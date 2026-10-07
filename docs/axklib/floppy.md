@@ -231,6 +231,33 @@ identity rather than one physical slot.
 Host transport wrappers and conversion limits are described in
 [Writer And Alteration](write.md#multi-floppy-transport).
 
+### Importing Available Objects
+
+Explicit floppy import is separate from trusted disk-set opening. Select all
+known source disks or unpacked disk folders together. Import inspection can
+join Wave Data segments when their complete stored headers agree, apart from
+the segment length and offset, and their exact byte ranges cover the declared
+payload without gaps or conflicting overlaps. Catalog labels and marker files
+do not substitute for these payload checks.
+
+Relationships within each source keep their original scope. An unresolved
+dependency may use another explicitly selected source only when the stored
+authoritative name and type identify one fully decoded, importable object.
+An unreadable local target or ambiguous local name is not replaced.
+
+Only complete objects with complete dependency closures are selectable. An
+unreadable Wave Data object excludes its dependent Samples and then dependent
+Sample Banks and Programs; import does not prune a Bank or Program to make it
+fit. Inspection reports each object's source files and exclusion reasons.
+Source issues require an unchecked acknowledgement before review. That
+acknowledgement does not make excluded objects available or certify a disk set.
+
+Malformed FAT allocation, cross-linked files, resource-limit violations and
+changed sources still stop the operation. Normal image opening, automatic
+companion discovery, package verification and strict validation retain their
+existing requirements. Import writes only to the chosen destination image and
+does not repair or modify the selected sources.
+
 ## Reading File Bytes
 
 A FAT file read is:

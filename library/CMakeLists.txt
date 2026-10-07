@@ -125,6 +125,7 @@ add_library(
   src/media_object_directory_set.cpp
   src/media_iso9660.cpp
   src/media_object_directory.cpp
+  src/media_smpl_segments.cpp
   src/media_yamaha.cpp
   src/su700.cpp
   src/object.cpp
@@ -139,6 +140,7 @@ add_library(
   src/package_archive.cpp
   src/package_build.cpp
   src/floppy_import.cpp
+  src/floppy_import_recovery.cpp
   src/package_import.cpp
   src/package_import_fat12.cpp
   src/package_import_iso9660.cpp
@@ -640,6 +642,7 @@ if(BUILD_TESTING)
     tests/package_test.cpp
     tests/package_graph_test.cpp
     tests/floppy_import_test.cpp
+    tests/floppy_import_recovery_test.cpp
     tests/report_test.cpp
     tests/sequence_test.cpp
     tests/sfs_test.cpp

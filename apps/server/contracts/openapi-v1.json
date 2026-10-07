@@ -2809,9 +2809,33 @@
         ],
         "type": "object"
       },
+      "FloppyImportFileSource": {
+        "additionalProperties": false,
+        "properties": {
+          "memberName": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "sizeBytes": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "memberName",
+          "path",
+          "sizeBytes"
+        ],
+        "type": "object"
+      },
       "FloppyImportInspection": {
         "additionalProperties": false,
         "properties": {
+          "canImport": {
+            "type": "boolean"
+          },
           "complete": {
             "type": "boolean"
           },
@@ -2825,15 +2849,23 @@
                 "path": {
                   "type": "string"
                 },
+                "reason": {
+                  "type": "string"
+                },
                 "sizeBytes": {
                   "minimum": 0,
                   "type": "integer"
+                },
+                "unreadableObject": {
+                  "type": "boolean"
                 }
               },
               "required": [
                 "memberName",
                 "path",
-                "sizeBytes"
+                "sizeBytes",
+                "reason",
+                "unreadableObject"
               ],
               "type": "object"
             },
@@ -2914,12 +2946,21 @@
             },
             "maxItems": 8192,
             "type": "array"
+          },
+          "recoveryUsed": {
+            "type": "boolean"
+          },
+          "requiresAcknowledgement": {
+            "type": "boolean"
           }
         },
         "required": [
           "format",
           "inspectionToken",
           "complete",
+          "canImport",
+          "recoveryUsed",
+          "requiresAcknowledgement",
           "label",
           "nextRequiredIndex",
           "members",
@@ -2998,6 +3039,14 @@
           "sizeBytes": {
             "minimum": 0,
             "type": "integer"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/FloppyImportFileSource"
+            },
+            "maxItems": 8192,
+            "minItems": 1,
+            "type": "array"
           }
         },
         "required": [
@@ -3007,7 +3056,8 @@
           "objectType",
           "sizeBytes",
           "requiredObjectKeys",
-          "exclusionReason"
+          "exclusionReason",
+          "sources"
         ],
         "type": "object"
       },
@@ -5076,6 +5126,9 @@
       "ImageFloppyImportPlanRequest": {
         "additionalProperties": false,
         "properties": {
+          "acknowledgeSourceIssues": {
+            "type": "boolean"
+          },
           "capacityPolicy": {
             "$ref": "#/components/schemas/VolumeCapacityPolicy"
           },
@@ -5131,6 +5184,7 @@
           "expectedRevision",
           "inspectionToken",
           "selectedObjectKeys",
+          "acknowledgeSourceIssues",
           "destination"
         ],
         "type": "object"
@@ -25872,6 +25926,7 @@
               "examples": {
                 "default": {
                   "value": {
+                    "acknowledgeSourceIssues": false,
                     "destination": {
                       "kind": "CREATE_VOLUME",
                       "partitionIndex": 0,

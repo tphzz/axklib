@@ -2608,12 +2608,20 @@ export interface components {
             /** @default false */
             overwrite: boolean;
         };
+        FloppyImportFileSource: {
+            memberName: string;
+            path: string;
+            sizeBytes: number;
+        };
         FloppyImportInspection: {
+            canImport: boolean;
             complete: boolean;
             excludedFiles: {
                 memberName: string;
                 path: string;
+                reason: string;
                 sizeBytes: number;
+                unreadableObject: boolean;
             }[];
             /** @enum {string} */
             format: 'A_SERIES' | 'SU700' | 'TX16W' | 'UNKNOWN';
@@ -2629,6 +2637,8 @@ export interface components {
             }[];
             nextRequiredIndex: number | null;
             objects: components['schemas']['FloppyImportObject'][];
+            recoveryUsed: boolean;
+            requiresAcknowledgement: boolean;
         };
         FloppyImportInspectionReleaseRequest: {
             inspectionToken: string;
@@ -2645,6 +2655,7 @@ export interface components {
             objectType: 'PROG' | 'SBAC' | 'SBNK' | 'SMPL' | 'SEQU' | 'PRF3' | 'UNKNOWN';
             requiredObjectKeys: string[];
             sizeBytes: number;
+            sources: components['schemas']['FloppyImportFileSource'][];
         };
         FloppyImportSource:
             | components['schemas']['FilesystemFileInput']
@@ -3139,6 +3150,7 @@ export interface components {
             supportedImports: ('SU700_FLOPPY' | 'FAT_FLOPPY_CONTENTS')[];
         };
         ImageFloppyImportPlanRequest: {
+            acknowledgeSourceIssues: boolean;
             capacityPolicy?: components['schemas']['VolumeCapacityPolicy'];
             destination: components['schemas']['ImageSessionPackageImportDestination'];
             expectedRevision: number;

@@ -30,7 +30,8 @@
     const controlsDisabled = $derived(workflow.busy || workflow.completion.locked);
     const canReview = $derived(
         !controlsDisabled &&
-            r?.inspection?.complete &&
+            r?.inspection?.canImport &&
+            (!r.inspection.requiresAcknowledgement || r.acknowledgeSourceIssues) &&
             r.selected.length > 0 &&
             !!importDestination(r.mode, r.partitionIndex, r.volumeName),
     );
@@ -50,11 +51,15 @@
                   ? 'Reviewing import'
                   : !r?.members.length
                     ? 'Choose floppy source'
-                    : r.inspection && !r.inspection.complete
-                      ? `Add companion disk ${r.inspection.nextRequiredIndex ?? ''}`
-                      : ready
-                        ? 'Ready to import'
-                        : 'Review selection and destination'),
+                    : r.inspection && !r.inspection.canImport
+                      ? r.inspection.nextRequiredIndex
+                          ? `No complete objects; add companion disk ${r.inspection.nextRequiredIndex}`
+                          : 'No complete objects available'
+                      : r?.inspection?.requiresAcknowledgement && !r.acknowledgeSourceIssues
+                        ? 'Review and acknowledge source issues'
+                        : ready
+                          ? 'Ready to import'
+                          : 'Review selection and destination'),
     );
     const bytes = $derived(
         r?.inspection?.objects
@@ -62,6 +67,10 @@
             .reduce((sum, o) => sum + o.sizeBytes, 0) ?? 0,
     );
     const supported = $derived(r?.inspection?.objects.filter((o) => !o.exclusionReason) ?? []);
+    const excludedCount = $derived(
+        (r?.inspection?.objects.filter((o) => !!o.exclusionReason).length ?? 0) +
+            (r?.inspection?.excludedFiles.filter((file) => file.unreadableObject).length ?? 0),
+    );
     const recovery = $derived(
         ['unconfirmed', 'checking', 'refresh-failed', 'refreshing'].includes(workflow.completion.phase),
     );
@@ -137,8 +146,8 @@
                         <div class="floppy-summary">
                             <strong>{r.inspection?.label || r.members[0]?.name || 'Floppy source'}</strong>
                             <small
-                                >{selection.included.size} of {r.inspection?.objects.length ?? 0} objects selected · {r
-                                    .inspection?.members.length || r.members.length}
+                                >{selection.included.size} selected · {supported.length} available · {excludedCount} excluded
+                                · {r.inspection?.members.length || r.members.length}
                                 {(r.inspection?.members.length || r.members.length) === 1 ? 'disk' : 'disks'} · {formatStoredSize(
                                     bytes,
                                 )}</small
@@ -190,6 +199,18 @@
                         onpartition={(index) => workflow.setPartition(index)}
                         onname={(name) => workflow.setDestination(r.mode, r.partitionIndex, name)}
                     />
+                    {#if r.inspection?.requiresAcknowledgement}
+                        <label class="floppy-source-acknowledgement">
+                            <input
+                                class="dialog-checkbox"
+                                type="checkbox"
+                                checked={r.acknowledgeSourceIssues}
+                                disabled={controlsDisabled}
+                                onchange={(event) => workflow.acknowledgeSourceIssues(event.currentTarget.checked)}
+                            />
+                            Import available objects despite source issues
+                        </label>
+                    {/if}
                     <div class="floppy-review">
                         <section class="floppy-object-section" aria-label="Floppy contents">
                             <div class="floppy-table-heading">
@@ -231,7 +252,10 @@
                                                     workflow.toggle(object.objectKey, event.currentTarget.checked)}
                                             />
                                             <span
-                                                ><strong>{object.displayName || object.name || 'Unnamed'}</strong
+                                                ><strong>{object.displayName || object.name || 'Unnamed'}</strong><small
+                                                    >{object.sources
+                                                        .map((source) => `${source.memberName}: ${source.path}`)
+                                                        .join('; ')}</small
                                                 >{#if object.exclusionReason}<small>{object.exclusionReason}</small
                                                     >{:else if selection.required.has(object.objectKey)}<small
                                                         >Required</small
@@ -243,8 +267,8 @@
                                 {#if r.inspection?.excludedFiles.length}<h3>Excluded files</h3>{/if}
                                 {#each r.inspection?.excludedFiles ?? [] as file}<div class="floppy-row excluded">
                                         <Icon name="archive" size={13} /><span
-                                            ><strong>{file.path}</strong><small
-                                                >Configuration or auxiliary file; not imported</small
+                                            ><strong>{file.path}</strong><small>{file.memberName}</small><small
+                                                >{file.reason}</small
                                             ></span
                                         ><small>{formatStoredSize(file.sizeBytes)}</small>
                                     </div>{/each}
@@ -311,6 +335,12 @@
 {/if}
 
 <style>
+    .floppy-source-acknowledgement {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: var(--dialog-body-font-size);
+    }
     .floppy-dialog {
         width: min(820px, calc(100vw - 40px));
         height: min(650px, calc(100dvh - 48px));

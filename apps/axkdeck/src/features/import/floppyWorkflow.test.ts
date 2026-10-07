@@ -13,10 +13,21 @@ export const inspection: FloppyInspection = {
     format: 'A_SERIES',
     inspectionToken: 'inspection',
     complete: true,
+    canImport: true,
+    recoveryUsed: false,
+    requiresAcknowledgement: false,
     label: 'Source',
     nextRequiredIndex: null,
     members: [{ index: 1, label: 'Source' }],
-    excludedFiles: [{ memberName: 'disk.img', path: 'SYSTEM2.002', sizeBytes: 100 }],
+    excludedFiles: [
+        {
+            memberName: 'disk.img',
+            path: 'SYSTEM2.002',
+            sizeBytes: 100,
+            reason: 'Configuration or auxiliary file; not imported.',
+            unreadableObject: false,
+        },
+    ],
     issues: [],
     objects: [
         {
@@ -27,6 +38,7 @@ export const inspection: FloppyInspection = {
             sizeBytes: 800,
             requiredObjectKeys: ['wave'],
             exclusionReason: '',
+            sources: [{ memberName: 'disk.img', path: 'SAMPLE.001', sizeBytes: 800 }],
         },
         {
             objectKey: 'wave',
@@ -36,6 +48,7 @@ export const inspection: FloppyInspection = {
             sizeBytes: 2000,
             requiredObjectKeys: [],
             exclusionReason: '',
+            sources: [{ memberName: 'disk.img', path: 'WAVE.002', sizeBytes: 2000 }],
         },
         {
             objectKey: 'bad',
@@ -45,6 +58,7 @@ export const inspection: FloppyInspection = {
             sizeBytes: 100,
             requiredObjectKeys: [],
             exclusionReason: 'Unsupported profile',
+            sources: [{ memberName: 'disk.img', path: 'BAD.003', sizeBytes: 100 }],
         },
     ],
 };
@@ -117,6 +131,29 @@ function setup(value = inspection, isDesktop = false, connectionMode: ImageTrans
     return { workflow, transport, refresh, otherFormat, picker };
 }
 describe('floppy import', () => {
+    it('requires acknowledgement for recoverable sources and resets it when sources change', async () => {
+        const { workflow, transport } = setup({
+            ...inspection,
+            complete: false,
+            canImport: true,
+            recoveryUsed: true,
+            requiresAcknowledgement: true,
+        });
+        await workflow.requestDroppedFiles([source], volume);
+        await workflow.review();
+        expect(transport.planFloppyImport).not.toHaveBeenCalled();
+        workflow.acknowledgeSourceIssues(true);
+        await workflow.review();
+        expect(transport.planFloppyImport).toHaveBeenCalledWith(
+            1,
+            expect.objectContaining({ acknowledgeSourceIssues: true }),
+        );
+        await workflow.add([serverFileLocation({ rootId: 'workspace', relativePath: 'two.img' })]);
+        expect(workflow.request?.acknowledgeSourceIssues).toBe(false);
+        transport.planFloppyImport.mockClear();
+        await workflow.review();
+        expect(transport.planFloppyImport).not.toHaveBeenCalled();
+    });
     it('suggests the first selected folder basename instead of its display path', async () => {
         const { workflow } = setup({ ...inspection, label: '   ' });
         const folder = serverDirectoryLocation(

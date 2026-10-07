@@ -69,10 +69,21 @@ export function floppyDialogFixture(count = 250, directSource = false, folder?: 
         format: 'A_SERIES',
         inspectionToken: 'inspection',
         complete: true,
+        canImport: true,
+        recoveryUsed: false,
+        requiresAcknowledgement: false,
         label: folder ? '' : 'Sampler floppy',
         nextRequiredIndex: null,
         members: [{ index: 1, label: 'Sampler floppy' }],
-        excludedFiles: [{ memberName: 'test.img', path: 'SYSTEM2.002', sizeBytes: 1024 }],
+        excludedFiles: [
+            {
+                memberName: 'test.img',
+                path: 'SYSTEM2.002',
+                sizeBytes: 1024,
+                reason: 'Configuration or auxiliary file; not imported.',
+                unreadableObject: false,
+            },
+        ],
         issues: [],
         objects: Array.from({ length: count }, (_, i) => ({
             objectKey: `wave-${i}`,
@@ -82,6 +93,7 @@ export function floppyDialogFixture(count = 250, directSource = false, folder?: 
             sizeBytes: 2048,
             requiredObjectKeys: [],
             exclusionReason: '',
+            sources: [{ memberName: 'test.img', path: `WAVE.${i}`, sizeBytes: 2048 }],
         })),
     };
     request.selected = request.inspection.objects.map((o) => o.objectKey);

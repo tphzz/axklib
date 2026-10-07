@@ -28,6 +28,7 @@ export interface FloppyRequest {
     members: Member[];
     inspection: FloppyInspection | null;
     selected: string[];
+    acknowledgeSourceIssues: boolean;
     mode: ImportDestinationMode;
     partitionIndex: number | null;
     volumeName: string;
@@ -87,6 +88,7 @@ export class FloppyImportWorkflow {
             members: [],
             inspection: null,
             selected: [],
+            acknowledgeSourceIssues: false,
             mode: initial?.mode ?? 'create',
             partitionIndex: initial?.partitionIndex ?? this.destinations().partitions[0]?.partitionIndex ?? null,
             volumeName: initial?.volumeName ?? '',
@@ -248,6 +250,11 @@ export class FloppyImportWorkflow {
     private editable() {
         return !!this.request && !this.busy && !this.completion.locked;
     }
+    acknowledgeSourceIssues(acknowledged: boolean): void {
+        if (!this.editable()) return;
+        this.request!.acknowledgeSourceIssues = acknowledged;
+        this.invalidate();
+    }
     private invalidate(selectionChanged = false): void {
         const r = this.request;
         if (!r) return;
@@ -270,7 +277,8 @@ export class FloppyImportWorkflow {
             this.busy ||
             this.completion.locked ||
             !token ||
-            !r.inspection?.complete ||
+            !r.inspection?.canImport ||
+            (r.inspection.requiresAcknowledgement && !r.acknowledgeSourceIssues) ||
             !r.selected.length ||
             session === null ||
             !destination
@@ -285,6 +293,7 @@ export class FloppyImportWorkflow {
                 const plan = await this.dependencies.transport.planFloppyImport(session, {
                     capacityPolicy: this.completion.capacity.policy(),
                     inspectionToken: token,
+                    acknowledgeSourceIssues: r.acknowledgeSourceIssues,
                     selectedObjectKeys: r.selected,
                     destination,
                     renames: Object.entries(r.renames)
@@ -338,7 +347,14 @@ export class FloppyImportWorkflow {
     async apply(): Promise<void> {
         const r = this.request,
             session = this.dependencies.sessionId();
-        if (!r?.plan?.valid || r.dirty || !this.editable() || session === null) return;
+        if (
+            !r?.plan?.valid ||
+            r.dirty ||
+            !this.editable() ||
+            session === null ||
+            (r.inspection?.requiresAcknowledgement && !r.acknowledgeSourceIssues)
+        )
+            return;
         const destination = importDestination(r.mode, r.partitionIndex, r.volumeName);
         if (!destination) return;
         const token = r.plan.planToken;
@@ -429,6 +445,7 @@ export class FloppyImportWorkflow {
                 .catch(() => undefined);
         if (this.request !== r) return;
         r.inspection = null;
+        r.acknowledgeSourceIssues = false;
         this.suggestVolumeName(r);
         r.selected = [];
         if (!r.members.length) {

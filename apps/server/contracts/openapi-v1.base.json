@@ -5672,6 +5672,16 @@
           }
         }
       },
+      "FloppyImportFileSource": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["memberName", "path", "sizeBytes"],
+        "properties": {
+          "memberName": {"type": "string"},
+          "path": {"type": "string"},
+          "sizeBytes": {"type": "integer", "minimum": 0}
+        }
+      },
       "FloppyImportObject": {
         "type": "object",
         "additionalProperties": false,
@@ -5682,7 +5692,8 @@
           "objectType",
           "sizeBytes",
           "requiredObjectKeys",
-          "exclusionReason"
+          "exclusionReason",
+          "sources"
         ],
         "properties": {
           "objectKey": {
@@ -5721,6 +5732,10 @@
           },
           "exclusionReason": {
             "type": "string"
+          },
+          "sources": {
+            "type": "array", "minItems": 1, "maxItems": 8192,
+            "items": {"$ref": "#/components/schemas/FloppyImportFileSource"}
           }
         }
       },
@@ -5731,6 +5746,9 @@
           "format",
           "inspectionToken",
           "complete",
+          "canImport",
+          "recoveryUsed",
+          "requiresAcknowledgement",
           "label",
           "nextRequiredIndex",
           "members",
@@ -5758,6 +5776,9 @@
           "complete": {
             "type": "boolean"
           },
+          "canImport": {"type": "boolean"},
+          "recoveryUsed": {"type": "boolean"},
+          "requiresAcknowledgement": {"type": "boolean"},
           "label": {
             "type": "string"
           },
@@ -5806,7 +5827,9 @@
               "required": [
                 "memberName",
                 "path",
-                "sizeBytes"
+                "sizeBytes",
+                "reason",
+                "unreadableObject"
               ],
               "properties": {
                 "memberName": {
@@ -5818,7 +5841,9 @@
                 "sizeBytes": {
                   "type": "integer",
                   "minimum": 0
-                }
+                },
+                "reason": {"type": "string"},
+                "unreadableObject": {"type": "boolean"}
               }
             }
           },
@@ -5852,10 +5877,12 @@
           "expectedRevision",
           "inspectionToken",
           "selectedObjectKeys",
+          "acknowledgeSourceIssues",
           "destination"
         ],
         "properties": {
           "capacityPolicy": {"$ref": "#/components/schemas/VolumeCapacityPolicy"},
+          "acknowledgeSourceIssues": {"type": "boolean"},
           "imageId": {
             "type": "string",
             "minLength": 1

@@ -92,17 +92,26 @@ class Admission {
 Json describe(const FloppyImportInspection &inspection, const std::string &token) {
     Json objects = Json::array();
     for (const auto &object : inspection.objects) {
+        Json sources = Json::array();
+        for (const auto &source : object.sources)
+            sources.push_back(
+                {{"memberName", source.member_name}, {"path", source.path}, {"sizeBytes", source.size_bytes}});
         objects.push_back({{"objectKey", object.key},
                            {"name", object.name},
                            {"displayName", object.display_name},
                            {"objectType", object_type_name(object.type)},
                            {"sizeBytes", object.size_bytes},
                            {"requiredObjectKeys", object.required_object_keys},
-                           {"exclusionReason", object.exclusion_reason}});
+                           {"exclusionReason", object.exclusion_reason},
+                           {"sources", std::move(sources)}});
     }
     Json excluded = Json::array();
     for (const auto &file : inspection.excluded_files)
-        excluded.push_back({{"memberName", file.member_name}, {"path", file.path}, {"sizeBytes", file.size_bytes}});
+        excluded.push_back({{"memberName", file.member_name},
+                            {"path", file.path},
+                            {"sizeBytes", file.size_bytes},
+                            {"reason", file.reason},
+                            {"unreadableObject", file.unreadable_object}});
     Json issues = Json::array();
     for (const auto &issue : inspection.issues)
         issues.push_back({{"code", issue.code}, {"message", issue.message}});
@@ -112,6 +121,9 @@ Json describe(const FloppyImportInspection &inspection, const std::string &token
     return Json{{"format", "A_SERIES"},
                 {"inspectionToken", token},
                 {"complete", inspection.complete},
+                {"canImport", inspection.can_import},
+                {"recoveryUsed", inspection.recovery_used},
+                {"requiresAcknowledgement", inspection.requires_acknowledgement},
                 {"label", inspection.label},
                 {"nextRequiredIndex", inspection.next_required_index ? Json(*inspection.next_required_index) : Json{}},
                 {"members", std::move(members)},
@@ -207,10 +219,16 @@ Result<Json> inspect(const Json &request, const OperationContext &context, const
                     Error{"floppy_source_invalid", "The floppy logical payload exceeds supported bounds."});
             logical_bytes += file.size;
         }
-        auto objects = member->objects(MediaObjectReadMode::decoded_metadata, maximum_disk_bytes, context.cancellation);
-        if (!objects)
-            return std::unexpected(core_error(objects.error()));
-        if (member->yamaha_catalog() || !objects->empty()) {
+        bool recognized = member->yamaha_catalog().has_value();
+        for (const auto &file : member->files()) {
+            if (recognized)
+                break;
+            auto prefix = member->read_file_prefix(file, 12U, context.cancellation);
+            if (!prefix)
+                return std::unexpected(core_error(prefix.error()));
+            recognized = AxkObjectDirectory::recognizes_entry_prefix(*prefix, false);
+        }
+        if (recognized) {
             formats.insert("A_SERIES");
         } else {
             auto su700 = inspect_su700_floppy(*member, context.cancellation);
@@ -233,6 +251,9 @@ Result<Json> inspect(const Json &request, const OperationContext &context, const
         return Json{{"format", *formats.begin()},
                     {"inspectionToken", nullptr},
                     {"complete", false},
+                    {"canImport", false},
+                    {"recoveryUsed", false},
+                    {"requiresAcknowledgement", false},
                     {"label", ""},
                     {"nextRequiredIndex", nullptr},
                     {"members", Json::array()},
@@ -292,6 +313,11 @@ Result<void> bind_floppy_import_operations(OperationRegistry &registry, const Sa
                         state->inspections.erase(token);
                         return Json{{"released", true}};
                     }
+                    const bool acknowledged = request.at("acknowledgeSourceIssues").get<bool>();
+                    if ((*record)->source.inspection().requires_acknowledgement && !acknowledged)
+                        return std::unexpected(
+                            Error{"floppy_source_issues_unacknowledged",
+                                  "Acknowledge the source issues before importing available objects."});
                     const auto identity = parse_session_identity(request);
                     if (!identity)
                         return std::unexpected(identity.error());

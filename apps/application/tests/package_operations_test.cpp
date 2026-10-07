@@ -717,6 +717,7 @@ TEST_F(PackageOperationsTest, FloppyImportRetainsOwnerBoundSelectionAndCreatesVo
         {"expectedRevision", opened->revision},
         {"inspectionToken", token},
         {"selectedObjectKeys", {sample->at("objectKey")}},
+        {"acknowledgeSourceIssues", false},
         {"destination", {{"kind", "CREATE_VOLUME"}, {"partitionIndex", 0}, {"volumeName", "From floppy"}}},
         {"capacityPolicy", {{"target", "A3000"}}}};
     const auto plan = registry_.invoke("images.floppy_import.plan", request, context());
@@ -746,6 +747,45 @@ TEST_F(PackageOperationsTest, FloppyImportRetainsOwnerBoundSelectionAndCreatesVo
     EXPECT_FALSE(volume_content_id(*refreshed, "From floppy").empty());
 }
 
+TEST_F(PackageOperationsTest, FloppyRecoveryAcknowledgementDoesNotPermitExcludedObjects) {
+    unpack_floppy();
+    {
+        std::ofstream bad{root_ / "unpacked/disk/BAD.099", std::ios::binary};
+        bad << "FSFSDEV3SPLXSMPL";
+    }
+    const auto inspected = registry_.invoke(
+        "images.floppy_import.inspect",
+        {{"sources", {{{"directoryRef", {{"rootId", "workspace"}, {"relativePath", "unpacked/disk"}}}}}}}, context());
+    ASSERT_TRUE(inspected) << inspected.error().message;
+    EXPECT_TRUE(inspected->at("canImport").get<bool>());
+    EXPECT_TRUE(inspected->at("requiresAcknowledgement").get<bool>());
+    EXPECT_TRUE(std::ranges::any_of(inspected->at("excludedFiles"),
+                                    [](const auto &file) { return file.at("unreadableObject").template get<bool>(); }));
+    const auto opened = images_->open({"workspace", "target.hds"}, "owner");
+    ASSERT_TRUE(opened);
+    const auto &objects = inspected->at("objects");
+    const auto wave =
+        std::ranges::find_if(objects, [](const auto &object) { return object.at("objectType") == "SMPL"; });
+    ASSERT_NE(wave, objects.end());
+    nlohmann::json request{
+        {"imageId", opened->image_id},
+        {"expectedRevision", opened->revision},
+        {"inspectionToken", inspected->at("inspectionToken")},
+        {"selectedObjectKeys", {wave->at("objectKey")}},
+        {"acknowledgeSourceIssues", false},
+        {"destination", {{"kind", "CREATE_VOLUME"}, {"partitionIndex", 0}, {"volumeName", "Recovery"}}}};
+    const auto refused = registry_.invoke("images.floppy_import.plan", request, context());
+    ASSERT_FALSE(refused);
+    EXPECT_EQ(refused.error().code, "floppy_source_issues_unacknowledged");
+    request["acknowledgeSourceIssues"] = true;
+    const auto plan = registry_.invoke("images.floppy_import.plan", request, context());
+    ASSERT_TRUE(plan) << plan.error().message;
+    EXPECT_TRUE(plan->at("valid").get<bool>());
+    request["selectedObjectKeys"] = {"floppy-import-source:0:BAD.099"};
+    EXPECT_FALSE(registry_.invoke("images.floppy_import.plan", request, context()));
+    EXPECT_EQ(images_->inspect(opened->image_id, "owner")->revision, 1U);
+}
+
 TEST_F(PackageOperationsTest, FloppyImportRejectsChangedSourceBeforePlanningOrWriting) {
     write_floppy();
     const auto before = read_bytes(root_ / "target.hds");
@@ -762,6 +802,7 @@ TEST_F(PackageOperationsTest, FloppyImportRejectsChangedSourceBeforePlanningOrWr
         {"expectedRevision", opened->revision},
         {"inspectionToken", inspected->at("inspectionToken")},
         {"selectedObjectKeys", {wave->at("objectKey")}},
+        {"acknowledgeSourceIssues", false},
         {"destination", {{"kind", "EXISTING_VOLUME"}, {"partitionIndex", 0}, {"volumeName", "Imported"}}}};
     const auto plan = registry_.invoke("images.floppy_import.plan", request, context());
     ASSERT_TRUE(plan) << plan.error().message;
@@ -802,6 +843,7 @@ TEST_F(PackageOperationsTest, UnpackedFloppyImportsAndParentSetsHaveTheSameObjec
          {"expectedRevision", opened->revision},
          {"inspectionToken", inspected->at("inspectionToken")},
          {"selectedObjectKeys", keys},
+         {"acknowledgeSourceIssues", false},
          {"destination", {{"kind", "CREATE_VOLUME"}, {"partitionIndex", 0}, {"volumeName", "Folder set"}}}},
         context());
     ASSERT_TRUE(plan) << plan.error().message;
@@ -834,6 +876,7 @@ TEST_F(PackageOperationsTest, UnpackedFloppyDetectsAddedRemovedAndChangedFilesBe
             {"expectedRevision", opened->revision},
             {"inspectionToken", inspected->at("inspectionToken")},
             {"selectedObjectKeys", {wave->at("objectKey")}},
+            {"acknowledgeSourceIssues", false},
             {"destination", {{"kind", "EXISTING_VOLUME"}, {"partitionIndex", 0}, {"volumeName", "Imported"}}}};
         const auto plan = registry_.invoke("images.floppy_import.plan", request, context());
         ASSERT_TRUE(plan) << plan.error().message;
