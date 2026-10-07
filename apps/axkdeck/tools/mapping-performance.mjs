@@ -40,7 +40,7 @@ try {
         const page = await browser.newPage({ viewport: { width: 1040, height: 680 } });
         const errors = [];
         page.on('pageerror', error => errors.push(error.message));
-        await page.goto(`http://127.0.0.1:${port}/tools/layout-fixtures/mapping-presentation.html?count=${count}${dense ? '&dense' : ''}`);
+        await page.goto(`http://127.0.0.1:${port}/tools/layout-fixtures/mapping-presentation.html?live&count=${count}${dense ? '&dense' : ''}`);
         await page.locator('.full .zone').first().waitFor();
         let tracing;
         const traceEvents = [];
@@ -156,6 +156,13 @@ try {
         await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
         await page.mouse.down();
         await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2 + plot.height / 4, { steps: 45 });
+        const liveCoverage = await page.locator('.full > .keyboard-mapping').evaluate(root => ({
+            top: root.querySelector('.zone.chosen').style.top,
+            limit: root.querySelector('.limits').style.top,
+            preview: !!root.querySelector('.preview-overlaps'),
+        }));
+        assert.equal(liveCoverage.top, liveCoverage.limit, 'Benchmark exercises live fill projection, not limits-only dragging');
+        assert.ok(liveCoverage.preview, 'Benchmark exercises the incremental preview geometry');
         await page.mouse.up();
         const dragFrames = await page.evaluate(() => {
             cancelAnimationFrame(window.mappingFrame);

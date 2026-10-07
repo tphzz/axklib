@@ -171,13 +171,13 @@ export function aSeriesMapping(
         const sourceValues = byId.get(member.id)?.draft.storedValues;
         if (!sourceValues) return [];
         const source = sampleMappingRange(sourceValues),
-            effective = sampleMappingRange(effectiveMember(bank, sourceValues));
+            effective = isBank ? sampleMappingRange(effectiveMember(bank, sourceValues)) : source;
         if (!source) return [];
         return [
             {
                 ...(effective ?? source),
                 empty: !effective,
-                source,
+                source: isBank ? source : undefined,
                 id: member.id,
                 selectionId: memberIndex,
                 label: member.name,

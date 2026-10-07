@@ -1,17 +1,23 @@
+#include <algorithm>
 #include <cstddef>
 #include <filesystem>
 #include <memory>
+#include <ranges>
+#include <span>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <utility>
+#include <vector>
 
 #include "media_test_fixtures.hpp"
 
+#include "axklib/floppy_import.hpp"
 #include "axklib/writer_internal.hpp"
 
 namespace {
 
-std::vector<std::byte> catalog_fat_fixture(std::string marker = "A3000F.SYM") {
+std::vector<std::byte> catalog_fat_fixture(std::string marker = "A3000F.SYM", std::string label = "CATALOG DISK  01") {
     axk::detail::PreparedMediaImage image;
     image.objects.emplace_back(axk::ObjectType::smpl, "TEST", smpl_object());
     image.objects.back().fat_filename = "TEST____.004";
@@ -19,7 +25,7 @@ std::vector<std::byte> catalog_fat_fixture(std::string marker = "A3000F.SYM") {
     EXPECT_TRUE(marker_filename) << marker_filename.error().message;
     image.retained_files.push_back({marker_filename ? *marker_filename : "MARKER.005", {}});
     image.floppy_catalog = axk::YamahaFloppyCatalog{
-        "CATALOG DISK  01",
+        std::move(label),
         {{4U, R"(\SMPL\TEST            01)"}, {5U, "\\" + marker}},
         {R"(\OTHERS)", R"(\SMPL)"},
     };
@@ -60,8 +66,8 @@ TEST(Fat12Reader, KeepsMissingAndMalformedCatalogsReadableButUntrusted) {
     ASSERT_TRUE(missing) << missing.error().message;
     EXPECT_FALSE(missing->yamaha_catalog());
     EXPECT_FALSE(missing->disk_identity().trusted_for_disk_set);
-    ASSERT_EQ(missing->validation_issues().size(), 1U);
-    EXPECT_EQ(missing->validation_issues().front().code, "FLOPPY_CATALOG_MISSING");
+    EXPECT_TRUE(missing->validation_issues().empty());
+    EXPECT_FALSE(axk::FloppyDiskSet::open({*missing}));
 
     auto bytes = catalog_fat_fixture("A3000E.SYM");
     const auto valid = axk::FatImage::open(std::make_shared<axk::MemoryReader>(bytes), "valid.ima");
@@ -76,10 +82,67 @@ TEST(Fat12Reader, KeepsMissingAndMalformedCatalogsReadableButUntrusted) {
     EXPECT_FALSE(malformed->disk_identity().trusted_for_disk_set);
     ASSERT_EQ(malformed->validation_issues().size(), 1U);
     EXPECT_EQ(malformed->validation_issues().front().code, "FLOPPY_CATALOG_INVALID");
+    EXPECT_FALSE(axk::FloppyDiskSet::open({*malformed}));
 
     const axk::MediaContainer container{*malformed};
     ASSERT_EQ(container.validation_issues().size(), 1U);
     EXPECT_EQ(container.validation_issues().front().code, "FLOPPY_CATALOG_INVALID");
+}
+
+TEST(Fat12Reader, DoesNotRequireAYamahaCatalogForOrdinaryFiles) {
+    auto bytes = fat_fixture();
+    ascii(bytes, 3U * 512U, "README  TXT");
+    std::fill_n(bytes.begin() + 4U * 512U, 12U, std::byte{'x'});
+    const auto fat = axk::FatImage::open(std::make_shared<axk::MemoryReader>(std::move(bytes)), "plain.img");
+    ASSERT_TRUE(fat) << fat.error().message;
+    EXPECT_TRUE(fat->validation_issues().empty());
+    EXPECT_FALSE(fat->disk_identity().trusted_for_disk_set);
+    ASSERT_EQ(fat->files().size(), 1U);
+    const auto objects = fat->objects();
+    ASSERT_TRUE(objects);
+    EXPECT_TRUE(objects->empty());
+    EXPECT_FALSE(axk::FloppyDiskSet::open({*fat}));
+}
+
+TEST(Fat12Reader, StandaloneLabelsNeedNoDiskSetIndexButChainedLabelsDo) {
+    for (const auto *label : {"DJ TSUYOSHI     ", "A4000/A5000 Demo", "                "}) {
+        for (const auto *marker : {"A3000.SYM", "A3000F.SYM", "A3000E.SYM"}) {
+            const auto fat = axk::FatImage::open(
+                std::make_shared<axk::MemoryReader>(catalog_fat_fixture(marker, label)), "label.img");
+            ASSERT_TRUE(fat) << fat.error().message;
+            EXPECT_EQ(fat->disk_identity().label, label);
+            EXPECT_FALSE(fat->disk_identity().trusted_for_disk_set);
+            if (std::string_view{marker} == "A3000.SYM") {
+                EXPECT_TRUE(fat->validation_issues().empty()) << label;
+            } else {
+                ASSERT_EQ(fat->validation_issues().size(), 1U) << label;
+                EXPECT_EQ(fat->validation_issues().front().code, "FLOPPY_SET_LABEL_INVALID");
+            }
+            EXPECT_FALSE(axk::FloppyDiskSet::open({*fat}));
+        }
+    }
+}
+
+TEST(Fat12Reader, OrdinaryNumericSuffixDoesNotImplyChainedMembershipForImport) {
+    const auto fat = axk::FatImage::open(
+        std::make_shared<axk::MemoryReader>(catalog_fat_fixture("A3000.SYM", "ORDINARY DISK 21")), "ordinary21.img");
+    ASSERT_TRUE(fat);
+    EXPECT_TRUE(fat->validation_issues().empty());
+    EXPECT_EQ(fat->disk_identity().index, 21U);
+    EXPECT_FALSE(fat->disk_identity().trusted_for_disk_set);
+    EXPECT_FALSE(axk::FloppyDiskSet::open({*fat}));
+    const auto imported = axk::FloppyImportSource::open({*fat});
+    ASSERT_TRUE(imported) << imported.error().message;
+    EXPECT_TRUE(imported->inspection().complete);
+    std::vector<axk::AxkObjectDirectoryEntry> entries;
+    for (const auto &file : fat->files()) {
+        auto bytes = fat->read_file(file);
+        ASSERT_TRUE(bytes);
+        entries.push_back({file.path, std::make_shared<axk::MemoryReader>(std::move(*bytes))});
+    }
+    const auto directory = axk::FloppyImportSource::open_directories({{"ordinary21", std::move(entries)}});
+    ASSERT_TRUE(directory) << directory.error().message;
+    EXPECT_TRUE(directory->inspection().complete);
 }
 
 TEST(Fat12Reader, ReadsBoundedObjectAndBuildsSharedRelationshipsCatalog) {

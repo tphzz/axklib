@@ -128,7 +128,7 @@ Result<FloppyImportSource> FloppyImportSource::open(std::vector<FatImage> member
         const auto &identity = member.disk_identity();
         if (!identity.trusted_for_disk_set &&
             (identity.marker == FloppySetMarker::continuation || identity.marker == FloppySetMarker::final ||
-             identity.marker == FloppySetMarker::invalid || identity.index > 1U)) {
+             identity.marker == FloppySetMarker::invalid)) {
             return std::unexpected(invalid("This disk has unsupported or inconsistent disk-set metadata."));
         }
         inspection.members.push_back(member.disk_identity());
@@ -193,7 +193,7 @@ Result<FloppyImportSource> FloppyImportSource::open_directories(std::vector<Flop
         const auto &identity = member->disk_identity();
         if (!identity.trusted_for_disk_set &&
             (identity.marker == FloppySetMarker::continuation || identity.marker == FloppySetMarker::final ||
-             identity.marker == FloppySetMarker::invalid || identity.index > 1U))
+             identity.marker == FloppySetMarker::invalid))
             return std::unexpected(invalid("This folder has unsupported or inconsistent disk-set metadata."));
         for (const auto &entry : source.entries) {
             if (std::ranges::find(member->stored_objects(), entry.name, &MediaObject::logical_path) ==

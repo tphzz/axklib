@@ -8,6 +8,7 @@
     import { noteName } from '../devices/a-series/sample/geometry';
     import { MappingClient, type MappingWindowAdapter } from './client.svelte';
     import type { MappingRole } from './protocol';
+    import { createMappingPreview } from './preview';
     let {
         adapter,
         role = 'program',
@@ -20,6 +21,9 @@
     const status = $derived(client.status);
     const pending = $derived(client.locked);
     const targets = $derived(new Map(snapshot?.targets.map((row) => [row.id, row])));
+    const previewing = $derived(client.preview !== null);
+    const projectPreview = $derived(previewing && snapshot ? createMappingPreview(snapshot) : null);
+    const preview = $derived(projectPreview && client.preview ? projectPreview(client.preview) : undefined);
     const send = (action: Parameters<typeof client.send>[0]) => client.send(action);
     let inputErrors = $state<Record<string, string>>({});
     let velocity = $state(100);
@@ -142,6 +146,8 @@
                     onpress={(note) => client.press(note, velocity)}
                     onrelease={() => client.release()}
                     zones={snapshot.zones}
+                    {preview}
+                    coverageLabel={role === 'sample' || role === 'members' ? 'Stored' : 'Effective'}
                     limits={client.preview ?? snapshot.limits}
                     targets={snapshot.zones.flatMap((zone) => {
                         const target = targets.get(zone.selectionId!);

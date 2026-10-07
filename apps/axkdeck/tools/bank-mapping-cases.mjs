@@ -44,7 +44,8 @@ export async function bankMappingCases(browser, base, output, results) {
             await wait(() => JSON.parse(document.querySelector('[data-bank-main]').textContent).bank.velocity_low === 50);
             await members.getByRole('button', { name: 'Low key limit', exact: true }).press('ArrowRight');
             await wait(() => JSON.parse(document.querySelector('[data-bank-main]').textContent).a.key_low === 1);
-            assert.equal((await snapshot(members)).zones[0].velocityLow, 50);
+            assert.equal((await snapshot(members)).zones[0].velocityLow, 0);
+            assert.equal((await snapshot(bank)).zones[0].velocityLow, 50);
             assert.equal((await snapshot(members)).limits.velocityLow, 0);
             await members.getByRole('button', { name: 'Sample', exact: true }).click();
             await members.getByRole('option', { name: 'b', exact: true }).click();

@@ -23,6 +23,13 @@
         if (editing?.profile === 'a-series/sample')
             Object.assign(editing.parameters, { key_low: low, key_high: high, root_key: root });
     }
+    if (query.has('override')) {
+        const sample = stored.get('a')!.editing;
+        const bank = stored.get('bank')!.editing;
+        if (sample?.profile === 'a-series/sample') sample.parameters.velocity_high = 84;
+        if (bank?.profile === 'a-series/sample-bank')
+            bank.bankOverrides!.units.find((unit) => unit.id === 37)!.activeSelectors = [37];
+    }
     let revision = 1;
     let writes = $state<ObjectParameterEdit[]>([]);
     let bank = $state.raw<ObjectEditorDocument | null>(null);

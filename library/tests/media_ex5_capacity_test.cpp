@@ -2,6 +2,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <ranges>
 #include <span>
 #include <string>
 #include <vector>
@@ -10,6 +11,7 @@
 
 #include "axklib/filesystem_transaction.hpp"
 #include "axklib/media.hpp"
+#include "axklib/semantic.hpp"
 #include "media_ex5_fixture.hpp"
 
 namespace {
@@ -39,6 +41,13 @@ TEST(Ex5Capacity, OpensBothOneSectorMismatchLayoutsWithWarnings) {
         EXPECT_EQ(image->geometry().backed_data_cluster_count, unused_tail ? clusters : clusters - 1U);
         ASSERT_EQ(image->validation_issues().size(), 1U);
         EXPECT_EQ(image->validation_issues()[0].code, "EX5_CAPACITY_EXCEEDS_IMAGE");
+        const axk::MediaContainer container{*image};
+        const auto inventory = axk::build_media_inventory(container, axk::MediaObjectReadMode::decoded_metadata);
+        ASSERT_TRUE(inventory);
+        const auto validation = axk::validate_semantics(container, *inventory, {});
+        ASSERT_EQ(validation.issues.size(), 1U);
+        EXPECT_EQ(validation.issues[0].severity, axk::ValidationSeverity::warning);
+        EXPECT_TRUE(validation.valid());
     }
 }
 
@@ -93,6 +102,11 @@ TEST(Ex5Capacity, ReadsOnlyExistingLogicalPayloadAndReportsMissingFileBytes) {
             EXPECT_EQ(image->validation_issues()[1].code, "EX5_FILE_DATA_UNAVAILABLE");
             EXPECT_NE(complete.error().message.find("TAIL.BIN"), std::string::npos);
         }
+        const axk::MediaContainer container{*image};
+        const auto validation = axk::validate_semantics(container, {}, {});
+        EXPECT_TRUE(validation.valid());
+        EXPECT_TRUE(std::ranges::all_of(
+            validation.issues, [](const auto &issue) { return issue.severity == axk::ValidationSeverity::warning; }));
         const std::vector<axk::FilesystemEdit> edits{
             axk::PutFilesystemFile{{"TAIL.BIN"}, payload(23U), axk::FileConflict::replace}};
         const auto replacement = axk::detail::prepare_fat_file_edits(source, axk::PartitionIndex{0}, edits);

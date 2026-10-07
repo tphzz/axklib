@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createServer } from 'vite';
 import { bankMappingCases } from './bank-mapping-cases.mjs';
+import { mappingStoredRangesCases } from './mapping-stored-ranges-cases.mjs';
 import { mappingPresentationCases } from './mapping-presentation-cases.mjs';
 import { mappingAuditionCases } from './mapping-audition-cases.mjs';
 import { mappingNavigationCases } from './mapping-navigation-cases.mjs';
@@ -152,7 +153,7 @@ try {
             await mapping.mouse.move(box.x + box.width / 2 + plot.width * 20 / 128, box.y + box.height / 2, { steps: 20 });
             assert.equal((await state(main)).values['assignments.0.key_low'], 24, 'An unfinished drag must remain a child preview');
             const guide = await mapping.locator('.range-guide[data-boundary="low"]').getAttribute('x1');
-            assert.equal(Number(guide), 36, 'Coverage guide remains on the Sample edge during a local limits preview');
+            assert.equal(Number(guide), 44, 'Coverage guide follows the locally projected assignment edge');
             await mapping.waitForFunction(() => document.querySelector('.limits').style.left === '34.375%');
             assert.equal(await mapping.locator('.limits').evaluate(node => node.style.left), '34.375%', 'Editable bounds follow the local drag before commit');
             await mapping.mouse.up();
@@ -244,6 +245,7 @@ try {
         } finally { await context.close(); }
     }
     await bankMappingCases(browser, `http://127.0.0.1:${port}`, output, results);
+    await mappingStoredRangesCases(browser, `http://127.0.0.1:${port}`, output, results);
     await mappingPresentationCases(browser, `http://127.0.0.1:${port}`, output, results);
     await mappingAuditionCases(browser, `http://127.0.0.1:${port}`, output, results);
     await mappingNavigationCases(browser, `http://127.0.0.1:${port}`, output, results);

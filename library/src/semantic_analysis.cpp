@@ -100,6 +100,7 @@ void append_unrecognized_category_entry_issues(const Container &container, std::
                 std::format("volume has {} visible object entries whose payload is unrecognized", unrecognized),
                 std::format("partition {}: {} / {}", partition.index.value, partition.name, volume_entry.name),
                 {},
+                "volume",
             });
         }
     }
@@ -238,10 +239,8 @@ std::vector<ValidationIssue> validate_program_bitmaps(const ObjectCatalog &catal
     return result;
 }
 
-ValidationReport validate_semantics(const Container &container, const ObjectCatalog &catalog,
-                                    const RelationshipGraph &graph) {
+ValidationReport semantic_detail::validate_sfs_structure(const Container &container, const ObjectCatalog &catalog) {
     ValidationReport result;
-    result.issues = validate_program_bitmaps(catalog, graph);
     for (const auto &diagnostic : container.diagnostics()) {
         if (diagnostic.code == ErrorCode::container_invalid_geometry ||
             diagnostic.code == ErrorCode::container_backup_mismatch)
@@ -249,7 +248,6 @@ ValidationReport validate_semantics(const Container &container, const ObjectCata
                 {"SFS_CONTAINER_METADATA_INVALID", ValidationSeverity::error, diagnostic.message, {}, {}});
     }
     result.coverage.object_count = catalog.objects.size();
-    result.coverage.relationship_count = graph.relationships.size();
     for (const auto &item : catalog.objects) {
         if (item.placement) {
             ++result.coverage.exact_placement_count;
@@ -278,47 +276,6 @@ ValidationReport validate_semantics(const Container &container, const ObjectCata
         });
     }
     append_unrecognized_category_entry_issues(container, result.issues);
-    for (const auto &relation : graph.relationships) {
-        switch (relation.quality) {
-        case RelationshipQuality::known:
-            ++result.coverage.known_relationship_count;
-            break;
-        case RelationshipQuality::likely:
-            ++result.coverage.likely_relationship_count;
-            break;
-        case RelationshipQuality::tentative:
-            ++result.coverage.tentative_relationship_count;
-            break;
-        case RelationshipQuality::unknown:
-            ++result.coverage.unknown_relationship_count;
-            break;
-        }
-        if ((relation.type == "SBNK_LEFT_MEMBER_TO_SMPL" || relation.type == "SBNK_RIGHT_MEMBER_TO_SMPL") &&
-            relation.quality == RelationshipQuality::unknown) {
-            const auto *source = find_object(catalog, relation.source_key);
-            result.issues.push_back({
-                "REL_SBNK_MEMBER_TARGET_MISSING",
-                ValidationSeverity::error,
-                source == nullptr ? "Sample does not resolve to exactly one Wave Data object"
-                                  : std::format("Sample '{}' does not resolve to exactly one Wave Data object",
-                                                source->object.header.name),
-                source == nullptr ? "" : sampler_path(*source),
-                relation.source_key,
-            });
-        }
-        if (relation.type.starts_with("PROG_ASSIGNMENT_TO_") &&
-            relation.assignment_state == AssignmentState::stored_assignment && !relation.target_key) {
-            const auto *source = find_object(catalog, relation.source_key);
-            result.issues.push_back({
-                "REL_PROGRAM_STORED_ROW_TARGET_MISSING",
-                ValidationSeverity::warning,
-                std::format("stored Program assignment row '{}' has no exact local target and is not effective",
-                            relation.assignment_name),
-                source == nullptr ? "" : sampler_path(*source),
-                relation.source_key,
-            });
-        }
-    }
     for (const auto &partition : container.partitions()) {
         const auto partition_path = std::format("partition {}: {}", partition.index.value, partition.name);
         if (!locate_partition_root_record(partition))

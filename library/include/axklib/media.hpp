@@ -16,6 +16,7 @@
 #include "axklib/io.hpp"
 #include "axklib/object.hpp"
 #include "axklib/sfs.hpp"
+#include "axklib/validation.hpp"
 
 namespace axk {
 
@@ -125,6 +126,7 @@ struct MediaValidationIssue {
     std::string sampler_path;
     std::string basis;
     std::string recommended_next_check;
+    ValidationSeverity severity{ValidationSeverity::error};
 };
 
 struct MediaObject {

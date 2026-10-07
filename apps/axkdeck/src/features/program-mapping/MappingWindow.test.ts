@@ -1,5 +1,5 @@
 import { act, fireEvent, render, waitFor } from '@testing-library/svelte';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import MappingWindow from './MappingWindow.svelte';
 import { MappingController } from './controller.svelte';
 import { programEditorFixture } from '../../test/programEditorFixture';
@@ -32,6 +32,38 @@ async function setup() {
     return { view, document, controller, commands, stop, publish };
 }
 describe('Mapping Editor window', () => {
+    afterEach(() => vi.unstubAllGlobals());
+    it('resizes the rendered coverage before committing a pointer gesture', async () => {
+        const { view, document, commands } = await setup();
+        const plot = view.container.querySelector('.plot')!;
+        vi.spyOn(plot, 'getBoundingClientRect').mockReturnValue({ width: 128, height: 128 } as DOMRect);
+        let frame!: FrameRequestCallback;
+        vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+            frame = callback;
+            return 1;
+        });
+        vi.stubGlobal('cancelAnimationFrame', vi.fn());
+        const handle = view.getByRole('button', { name: 'High velocity limit' });
+        handle.setPointerCapture = vi.fn();
+        handle.hasPointerCapture = () => false;
+        const pointer = (type: string, y: number) => {
+            const event = new Event(type, { bubbles: true });
+            Object.assign(event, { pointerId: 1, clientX: 60, clientY: y, button: 0 });
+            return fireEvent(handle, event);
+        };
+        await pointer('pointerdown', 0);
+        await pointer('pointermove', 32);
+        await act(() => frame(0));
+        expect(view.container.querySelector<HTMLElement>('.selection-outline')!.style.top).toBe('25%');
+        expect(view.container.querySelector<HTMLElement>('.zone.chosen')!.style.top).toBe('25%');
+        expect(document.draft.values['assignments.0.velocity_high']).toBe(127);
+        expect(commands.filter((command) => command.action.kind === 'range')).toHaveLength(0);
+        await pointer('pointerup', 32);
+        await waitFor(() => expect(document.draft.values['assignments.0.velocity_high']).toBe(95));
+        expect(commands.filter((command) => command.action.kind === 'range')).toHaveLength(1);
+        view.unmount();
+    });
+
     it('shares keyboard edits, undo and duplicate assignment selection with the main draft', async () => {
         const { view, document, commands } = await setup();
         await fireEvent.keyDown(view.getByRole('button', { name: 'High velocity limit' }), { key: 'ArrowDown' });

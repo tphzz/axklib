@@ -14,6 +14,7 @@
         formatNote,
         onselect,
         ondrag,
+        overlapPath,
     }: {
         zones: KeyboardZone[];
         geometry: MappingGeometry;
@@ -25,6 +26,7 @@
         formatNote: (note: number) => string;
         onselect: (id: string) => void;
         ondrag?: (event: PointerEvent, ids: string[]) => void;
+        overlapPath?: string;
     } = $props();
     const colors = $derived(geometry.colors);
     const overlaps = $derived(geometry.overlaps);
@@ -56,6 +58,9 @@
             : null,
     );
     const labels = $derived(mappingLabels(zones, start, span, width, height, geometry.ordered));
+    const patternId = $props.id();
+    const stripeWidth = $derived((8 * span) / Math.max(1, width));
+    const stripeHeight = $derived((8 * 128) / Math.max(1, height));
     const keyLines = $derived({
         minor: Array.from({ length: 129 }, (_, note) => note)
             .filter((note) => note % 12 !== 0)
@@ -94,6 +99,7 @@
         {@const box = mappingRectangle(overlap, 0, 128)}
         <button
             class="overlap"
+            hidden={overlapPath !== undefined}
             title={overlap.zones.map((zone) => zone.label).join(', ')}
             aria-label={`Select overlapping mappings: ${overlap.zones.map((zone) => zone.label).join(', ')}`}
             style:left={`${box.left}%`}
@@ -114,6 +120,22 @@
         ></button>
     {/each}
 </div>
+{#if overlapPath !== undefined}
+    <svg class="preview-overlaps" viewBox={`${start} 0 ${span} 128`} preserveAspectRatio="none" aria-hidden="true">
+        <defs>
+            <pattern id={patternId} patternUnits="userSpaceOnUse" width={stripeWidth} height={stripeHeight}>
+                <path
+                    d={`M0 ${stripeHeight}L${stripeWidth} 0`}
+                    stroke="var(--editor-loop)"
+                    stroke-opacity="0.1"
+                    stroke-width="2"
+                    vector-effect="non-scaling-stroke"
+                />
+            </pattern>
+        </defs>
+        <path d={overlapPath} fill={`url(#${patternId})`} />
+    </svg>
+{/if}
 <svg class="region-borders" viewBox={`${start} 0 ${span} 128`} preserveAspectRatio="none" aria-hidden="true">
     {#each borders as border}
         <path class="zone-border" style:--zone-color={border.tone} d={border.path} />
@@ -206,6 +228,9 @@
             transparent 0 6px,
             color-mix(in srgb, var(--editor-loop) 10%, transparent) 6px 8px
         );
+    }
+    .overlap[hidden] {
+        display: none;
     }
     .selection-outline {
         box-shadow: inset 0 0 0 2px var(--color-text);

@@ -15,6 +15,7 @@
         type MappingViewport,
     } from './mappingViewport';
     import { mappingRectangle, MappingGeometryCache } from './keyboardGeometry';
+    import { MappingPreviewGeometryCache } from './mappingPreviewGeometry';
     import { velocityGrid } from './mappingPresentation';
     import { graphDrag } from './graphDrag';
     import {
@@ -25,6 +26,7 @@
         type KeyboardRange,
         type KeyboardZone,
         type RangeHandle,
+        type KeyboardMappingPreview,
     } from './keyboardMapping';
     let {
         zones,
@@ -47,6 +49,8 @@
         targets = [],
         velocity = 100,
         onvelocity = () => {},
+        preview,
+        coverageLabel = 'Effective',
     }: {
         zones: KeyboardZone[];
         limits: KeyboardRange;
@@ -68,6 +72,8 @@
         targets?: { id: string; limits: KeyboardRange; axes: EditableMappingAxes; editable: boolean }[];
         velocity?: number;
         onvelocity?: (velocity: number) => void;
+        preview?: KeyboardMappingPreview;
+        coverageLabel?: string;
     } = $props();
     const mapping = $derived(mode === 'mapping' ? 1 : 0);
     const axes = $derived({ keys: editableAxes.keys, velocity: !!mapping && editableAxes.velocity });
@@ -89,12 +95,17 @@
     const selectedIds = $derived(new Set(zones.filter((zone) => zone.selected).map((zone) => zone.id)));
     const busy = $derived(feedback !== null);
     const x = (note: number) => ((note - start) / span) * 100;
-    const selected = $derived(zones.filter((zone) => zone.selected));
+    const previewById = $derived(new Map(preview?.zones.map((zone) => [zone.id, zone])));
+    const shownZones = $derived(preview ? zones.map((zone) => previewById.get(zone.id) ?? zone) : zones);
+    const selected = $derived(shownZones.filter((zone) => zone.selected));
     const rectangle = $derived(mappingRectangle(limits, start, span));
     const velocityOffset = $derived(Math.min(12, Math.max(0, ((rectangle.width / 100) * plotWidth) / 2 - 1)));
     const grid = velocityGrid();
     const geometryCache = new MappingGeometryCache();
-    const geometry = $derived(geometryCache.read(zones));
+    const previewCache = new MappingPreviewGeometryCache();
+    const staticGeometry = $derived(geometryCache.read(zones));
+    const presentation = $derived(previewCache.read(staticGeometry, preview));
+    const geometry = $derived(presentation.geometry);
     const handles = $derived<{ id: RangeHandle; label: string; x: number; y: number }[]>([
         ...(axes.keys
             ? ([
@@ -324,7 +335,7 @@
         {start}
         end={start + span - 1}
         {formatNote}
-        {zones}
+        zones={shownZones}
         {geometry}
         interactive
         {onpress}
@@ -399,8 +410,9 @@
             >
                 <div class="plot-content">
                     <MappingRegions
-                        {zones}
+                        zones={shownZones}
                         {geometry}
+                        overlapPath={presentation.overlapPath}
                         {start}
                         {span}
                         width={plotWidth}
@@ -450,8 +462,8 @@
                 />{/if}
         </div>
         <div class="legend">
-            <span><i class="source-key"></i>Source</span>
-            <span><i class="effective-key"></i>Effective</span>
+            {#if geometry.sources.length}<span><i class="source-key"></i>Source</span>{/if}
+            <span><i class="effective-key"></i>{coverageLabel}</span>
             <span><i class="limit-key"></i>{rangeLabel}</span>
             <span><i class="root-key"></i>Root</span>
         </div>

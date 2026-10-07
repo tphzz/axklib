@@ -461,18 +461,8 @@ axk::app::Result<axk::app::ImageSessionSummary> axk::app::ImageSessionManager::o
         session->validation.push_back(
             {std::move(code), std::move(severity), std::move(message), std::move(sampler_path), std::move(object_id)});
     };
-    for (const auto &issue : tree.issues) {
-        append_validation(issue.code, issue.severity, issue.message, issue.sampler_path,
-                          issue.object_key.empty() ? std::nullopt : mapped_id(object_ids, issue.object_key));
-    }
-    for (const auto &issue : media->validation_issues())
-        append_validation(issue.code, "warning", issue.message, issue.sampler_path, std::nullopt);
-    const auto validation = [&] {
-        if (const auto *sfs = std::get_if<axk::Container>(&media->storage()))
-            return axk::validate_semantics(*sfs, inventory->catalog, graph).issues;
-        return axk::validate_program_bitmaps(inventory->catalog, graph);
-    }();
-    for (const auto &issue : validation) {
+    const auto validation = axk::validate_semantics(*media, *inventory, graph);
+    for (const auto &issue : validation.issues) {
         std::string severity;
         switch (issue.severity) {
         case axk::ValidationSeverity::info:

@@ -50,53 +50,6 @@ struct image_state {
     ValidationReport validation;
 };
 
-ValidationSeverity internal_validation_severity(std::string_view severity) {
-    if (severity == "info")
-        return ValidationSeverity::info;
-    if (severity == "warning")
-        return ValidationSeverity::warning;
-    return ValidationSeverity::error;
-}
-
-ValidationReport validate_media(const MediaContainer &container, const ObjectCatalog &catalog,
-                                const RelationshipGraph &graph, const ContentTree &tree) {
-    if (const auto *sfs = std::get_if<Container>(&container.storage()))
-        return validate_semantics(*sfs, catalog, graph);
-    ValidationReport report;
-    report.coverage.object_count = catalog.objects.size();
-    report.coverage.relationship_count = graph.relationships.size();
-    for (const auto &relationship : graph.relationships) {
-        switch (relationship.quality) {
-        case RelationshipQuality::known:
-            ++report.coverage.known_relationship_count;
-            break;
-        case RelationshipQuality::likely:
-            ++report.coverage.likely_relationship_count;
-            break;
-        case RelationshipQuality::tentative:
-            ++report.coverage.tentative_relationship_count;
-            break;
-        case RelationshipQuality::unknown:
-            ++report.coverage.unknown_relationship_count;
-            break;
-        }
-    }
-    for (const auto &object : catalog.objects) {
-        if (object.placement)
-            ++report.coverage.exact_placement_count;
-        else
-            ++report.coverage.unresolved_placement_count;
-    }
-    for (const auto &issue : tree.issues) {
-        report.issues.push_back({issue.code, internal_validation_severity(issue.severity), issue.message,
-                                 issue.sampler_path, issue.object_key});
-    }
-    for (const auto &issue : container.validation_issues()) {
-        report.issues.push_back({issue.code, ValidationSeverity::warning, issue.message, issue.sampler_path, {}});
-    }
-    return report;
-}
-
 const std::vector<ContentNode> *find_children(const ContentTree &tree, std::string_view parent) {
     if (parent.empty())
         return &tree.roots;
@@ -313,7 +266,7 @@ result<image> image::open(const std::string &utf8_path, operation_context &conte
             return public_error(inventory.error());
         auto graph = build_relationship_graph(inventory->catalog);
         auto tree = build_content_tree(*container, inventory->catalog, graph);
-        auto validation = validate_media(*container, inventory->catalog, graph, tree);
+        auto validation = validate_semantics(*container, *inventory, graph);
         std::unordered_map<std::string, MediaObjectDescriptor> descriptors;
         descriptors.reserve(inventory->objects.size());
         for (auto &descriptor : inventory->objects)

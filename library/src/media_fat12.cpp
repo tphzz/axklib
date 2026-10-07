@@ -8,6 +8,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include "axklib/floppy_catalog_internal.hpp"
 #include "axklib/utf8.hpp"
 #include "media_ex5_internal.hpp"
 #include "media_internal.hpp"
@@ -402,7 +403,7 @@ Result<FatImage> FatImage::open(std::shared_ptr<const RandomAccessReader> reader
                          declared_bytes, geometry.physical_size_bytes,
                          geometry.physical_size_bytes / geometry.bytes_per_sector, excluded),
              "/", "Declared EX5 capacity exceeds physical storage by one sector",
-             "Keep a backup. Guarded edits do not correct the size mismatch."});
+             "Keep a backup. Guarded edits do not correct the size mismatch.", ValidationSeverity::warning});
         for (const auto &file : result.files_) {
             if (const auto check = cancellation.check(); !check)
                 return std::unexpected{check.error()};
@@ -417,14 +418,17 @@ Result<FatImage> FatImage::open(std::shared_ptr<const RandomAccessReader> reader
                         {"EX5_FILE_DATA_UNAVAILABLE",
                          std::format("File '{}' requires bytes absent from the image", file.path), file.path,
                          "File payload exceeds physical storage",
-                         "Complete export is unavailable; missing bytes are not synthesized."});
+                         "Complete export is unavailable; missing bytes are not synthesized.",
+                         ValidationSeverity::warning});
                     break;
                 }
                 remaining -= take;
             }
         }
     }
-    if (geometry.profile != FatProfile::a_series_floppy)
+    if (geometry.profile != FatProfile::a_series_floppy || !std::ranges::any_of(result.files_, [](const FatFile &file) {
+            return file.path.find('/') == std::string::npos && detail::is_yamaha_floppy_catalog_path(file.path);
+        }))
         return result;
     auto catalog = detail::inspect_yamaha_floppy_catalog(result, cancellation);
     result.yamaha_catalog_ = std::move(catalog.catalog);

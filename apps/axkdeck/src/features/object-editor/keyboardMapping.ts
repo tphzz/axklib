@@ -13,6 +13,10 @@ export interface KeyboardZone extends KeyboardRange {
     source?: KeyboardRange;
     empty?: boolean;
 }
+export interface KeyboardMappingPreview {
+    ids: ReadonlySet<string>;
+    zones: KeyboardZone[];
+}
 export type RangeHandle = 'move' | 'low' | 'high' | 'velocityLow' | 'velocityHigh';
 export type RangeBoundary = Exclude<RangeHandle, 'move'>;
 export interface EditableMappingAxes {

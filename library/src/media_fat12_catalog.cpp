@@ -94,11 +94,6 @@ FloppyCatalogInspection inspect_yamaha_floppy_catalog(std::span<const FloppyCata
     if (parsed_label) {
         result.identity.set_name = parsed_label->first;
         result.identity.index = parsed_label->second;
-    } else if (!std::ranges::all_of(catalog->disk_name, [](char character) { return character == ' '; })) {
-        result.issues.push_back(
-            issue("FLOPPY_SET_LABEL_INVALID",
-                  std::format("Yamaha disk label '{}' has no exact two-digit set index", catalog->disk_name),
-                  "\\YAMAHA.SYM", "Use explicit recovery; ordered disk-set attachment is disabled"));
     }
 
     std::map<std::uint16_t, std::vector<const FloppyCatalogFile *>> files_by_slot;
@@ -191,11 +186,17 @@ FloppyCatalogInspection inspect_yamaha_floppy_catalog(std::span<const FloppyCata
         result.identity.marker = FloppySetMarker::final;
     }
 
+    const bool chained =
+        result.identity.marker == FloppySetMarker::continuation || result.identity.marker == FloppySetMarker::final;
+    if (chained && !parsed_label) {
+        result.issues.push_back(
+            issue("FLOPPY_SET_LABEL_INVALID",
+                  std::format("Yamaha disk label '{}' has no exact two-digit set index", catalog->disk_name),
+                  "\\YAMAHA.SYM", "Use explicit recovery; ordered disk-set attachment is disabled"));
+    }
+
     result.catalog = std::move(*catalog);
-    result.identity.trusted_for_disk_set =
-        parsed_label.has_value() &&
-        (result.identity.marker == FloppySetMarker::continuation || result.identity.marker == FloppySetMarker::final) &&
-        result.issues.empty();
+    result.identity.trusted_for_disk_set = parsed_label.has_value() && chained && result.issues.empty();
     return result;
 }
 

@@ -32,8 +32,7 @@ struct ValidationSource {
     FileRef reference;
     std::filesystem::path path;
     axk::MediaContainer media;
-    std::vector<axk::MediaObjectDescriptor> objects;
-    axk::ObjectCatalog catalog;
+    axk::MediaInventory inventory;
     axk::RelationshipGraph graph;
 };
 
@@ -59,7 +58,7 @@ std::vector<axk::ReportRow> allocation_mismatch_rows(const std::filesystem::path
                                                      std::span<const axk::Partition> partitions);
 std::vector<axk::ReportRow> volume_validation_rows(const std::filesystem::path &path, const axk::Container &container,
                                                    const axk::ObjectCatalog &catalog);
-std::vector<axk::ReportRow> validate_media_details(const ValidationSource &source, bool include_object_checks = true);
+std::vector<axk::ReportRow> validate_media_details(const ValidationSource &source);
 std::vector<axk::ReportRow> validate_export_directory(const SandboxTree &tree);
 
 Result<axk::ReportSchemaManifest> write_report_set(const std::filesystem::path &destination,

@@ -90,12 +90,8 @@ axk::app::Result<ValidationSource> load_source(const axk::app::Sandbox &sandbox,
         return std::unexpected(core_error(inventory.error(), source));
     auto graph = axk::build_relationship_graph(inventory->catalog);
     const auto report_path = axk::text::path_from_utf8(display_path(source, context));
-    return ValidationSource{source,
-                            report_path ? *report_path : std::filesystem::path{source.relative_path},
-                            std::move(*media),
-                            std::move(inventory->objects),
-                            std::move(inventory->catalog),
-                            std::move(graph)};
+    return ValidationSource{source, report_path ? *report_path : std::filesystem::path{source.relative_path},
+                            std::move(*media), std::move(*inventory), std::move(graph)};
 }
 
 std::string child_reference_path(const axk::app::DirectoryRef &directory, std::string_view child) {

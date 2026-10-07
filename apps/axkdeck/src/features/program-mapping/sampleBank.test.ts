@@ -33,6 +33,22 @@ async function setup() {
     return { workflow, transport, bank, a, b, bankWindow, members, send };
 }
 describe('Sample and Bank mapping contexts', () => {
+    it('draws stored member ranges independently of active bank velocity overrides', async () => {
+        const { bank, a, bankWindow, members } = await setup();
+        a.draft.set('velocity_high', 84);
+        const draft = bank.draft as BankDraft;
+        draft.patch({ velocity_high: 126 });
+        draft.patch({ velocity_high: 127 });
+        bankWindow.refresh(bank);
+        members.refresh(bank);
+        expect(members.state.limits!.velocityHigh).toBe(84);
+        expect(members.state.zones[0]!.velocityHigh).toBe(84);
+        expect(members.state.zones[1]!.velocityHigh).toBe(127);
+        expect(bankWindow.state.zones[0]!.velocityHigh).toBe(127);
+        expect(draft.isOverridden('velocity_high')).toBe(true);
+        expect(a.draft.values.velocity_high).toBe(84);
+    });
+
     it('uses the current member for editing and undo after a cached selection change', async () => {
         const { bank, a, b, members, send } = await setup();
         const revision = members.state.editRevision;
@@ -137,7 +153,7 @@ describe('Sample and Bank mapping contexts', () => {
         expect(a.draft.values.key_high).toBe(128);
         expect(a.draft.values.key_low).toBe(50);
     });
-    it('shares canonical member drafts while bank overrides mask rather than replace stored ranges', async () => {
+    it('shares canonical member drafts without projecting bank overrides into the stored member view', async () => {
         const { bank, a, bankWindow, members, send } = await setup();
         expect(bankWindow.state.editableAxes).toEqual({ keys: false, velocity: true });
         expect(
@@ -158,7 +174,8 @@ describe('Sample and Bank mapping contexts', () => {
         });
         members.refresh(bank);
         expect(members.state.limits!.velocityLow).toBe(0);
-        expect(members.state.zones[0]!.velocityLow).toBe(50);
+        expect(members.state.zones[0]!.velocityLow).toBe(0);
+        expect(bankWindow.state.zones[0]!.velocityLow).toBe(50);
         await send(members, {
             kind: 'range',
             selectionId: 0,
@@ -166,7 +183,9 @@ describe('Sample and Bank mapping contexts', () => {
             range: { ...members.state.limits!, velocityLow: 20 },
         });
         expect(a.draft.values.velocity_low).toBe(20);
-        expect(members.state.zones[0]!.velocityLow).toBe(50);
+        expect(members.state.zones[0]!.velocityLow).toBe(20);
+        bankWindow.refresh(bank);
+        expect(bankWindow.state.zones[0]!.velocityLow).toBe(50);
         await send(bankWindow, { kind: 'inherit', boundary: 'velocityLow' });
         members.refresh(bank);
         expect(members.state.zones[0]!.velocityLow).toBe(20);

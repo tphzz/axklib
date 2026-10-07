@@ -160,6 +160,7 @@ add_library(
   src/report.cpp
   src/semantic.cpp
   src/semantic_analysis.cpp
+  src/media_semantics.cpp
   src/sequence.cpp
   src/sequence_diagnostics.cpp
   src/sfs.cpp
@@ -618,6 +619,7 @@ if(BUILD_TESTING)
     tests/media_ex5_test.cpp
     tests/media_ex5_capacity_test.cpp
     tests/media_iso9660_test.cpp
+    tests/media_semantics_test.cpp
     tests/media_conversion_test.cpp
     tests/media_floppy_catalog_test.cpp
     tests/media_yamaha_test.cpp
@@ -710,7 +712,7 @@ if(BUILD_TESTING)
     endif()
   endif()
   if(AXK_BUILD_SHARED_SDK)
-    target_sources(axk_core_tests PRIVATE tests/sdk_test.cpp)
+    target_sources(axk_core_tests PRIVATE tests/sdk_test.cpp tests/sdk_validation_test.cpp)
     target_link_libraries(axk_core_tests PRIVATE axklib::axklib)
   endif()
   axk_set_project_warnings(axk_core_tests)
