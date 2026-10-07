@@ -1192,8 +1192,8 @@ TEST(ServerContract, ProgramStorageAndConversionEnumsRemainDistinctFromSampleFor
     axk::server::OpenApiValidator validator;
     for (const auto &[application, wire] : std::array<std::pair<std::string_view, std::string_view>, 3>{
              {{"unknown", "UNKNOWN"}, {"a3000", "A3000"}, {"a4000_a5000", "A4000_A5000"}}}) {
-        EXPECT_EQ(validator.wire_value("ProgramStorageFormat", application), wire);
-        EXPECT_EQ(validator.application_value("ProgramStorageFormat", wire), application);
+        EXPECT_EQ(validator.wire_value("ProgramStorageFormat", application), nlohmann::json(wire));
+        EXPECT_EQ(validator.application_value("ProgramStorageFormat", wire), nlohmann::json(application));
         EXPECT_TRUE(validator.validate("ProgramStorageFormat", wire));
         EXPECT_FALSE(validator.validate("ProgramStorageFormat", application));
     }
