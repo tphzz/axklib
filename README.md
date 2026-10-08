@@ -35,6 +35,11 @@ and its corresponding file through the inspector.
   <img width="24%" alt="import_audio" src="https://github.com/user-attachments/assets/6a14699c-da72-477e-91fa-7278e3c5b315" />
   <img width="24%" alt="import_floppy" src="https://github.com/user-attachments/assets/8f14499c-7be7-4fae-b88a-dc835f52507b" />
   <img width="24%" alt="import_packages" src="https://github.com/user-attachments/assets/250f0b05-fbeb-4f26-b24b-301a5f9b6f4a" />
+  <br/>
+  <img width="24%" alt="image_effects" src="https://github.com/user-attachments/assets/a50f10e5-25bd-49e6-819d-0c4ade19e2c6" />
+  <img width="24%" alt="image_mapping_editor" src="https://github.com/user-attachments/assets/8c02e351-6e5f-4c60-a6d9-9dcdd549bc08" />
+  <img width="24%" alt="image_conversion_amplitude_eg" src="https://github.com/user-attachments/assets/15561c52-1bcc-4458-b125-01898d7fa60c" />
+  <img width="24%" alt="image_logs" src="https://github.com/user-attachments/assets/ae883760-6b34-4192-b6ca-60689b839d2a" />
 </p>
 
 ### Supported Media
