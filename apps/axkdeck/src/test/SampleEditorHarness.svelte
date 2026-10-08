@@ -27,7 +27,10 @@
         { objectId: 'Member C', name: 'A deliberately long sample preview name' },
     ];
     let selected = $state(untrack(() => (bank ? 'Bank A' : 'Sample A')));
-    const bankOverrides = new Map<string, Set<number>>();
+    const bankOverrides = new Map<string, Set<number>>(
+        untrack(() => (bank ? ['Bank A', 'Bank B'].map((name) => [name, new Set([6])] as const) : [])),
+    );
+    let rootPreserved = $state(untrack(() => bank));
     let lowerOpen = $state(false);
     let writes = $state(0);
     let names = $state(['Sample A', 'Sample B', 'Sample C with a very long name that must truncate in narrow panes']);
@@ -83,7 +86,10 @@
             storedFormats[name] ?? ((bank && !isBank ? name === 'Member A' : stereo) ? 'A3000_188' : 'A4000_A5000_224'),
         );
         const currentParameters = structuredClone(
-            copies.get(name) ?? { ...parameters, ...(name === 'Sample B' ? { level: 75, root_key: 64 } : {}) },
+            copies.get(name) ?? {
+                ...parameters,
+                ...(isBank ? { root_key: 67 } : name === 'Sample B' ? { level: 75, root_key: 64 } : {}),
+            },
         );
         if (bank && !isBank) {
             Object.assign(currentParameters, {
@@ -181,14 +187,21 @@
             writes++;
             for (const operation of edit.operations) {
                 if (operation.type === 'update_sample_bank_overrides') {
+                    if (
+                        'root_key' in operation.parameters ||
+                        operation.enable.includes(6) ||
+                        operation.disable.includes(6)
+                    )
+                        throw new Error('Original Key cannot be edited or toggled at bank level');
                     const name = operation.sample_bank_name;
-                    const stored = copies.get(name) ?? structuredClone(parameters);
+                    const stored = copies.get(name) ?? structuredClone(sampleSnapshot(detail(name))!.parameters);
                     patchParameters(stored, operation.parameters);
                     copies.set(name, stored);
                     const enabled = bankOverrides.get(name) ?? new Set<number>();
                     operation.enable.forEach((id) => enabled.add(id));
                     operation.disable.forEach((id) => enabled.delete(id));
                     bankOverrides.set(name, enabled);
+                    rootPreserved = enabled.has(6) && stored.root_key === 67;
                 } else patchParameters(parameters, operation.parameters);
             }
             return { jobId: 1, kind: 'edit', status: 'queued' };
@@ -295,7 +308,7 @@
     } as unknown as InspectorSelection);
 </script>
 
-<nav>
+<nav data-root-preserved={rootPreserved}>
     <button onclick={() => (selected = bank ? 'Bank A' : 'Sample A')}>Select A</button><button
         onclick={() => (selected = bank ? 'Bank B' : 'Sample B')}>Select B</button
     ><output aria-label="Write count">{writes}</output>

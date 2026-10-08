@@ -73,6 +73,8 @@ window.runBankEditorChecks = async function () {
     check(!button('Waveform'), 'Bank has no waveform editor');
     check(!field('Loop Tempo'), 'Bank Sample Info has no sample-only tempo helper');
     await navigate('Map/Out', 'Mix & Key');
+    check(document.querySelector('nav').dataset.rootPreserved === 'true', 'Stored Original Key selector is present');
+    check(!field('Original key') && !labelled('Use sample values for Original key'), 'Bank Original Key is not editable or clearable');
     check(field('Level').value === '' && field('Level').placeholder === '---', 'Inherited level is ---');
     check(!button('Save').disabled === false, 'Inherited bank starts clean');
     await change('Level', 81);
@@ -89,6 +91,7 @@ window.runBankEditorChecks = async function () {
     measurePreview();
     labelled('Use sample values for Level').click(); await settle(); button('Save').click(); await settle();
     check(labelled('Write count').textContent === '2' && field('Level').value === '', 'Clear saved override persists inheritance');
+    check(document.querySelector('nav').dataset.rootPreserved === 'true', 'Save and clear preserve selector 6 and dormant bank root');
     await navigate('EG', 'Amplitude');
     await change('Attack rate', 100);
     check(field('Decay rate').value === '91' && field('Release rate').value === '92', 'Activation seeds all envelope rates from preview');

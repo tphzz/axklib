@@ -146,7 +146,10 @@ Conversion in either direction is blocked when any bank override is enabled.
 Override selectors have generation-specific numbering and
 side effects, so copying their flags is not a parameter-preserving conversion.
 The converter does not clear them or run Freeze SampleBank automatically.
-Use the bank editor to return enabled overrides to sample values before conversion.
+Use the bank editor to return editable overrides to sample values before conversion.
+An existing Original Key enable bit (selector 6) is preserved, not applied to
+members and not editable at bank level. It permits unrelated supported bank edits
+but still blocks conversion, even after all editable overrides have been cleared.
 Unknown data and values without an equivalent in the target format also block
 conversion rather than being clamped or reset. See the
 [alteration operation](alteration.md) for programmatic use.

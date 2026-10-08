@@ -124,6 +124,9 @@ bool sample_bank_override_state_supported(const CurrentSbac &bank) {
     for (const auto &unit : sample_bank_override_units(*generation))
         for (const auto selector : unit.selectors)
             allowed[selector / 32U] |= 1U << (selector % 32U);
+    // Selector 6 is preserved but never applies bank Original Key to members.
+    // Admit its stored bit without making it an editable override unit.
+    allowed[0] |= 1U << 6U;
     for (std::size_t i = 0; i < allowed.size(); ++i)
         if ((bank.override_enable_words[i] & ~allowed[i]) != 0U)
             return false;

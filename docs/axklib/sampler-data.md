@@ -711,6 +711,13 @@ unit: selectors 49/50/51 on A3000 and 49/50/51/85 on A4000/A5000. Existing parti
 EQ masks are preserved by unrelated edits; an EQ edit activates its whole unit.
 Unsupported enable states remain read-only.
 
+Selector 6 (Original Key) is sample-only. Its stored bank enable bit is preserved
+but does not override member roots, sample rates, fine tuning or cached pitch.
+It does not block unrelated supported bank-only edits. Neither its bit nor its
+retained values can be edited or cleared through bank overrides. Other unsupported
+active selectors remain read-only; an enabled selector 6 still blocks cross-format
+conversion.
+
 The distinct, immediate member-wide `update_sample_bank_parameters` operation
 requires clear override state, validates the bank and each member against their
 own format, and rejects the entire update on a conflict.

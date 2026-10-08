@@ -37,7 +37,7 @@ describe('Program visualization context', () => {
             assignable: true,
             available: true,
             reason: '',
-            values: { 'aeg.attack_rate': 20, 'aeg.sustain_level': 0 },
+            values: { root_key: 67, 'aeg.attack_rate': 20, 'aeg.sustain_level': 0 },
             overrideKeys: ['aeg.attack_rate'],
             members: [
                 { name: 'Duplicate', objectId: 'sample' },
@@ -51,7 +51,7 @@ describe('Program visualization context', () => {
             draft.assignments.find((row) => row.id === id)!,
         );
         expect(samples).toHaveLength(1);
-        expect(samples[0]!.values).toMatchObject({ 'aeg.attack_rate': 20, 'aeg.sustain_level': 90 });
+        expect(samples[0]!.values).toMatchObject({ root_key: 60, 'aeg.attack_rate': 20, 'aeg.sustain_level': 90 });
         delete samples[0]!.values['aeg.attack_rate'];
         expect(programEnvelope(samples[0]!, document.draft.values, 0)).toBeNull();
     });

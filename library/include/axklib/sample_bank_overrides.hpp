@@ -24,6 +24,7 @@ struct SampleBankOverrideEdit {
 };
 
 AXK_API std::vector<SampleBankOverrideUnit> sample_bank_override_units(SampleParameterGeneration generation);
+// Includes preserved, non-applying selector 6; editable units still exclude it.
 AXK_API bool sample_bank_override_state_supported(const CurrentSbac &bank);
 // Changes only bank parameters and override flags. Members and membership are untouched.
 AXK_API Result<void> apply_sample_bank_overrides(std::vector<std::byte> &payload, const SampleBankOverrideEdit &edit);

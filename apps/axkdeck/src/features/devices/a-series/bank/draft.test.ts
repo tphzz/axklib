@@ -8,6 +8,21 @@ const units = [
 const stored = { level: 127, 'aeg.attack_rate': 1, 'aeg.decay_rate': 2, 'aeg.release_rate': 3 };
 
 describe('bank override draft', () => {
+    it('keeps the member root even when the bank has a different dormant Original Key', () => {
+        const draft = new BankDraft({ ...stored, root_key: 67, fine_tune_cents: -1 }, units);
+        draft.member = { level: 80, root_key: 44, fine_tune_cents: 2 };
+        expect(draft.values.root_key).toBe(44);
+        draft.set('root_key', 64);
+        draft.clearOverride('root_key');
+        expect(draft.dirty).toBe(false);
+        draft.set('level', 81);
+        expect(draft.changes).not.toHaveProperty('root_key');
+        expect(draft.values.root_key).toBe(44);
+        expect(draft.storedValues.root_key).toBe(67);
+        draft.member = { level: 90, root_key: 60 };
+        expect(draft.values.root_key).toBe(60);
+        expect(draft.values.level).toBe(81);
+    });
     it('seeds a complete group from the preview member and undoes activation atomically', () => {
         const draft = new BankDraft(stored, units);
         draft.member = { level: 80, 'aeg.attack_rate': 90, 'aeg.decay_rate': 91, 'aeg.release_rate': 92 };

@@ -5,6 +5,7 @@
 #include <string>
 #include <unordered_map>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -311,6 +312,35 @@ TEST(ProgramEditorSnapshot, ContextUsesResolvedIdsAndExcludesOtherVolumesWithout
     EXPECT_TRUE(target["available"].get<bool>());
     EXPECT_EQ(target["values"]["aeg.attack_rate"], 50U);
     EXPECT_FALSE(target.contains("sources"));
+}
+
+TEST(ProgramEditorSnapshot, PreservedBankRootSelectorDoesNotBecomeAPreviewOverride) {
+    const auto program = editor_snapshot(4U);
+    for (const auto format : {axk::SampleStorageFormat::a3000_188, axk::SampleStorageFormat::a4000_a5000_224}) {
+        axk::SampleSpec member;
+        member.name = "Member";
+        axk::SampleBankSpec spec{"Bank", {"Member"}};
+        spec.storage_format = format;
+        auto bytes = axk::detail::prepare_sbac_payload(spec, {{"Member", member}});
+        ASSERT_TRUE(bytes);
+        (*bytes)[0x137] = std::byte{0x40};
+        (*bytes)[0xa6] = std::byte{67};
+        auto bank = program;
+        bank.key = "bank";
+        bank.raw_payload = *bytes;
+        bank.object = axk::decode_object(*bytes).value();
+        std::unordered_map<std::string, axk::ObjectSnapshot> objects{{"program", program}, {"bank", bank}};
+        nlohmann::ordered_json editor = axk::app::detail::a_series_program_editor(program, program.raw_payload, true);
+        axk::app::detail::add_program_editing_context(editor, "program", objects, {});
+        ASSERT_EQ(editor["targets"].size(), 1U);
+        const auto &target = editor["targets"][0];
+        EXPECT_TRUE(target["available"].get<bool>());
+        EXPECT_EQ(target["values"]["root_key"].get<unsigned>(), 67U);
+        EXPECT_TRUE(target["overrideKeys"].empty());
+        std::get<axk::CurrentSbac>(objects.at("bank").object.payload).override_enable_words[0] |= 1U;
+        axk::app::detail::add_program_editing_context(editor, "program", objects, {});
+        EXPECT_FALSE(editor["targets"][0]["available"].get<bool>());
+    }
 }
 
 TEST(ProgramEditorCatalog, NewAssignmentDefaultsMatchTheNeutralWriterRow) {
