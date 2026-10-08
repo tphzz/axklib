@@ -39,7 +39,7 @@ and its corresponding file through the inspector.
   <img width="24%" alt="image_effects" src="https://github.com/user-attachments/assets/a50f10e5-25bd-49e6-819d-0c4ade19e2c6" />
   <img width="24%" alt="image_mapping_editor" src="https://github.com/user-attachments/assets/8c02e351-6e5f-4c60-a6d9-9dcdd549bc08" />
   <img width="24%" alt="image_conversion_amplitude_eg" src="https://github.com/user-attachments/assets/15561c52-1bcc-4458-b125-01898d7fa60c" />
-  <img width="24%" alt="image_logs" src="https://github.com/user-attachments/assets/ae883760-6b34-4192-b6ca-60689b839d2a" />
+  <img width="24%" alt="image_lfo_logs" src="https://github.com/user-attachments/assets/1a238daf-3f6b-4881-9359-9f2d83bfe2bb" />
 </p>
 
 ### Supported Media
