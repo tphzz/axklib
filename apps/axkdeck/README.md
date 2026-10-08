@@ -20,10 +20,14 @@ Production builds contain no scripting runtime or demo-data fallback.
 
 - Node.js 22.12 or newer
 - Corepack (`corepack enable`)
-- Rust stable
+- Rust 1.85.x
 - CMake 3.22.1 or newer and Ninja
 - The [Tauri platform prerequisites](https://v2.tauri.app/start/prerequisites/)
 - A configured axklib release build in the monorepo root
+
+Install Rust with `rustup toolchain install 1.85`. Run desktop/Tauri commands
+with `RUSTUP_TOOLCHAIN=1.85` (PowerShell: `$env:RUSTUP_TOOLCHAIN = '1.85'`);
+this leaves Rust's global default unchanged.
 
 ### Native dependencies
 
@@ -49,8 +53,10 @@ cmake --build --preset release --target axklib_server
 Axkdeck is a Cargo/Tauri project and intentionally is not part of the CMake
 project. Run `corepack pnpm desktop:build` from `apps/axkdeck`. Its Rust build
 script stages the existing native release server and never configures or builds
-the C++ project. Set `AXKLIB_SERVER_BINARY` only when using a nonstandard native
-build directory.
+the C++ project. For a nonstandard native build, set `AXKLIB_SERVER_BINARY` to
+the server and `AXKLIB_BUILD_DIRECTORY` to its matching build directory. Metadata
+stored elsewhere can be selected with `AXKLIB_VERSION_METADATA_FILE` and
+`AXKLIB_PACKAGE_BASENAME_FILE`.
 
 The same Git tag versions axklib and axkdeck. `desktop:dev` and
 `desktop:build` read `version_metadata.json` and `package_basename.txt` from the
@@ -95,11 +101,11 @@ After installing the system packages, verify the complete toolchain from
 `apps/axkdeck`:
 
 ```bash
-rustc --version
+rustc +1.85 --version
 node --version
 corepack enable
 corepack pnpm install --frozen-lockfile
-corepack pnpm tauri info
+RUSTUP_TOOLCHAIN=1.85 corepack pnpm tauri info
 ```
 
 All entries in the `Environment` section of `tauri info` should show as
@@ -131,7 +137,7 @@ including preparation, transfer, decoding, cache, and scheduling timings. For
 example:
 
 ```bash
-AXKDECK_LOG_LEVEL=debug corepack pnpm desktop:dev
+RUSTUP_TOOLCHAIN=1.85 AXKDECK_LOG_LEVEL=debug corepack pnpm desktop:dev
 ```
 
 ### macOS
@@ -149,11 +155,11 @@ desktop toolchain:
 
 ```bash
 xcode-select -p
-rustc --version
+rustc +1.85 --version
 node --version
 corepack enable
 corepack pnpm install --frozen-lockfile
-corepack pnpm tauri info
+RUSTUP_TOOLCHAIN=1.85 corepack pnpm tauri info
 ```
 
 See the official
@@ -187,8 +193,8 @@ WebView2:
 Open a new PowerShell terminal and verify the toolchain:
 
 ```powershell
-rustup default stable-msvc
-rustc --version
+$env:RUSTUP_TOOLCHAIN = '1.85'
+rustc +1.85 --version
 node --version
 corepack enable
 corepack pnpm install --frozen-lockfile
@@ -233,11 +239,20 @@ The Vite frontend is available at `http://localhost:5173`.
 To launch the desktop shell with the existing native release server:
 
 ```bash
-corepack pnpm desktop:dev
+RUSTUP_TOOLCHAIN=1.85 corepack pnpm desktop:dev
 ```
 
-Use `corepack pnpm desktop:dev:fresh` to incrementally build the native server
-target before launching the desktop shell.
+Use `RUSTUP_TOOLCHAIN=1.85 corepack pnpm desktop:dev:fresh` to incrementally
+build the native server target before launching the desktop shell.
+
+### Editors
+
+Programs, Samples and Sample Banks have lower-zone editors with compact key
+ranges and a separate full **Mapping Editor**. For Sample Banks, **Bank Mapping**
+edits bank overrides; **Member Mapping** edits the assigned Samples and saves
+changed members atomically. Bank root editing is disabled. Existing Original Key
+enable bits (selector 6) are preserved during supported bank edits but still
+block format conversion. See [Sample Bank Conversion](../../docs/axklib/sample-formats.md#sample-bank-conversion).
 
 ### Interface scale
 
@@ -305,19 +320,21 @@ or the active partition when nothing is selected.
 
 Choose one ordinary floppy or the companion images of one disk set, up to
 32 members. Content inspection distinguishes A-series, SU700 and TX16W disks;
-unrelated disks cannot be combined. Add any missing companions before continuing.
+unrelated disks cannot be combined.
 Select the objects to import; required dependencies remain included and locked.
 SYSTEM/SYSTEM2 and auxiliary files are shown as excluded, not imported.
 
 The storage picker also accepts unpacked A-series disks: navigate into a disk
 folder and choose **Select current folder**, or select the parent folder of one
 companion set. Parent-folder recognition uses Yamaha catalogs and disk numbers,
-not folder names. Missing disks keep import disabled; use **Add disks...** to
-provide companions. Multiple unrelated sets, duplicate disk numbers, and mixed
-image-file/folder selections are rejected. Folder sources must be in a configured
-server storage location; client uploads still accept image files only. When using
-the bundled desktop server, the storage picker opens directly without a
-local/remote choice. Source folders remain unchanged.
+not folder names. Use **Add disks...** to provide missing companions. When source
+issues remain, **Import available objects despite source issues** allows import
+of complete objects with complete dependencies after acknowledgement; unreadable
+or unresolved objects remain excluded. Multiple unrelated sets, duplicate disk
+numbers, and mixed image-file/folder selections are rejected. Folder sources must
+be in a configured server storage location; client uploads still accept image
+files only. When using the bundled desktop server, the storage picker opens
+directly without a local/remote choice. Source folders remain unchanged.
 
 Choose **Existing** or **New** for the destination volume, then **Review**.
 Resolve naming or Program slot conflicts using the same controls as package
@@ -335,7 +352,7 @@ location. The desktop application can also choose a local package, upload it
 in bounded chunks, and remove that temporary upload when the dialog closes.
 Axkdeck verifies the package, shows its Program, Sample Bank, Sample, and Wave
 Data graph, and presents the exact insertion, reuse, allocation, warning, and
-naming-conflict plan before enabling **Import package**. Conflict renames are
+naming-conflict plan before enabling **Import**. Conflict renames are
 replanned before application.
 
 Right-click a writable SFS partition and choose **Import packages…** to select
@@ -552,10 +569,12 @@ corepack pnpm version:test
 corepack pnpm test
 corepack pnpm check
 corepack pnpm build
-cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
-cargo test --manifest-path src-tauri/Cargo.toml
-cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
-corepack pnpm desktop:build
+cargo +1.85 fmt --manifest-path src-tauri/Cargo.toml -- --check
+cargo +1.85 check --locked --manifest-path src-tauri/Cargo.toml
+cargo +1.85 test --locked --manifest-path src-tauri/Cargo.toml
+cargo +1.85 clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+cargo +1.85 clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets --release -- -D warnings
+RUSTUP_TOOLCHAIN=1.85 corepack pnpm desktop:build
 ```
 
 TypeScript and Svelte source is formatted with the project-local
