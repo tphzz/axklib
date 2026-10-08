@@ -11,6 +11,11 @@ afterAll(() => {
     Element.prototype.scrollIntoView = originalScroll;
 });
 describe('editor choices', () => {
+    it('does not build hidden option lists for dropdown-only controls', () => {
+        const view = render(EditorChoice, { label: 'Output', value: 0, options, segmented: false, onchange: vi.fn() });
+        expect(view.container.querySelector('.choice-measurement')).toBeNull();
+        expect(view.container.querySelectorAll('.editor-option-label')).toHaveLength(1);
+    });
     it('keeps extension markers separate from option names and includes them in segment measurement', async () => {
         const marked = [
             { value: 0, label: 'Ordinary' },
@@ -21,7 +26,7 @@ describe('editor choices', () => {
         await fireEvent.click(view.getByRole('button', { name: 'Mode' }));
         const option = view.getByRole('option', { name: 'Later value' });
         expect(option.querySelector('.editor-option-label .extended-parameter')).not.toBeNull();
-        expect(option.title).toBe('Later value: Convert first.');
+        expect(option.title).toContain('Convert first.');
         expect(view.getByRole('option', { name: 'Ordinary' }).querySelector('[data-icon="plus"]')).toBeNull();
         await fireEvent.click(option);
         expect(onchange).not.toHaveBeenCalled();
@@ -30,6 +35,8 @@ describe('editor choices', () => {
         expect(
             view.getByRole('button', { name: 'Mode: Later value' }).querySelector('.extended-parameter'),
         ).not.toBeNull();
+        expect(view.container.querySelector('.choice-measurement')).toBeNull();
+        await view.rerender({ segmented: undefined });
         expect(view.container.querySelector('.choice-measurement .extended-parameter')).not.toBeNull();
     });
     it('opens only deliberately and supports selection, Escape and outside dismissal', async () => {

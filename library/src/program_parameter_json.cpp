@@ -115,8 +115,10 @@ Result<void> controller(const Json &value, ProgramControllerParameters &result) 
 }
 
 Result<void> effect(const Json &value, ProgramEffectParameters &result) {
-    AXK_FIELDS("enabled", "input_level", "output_level", "pan", "width", "destination", "type", "parameters");
+    AXK_FIELDS("enabled", "input_level", "output_level", "pan", "width", "destination", "type", "parameters",
+               "reset_parameters");
     AXK_READ(enabled);
+    AXK_READ(reset_parameters);
     AXK_READ(input_level);
     AXK_READ(output_level);
     AXK_READ(pan);
@@ -151,6 +153,7 @@ Json ad_channel_json(const ProgramAdChannelParameters &value) {
 
 Json effect_json(const ProgramEffectParameters &value) {
     auto result = Json::object();
+    AXK_WRITE(reset_parameters);
     AXK_WRITE(enabled);
     AXK_WRITE(input_level);
     AXK_WRITE(output_level);

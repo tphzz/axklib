@@ -49,7 +49,7 @@ describe('object editor lifecycle', () => {
         b.draft.set('pan', 12);
         expect(await workflow.load(1, 'A')).toBe(a);
         await workflow.save(a);
-        expect(transport.startObjectParameterEdit.mock.calls[0]![1].operation.parameters).toEqual({ level: 80 });
+        expect(transport.startObjectParameterEdit.mock.calls[0]![1].operations[0]!.parameters).toEqual({ level: 80 });
         expect(a.draft.canUndo).toBe(false);
         expect(a.draft.dirty).toBe(false);
         expect(b.draft.dirty).toBe(true);

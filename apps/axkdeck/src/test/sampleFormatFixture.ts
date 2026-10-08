@@ -70,9 +70,10 @@ export function sampleFormatFixture(
 
 export function sampleConversionFixture(
     format: SampleStorageFormat = 'A4000_A5000_224',
-    overrides: Partial<ObjectFormatConversionSnapshot> = {},
-): ObjectFormatConversionSnapshot {
+    overrides: Partial<Extract<ObjectFormatConversionSnapshot, { kind: 'SAMPLE' | 'SAMPLE_BANK' }>> = {},
+): Extract<ObjectFormatConversionSnapshot, { kind: 'SAMPLE' | 'SAMPLE_BANK' }> {
     return {
+        kind: 'SAMPLE',
         payloadSha256: 'a'.repeat(64),
         partitionIndex: 0,
         volumeName: 'Volume',

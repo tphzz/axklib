@@ -23,10 +23,13 @@
     function reveal(button: HTMLElement | null) {
         if (!button || !strip) return;
         // Only scroll this strip, not the workspace or the editor's content pane.
-        const offset = button.offsetLeft - strip.scrollLeft;
-        if (offset < 0) strip.scrollLeft += offset;
-        else if (offset + button.offsetWidth > strip.clientWidth)
-            strip.scrollLeft += offset + button.offsetWidth - strip.clientWidth;
+        const viewport = strip.getBoundingClientRect();
+        if (!viewport.width || !strip.clientWidth) return;
+        const bounds = button.getBoundingClientRect();
+        const scale = viewport.width / strip.clientWidth;
+        if (bounds.left < viewport.left)
+            strip.scrollLeft = Math.max(0, strip.scrollLeft + Math.floor((bounds.left - viewport.left) / scale));
+        else if (bounds.right > viewport.right) strip.scrollLeft += Math.ceil((bounds.right - viewport.right) / scale);
     }
     function revealSelected() {
         reveal(strip?.querySelector('[aria-selected="true"], [aria-pressed="true"]'));

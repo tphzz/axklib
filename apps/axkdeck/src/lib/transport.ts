@@ -241,6 +241,7 @@ export interface SamplerRelationship {
 }
 export interface SamplerObject {
     sampleFormat?: import('./objectEditing').SampleFormatMetadata | null;
+    programFormat?: import('./objectEditing').ProgramFormatMetadata | null;
     key: string;
     objectType: string;
     name: string;

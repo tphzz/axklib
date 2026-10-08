@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { sampleSnapshot } from '../../../../lib/objectEditing';
     import { onDestroy } from 'svelte';
     import type { SampleWaveformPreview } from '../../../../lib/types';
     import type { ObjectEditorDocument } from '../../../object-editor/workflow.svelte';
@@ -40,7 +41,7 @@
     onDestroy(() => {
         mounted = false;
     });
-    const frames = $derived(Math.max(1, document.detail!.editing!.maximumFrames));
+    const frames = $derived(Math.max(1, sampleSnapshot(document.detail)!.maximumFrames));
     const values = $derived(document.draft.values);
     const markers = $derived(markerValues(values));
     const bounds = $derived(markerBounds(values, frames));
@@ -105,7 +106,7 @@
         document.draft.patch(changes);
     }
     function blocked(index: number) {
-        const snapshot = document.detail!.editing!;
+        const snapshot = sampleSnapshot(document.detail)!;
         return (
             disabled ||
             !Number.isFinite(markers[index]) ||
@@ -340,7 +341,7 @@
                 options={modeField.options!}
                 disabled={disabled ||
                     ['loop_mode', 'loop_start_frame', 'loop_length_frames'].some((key) =>
-                        document.detail!.editing!.blockedParameters.includes(key),
+                        sampleSnapshot(document.detail)!.blockedParameters.includes(key),
                     )}
                 onchange={mode}
             />

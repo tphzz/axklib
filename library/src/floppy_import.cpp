@@ -1,14 +1,17 @@
 #include "axklib/floppy_import.hpp"
 
 #include <algorithm>
+#include <format>
 #include <map>
 #include <set>
 #include <utility>
 
+#include "axklib/floppy_catalog_internal.hpp"
 #include "axklib/package_closure.hpp"
 #include "axklib/package_graph.hpp"
 #include "axklib/package_relocation.hpp"
-#include "axklib/relationship.hpp"
+#include "floppy_import_recovery.hpp"
+#include "media_internal.hpp"
 
 namespace axk {
 namespace {
@@ -34,8 +37,8 @@ std::optional<PackageRootKind> root_kind(ObjectType type) {
 }
 
 Result<void> inspect_objects(FloppyImportInspection &inspection, const ObjectCatalog &catalog,
+                             const RelationshipGraph &graph, const detail::FloppyFileSources &source_files,
                              const CancellationToken &cancellation) {
-    const auto graph = build_relationship_graph(catalog);
     std::map<std::string, const ObjectSnapshot *, std::less<>> objects;
     for (const auto &object : catalog.objects)
         objects.emplace(object.key, &object);
@@ -49,10 +52,14 @@ Result<void> inspect_objects(FloppyImportInspection &inspection, const ObjectCat
                                .type = object.object.header.type,
                                .size_bytes = object.raw_payload.size(),
                                .required_object_keys = {},
-                               .exclusion_reason = {}};
+                               .exclusion_reason = {},
+                               .sources = source_files.at(object.key)};
         if (const auto *program = std::get_if<CurrentProg>(&object.object.payload))
             row.display_name = program->program_name;
-        if (!root_kind(row.type)) {
+        const auto failed = std::ranges::find(catalog.issues, std::optional{object.sfs_id}, &CatalogIssue::sfs_id);
+        if (failed != catalog.issues.end()) {
+            row.exclusion_reason = failed->message;
+        } else if (!root_kind(row.type)) {
             row.exclusion_reason = "This object type cannot be imported.";
         } else if (auto profile = package_internal::build_relocation_profile(object.object, object.raw_payload);
                    !profile) {
@@ -89,82 +96,176 @@ Result<void> inspect_objects(FloppyImportInspection &inspection, const ObjectCat
     return {};
 }
 
-Result<void> excluded_files(FloppyImportInspection &inspection, const FatImage &member,
-                            const CancellationToken &cancellation) {
-    auto objects = member.objects(MediaObjectReadMode::decoded_metadata, 64U * 1024U * 1024U, cancellation);
-    if (!objects)
-        return std::unexpected(objects.error());
-    std::set<std::string> paths;
-    for (const auto &object : *objects)
-        paths.insert(object.logical_path);
-    for (const auto &file : member.files()) {
-        if (!paths.contains(file.path))
-            inspection.excluded_files.push_back({member.source_name(), file.path, file.size});
+bool cataloged_object(std::string_view path, const std::optional<YamahaFloppyCatalog> &catalog) {
+    const auto slot = detail::yamaha_floppy_filename_slot(path);
+    if (!catalog || !slot)
+        return false;
+    const auto entry = std::ranges::find(catalog->files, *slot, &YamahaFloppyCatalogEntry::slot);
+    if (entry == catalog->files.end())
+        return false;
+    for (const auto category : {R"(\SMPL\)", R"(\SBNK\)", R"(\SBAC\)", R"(\PROG\)", R"(\SEQU\)", R"(\PRF3\)"})
+        if (entry->logical_path.starts_with(category))
+            return true;
+    return false;
+}
+
+Result<void> read_entry(std::vector<MediaObject> &objects, detail::FloppyFileSources &source_files,
+                        FloppyImportInspection &inspection, std::size_t source_index, const std::string &member_name,
+                        const std::string &path, std::vector<std::byte> bytes, bool cataloged, bool nested) {
+    const bool recognized = detail::object_prefix(bytes);
+    const bool supported_path = !nested || AxkObjectDirectory::recognizes_entry_prefix(bytes, true);
+    if (!recognized || !supported_path) {
+        const bool unreadable = cataloged || recognized;
+        inspection.excluded_files.push_back(
+            {member_name, path, bytes.size(),
+             unreadable ? "Cataloged or recognized sampler object has no supported object header at this path."
+                        : "Configuration or auxiliary file; not imported.",
+             unreadable});
+        return {};
     }
+    auto decoded = detail::decode_media_object(bytes, bytes.size());
+    if (!decoded) {
+        inspection.excluded_files.push_back({member_name, path, bytes.size(), decoded.error().message, true});
+        return {};
+    }
+    const auto scope = std::format("floppy-import-source:{}", source_index);
+    const auto key = std::format("{}:{}", scope, path);
+    source_files.emplace(key, std::vector<FloppyImportFileSource>{{member_name, path, bytes.size()}});
+    objects.push_back({key,
+                       path,
+                       scope,
+                       {},
+                       scope,
+                       {},
+                       {member_name, LabelStatus::raw_identifier, "Selected source"},
+                       0U,
+                       bytes.size(),
+                       std::move(decoded->object),
+                       std::move(bytes),
+                       std::move(decoded->issue)});
     return {};
+}
+
+bool inspect_set_completeness(FloppyImportInspection &inspection) {
+    const auto &members = inspection.members;
+    const bool ordinary = std::ranges::all_of(members, [](const auto &identity) {
+        return !identity.trusted_for_disk_set &&
+               (identity.marker == FloppySetMarker::none || identity.marker == FloppySetMarker::ordinary);
+    });
+    if (ordinary) {
+        inspection.complete = true;
+        return false;
+    }
+    const auto &first = members.front();
+    std::map<std::uint16_t, FloppySetMarker> sequence;
+    for (const auto &identity : members) {
+        if (!identity.trusted_for_disk_set || identity.set_name != first.set_name ||
+            !sequence.emplace(identity.index, identity.marker).second) {
+            inspection.complete = false;
+            return false;
+        }
+    }
+    std::uint16_t next = 1U;
+    while (sequence.contains(next))
+        ++next;
+    const bool contiguous = next == members.size() + 1U;
+    const bool markers = std::ranges::all_of(sequence, [&](const auto &entry) {
+        return entry.second ==
+               (entry.first == sequence.rbegin()->first ? FloppySetMarker::final : FloppySetMarker::continuation);
+    });
+    inspection.complete = contiguous && markers;
+    if (!inspection.complete)
+        inspection.next_required_index = next;
+    return inspection.complete;
+}
+
+Result<detail::RecoveredFloppyObjects> finish(std::vector<MediaObject> objects, detail::FloppyFileSources source_files,
+                                              FloppyImportInspection &inspection,
+                                              const CancellationToken &cancellation) {
+    const bool trusted_complete = inspect_set_completeness(inspection);
+    const auto &first = inspection.members.front();
+    inspection.label = first.trusted_for_disk_set ? first.set_name : first.label;
+    auto recovered = detail::recover_floppy_objects(std::move(objects), std::move(source_files), cancellation);
+    if (!recovered)
+        return std::unexpected(recovered.error());
+    if (recovered->catalog.objects.empty() &&
+        !std::ranges::any_of(inspection.excluded_files, &FloppyImportExcludedFile::unreadable_object))
+        return std::unexpected(invalid("No A-series sampler objects were found in the selected sources."));
+    if (auto checked = inspect_objects(inspection, recovered->catalog, recovered->relationships,
+                                       recovered->source_files, cancellation);
+        !checked)
+        return std::unexpected(checked.error());
+    inspection.can_import =
+        std::ranges::any_of(inspection.objects, [](const auto &object) { return object.exclusion_reason.empty(); });
+    const bool exclusions =
+        std::ranges::any_of(inspection.objects, [](const auto &object) { return !object.exclusion_reason.empty(); }) ||
+        std::ranges::any_of(inspection.excluded_files, &FloppyImportExcludedFile::unreadable_object);
+    inspection.recovery_used =
+        !trusted_complete && (recovered->joined || exclusions || !inspection.complete || !inspection.issues.empty());
+    inspection.requires_acknowledgement =
+        inspection.recovery_used || exclusions || !inspection.complete || !inspection.issues.empty();
+    if (inspection.recovery_used)
+        inspection.issues.push_back(
+            {"FLOPPY_IMPORT_RECOVERY",
+             "Only complete objects and their complete dependencies are available. Explicit-source recovery does not "
+             "certify a disk set; unreadable or unresolved objects are excluded.",
+             {},
+             "Explicitly selected source bytes",
+             "Review excluded objects before importing.",
+             ValidationSeverity::warning});
+    return recovered;
 }
 } // namespace
 
-FloppyImportSource::FloppyImportSource(MediaKind kind, ObjectCatalog catalog, FloppyImportInspection inspection)
-    : kind_(kind), catalog_(std::move(catalog)), inspection_(std::move(inspection)) {}
+FloppyImportSource::FloppyImportSource(MediaKind kind, ObjectCatalog catalog, RelationshipGraph relationships,
+                                       FloppyImportInspection inspection)
+    : kind_(kind), catalog_(std::move(catalog)), relationships_(std::move(relationships)),
+      inspection_(std::move(inspection)) {}
 
 Result<FloppyImportSource> FloppyImportSource::open(std::vector<FatImage> members,
                                                     const CancellationToken &cancellation) {
     if (const auto checked = cancellation.check(); !checked)
         return std::unexpected(checked.error());
     if (members.empty() || members.size() > FloppyDiskSet::maximum_members)
-        return std::unexpected(invalid("Choose one floppy or a set of at most 32 members."));
+        return std::unexpected(invalid("Choose between one and 32 floppy images."));
     FloppyImportInspection inspection;
+    detail::FloppyFileSources source_files;
+    std::vector<MediaObject> objects;
     std::size_t file_count{};
-    for (const auto &member : members) {
-        if (member.geometry().physical_size_bytes > 4U * 1024U * 1024U)
-            return std::unexpected(invalid("The source exceeds the floppy image size limit."));
+    for (std::size_t index = 0; index < members.size(); ++index) {
+        const auto &member = members[index];
+        if (member.geometry().profile != FatProfile::a_series_floppy ||
+            member.geometry().physical_size_bytes > 4U * 1024U * 1024U)
+            return std::unexpected(invalid("The source exceeds the A-series floppy image profile or size limit."));
+        inspection.members.push_back(member.disk_identity());
+        for (const auto &issue : member.validation_issues()) {
+            inspection.issues.push_back(issue);
+            inspection.issues.back().message = member.source_name() + ": " + issue.message;
+        }
         std::uint64_t payload_bytes{};
+        std::set<std::uint16_t> clusters;
         for (const auto &file : member.files()) {
             if (++file_count > 8192U || file.size > member.geometry().physical_size_bytes - payload_bytes)
                 return std::unexpected(invalid("The floppy logical payload exceeds supported bounds."));
             payload_bytes += file.size;
+            for (const auto cluster : file.clusters)
+                if (!clusters.insert(cluster).second)
+                    return std::unexpected(invalid("Floppy files have crosslinked cluster chains."));
+            auto bytes = member.read_file(file, cancellation);
+            if (!bytes)
+                return std::unexpected(bytes.error());
+            if (auto checked =
+                    read_entry(objects, source_files, inspection, index, member.source_name(), file.path,
+                               std::move(*bytes), cataloged_object(file.path, member.yamaha_catalog()), false);
+                !checked)
+                return std::unexpected(checked.error());
         }
-        const auto &identity = member.disk_identity();
-        if (!identity.trusted_for_disk_set &&
-            (identity.marker == FloppySetMarker::continuation || identity.marker == FloppySetMarker::final ||
-             identity.marker == FloppySetMarker::invalid || identity.index > 1U)) {
-            return std::unexpected(invalid("This disk has unsupported or inconsistent disk-set metadata."));
-        }
-        inspection.members.push_back(member.disk_identity());
-        if (auto excluded = excluded_files(inspection, member, cancellation); !excluded)
-            return std::unexpected(excluded.error());
     }
-    const auto first = members.front().disk_identity();
-    inspection.label = first.trusted_for_disk_set ? first.set_name : first.label;
-    std::optional<MediaContainer> media;
-    if (members.size() > 1U) {
-        auto set = FloppyDiskSet::open(std::move(members), {}, cancellation);
-        if (!set)
-            return std::unexpected(set.error());
-        inspection.complete = set->status() == FloppySetStatus::complete;
-        inspection.next_required_index = set->next_required_index();
-        std::ranges::sort(inspection.members, {}, &FloppyDiskIdentity::index);
-        media.emplace(std::move(*set));
-    } else {
-        inspection.complete =
-            !first.trusted_for_disk_set || (first.marker == FloppySetMarker::final && first.index == 1U);
-        if (first.trusted_for_disk_set && !inspection.complete)
-            inspection.next_required_index = first.index == 1U ? 2U : 1U;
-        media.emplace(std::move(members.front()));
-    }
-    const auto issues = media->validation_issues();
-    inspection.issues.assign(issues.begin(), issues.end());
-    if (!inspection.complete)
-        return FloppyImportSource{media->kind(), {}, std::move(inspection)};
-    auto catalog = build_object_catalog(*media, 64U * 1024U * 1024U, cancellation);
-    if (!catalog)
-        return std::unexpected(catalog.error());
-    if (catalog->objects.empty())
-        return std::unexpected(invalid("No A-series sampler objects were found in this floppy."));
-    if (auto inspected = inspect_objects(inspection, *catalog, cancellation); !inspected)
-        return std::unexpected(inspected.error());
-    return FloppyImportSource{media->kind(), std::move(*catalog), std::move(inspection)};
+    auto recovered = finish(std::move(objects), std::move(source_files), inspection, cancellation);
+    if (!recovered)
+        return std::unexpected(recovered.error());
+    return FloppyImportSource{MediaKind::fat12_floppy, std::move(recovered->catalog),
+                              std::move(recovered->relationships), std::move(inspection)};
 }
 
 const FloppyImportInspection &FloppyImportSource::inspection() const noexcept { return inspection_; }
@@ -172,85 +273,65 @@ const FloppyImportInspection &FloppyImportSource::inspection() const noexcept { 
 Result<FloppyImportSource> FloppyImportSource::open_directories(std::vector<FloppyImportDirectory> sources,
                                                                 const CancellationToken &cancellation) {
     if (sources.empty() || sources.size() > FloppyDiskSet::maximum_members)
-        return std::unexpected(invalid("Choose one folder or a set of at most 32 disk folders."));
+        return std::unexpected(invalid("Choose between one and 32 disk folders."));
     FloppyImportInspection inspection;
-    std::vector<AxkObjectDirectory> members;
-    std::size_t entries{};
-    std::uint64_t bytes{};
-    for (auto &source : sources) {
+    detail::FloppyFileSources source_files;
+    std::vector<MediaObject> objects;
+    std::size_t count{};
+    std::uint64_t total_bytes{};
+    for (std::size_t index = 0; index < sources.size(); ++index) {
+        const auto &source = sources[index];
         for (const auto &entry : source.entries) {
-            if (!entry.reader || ++entries > AxkObjectDirectory::maximum_entries ||
-                entry.reader->size() > AxkObjectDirectory::maximum_payload_bytes - bytes)
+            if (!entry.reader || ++count > AxkObjectDirectory::maximum_entries ||
+                entry.reader->size() > AxkObjectDirectory::maximum_payload_bytes - total_bytes)
                 return std::unexpected(invalid("The disk folders exceed the entry or payload limit."));
-            bytes += entry.reader->size();
+            total_bytes += entry.reader->size();
         }
-        auto member = AxkObjectDirectory::open(source.entries, source.name, cancellation);
-        if (!member)
-            return std::unexpected(member.error());
-        if (std::ranges::any_of(member->validation_issues(),
-                                [](const auto &issue) { return issue.code == "FLOPPY_CATALOG_INVALID"; }))
-            return std::unexpected(invalid("The folder has an invalid Yamaha floppy catalog."));
-        const auto &identity = member->disk_identity();
-        if (!identity.trusted_for_disk_set &&
-            (identity.marker == FloppySetMarker::continuation || identity.marker == FloppySetMarker::final ||
-             identity.marker == FloppySetMarker::invalid || identity.index > 1U))
-            return std::unexpected(invalid("This folder has unsupported or inconsistent disk-set metadata."));
+        // Reuse directory path, depth, duplicate-name and leaf-size validation.
+        if (auto checked = AxkObjectDirectory::recognizes(source.entries, source.name, cancellation); !checked)
+            return std::unexpected(checked.error());
+        std::vector<detail::FloppyCatalogFile> files;
+        for (const auto &entry : source.entries)
+            files.push_back({entry.name, entry.reader->size()});
+        detail::FloppyCatalogInspection catalog;
+        if (std::ranges::any_of(files,
+                                [](const auto &file) { return detail::is_yamaha_floppy_catalog_path(file.path); })) {
+            catalog = detail::inspect_yamaha_floppy_catalog(files, [&](std::size_t entry_index, std::size_t limit) {
+                const auto &reader = *source.entries[entry_index].reader;
+                return detail::read_bytes(
+                    reader, 0U, static_cast<std::size_t>(std::min<std::uint64_t>(limit, reader.size())), cancellation);
+            });
+            for (const auto &issue : catalog.issues) {
+                inspection.issues.push_back(issue);
+                inspection.issues.back().message = source.name + ": " + issue.message;
+            }
+        }
+        inspection.members.push_back(catalog.identity);
         for (const auto &entry : source.entries) {
-            if (std::ranges::find(member->stored_objects(), entry.name, &MediaObject::logical_path) ==
-                member->stored_objects().end())
-                inspection.excluded_files.push_back({source.name, entry.name, entry.reader->size()});
+            auto bytes =
+                detail::read_bytes(*entry.reader, 0U, static_cast<std::size_t>(entry.reader->size()), cancellation);
+            if (!bytes)
+                return std::unexpected(bytes.error());
+            if (auto checked = read_entry(objects, source_files, inspection, index, source.name, entry.name,
+                                          std::move(*bytes), cataloged_object(entry.name, catalog.catalog),
+                                          entry.name.find('/') != std::string::npos);
+                !checked)
+                return std::unexpected(checked.error());
         }
-        inspection.members.push_back(identity);
-        members.push_back(std::move(*member));
     }
-    std::ranges::sort(members, {}, [](const auto &member) { return member.disk_identity().index; });
-    std::ranges::sort(inspection.members, {}, &FloppyDiskIdentity::index);
-    const auto &first = members.front().disk_identity();
-    inspection.label = first.trusted_for_disk_set ? first.set_name : first.label;
-    inspection.complete = true;
-    if (first.trusted_for_disk_set) {
-        std::set<std::uint16_t> indices;
-        for (std::size_t index = 0; index < members.size(); ++index) {
-            const auto &identity = members[index].disk_identity();
-            if (!identity.trusted_for_disk_set || identity.set_name != first.set_name ||
-                !indices.insert(identity.index).second ||
-                (index + 1U < members.size() && identity.marker != FloppySetMarker::continuation))
-                return std::unexpected(invalid("Choose folders from one disk set with unique disk numbers."));
-        }
-        std::uint16_t next = 1U;
-        while (indices.contains(next))
-            ++next;
-        inspection.complete =
-            next == members.size() + 1U && members.back().disk_identity().marker == FloppySetMarker::final;
-        if (!inspection.complete) {
-            inspection.next_required_index = next;
-            return FloppyImportSource{MediaKind::axk_object_directory, {}, std::move(inspection)};
-        }
-        auto assembled = AxkObjectDirectory::open_members(std::move(members), {}, cancellation);
-        if (!assembled)
-            return std::unexpected(assembled.error());
-        members = {};
-        members.push_back(std::move(*assembled));
-    } else if (members.size() != 1U) {
-        return std::unexpected(invalid("Multiple unpacked disks require matching Yamaha disk-set catalogs."));
-    }
-    MediaContainer media{std::move(members.front())};
-    const auto issues = media.validation_issues();
-    inspection.issues.assign(issues.begin(), issues.end());
-    auto catalog = build_object_catalog(media, AxkObjectDirectory::maximum_payload_bytes, cancellation);
-    if (!catalog)
-        return std::unexpected(catalog.error());
-    if (auto inspected = inspect_objects(inspection, *catalog, cancellation); !inspected)
-        return std::unexpected(inspected.error());
-    return FloppyImportSource{media.kind(), std::move(*catalog), std::move(inspection)};
+    auto recovered = finish(std::move(objects), std::move(source_files), inspection, cancellation);
+    if (!recovered)
+        return std::unexpected(recovered.error());
+    return FloppyImportSource{MediaKind::axk_object_directory, std::move(recovered->catalog),
+                              std::move(recovered->relationships), std::move(inspection)};
 }
 
 Result<PortablePackage> FloppyImportSource::prepare(std::span<const std::string> selected_object_keys,
                                                     const CancellationToken &cancellation) const {
     if (const auto checked = cancellation.check(); !checked)
         return std::unexpected(checked.error());
-    if (!inspection_.complete)
-        return std::unexpected(invalid("Add the missing companion disks before importing."));
+    if (!inspection_.can_import)
+        return std::unexpected(invalid("No complete objects are available to import."));
     if (selected_object_keys.empty())
         return std::unexpected(invalid("Select at least one object to import."));
     std::set<std::string> unique;
@@ -264,6 +345,6 @@ Result<PortablePackage> FloppyImportSource::prepare(std::span<const std::string>
         root.object_key = key;
         roots.push_back(std::move(root));
     }
-    return package_internal::build_graph(kind_, catalog_, roots, cancellation);
+    return package_internal::build_graph(kind_, catalog_, relationships_, roots, cancellation);
 }
 } // namespace axk

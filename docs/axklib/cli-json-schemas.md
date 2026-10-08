@@ -26,6 +26,13 @@ Object schema `1.0` applies the canonical object terminology: decoded `SBNK`
 objects expose `sample_name`, their members expose `wave_data_name`, and decoded
 `SBAC` objects represent Sample Banks.
 
+Decoded `PROG` effect blocks include `stored_type` alongside `type`. For header
+revision 1, `effect_type_interpretation: a3000-v2-and-later-load` identifies the
+later-loader mapping applied to `type`; it does not emulate original V1
+playback. For revisions 2 and 4 the interpretation is `stored`. See
+[Program formats](program-formats.md) for the independent storage badge and
+conversion rules.
+
 nlohmann/json is an implementation dependency. It appears only in manifest or
 export-graph input readers, report serialization, and the dedicated schema
 serializer translation units. Installed headers and DTO headers do not expose

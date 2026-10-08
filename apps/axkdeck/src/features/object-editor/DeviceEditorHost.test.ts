@@ -2,6 +2,7 @@ import { sampleConversionFixture, sampleFormatFixture } from '../../test/sampleF
 import { act, fireEvent, render, waitFor, within } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ObjectDetail } from '../../lib/transport';
+import { sampleSnapshot } from '../../lib/objectEditing';
 import type { SampleWaveformPreview } from '../../lib/types';
 import DeviceEditorHostHarness from '../../test/DeviceEditorHostHarness.svelte';
 import { ObjectEditorWorkflow } from './workflow.svelte';
@@ -112,7 +113,7 @@ describe('Sample editor workspace navigation', () => {
             bank.object.name = 'Long Bank Name';
             bank.object.type = 'SBAC';
             bank.editing!.profile = 'a-series/sample-bank';
-            bank.editing!.bankOverrides = {
+            sampleSnapshot(bank)!.bankOverrides = {
                 units: [{ id: 33, keys: ['level'], selectors: [33], activeSelectors: [33] }],
                 members: [],
             };
@@ -314,7 +315,7 @@ describe('Sample editor workspace navigation', () => {
             status: vi.fn(),
         });
         const view = render(DeviceEditorHostHarness, { workflow, sample: 'unknown' });
-        expect(await view.findByText('Editing is not available for this Sample format')).toBeTruthy();
+        expect(await view.findByText('Editing is not available for this object format')).toBeTruthy();
         expect(view.queryByRole('tab')).toBeNull();
         expect(workflow.visible).toBe(false);
         await workflow.openConversion(1, 'unknown');

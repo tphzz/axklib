@@ -516,14 +516,18 @@ TEST(MediaConversion, WritesMultipleIsoVolumesAndPackagesOversizedWaveDataAsAFlo
     ASSERT_TRUE(last_only) << last_only.error().message;
     EXPECT_FALSE(last_only->inspection().complete);
     EXPECT_EQ(last_only->inspection().next_required_index, 1U);
-    EXPECT_FALSE(axk::FloppyImportSource::open({members.front(), members.front()}));
+    const auto duplicate_import = axk::FloppyImportSource::open({members.front(), members.front()});
+    ASSERT_TRUE(duplicate_import) << duplicate_import.error().message;
+    EXPECT_FALSE(duplicate_import->inspection().complete);
+    EXPECT_TRUE(duplicate_import->inspection().requires_acknowledgement);
+    EXPECT_FALSE(axk::FloppyDiskSet::open({members.front(), members.front()}, "duplicate trusted set"));
     auto reversed_members = members;
     std::ranges::reverse(reversed_members);
     const auto import_source = axk::FloppyImportSource::open(std::move(reversed_members));
     ASSERT_TRUE(import_source) << import_source.error().message;
     ASSERT_EQ(import_source->inspection().objects.size(), 5U);
     EXPECT_TRUE(import_source->inspection().complete);
-    EXPECT_EQ(import_source->inspection().members.front().index, 1U);
+    EXPECT_EQ(import_source->inspection().members.front().index, 2U);
 
     const auto complete = axk::FloppyDiskSet::open(std::move(members), "loose set");
     ASSERT_TRUE(complete) << complete.error().message;
@@ -538,12 +542,20 @@ TEST(MediaConversion, WritesMultipleIsoVolumesAndPackagesOversizedWaveDataAsAFlo
         const auto direct = import_source->prepare(std::array{object.key});
         ASSERT_TRUE(direct) << direct.error().message;
         axk::PackageRootSelector package_root;
-        package_root.object_key = object.key;
+        package_root.object_name = object.name;
         package_root.kind = direct->roots.front().kind;
         const auto archived = axk::build_portable_package(import_media, std::array{package_root});
         ASSERT_TRUE(archived) << archived.error().message;
-        EXPECT_EQ(direct->package_id, archived->package.package_id);
-        EXPECT_EQ(direct->nodes, archived->package.nodes);
+        EXPECT_TRUE(axk::verify_portable_package(*direct));
+        EXPECT_TRUE(axk::verify_portable_package(archived->package));
+        EXPECT_EQ(direct->roots, archived->package.roots);
+        ASSERT_EQ(direct->nodes.size(), archived->package.nodes.size());
+        for (std::size_t index = 0U; index < direct->nodes.size(); ++index) {
+            auto imported_node = direct->nodes[index];
+            // Explicit imports retain disk-local labels rather than a trusted set label.
+            imported_node.placement_hint.volume_name = archived->package.nodes[index].placement_hint.volume_name;
+            EXPECT_EQ(imported_node, archived->package.nodes[index]);
+        }
         EXPECT_EQ(direct->relationships, archived->package.relationships);
         if (object.type == axk::ObjectType::smpl) {
             EXPECT_EQ(direct->nodes.size(), 1U);

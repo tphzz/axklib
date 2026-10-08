@@ -137,7 +137,108 @@ class SampleParameterEditValidation : public testing::Test {
         ASSERT_TRUE(writer.write_be32(0x104U, 0U));
         ASSERT_TRUE(writer.write_be32(0x160U, 0U));
     }
+
+    void set_retained_named_right_slot() {
+        axk::SampleSpec sample;
+        sample.name = "Retained";
+        sample.parameters.root_key = 60U;
+        sample.parameters.loop_mode = axk::AudioSamplerLoopMode::forward_loop;
+        sample.parameters.loop_start_frame = 10U;
+        sample.parameters.loop_length_frames = 300U;
+        const auto prepared =
+            axk::detail::prepare_sbnk_payload(sample, {"Left", 0x100U, 44'100U, 400U},
+                                              axk::detail::PreparedWaveformMember{"Right", 0x200U, 44'100U, 400U});
+        ASSERT_TRUE(prepared) << prepared.error().message;
+        payload = *prepared;
+        payload[0xd0U] = std::byte{2};
+        const auto decoded = axk::decode_object(payload);
+        ASSERT_TRUE(decoded);
+        const auto &current = std::get<axk::CurrentSbnk>(decoded->payload);
+        ASSERT_TRUE(current.storage.structurally_valid);
+        ASSERT_TRUE(current.right);
+        ASSERT_EQ(current.sample_flags, 2U);
+        ASSERT_NE(current.left.wave_data_name, current.right->wave_data_name);
+    }
 };
+
+TEST_F(SampleParameterEditValidation, LevelEditPreservesRetainedFlagsAndDistinctNamedChannelsExactly) {
+    set_retained_named_right_slot();
+    ASSERT_FALSE(HasFatalFailure());
+    expect_level_only_change();
+}
+
+TEST_F(SampleParameterEditValidation, RetainedNamedChannelsAcceptOnlyRequestedLoopBytes) {
+    set_retained_named_right_slot();
+    ASSERT_FALSE(HasFatalFailure());
+    auto expected = payload;
+    axk::ByteWriter writer{expected};
+    ASSERT_TRUE(writer.write_be32(0xf8U, 20U));
+    ASSERT_TRUE(writer.write_be32(0xfcU, 20U));
+    ASSERT_TRUE(writer.write_be32(0x100U, 200U));
+    ASSERT_TRUE(writer.write_be32(0x104U, 200U));
+    ASSERT_TRUE(writer.write_be32(0x160U, 220U));
+    axk::SampleParameters edits;
+    edits.loop_start_frame = 20U;
+    edits.loop_length_frames = 200U;
+
+    const auto changed = axk::detail::apply_sample_parameters_to_payload(payload, edits);
+
+    ASSERT_TRUE(changed) << changed.error().message;
+    EXPECT_EQ(payload, expected);
+}
+
+TEST_F(SampleParameterEditValidation, RetainedNamedChannelsPitchEditUpdatesBothCachesWithoutNormalizingTopology) {
+    set_retained_named_right_slot();
+    ASSERT_FALSE(HasFatalFailure());
+    const axk::ByteReader before{payload};
+    auto expected = payload;
+    expected[0xd6U] = std::byte{72};
+    expected[0xd7U] = std::byte{72};
+    expected[0xdcU] = std::byte{249};
+    expected[0xddU] = std::byte{249};
+    axk::ByteWriter writer{expected};
+    for (const auto offset : {0xdeU, 0xe0U}) {
+        const auto pitch = before.be16(offset);
+        ASSERT_TRUE(pitch);
+        ASSERT_TRUE(writer.write_be16(offset, static_cast<std::uint16_t>(*pitch + 1024U + 7U)));
+    }
+    axk::SampleParameters edits;
+    edits.root_key = 72U;
+    edits.fine_tune_cents = -7;
+
+    const auto changed = axk::detail::apply_sample_parameters_to_payload(payload, edits);
+
+    ASSERT_TRUE(changed) << changed.error().message;
+    EXPECT_EQ(payload, expected);
+}
+
+TEST_F(SampleParameterEditValidation, RetainedNamedChannelsRejectExpansionChangesAtomically) {
+    set_retained_named_right_slot();
+    ASSERT_FALSE(HasFatalFailure());
+    axk::SampleParameters edits;
+    edits.level = 87U;
+    edits.expand_detune = 2;
+    expect_rejected_without_changes(edits);
+    edits.expand_detune.reset();
+    edits.expand_dephase = 3;
+    expect_rejected_without_changes(edits);
+}
+
+TEST_F(SampleParameterEditValidation, RetainedNamedChannelsWidthEditDependsOnExistingExpansionValues) {
+    set_retained_named_right_slot();
+    ASSERT_FALSE(HasFatalFailure());
+    auto expected = payload;
+    expected[0x114U] = std::byte{4};
+    axk::SampleParameters edits;
+    edits.expand_width = 4;
+    const auto changed = axk::detail::apply_sample_parameters_to_payload(payload, edits);
+    ASSERT_TRUE(changed) << changed.error().message;
+    EXPECT_EQ(payload, expected);
+    payload[0x112U] = std::byte{1};
+    edits.expand_width = 5;
+    edits.level = 87U;
+    expect_rejected_without_changes(edits);
+}
 
 TEST_F(SampleParameterEditValidation, StereoEmptyLoopsPreserveDormantOffsetsForUnrelatedEdits) {
     set_stereo_empty_loops();

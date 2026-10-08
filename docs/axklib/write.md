@@ -759,7 +759,7 @@ Supported operation types:
 | `insert_program` | `volume_name`, `program` |
 | `rename_program` | `volume_name`, `program_number`, `new_program_name` |
 | `update_program_parameters` | `volume_name`, `program_number`, explicit `model`, non-empty global and/or guarded assignment patches |
-| `replace_program_assignments` | `volume_name`, `program_number`, explicit `model`, `expected_payload_sha256`, complete `assignments` array |
+| `replace_program_assignments` | `volume_name`, `program_number`, explicit matching `model`, `expected_payload_sha256`, complete `assignments` array; optional global `parameters` |
 
 The [Program parameter contract](program-parameters.md) defines the current-layout
 update groups, numeric domains, effect initialization rules, and assignment guards.

@@ -6,6 +6,31 @@ import { floppyDialogFixture } from '../../test/floppyDialogFixture';
 import { capacityConflict } from '../../test/importCapacityFixture';
 
 describe('Floppy import dialog', () => {
+    it('shows source exclusions and requires an unchecked acknowledgement before review', async () => {
+        const workflow = floppyDialogFixture(5);
+        const r = workflow.request!;
+        r.plan = null;
+        r.inspection!.complete = false;
+        r.inspection!.recoveryUsed = true;
+        r.inspection!.requiresAcknowledgement = true;
+        r.inspection!.excludedFiles.push({
+            memberName: 'disk2.img',
+            path: 'BAD.001',
+            sizeBytes: 16,
+            reason: 'Invalid Wave Data header',
+            unreadableObject: true,
+        });
+        const view = render(FloppyImportDialog, { workflow });
+        const acknowledgement = view.getByRole('checkbox', { name: 'Import available objects despite source issues' });
+        expect((acknowledgement as HTMLInputElement).checked).toBe(false);
+        expect(view.getByText(/5 available.*1 excluded/)).toBeTruthy();
+        expect(view.getByText('Invalid Wave Data header')).toBeTruthy();
+        expect(view.getByRole('button', { name: 'Review' }).hasAttribute('disabled')).toBe(true);
+        await fireEvent.click(acknowledgement);
+        expect(view.getByRole('button', { name: 'Review' }).hasAttribute('disabled')).toBe(false);
+        await fireEvent.click(acknowledgement);
+        expect(view.getByRole('button', { name: 'Review' }).hasAttribute('disabled')).toBe(true);
+    });
     it('replaces incomplete totals with capacity summaries until a successful review', async () => {
         const workflow = floppyDialogFixture(5);
         const validPlan = workflow.request!.plan!;

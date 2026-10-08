@@ -3,7 +3,10 @@
 #include <iomanip>
 #include <sstream>
 
+#include "a_series_program_context.hpp"
+#include "a_series_program_editor.hpp"
 #include "a_series_sample_editor.hpp"
+#include "axklib/application/program_formats.hpp"
 #include "axklib/application/sample_formats.hpp"
 #include "axklib/program_parameter_json.hpp"
 
@@ -205,11 +208,14 @@ Json decoded_json(const axk::DecodedObject &object, Json &omissions) {
                 {"slots", std::move(slots)}};
     }
     if (const auto *program = std::get_if<axk::CurrentProg>(&object.payload)) {
+        const auto &layout = program->layout;
         Json effects = Json::array();
         for (const auto &effect : program->effect_blocks)
-            effects.push_back({{"rawBlockHex", hex(effect.raw_bytes)},
-                               {"type", effect.type},
-                               {"parameterValues", effect.parameter_values}});
+            effects.push_back(
+                {{"rawBlockHex", hex(effect.raw_bytes)},
+                 {"storedType", std::to_integer<unsigned>(effect.raw_bytes[layout.version == 4U ? 6U : 7U])},
+                 {"type", effect.type},
+                 {"parameterValues", effect.parameter_values}});
         Json assignments = Json::array();
         for (const auto &assignment : program->assignments) {
             assignments.push_back(
@@ -220,13 +226,13 @@ Json decoded_json(const axk::DecodedObject &object, Json &omissions) {
                  {"parameters", axk::detail::program_assignment_parameters_json(assignment.parameters)},
                  {"rawRowHex", hex(assignment.raw_row)}});
         }
-        const auto &layout = program->layout;
         return {
             {"kind", "PROG"},
             {"common", common_json(program->common)},
             {"storageLayout",
              layout.parameter_tail_offset ? "current-split-parameter-tail" : "legacy-without-parameter-tail"},
             {"layoutVersion", layout.version},
+            {"effectTypeInterpretation", layout.version == 1U ? "a3000-v2-and-later-load" : "stored"},
             {"logicalSize", layout.logical_size},
             {"storedAssignmentCount", layout.stored_assignment_count},
             {"assignmentCapacity", layout.assignment_capacity},
@@ -381,9 +387,11 @@ axk::app::Result<nlohmann::ordered_json> axk::app::ImageSessionManager::object_d
     const auto *bank = std::get_if<CurrentSbac>(&snapshot->second.object.payload);
     if (bank)
         object["sampleFormat"] = sample_format_metadata(*bank);
+    const auto *program = std::get_if<CurrentProg>(&snapshot->second.object.payload);
+    object["programFormat"] = program_format_metadata(snapshot->second.object);
     Json editing = nullptr;
     Json conversion = nullptr;
-    if ((sample || bank) && media_descriptor.size <= 1024U * 1024U) {
+    if ((sample || bank || program) && media_descriptor.size <= 1024U * 1024U) {
         // Session catalogs retain decoded metadata, not necessarily the original object bytes.
         const auto payload = implementation_->read_object_range(**session, object_id, 0U,
                                                                 static_cast<std::size_t>(media_descriptor.size), {});
@@ -402,8 +410,14 @@ axk::app::Result<nlohmann::ordered_json> axk::app::ImageSessionManager::object_d
                                        {"frames", member.frame_count},
                                        {"sampleRate", member.sample_rate}});
         }
-        editing = bank ? detail::a_series_bank_editor(snapshot->second, *payload, writable, relationships)
-                       : detail::a_series_sample_editor(snapshot->second, *payload, writable, sources);
+        if (sample || bank)
+            editing = bank ? detail::a_series_bank_editor(snapshot->second, *payload, writable, relationships)
+                           : detail::a_series_sample_editor(snapshot->second, *payload, writable, sources);
+        else if (program)
+            editing = detail::a_series_program_editor(snapshot->second, *payload, writable);
+        if (editing.is_object() && editing.value("profile", "") == "a-series/program")
+            detail::add_program_editing_context(editing, object_id, (*session)->snapshots_by_id,
+                                                (*session)->relationships);
     }
     return Json{{"schemaVersion", 1U},
                 {"image", {{"imageId", image_id}, {"revision", (*session)->revision}, {"format", (*session)->format}}},

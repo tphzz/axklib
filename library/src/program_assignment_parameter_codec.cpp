@@ -88,6 +88,12 @@ void project_outputs(std::span<std::byte> row) {
 }
 
 Result<void> apply_row(std::span<std::byte> row, const Parameters &parameters, ASeriesModel model) {
+    const bool native = model == ASeriesModel::a3000;
+    if (native && (parameters.velocity_sensitivity_offset || parameters.high_velocity_crossfade_offset ||
+                   parameters.low_velocity_crossfade_offset))
+        return std::unexpected{invalid("Native Programs do not store velocity sensitivity or crossfade offsets")};
+    if (!native && parameters.velocity_crossfade)
+        return std::unexpected{invalid("The velocity crossfade switch belongs to native Programs")};
     const auto original_outputs = std::array{row[0x1d], row[0x2f], row[0x28], row[0x32]};
     for (const auto &field : signed_fields) {
         const auto &value = parameters.*field.member;
@@ -95,7 +101,10 @@ Result<void> apply_row(std::span<std::byte> row, const Parameters &parameters, A
             continue;
         if (*value < field.minimum || *value > field.maximum)
             return std::unexpected{invalid("Easy Edit value is outside its stored offset or replacement domain")};
-        row[field.offset] = static_cast<std::byte>(static_cast<std::uint8_t>(*value));
+        const auto offset = native && field.offset == 0x2fU   ? 0x2eU
+                            : native && field.offset == 0x32U ? 0x31U
+                                                              : field.offset;
+        row[offset] = static_cast<std::byte>(static_cast<std::uint8_t>(*value));
     }
     for (const auto &[member, offset] : limits) {
         if (const auto &value = parameters.*member; value) {
@@ -118,9 +127,17 @@ Result<void> apply_row(std::span<std::byte> row, const Parameters &parameters, A
          std::array{std::pair{parameters.output1, 0x1dU}, std::pair{parameters.output2, 0x28U}}) {
         if (!value)
             continue;
-        if (*value < -1 || *value > (model == ASeriesModel::a5000 ? 12 : 9))
+        if (*value < -1 || *value > (native ? (offset == 0x1dU ? 4 : 5) : model == ASeriesModel::a5000 ? 12 : 9))
             return std::unexpected{invalid("Easy Edit output replacement is not supported for the model")};
-        row[offset] = static_cast<std::byte>(static_cast<std::uint8_t>(*value));
+        row[native ? (offset == 0x1dU ? 0x2dU : 0x30U) : offset] =
+            static_cast<std::byte>(static_cast<std::uint8_t>(*value));
+    }
+    if (parameters.velocity_crossfade) {
+        const auto value = static_cast<int>(*parameters.velocity_crossfade);
+        if (value < -1 || value > 1)
+            return std::unexpected{invalid("Velocity crossfade must be inherit, off, or on")};
+        const auto packed = static_cast<unsigned>(value == -1 ? 3 : value);
+        row[0x23] = static_cast<std::byte>((std::to_integer<unsigned>(row[0x23]) & 0x3fU) | (packed << 6U));
     }
     const ByteReader reader{row};
     if ((parameters.key_low || parameters.key_high) && (*reader.u8(0x1e) > 127U || *reader.u8(0x1f) > *reader.u8(0x1e)))
@@ -136,7 +153,7 @@ Result<void> apply_row(std::span<std::byte> row, const Parameters &parameters, A
     }
     if (parameters.midi_control)
         row[0x33] = static_cast<std::byte>(*parameters.midi_control);
-    if (original_outputs != std::array{row[0x1d], row[0x2f], row[0x28], row[0x32]})
+    if (!native && original_outputs != std::array{row[0x1d], row[0x2f], row[0x28], row[0x32]})
         project_outputs(row);
     return {};
 }
@@ -156,8 +173,8 @@ std::optional<ProgramReceiveSetting> decode_program_receive(std::uint8_t raw) {
 }
 
 Result<std::uint8_t> encode_program_receive(const ProgramReceiveSetting &receive, ASeriesModel model) {
-    if (model != ASeriesModel::a4000 && model != ASeriesModel::a5000)
-        return std::unexpected{invalid("Program receive selection requires an A4000 or A5000 target model")};
+    if (model != ASeriesModel::a3000 && model != ASeriesModel::a4000 && model != ASeriesModel::a5000)
+        return std::unexpected{invalid("Program receive selection requires a supported target model")};
     if (std::holds_alternative<ProgramReceiveInherit>(receive))
         return 0xffU;
     if (std::holds_alternative<ProgramReceiveBasic>(receive))
@@ -174,11 +191,14 @@ ProgramAssignmentParameters decode_program_assignment_parameters(std::span<const
                                                                  ProgStorageLayout layout) {
     const ByteReader reader{row};
     Parameters result;
-    result.receive = decode_program_receive(*reader.u8(0x15));
     const auto current = layout == ProgStorageLayout::current_split_parameter_tail;
+    const auto receive = *reader.u8(0x15);
+    if (current || receive <= 16U || receive == 0xffU)
+        result.receive = decode_program_receive(receive);
     for (const auto &field : signed_fields) {
-        // Current output lanes do not describe the legacy routing representation.
-        if (current || field.offset < 0x2dU)
+        // These velocity and output lanes have no native A3000 parameter meaning.
+        if (current ||
+            (field.offset < 0x2dU && field.offset != 0x17U && field.offset != 0x19U && field.offset != 0x1bU))
             result.*field.member = known(*reader.s8(field.offset), field.minimum, field.maximum);
     }
     for (const auto &[member, offset] : limits)
@@ -191,6 +211,14 @@ ProgramAssignmentParameters decode_program_assignment_parameters(std::span<const
     if (current) {
         result.output1 = known(*reader.s8(0x1d), -1, 12);
         result.output2 = known(*reader.s8(0x28), -1, 12);
+    } else {
+        result.output1 = known(*reader.s8(0x2d), -1, 4);
+        result.output2 = known(*reader.s8(0x30), -1, 5);
+        result.output1_level_offset = known(*reader.s8(0x2e), -127, 127);
+        result.output2_level_offset = known(*reader.s8(0x31), -127, 127);
+        const auto raw = (*reader.u8(0x23) >> 6U) & 3U;
+        if (raw != 2U)
+            result.velocity_crossfade = static_cast<ProgramInheritableSwitch>(raw == 3U ? -1 : static_cast<int>(raw));
     }
     if (*reader.u8(0x33) <= 1U)
         result.midi_control = *reader.u8(0x33) != 0U;
@@ -200,16 +228,18 @@ ProgramAssignmentParameters decode_program_assignment_parameters(std::span<const
 Result<void> apply_program_assignment_patches(std::vector<std::byte> &payload,
                                               std::span<const ProgramAssignmentParameterPatch> patches,
                                               ASeriesModel model) {
-    if (model != ASeriesModel::a4000 && model != ASeriesModel::a5000)
+    if (model != ASeriesModel::a3000 && model != ASeriesModel::a4000 && model != ASeriesModel::a5000)
         return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
-                                          "Program parameter writes require an A4000 or A5000 target model")};
+                                          "Program parameter writes require a supported target model")};
     const auto object = decode_object(payload);
     if (!object)
         return std::unexpected{object.error()};
     const auto *program = std::get_if<CurrentProg>(&object->payload);
-    if (!program || !program->layout.parameter_tail_offset)
+    if (!program ||
+        (model == ASeriesModel::a3000 ? program->layout.version != 2U
+                                      : program->layout.version != 4U || !program->layout.parameter_tail_offset))
         return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
-                                          "Easy Edit writes require the current Program layout")};
+                                          "Easy Edit model must match a writable revision-2 or revision-4 Program")};
     std::set<std::size_t> ordinals;
     auto bytes = payload;
     for (const auto &patch : patches) {
@@ -234,6 +264,7 @@ Result<void> apply_program_assignment_patches(std::vector<std::byte> &payload,
 
 bool has_program_assignment_parameter_values(const ProgramAssignmentParameters &parameters) {
     return parameters.receive || parameters.output1 || parameters.output2 || parameters.midi_control ||
+           parameters.velocity_crossfade ||
            std::ranges::any_of(signed_fields,
                                [&](const auto &field) { return (parameters.*field.member).has_value(); }) ||
            std::ranges::any_of(limits, [&](const auto &field) { return (parameters.*field.first).has_value(); }) ||

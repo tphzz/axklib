@@ -5,6 +5,7 @@ import {
     type DownloadArchiveSnapshot,
 } from './httpApiClient';
 import type { components } from './generated/axklibApiV1';
+import { loadProgramEditorCatalog } from './httpProgramCatalog';
 import { normalizeWaveformPreview } from './waveformPreview';
 import type { ObjectParameterEdit, SampleDuplicationRequest, ObjectFormatConversionRequest } from './objectEditing';
 import type {
@@ -114,6 +115,7 @@ export class HttpImageTransport extends HttpPackageTransport implements ImageTra
     private readonly jobs: HttpJobController;
     private readonly imports: HttpImportOperations;
     private readonly createPlans = new Map<string, ApiWritePlan>();
+    programEditorCatalog = () => loadProgramEditorCatalog(this.client);
 
     constructor(connection: HttpImageTransportConnection, capacityReviewer?: CapacityReviewHandler) {
         const client = new AxklibHttpApiClient(connection);
@@ -367,7 +369,7 @@ export class HttpImageTransport extends HttpPackageTransport implements ImageTra
     }
 
     startObjectParameterEdit(sessionId: number, edit: ObjectParameterEdit): Promise<JobState> {
-        return this.imageSessions.startMutations(sessionId, [edit.operation], edit.expectedRevision);
+        return this.imageSessions.startMutations(sessionId, edit.operations, edit.expectedRevision);
     }
     startSampleDuplication(sessionId: number, edit: SampleDuplicationRequest): Promise<JobState> {
         return this.imageSessions.startMutations(sessionId, [edit.operation], edit.expectedRevision);

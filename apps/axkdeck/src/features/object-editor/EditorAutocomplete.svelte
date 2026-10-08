@@ -3,6 +3,8 @@
     import Icon from '../../lib/components/Icon.svelte';
     import EditorOptionLabel from './EditorOptionLabel.svelte';
     import { mountEditorPopup } from './editorPopup';
+    import { optionHelp, type EditorOption } from './editorOptions';
+    import ExtendedParameterMarker from './ExtendedParameterMarker.svelte';
     let {
         label,
         value,
@@ -12,7 +14,7 @@
     }: {
         label: string;
         value: number | undefined;
-        options: { value: number; label: string; disabled?: boolean; reason?: string; extended?: boolean }[];
+        options: EditorOption[];
         disabled?: boolean;
         onchange: (value: number) => void;
     } = $props();
@@ -25,6 +27,7 @@
     let filtering = $state(false);
     let active = $state(-1);
     const currentLabel = $derived(options.find((item) => item.value === value)?.label ?? '');
+    const current = $derived(options.find((item) => item.value === value));
     const filtered = $derived(
         options.filter(
             (item) =>
@@ -105,6 +108,8 @@
         aria-expanded={open}
         aria-controls={open ? id : undefined}
         aria-activedescendant={open && active >= 0 ? `${id}-${active}` : undefined}
+        title={current ? optionHelp(current) : label}
+        class:marked={!filtering && (current?.extended || current?.a5000Only)}
         {disabled}
         value={query}
         placeholder={value === undefined ? 'Unavailable' : ''}
@@ -120,6 +125,9 @@
             if (!open) query = currentLabel;
         }}
     />
+    {#if !filtering && (current?.extended || current?.a5000Only)}<span class="selected-marker"
+            ><ExtendedParameterMarker a5000Only={current?.a5000Only} /></span
+        >{/if}
     {#if query || value !== undefined}
         <button
             type="button"
@@ -145,14 +153,14 @@
                     tabindex="-1"
                     aria-selected={item.value === value}
                     aria-disabled={item.disabled || undefined}
-                    title={item.reason ? `${item.label}: ${item.reason}` : item.label}
+                    title={optionHelp(item)}
                     class:active={active === index}
                     onpointerdown={(event) => event.preventDefault()}
                     onpointermove={() => (active = index)}
                     onclick={() => select(index)}
                     onkeydown={key}
                 >
-                    <EditorOptionLabel label={item.label} extended={item.extended} />
+                    <EditorOptionLabel {...item} />
                 </div>
             {:else}<div class="empty" role="status">No matches</div>{/each}
         </div>
@@ -166,6 +174,18 @@
     }
     input {
         padding-right: 29px !important;
+    }
+    input:enabled {
+        cursor: pointer;
+    }
+    input.marked {
+        padding-right: 45px !important;
+    }
+    .selected-marker {
+        position: absolute;
+        right: 29px;
+        top: 50%;
+        transform: translateY(-50%);
     }
     .clear {
         position: absolute;

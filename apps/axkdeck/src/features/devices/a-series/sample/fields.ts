@@ -3,7 +3,14 @@ export interface SampleField {
     label: string;
     min: number;
     max: number;
-    options?: { value: number; label: string; extended?: boolean; disabled?: boolean; reason?: string }[];
+    options?: {
+        value: number;
+        label: string;
+        extended?: boolean;
+        a5000Only?: boolean;
+        disabled?: boolean;
+        reason?: string;
+    }[];
     extended?: boolean;
     boolean?: boolean;
     help?: string;
@@ -45,9 +52,9 @@ const output1 = [
     'AssgnOut 3&4',
     'AssgnOut 5&6',
     'DIG&OPT',
-    'Ef4 (A5000)',
-    'Ef5 (A5000)',
-    'Ef6 (A5000)',
+    'Ef4',
+    'Ef5',
+    'Ef6',
 ];
 const output2 = [
     'Off',
@@ -60,9 +67,9 @@ const output2 = [
     'Ef1',
     'Ef2',
     'Ef3',
-    'Ef4 (A5000)',
-    'Ef5 (A5000)',
-    'Ef6 (A5000)',
+    'Ef4',
+    'Ef5',
+    'Ef6',
 ];
 const key = (path: string, label: string, original?: number): SampleField => ({
     ...n(path, label),

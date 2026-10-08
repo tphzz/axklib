@@ -42,7 +42,9 @@ MediaObjectDescriptor describe_catalog_object(const ObjectSnapshot &object, std:
     };
 }
 
-ObjectCatalog catalog_from_media_objects(std::vector<MediaObject> objects) {
+} // namespace
+
+ObjectCatalog detail::catalog_from_media_objects(std::vector<MediaObject> objects) {
     ObjectCatalog result;
     std::map<std::pair<std::string, std::string>, std::uint32_t> volume_ids;
     std::uint32_t next_volume = 1;
@@ -73,8 +75,6 @@ ObjectCatalog catalog_from_media_objects(std::vector<MediaObject> objects) {
     }
     return result;
 }
-
-} // namespace
 
 Result<ObjectCatalog> build_object_catalog(const MediaContainer &container, std::size_t maximum_object_bytes,
                                            const CancellationToken &cancellation) {
@@ -116,7 +116,8 @@ Result<MediaInventory> build_media_inventory(const MediaContainer &container, Me
         objects.push_back(describe_media_object(object));
     const bool raw_payloads_complete =
         mode == MediaObjectReadMode::complete || container.kind() == MediaKind::standalone_object;
-    return MediaInventory{std::move(objects), catalog_from_media_objects(std::move(*loaded)), raw_payloads_complete};
+    return MediaInventory{std::move(objects), detail::catalog_from_media_objects(std::move(*loaded)),
+                          raw_payloads_complete};
 }
 
 Result<MediaObject> load_media_object(const MediaContainer &container, const MediaObjectDescriptor &descriptor,

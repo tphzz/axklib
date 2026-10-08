@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { sampleSnapshot } from '../../../../lib/objectEditing';
     import RangeBand from '../../../object-editor/RangeBand.svelte';
     import ParameterField from './ParameterField.svelte';
     import type { SampleField } from './fields';
@@ -7,8 +8,8 @@
     import { blockedGraphParameters } from './formatCapabilities';
     let { document, fields, disabled }: { document: ObjectEditorDocument; fields: SampleField[]; disabled: boolean } =
         $props();
-    const blocked = (key: string) => disabled || document.detail!.editing!.blockedParameters.includes(key);
-    const graphBlocked = $derived(blockedGraphParameters(document.detail!.editing!));
+    const blocked = (key: string) => disabled || sampleSnapshot(document.detail)!.blockedParameters.includes(key);
+    const graphBlocked = $derived(blockedGraphParameters(sampleSnapshot(document.detail)!));
     const unavailable = $derived(
         disabled ||
             ['velocity_low', 'velocity_high'].some(
@@ -30,12 +31,12 @@
         onchange={(low, high) => document.draft.patch({ velocity_low: low, velocity_high: high })}
     />
     <div class="velocity-fields">
-        {#each fields.filter((field) => field.key !== 'velocity_crossfade' || document.detail!.editing!.sampleFormat.format === 'A3000_188') as field}
+        {#each fields.filter((field) => field.key !== 'velocity_crossfade' || sampleSnapshot(document.detail)!.sampleFormat.format === 'A3000_188') as field}
             <ParameterField
                 {field}
                 draft={document.draft}
-                unavailableReason={document.detail?.editing?.unavailableParameters[field.key]?.message}
-                blockedReason={parameterBlockReason(field.key, document.detail!.editing!)}
+                unavailableReason={sampleSnapshot(document.detail)?.unavailableParameters[field.key]?.message}
+                blockedReason={parameterBlockReason(field.key, sampleSnapshot(document.detail)!)}
                 disabled={blocked(field.key)}
                 slider={field.key.includes('xfade')}
                 oninvalid={(message) => (document.inputErrors = { ...document.inputErrors, [field.key]: message })}

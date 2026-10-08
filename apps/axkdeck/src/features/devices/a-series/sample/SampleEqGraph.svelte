@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { sampleSnapshot } from '../../../../lib/objectEditing';
     import { onDestroy } from 'svelte';
     import { BankDraft } from '../bank/draft.svelte';
     import { blockedGraphParameters } from './formatCapabilities';
@@ -22,7 +23,7 @@
     const inherited = $derived(
         document.draft instanceof BankDraft && !document.draft.isOverridden('sample_eq_frequency'),
     );
-    const sourceSnapshot = $derived(inherited ? document.previewDetail?.editing : document.detail!.editing);
+    const sourceSnapshot = $derived(sampleSnapshot(inherited ? document.previewDetail : document.detail));
     const native = $derived(sourceSnapshot?.sampleFormat.format === 'A3000_188');
     const available = $derived(
         keys.every((key) => (native && key === 'sample_eq_type') || Number.isFinite(values[key])),
@@ -50,7 +51,7 @@
             ? Array.from({ length: 401 }, (_, i) => ({ x: i / 400, y: (eqResponse(coefficients, i / 400) + 18) / 36 }))
             : [],
     );
-    const blocked = $derived(blockedGraphParameters(document.detail!.editing!));
+    const blocked = $derived(blockedGraphParameters(sampleSnapshot(document.detail)!));
     let startWidth = 10;
     let wheelTimer: ReturnType<typeof setTimeout> | undefined;
     const canEdit = (key: string) => available && !disabled && !blocked.includes(key);

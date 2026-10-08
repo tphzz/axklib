@@ -17,10 +17,13 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
+#include "../src/alteration_manifest_program.hpp"
 #include "axklib/alteration.hpp"
 #include "axklib/audio.hpp"
+#include "axklib/bytes.hpp"
 #include "axklib/catalog.hpp"
 #include "axklib/package_archive.hpp"
+#include "axklib/program_format_conversion.hpp"
 #include "axklib/writer.hpp"
 #include "axklib/writer_internal.hpp"
 
@@ -296,6 +299,84 @@ TEST_F(ProgramAssignmentReplacement, ShrinksToZeroNeutralizingRemovedRowsWithout
     EXPECT_EQ(std::get<axk::CurrentSbac>(bank->object.payload).raw_sample_parameter_block[0x1bU], std::byte{0});
 }
 
+TEST_F(ProgramAssignmentReplacement, CombinesMembershipEasyEditAndGlobalParametersInOneSave) {
+    auto operation = replacement(
+        expected_hash,
+        Json::array({{{"retain_ordinal", 0}},
+                     {{"retain_ordinal", 2}, {"sample", "Other"}, {"parameters", {{"amp_attack_offset", -20}}}},
+                     {{"sample", "New"}, {"parameters", {{"receive", "basic"}}}}}));
+    operation["parameters"] = {{"level", 67}, {"transpose", 12}};
+    const auto parsed = parse_replacement(operation);
+    ASSERT_TRUE(parsed) << parsed.error().message;
+    const auto changed = axk::alter_hds(source, *parsed, output);
+    ASSERT_TRUE(changed) << changed.error().message;
+    const auto after = catalog(output);
+    ASSERT_TRUE(after);
+    const auto *current = find_object(*after, axk::ObjectType::prog, "001");
+    ASSERT_NE(current, nullptr);
+    const auto &program = std::get<axk::CurrentProg>(current->object.payload);
+    EXPECT_EQ(program.layout.version, 4U);
+    EXPECT_EQ(program.parameters.level, 67U);
+    EXPECT_EQ(program.parameters.transpose, 12);
+    ASSERT_EQ(program.assignments.size(), 3U);
+    EXPECT_EQ(program.assignments[1].parameters.level_offset, 11);
+    EXPECT_EQ(program.assignments[1].parameters.amp_attack_offset, -20);
+    EXPECT_EQ(program.assignments[2].raw_receive_selector, 16U);
+    expect_sample_links(*after, "Old", {2U});
+    expect_sample_links(*after, "New", {1U});
+}
+
+TEST_F(ProgramAssignmentReplacement, NativeReplacementPreservesRevisionAndReopensWithNeutralNewRows) {
+    const Json conversion{{"id", "native"},
+                          {"type", "convert_prog_format"},
+                          {"partition_index", 0},
+                          {"volume_name", "Programs"},
+                          {"program_number", 1},
+                          {"target_format", "a3000"},
+                          {"expected_payload_sha256", expected_hash}};
+    const auto convert = parse_replacement(conversion);
+    ASSERT_TRUE(convert) << convert.error().message;
+    const auto native_path = root / "native.hds";
+    const auto converted = axk::alter_hds(source, *convert, native_path);
+    ASSERT_TRUE(converted) << converted.error().message;
+    const auto native_catalog = catalog(native_path);
+    ASSERT_TRUE(native_catalog);
+    const auto *old = find_object(*native_catalog, axk::ObjectType::prog, "001");
+    ASSERT_NE(old, nullptr);
+    const auto hash = axk::package_internal::hex_digest(axk::package_internal::sha256(old->raw_payload));
+    auto operation = replacement(
+        hash,
+        Json::array({{{"retain_ordinal", 2}},
+                     {{"sample", "New"}, {"parameters", {{"amp_release_offset", 19}, {"velocity_crossfade", "on"}}}}}));
+    operation["model"] = "A3000";
+    operation["parameters"] = {{"level", 65}};
+    const auto parsed = parse_replacement(operation);
+    ASSERT_TRUE(parsed) << parsed.error().message;
+    const auto changed = axk::alter_hds(native_path, *parsed, output);
+    ASSERT_TRUE(changed) << changed.error().message;
+    const auto after = catalog(output);
+    ASSERT_TRUE(after);
+    const auto *current = find_object(*after, axk::ObjectType::prog, "001");
+    ASSERT_NE(current, nullptr);
+    const auto &previous = std::get<axk::CurrentProg>(old->object.payload);
+    const auto &program = std::get<axk::CurrentProg>(current->object.payload);
+    EXPECT_EQ(program.layout.version, 2U);
+    EXPECT_EQ(program.layout.parameter_tail_offset, std::nullopt);
+    EXPECT_EQ(program.layout.assignment_capacity, previous.layout.assignment_capacity);
+    EXPECT_EQ(program.parameters.level, 65U);
+    ASSERT_EQ(program.assignments.size(), 2U);
+    EXPECT_EQ(program.assignments[0].raw_row, previous.assignments[2].raw_row);
+    EXPECT_EQ(program.assignments[1].parameters.amp_release_offset, 19);
+    EXPECT_EQ(program.assignments[1].parameters.velocity_crossfade, axk::ProgramInheritableSwitch::on);
+    EXPECT_EQ(program.assignments[1].parameters.output1, -1);
+    EXPECT_EQ(program.assignments[1].parameters.output2, -1);
+    EXPECT_EQ(program.assignments[1].parameters.key_high, 127U);
+    EXPECT_EQ(program.assignments[1].parameters.midi_control, true);
+    EXPECT_EQ(current->raw_payload[0x43U], old->raw_payload[0x43U]);
+    expect_sample_links(*after, "Old", {2U});
+    expect_sample_links(*after, "New", {1U});
+}
+
 TEST_F(ProgramAssignmentReplacement, GrowsAcrossAllocationBoundaryPreservingTailAndObjectIdentity) {
     auto rows = Json::array();
     for (std::size_t index = 0; index < 40U; ++index)
@@ -330,7 +411,8 @@ TEST_F(ProgramAssignmentReplacement, StaleGuardInvalidRowsAndLaterFailurePreserv
     ASSERT_TRUE(stale);
     EXPECT_FALSE(axk::alter_hds(source, *stale, output, {}, nullptr, true));
     EXPECT_EQ(read_image(output), original);
-    for (const auto &rows : {Json::array({{{"retain_ordinal", 3}}}), Json::array({{{"sample", "Absent"}}})}) {
+    for (const auto &rows : {Json::array({{{"retain_ordinal", 3}}}), Json::array({{{"sample", "Absent"}}}),
+                             Json::array({{{"sample", "Member"}}})}) {
         const auto invalid = parse_replacement(replacement(expected_hash, rows));
         ASSERT_TRUE(invalid);
         EXPECT_FALSE(axk::alter_hds(source, *invalid, output, {}, nullptr, true));
@@ -343,6 +425,62 @@ TEST_F(ProgramAssignmentReplacement, StaleGuardInvalidRowsAndLaterFailurePreserv
     EXPECT_FALSE(axk::alter_hds(source, *later, output, {}, nullptr, true));
     EXPECT_EQ(read_image(source), original);
     EXPECT_EQ(read_image(output), original);
+}
+
+TEST(ProgramAssignmentReplacementCodec, NativeGrowthPreservesHeaderUnusedBytesAndCountedEmptyRows) {
+    auto current = axk::detail::prepare_prog_payload({1U, "Native", {}});
+    ASSERT_TRUE(current);
+    auto conversion = axk::plan_program_format_conversion(*current, axk::ProgramStorageFormat::a3000);
+    ASSERT_TRUE(conversion.allowed());
+    auto payload = conversion.converted_payload;
+    axk::ByteWriter writer{payload};
+    ASSERT_TRUE(writer.write_be16(0x96U, 2U));
+    ASSERT_TRUE(writer.write_be32(0x1cU, 0x12345678U));
+    payload[0x120U + 0x14U] = std::byte{0x71};
+    payload[0x120U + 0x10U] = std::byte{0x55};
+    payload[0x120U + 0x36U] = std::byte{0x6a};
+    const auto logical_size = payload.size();
+    payload.insert(payload.end(), 32U, std::byte{0x5a});
+    axk::ReplaceProgramAssignmentsOperation operation;
+    operation.program_number = 1U;
+    operation.model = axk::ASeriesModel::a3000;
+    operation.expected_payload_sha256 = std::string(64U, 'a');
+    operation.assignments.push_back({0U, {}});
+    for (std::size_t i = 1; i < 10U; ++i)
+        operation.assignments.push_back({{}, axk::ProgramAssignmentSpec{"SBNK", "New"}});
+    operation.parameters.level = 64U;
+    const auto result = axk::detail::replace_prog_assignment_rows(payload, operation);
+    ASSERT_TRUE(result) << result.error().message;
+    EXPECT_TRUE(
+        std::ranges::equal(std::span(*result).subspan(0x120U, 0x38U), std::span(payload).subspan(0x120U, 0x38U)));
+    EXPECT_TRUE(std::ranges::equal(std::span(*result).subspan(0x1cU, 4U), std::span(payload).subspan(0x1cU, 4U)));
+    EXPECT_TRUE(std::ranges::equal(std::span(*result).last(32U), std::span(payload).last(32U)));
+    const auto decoded = axk::decode_object(*result);
+    ASSERT_TRUE(decoded);
+    const auto &program = std::get<axk::CurrentProg>(decoded->payload);
+    EXPECT_EQ(program.layout.version, 2U);
+    EXPECT_EQ(program.layout.logical_size, logical_size + 2U * 0x38U);
+    EXPECT_EQ(program.assignments.size(), 10U);
+    EXPECT_EQ(program.parameters.level, 64U);
+}
+
+TEST(ProgramAssignmentReplacementCodec, SparseEffectEditsUseRetainedTypeWithoutResettingHiddenWords) {
+    axk::ProgramSpec spec{1U, "Existing", {{"SBNK", "Sample", {}}}};
+    spec.parameters.effects[0].type = 1U;
+    spec.parameters.effects[0].parameters[1] = 2345U;
+    auto payload = axk::detail::prepare_prog_payload(spec);
+    ASSERT_TRUE(payload);
+    const auto operation =
+        parse_replacement(replacement(std::string(64U, 'a'), Json::array({{{"retain_ordinal", 0}}})));
+    ASSERT_TRUE(operation);
+    auto edit = std::get<axk::ReplaceProgramAssignmentsOperation>(operation->operations[0].data);
+    edit.parameters.effects[0].parameters[1] = 1234U;
+    const auto result = axk::detail::replace_prog_assignment_rows(*payload, edit);
+    ASSERT_TRUE(result) << result.error().message;
+    auto expected = *payload;
+    axk::ByteWriter writer{expected};
+    ASSERT_TRUE(writer.write_be16(0xa2U, 1234U));
+    EXPECT_EQ(*result, expected);
 }
 
 TEST_F(ProgramAssignmentReplacement, GrowsTo999CountedAssignmentsAndRetainsOneTargetMembershipBit) {

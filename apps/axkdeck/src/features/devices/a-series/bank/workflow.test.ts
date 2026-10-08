@@ -22,8 +22,8 @@ describe('bank editing lifecycle', () => {
                     partitionIndex: 0,
                     volumeName: 'Volume',
                     payloadSha256: String(revision).repeat(64),
-                    parameters: { level },
-                    blockedParameters: [],
+                    parameters: { level, root_key: 67 },
+                    blockedParameters: ['root_key'],
                     blockedParameterReasons: {},
                     unavailableParameters: {},
                     bankOverrides: {
@@ -40,11 +40,15 @@ describe('bank editing lifecycle', () => {
         const transport = {
             objectDetail: vi.fn(async () => detail()),
             startObjectParameterEdit: vi.fn(async (_session: number, edit: ObjectParameterEdit) => {
-                expect(edit.operation.type).toBe('update_sample_bank_overrides');
-                if (edit.operation.type === 'update_sample_bank_overrides') {
-                    expect(edit.operation.sample_bank_name).toBe('Bank');
-                    active = edit.operation.enable.includes(33);
-                    level = Number(edit.operation.parameters.level ?? level);
+                const operation = edit.operations[0]!;
+                expect(operation.type).toBe('update_sample_bank_overrides');
+                if (operation.type === 'update_sample_bank_overrides') {
+                    expect(operation.sample_bank_name).toBe('Bank');
+                    expect(operation.parameters).not.toHaveProperty('root_key');
+                    expect(operation.enable).not.toContain(6);
+                    expect(operation.disable).not.toContain(6);
+                    active = operation.enable.includes(33);
+                    level = Number(operation.parameters.level ?? level);
                 }
                 revision++;
                 return { jobId: 1, kind: 'edit', status: 'queued' as const };
@@ -56,6 +60,8 @@ describe('bank editing lifecycle', () => {
         const document = (await workflow.load(1, 'bank'))!;
         const draft = document.draft as BankDraft;
         draft.member = { level: 60, root_key: 44 };
+        draft.set('root_key', 64);
+        expect(draft.dirty).toBe(false);
         document.previewMemberId = 'member';
         const navigation = workflow.navigation('a-series/sample-bank');
         navigation.tab = 'filter';
@@ -73,12 +79,20 @@ describe('bank editing lifecycle', () => {
         expect(workflow.locked).toBe(false);
         draft.clearOverride('level');
         await workflow.save(document);
-        expect(transport.startObjectParameterEdit.mock.calls[1]![1].operation).toMatchObject({
+        expect(transport.startObjectParameterEdit.mock.calls[1]![1].operations[0]).toMatchObject({
             parameters: {},
             enable: [],
             disable: [33],
         });
         expect(draft.dirty).toBe(false);
         expect(draft.values.level).toBe(60);
+        expect(draft.storedValues.root_key).toBe(67);
+        expect(draft.values.root_key).toBe(44);
+        const reopened = (await workflow.load(1, 'bank'))!;
+        const reopenedDraft = reopened.draft as BankDraft;
+        reopenedDraft.member = { level: 75, root_key: 48 };
+        expect(reopenedDraft.storedValues.root_key).toBe(67);
+        expect(reopenedDraft.values.root_key).toBe(48);
+        expect(reopenedDraft.dirty).toBe(false);
     });
 });

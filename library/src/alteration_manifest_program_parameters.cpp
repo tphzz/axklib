@@ -40,8 +40,14 @@ template <typename T> Result<T> integer(const Json &value, std::string_view fiel
 } // namespace
 
 Result<void> validate_program_parameter_update(const UpdateProgramParametersOperation &operation) {
-    if (operation.model != ASeriesModel::a4000 && operation.model != ASeriesModel::a5000)
-        return std::unexpected{invalid("model must be explicitly A4000 or A5000")};
+    if (operation.model != ASeriesModel::a3000 && operation.model != ASeriesModel::a4000 &&
+        operation.model != ASeriesModel::a5000)
+        return std::unexpected{invalid("model must be explicitly A3000, A4000 or A5000")};
+    if (operation.expected_payload_sha256 &&
+        (operation.expected_payload_sha256->size() != 64U ||
+         !std::ranges::all_of(*operation.expected_payload_sha256,
+                              [](unsigned char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); })))
+        return std::unexpected{invalid("expected_payload_sha256 must be lowercase SHA-256")};
     if (operation.program_number < 1U || operation.program_number > 128U)
         return std::unexpected{invalid("program_number must be 1..128")};
     if (operation.volume_name.empty())
@@ -66,7 +72,7 @@ Result<void> validate_program_parameter_update(const UpdateProgramParametersOper
 Result<UpdateProgramParametersOperation> parse_program_parameter_update_json(const Json &row,
                                                                              PartitionSelector selector) {
     if (auto valid = fields(row, {"id", "type", "partition_index", "volume_name", "program_number", "model",
-                                  "parameters", "assignments"});
+                                  "parameters", "assignments", "expected_payload_sha256"});
         !valid)
         return std::unexpected{valid.error()};
     const auto model = text(row, "model");
@@ -78,10 +84,22 @@ Result<UpdateProgramParametersOperation> parse_program_parameter_update_json(con
         return std::unexpected{volume.error()};
     if (!number)
         return std::unexpected{number.error()};
-    if (*model != "A4000" && *model != "A5000")
-        return std::unexpected{invalid("model must be A4000 or A5000")};
-    UpdateProgramParametersOperation result{
-        std::move(selector), *volume, *number, *model == "A4000" ? ASeriesModel::a4000 : ASeriesModel::a5000, {}, {}};
+    if (*model != "A3000" && *model != "A4000" && *model != "A5000")
+        return std::unexpected{invalid("model must be A3000, A4000 or A5000")};
+    UpdateProgramParametersOperation result{std::move(selector),
+                                            *volume,
+                                            *number,
+                                            *model == "A3000"   ? ASeriesModel::a3000
+                                            : *model == "A4000" ? ASeriesModel::a4000
+                                                                : ASeriesModel::a5000,
+                                            {},
+                                            {}};
+    if (row.contains("expected_payload_sha256")) {
+        const auto hash = text(row, "expected_payload_sha256");
+        if (!hash)
+            return std::unexpected{hash.error()};
+        result.expected_payload_sha256 = *hash;
+    }
     if (auto parsed = child(row, "parameters", result.parameters, parse_program_parameters_json); !parsed)
         return std::unexpected{parsed.error()};
     if (row.contains("assignments")) {

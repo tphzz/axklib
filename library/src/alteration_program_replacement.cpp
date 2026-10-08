@@ -22,7 +22,7 @@ Result<std::set<SfsId>> assignment_targets(TransactionState &state, MutableParti
         return std::unexpected{transaction_error("Program is unreadable")};
     std::set<SfsId> result;
     for (const auto &row : program->assignments) {
-        if (row.name.empty() && row.kind == 0U)
+        if (row.name.empty())
             continue;
         if (row.name.empty() || (row.kind != 0x10U && row.kind != 0x11U))
             return std::unexpected{transaction_error("Program assignment target is unsupported")};
@@ -65,7 +65,42 @@ Result<OperationReport> replace_program_assignments(TransactionState &state, Ope
     auto new_targets = assignment_targets(state, partition, operation.volume_name, *replacement, cancellation);
     if (!new_targets)
         return std::unexpected{new_targets.error()};
-    state.load_references_added =
+    auto banks = category_objects(state, partition, operation.volume_name, "SBAC", ObjectType::sbac, cancellation);
+    if (!banks)
+        return std::unexpected{banks.error()};
+    const auto original = decode_object(*payload);
+    if (!original)
+        return std::unexpected{original.error()};
+    const auto &original_rows = std::get<CurrentProg>(original->payload).assignments;
+    for (const auto &edit : operation.assignments) {
+        if (!edit.assignment || edit.assignment->target_kind != "SBNK")
+            continue;
+        const auto &target_name = edit.assignment->target_name;
+        if (edit.retain_ordinal && original_rows[*edit.retain_ordinal].kind == 0x10U &&
+            original_rows[*edit.retain_ordinal].name == target_name)
+            continue;
+        auto target =
+            category_object(state, partition, operation.volume_name, "SBNK", target_name, "SBNK", cancellation);
+        if (!target)
+            return std::unexpected{target.error()};
+        auto bytes = current_payload(state, partition, target->second, cancellation);
+        if (!bytes)
+            return std::unexpected{bytes.error()};
+        auto decoded = decode_object(*bytes);
+        if (!decoded)
+            return std::unexpected{decoded.error()};
+        const auto *sample = std::get_if<CurrentSbnk>(&decoded->payload);
+        const bool member = std::ranges::any_of(*banks, [&](const auto &bank) {
+            const auto *parameters = std::get_if<CurrentSbac>(&bank.decoded.payload);
+            return parameters && std::ranges::any_of(parameters->slots, [&](const auto &slot) {
+                       return slot.active && slot.name == target_name;
+                   });
+        });
+        if (!sample || (sample->sample_flags & 1U) != 0U || member)
+            return std::unexpected{
+                transaction_error("Sample Bank members cannot be assigned independently; assign their bank")};
+    }
+    state.load_references_added |=
         std::ranges::any_of(*new_targets, [&](SfsId target) { return !old_targets->contains(target); });
     for (const auto type : {ObjectType::sbnk, ObjectType::sbac}) {
         const bool sample = type == ObjectType::sbnk;

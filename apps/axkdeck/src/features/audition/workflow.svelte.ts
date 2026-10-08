@@ -522,6 +522,18 @@ export class AuditionWorkflow {
     ): Promise<void> {
         return this.controller.play(sessionId, objectId, prepare);
     }
+    playVoices(
+        sessionId: number,
+        objectId: string,
+        token: string,
+        prepare: import('../../lib/audio/heldVoices').PrepareVoices,
+    ): Promise<void> {
+        this.cancelSampleBankPlayback();
+        return this.controller.playVoices(sessionId, objectId, token, prepare);
+    }
+    releaseVoices(token: string): void {
+        this.controller.releaseVoices(token);
+    }
     seekPrepared(frame: number): void {
         this.controller.seek(frame);
     }

@@ -125,6 +125,119 @@
         ],
         "type": "string"
       },
+      "ASeriesProgramEditor": {
+        "additionalProperties": false,
+        "properties": {
+          "assignments": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "enum": [
+                    "SBNK",
+                    "SBAC",
+                    "UNKNOWN"
+                  ]
+                },
+                "name": {
+                  "type": "string"
+                },
+                "ordinal": {
+                  "maximum": 998,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "targetObjectId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "ordinal",
+                "kind",
+                "name",
+                "targetObjectId"
+              ],
+              "type": "object"
+            },
+            "maxItems": 999,
+            "type": "array"
+          },
+          "editable": {
+            "type": "boolean"
+          },
+          "model": {
+            "enum": [
+              "A3000",
+              "A5000"
+            ]
+          },
+          "partitionIndex": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "payloadSha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "profile": {
+            "const": "a-series/program"
+          },
+          "programName": {
+            "type": "string"
+          },
+          "programNumber": {
+            "maximum": 128,
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "storageRevision": {
+            "type": "integer"
+          },
+          "targets": {
+            "items": {
+              "$ref": "#/components/schemas/ProgramEditorTarget"
+            },
+            "type": "array"
+          },
+          "values": {
+            "additionalProperties": {
+              "type": [
+                "integer",
+                "boolean"
+              ]
+            },
+            "type": "object"
+          },
+          "volumeName": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "profile",
+          "editable",
+          "reason",
+          "payloadSha256",
+          "partitionIndex",
+          "volumeName",
+          "programNumber",
+          "programName",
+          "storageRevision",
+          "model",
+          "values",
+          "assignments",
+          "targets"
+        ],
+        "type": "object"
+      },
       "ASeriesSampleEditor": {
         "additionalProperties": false,
         "oneOf": [
@@ -275,7 +388,14 @@
             "$ref": "#/components/schemas/SamplePlaybackWindow"
           },
           "profile": {
-            "type": "string"
+            "oneOf": [
+              {
+                "const": "a-series/sample"
+              },
+              {
+                "const": "a-series/sample-bank"
+              }
+            ]
           },
           "reason": {
             "type": "string"
@@ -874,11 +994,13 @@
               "DUPLICATE_SBNK",
               "CONVERT_SBNK_FORMAT",
               "CONVERT_SBAC_FORMAT",
+              "CONVERT_PROG_FORMAT",
               "UPDATE_SAMPLE_BANK_OVERRIDES"
             ],
             "x-axklib-application-enum": {
               "ASSIGN_SBAC_MEMBERS": "assign_sbac_members",
               "CLEAR_PROGRAM_ASSIGNMENTS": "clear_program_assignments",
+              "CONVERT_PROG_FORMAT": "convert_prog_format",
               "CONVERT_SBAC_FORMAT": "convert_sbac_format",
               "CONVERT_SBNK_FORMAT": "convert_sbnk_format",
               "DELETE_PROGRAM": "delete_program",
@@ -2687,9 +2809,33 @@
         ],
         "type": "object"
       },
+      "FloppyImportFileSource": {
+        "additionalProperties": false,
+        "properties": {
+          "memberName": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string"
+          },
+          "sizeBytes": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "memberName",
+          "path",
+          "sizeBytes"
+        ],
+        "type": "object"
+      },
       "FloppyImportInspection": {
         "additionalProperties": false,
         "properties": {
+          "canImport": {
+            "type": "boolean"
+          },
           "complete": {
             "type": "boolean"
           },
@@ -2703,15 +2849,23 @@
                 "path": {
                   "type": "string"
                 },
+                "reason": {
+                  "type": "string"
+                },
                 "sizeBytes": {
                   "minimum": 0,
                   "type": "integer"
+                },
+                "unreadableObject": {
+                  "type": "boolean"
                 }
               },
               "required": [
                 "memberName",
                 "path",
-                "sizeBytes"
+                "sizeBytes",
+                "reason",
+                "unreadableObject"
               ],
               "type": "object"
             },
@@ -2792,12 +2946,21 @@
             },
             "maxItems": 8192,
             "type": "array"
+          },
+          "recoveryUsed": {
+            "type": "boolean"
+          },
+          "requiresAcknowledgement": {
+            "type": "boolean"
           }
         },
         "required": [
           "format",
           "inspectionToken",
           "complete",
+          "canImport",
+          "recoveryUsed",
+          "requiresAcknowledgement",
           "label",
           "nextRequiredIndex",
           "members",
@@ -2876,6 +3039,14 @@
           "sizeBytes": {
             "minimum": 0,
             "type": "integer"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/FloppyImportFileSource"
+            },
+            "maxItems": 8192,
+            "minItems": 1,
+            "type": "array"
           }
         },
         "required": [
@@ -2885,7 +3056,8 @@
           "objectType",
           "sizeBytes",
           "requiredObjectKeys",
-          "exclusionReason"
+          "exclusionReason",
+          "sources"
         ],
         "type": "object"
       },
@@ -4954,6 +5126,9 @@
       "ImageFloppyImportPlanRequest": {
         "additionalProperties": false,
         "properties": {
+          "acknowledgeSourceIssues": {
+            "type": "boolean"
+          },
           "capacityPolicy": {
             "$ref": "#/components/schemas/VolumeCapacityPolicy"
           },
@@ -5009,6 +5184,7 @@
           "expectedRevision",
           "inspectionToken",
           "selectedObjectKeys",
+          "acknowledgeSourceIssues",
           "destination"
         ],
         "type": "object"
@@ -5560,6 +5736,9 @@
                 "$ref": "#/components/schemas/ASeriesSampleEditor"
               },
               {
+                "$ref": "#/components/schemas/ASeriesProgramEditor"
+              },
+              {
                 "type": "null"
               }
             ]
@@ -5733,7 +5912,7 @@
         "properties": {
           "decoded": {
             "additionalProperties": true,
-            "description": "Type-specific decoded metadata with raw storage. PROG parameters and assignment parameters use the shared authoring parameter names (snake_case, numbered maps). Omitted semantic leaves have unavailable or unsupported encodings; inactive known values remain present. Raw blocks and rows retain all stored bytes. Decoded values do not imply authoring support for a target model.",
+            "description": "Type-specific decoded metadata with raw storage. PROG parameters and assignment parameters use the shared authoring parameter names (snake_case, numbered maps). PROG effectBlocks retain storedType separately from type. effectTypeInterpretation is a3000-v2-and-later-load for revision 1 (type and typed effects use later-loader normalization, not original V1 playback), otherwise stored. Omitted semantic leaves have unavailable or unsupported encodings; inactive known values remain present. Raw blocks and rows retain all stored bytes. Decoded values do not imply authoring support for a target model.",
             "properties": {
               "kind": {
                 "type": "string"
@@ -5799,6 +5978,16 @@
             ],
             "type": "string"
           },
+          "programFormat": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ProgramFormatMetadata"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "sampleFormat": {
             "oneOf": [
               {
@@ -5844,7 +6033,8 @@
           "header",
           "decoded",
           "omissions",
-          "sampleFormat"
+          "sampleFormat",
+          "programFormat"
         ],
         "type": "object"
       },
@@ -6089,6 +6279,16 @@
           "partitionName": {
             "type": "string"
           },
+          "programFormat": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ProgramFormatMetadata"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "sampleFormat": {
             "oneOf": [
               {
@@ -6155,7 +6355,8 @@
           "sizeWithDependenciesBytes",
           "waveform",
           "sequence",
-          "sampleFormat"
+          "sampleFormat",
+          "programFormat"
         ],
         "type": "object"
       },
@@ -11523,46 +11724,14 @@
         "type": "object"
       },
       "ObjectFormatConversion": {
-        "additionalProperties": false,
-        "properties": {
-          "canConvertFormat": {
-            "type": "boolean"
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/SampleObjectFormatConversion"
           },
-          "formatConversions": {
-            "items": {
-              "$ref": "#/components/schemas/SampleFormatConversionPreview"
-            },
-            "type": "array"
-          },
-          "partitionIndex": {
-            "maximum": 7,
-            "minimum": 0,
-            "type": "integer"
-          },
-          "payloadSha256": {
-            "pattern": "^[0-9a-f]{64}$",
-            "type": "string"
-          },
-          "reason": {
-            "type": "string"
-          },
-          "sampleFormat": {
-            "$ref": "#/components/schemas/SampleFormatMetadata"
-          },
-          "volumeName": {
-            "type": "string"
+          {
+            "$ref": "#/components/schemas/ProgramFormatConversion"
           }
-        },
-        "required": [
-          "payloadSha256",
-          "partitionIndex",
-          "volumeName",
-          "sampleFormat",
-          "canConvertFormat",
-          "formatConversions",
-          "reason"
-        ],
-        "type": "object"
+        ]
       },
       "ObjectsRequest": {
         "additionalProperties": false,
@@ -13216,6 +13385,428 @@
         ],
         "type": "object"
       },
+      "ProgramEditorCatalog": {
+        "additionalProperties": false,
+        "properties": {
+          "formats": {
+            "items": {
+              "$ref": "#/components/schemas/ProgramEditorFormat"
+            },
+            "maxItems": 2,
+            "minItems": 2,
+            "type": "array"
+          },
+          "schemaVersion": {
+            "const": 1
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "formats"
+        ],
+        "type": "object"
+      },
+      "ProgramEditorFormat": {
+        "additionalProperties": false,
+        "properties": {
+          "effects": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "maximum": 96,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "label": {
+                  "type": "string"
+                },
+                "parameters": {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "editable": {
+                        "type": "boolean"
+                      },
+                      "index": {
+                        "maximum": 15,
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "label": {
+                        "type": "string"
+                      },
+                      "max": {
+                        "type": "integer"
+                      },
+                      "min": {
+                        "type": "integer"
+                      }
+                    },
+                    "required": [
+                      "index",
+                      "label",
+                      "min",
+                      "max",
+                      "editable"
+                    ],
+                    "type": "object"
+                  },
+                  "maxItems": 16,
+                  "minItems": 16,
+                  "type": "array"
+                },
+                "printedNumber": {
+                  "type": "integer"
+                },
+                "resetWords": {
+                  "items": {
+                    "maximum": 65535,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "maxItems": 16,
+                  "minItems": 16,
+                  "type": "array"
+                }
+              },
+              "required": [
+                "id",
+                "label",
+                "printedNumber",
+                "resetWords",
+                "parameters"
+              ],
+              "type": "object"
+            },
+            "maxItems": 97,
+            "type": "array"
+          },
+          "fields": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "allowedValues": {
+                  "items": {
+                    "type": "integer"
+                  },
+                  "type": "array"
+                },
+                "boolean": {
+                  "type": "boolean"
+                },
+                "defaultValue": {
+                  "type": [
+                    "integer",
+                    "boolean"
+                  ]
+                },
+                "key": {
+                  "type": "string"
+                },
+                "max": {
+                  "type": "integer"
+                },
+                "min": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "key",
+                "min",
+                "max"
+              ],
+              "type": "object"
+            },
+            "maxItems": 256,
+            "type": "array"
+          },
+          "model": {
+            "enum": [
+              "A3000",
+              "A5000"
+            ]
+          }
+        },
+        "required": [
+          "model",
+          "fields",
+          "effects"
+        ],
+        "type": "object"
+      },
+      "ProgramEditorTarget": {
+        "additionalProperties": false,
+        "properties": {
+          "assignable": {
+            "type": "boolean"
+          },
+          "available": {
+            "type": "boolean"
+          },
+          "kind": {
+            "enum": [
+              "SBNK",
+              "SBAC"
+            ]
+          },
+          "members": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "objectId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "name",
+                "objectId"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "name": {
+            "type": "string"
+          },
+          "objectId": {
+            "type": "string"
+          },
+          "overrideKeys": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "values": {
+            "additionalProperties": {
+              "type": [
+                "integer",
+                "boolean"
+              ]
+            },
+            "type": "object"
+          }
+        },
+        "required": [
+          "objectId",
+          "kind",
+          "name",
+          "assignable",
+          "reason",
+          "available",
+          "values",
+          "overrideKeys",
+          "members"
+        ],
+        "type": "object"
+      },
+      "ProgramFormatConversion": {
+        "additionalProperties": false,
+        "properties": {
+          "canConvertFormat": {
+            "type": "boolean"
+          },
+          "formatConversions": {
+            "items": {
+              "$ref": "#/components/schemas/ProgramFormatConversionPreview"
+            },
+            "type": "array"
+          },
+          "kind": {
+            "enum": [
+              "PROGRAM"
+            ],
+            "type": "string",
+            "x-axklib-application-enum": {
+              "PROGRAM": "program"
+            }
+          },
+          "partitionIndex": {
+            "maximum": 7,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "payloadSha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "programFormat": {
+            "$ref": "#/components/schemas/ProgramFormatMetadata"
+          },
+          "programName": {
+            "type": "string"
+          },
+          "programNumber": {
+            "maximum": 128,
+            "minimum": 1,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "volumeName": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "payloadSha256",
+          "partitionIndex",
+          "volumeName",
+          "programNumber",
+          "programName",
+          "programFormat",
+          "canConvertFormat",
+          "formatConversions",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "ProgramFormatConversionIssue": {
+        "additionalProperties": false,
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "storedValue": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "key",
+          "message",
+          "storedValue"
+        ],
+        "type": "object"
+      },
+      "ProgramFormatConversionPreview": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed": {
+            "type": "boolean"
+          },
+          "blockers": {
+            "items": {
+              "$ref": "#/components/schemas/ProgramFormatConversionIssue"
+            },
+            "type": "array"
+          },
+          "changes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "targetFormat": {
+            "enum": [
+              "A3000",
+              "A4000_A5000"
+            ],
+            "type": "string",
+            "x-axklib-application-enum": {
+              "A3000": "a3000",
+              "A4000_A5000": "a4000_a5000"
+            }
+          }
+        },
+        "required": [
+          "targetFormat",
+          "allowed",
+          "changes",
+          "blockers"
+        ],
+        "type": "object"
+      },
+      "ProgramFormatMetadata": {
+        "additionalProperties": false,
+        "properties": {
+          "assignmentCapacity": {
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "format": {
+            "$ref": "#/components/schemas/ProgramStorageFormat"
+          },
+          "headerRevision": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "logicalSize": {
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "parameterTailBytes": {
+            "enum": [
+              0,
+              176,
+              null
+            ],
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "storedAssignmentCount": {
+            "maximum": 999,
+            "minimum": 0,
+            "type": [
+              "integer",
+              "null"
+            ]
+          },
+          "structurallyValid": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "format",
+          "structurallyValid",
+          "headerRevision",
+          "logicalSize",
+          "storedAssignmentCount",
+          "assignmentCapacity",
+          "parameterTailBytes"
+        ],
+        "type": "object"
+      },
+      "ProgramStorageFormat": {
+        "enum": [
+          "UNKNOWN",
+          "A3000",
+          "A4000_A5000"
+        ],
+        "type": "string",
+        "x-axklib-application-enum": {
+          "A3000": "a3000",
+          "A4000_A5000": "a4000_a5000",
+          "UNKNOWN": "unknown"
+        }
+      },
       "ReadinessResponse": {
         "additionalProperties": false,
         "properties": {
@@ -13748,6 +14339,60 @@
           "parameterIssues",
           "requiresA5000",
           "extensionDiffersFromPrefixDefaults"
+        ],
+        "type": "object"
+      },
+      "SampleObjectFormatConversion": {
+        "additionalProperties": false,
+        "properties": {
+          "canConvertFormat": {
+            "type": "boolean"
+          },
+          "formatConversions": {
+            "items": {
+              "$ref": "#/components/schemas/SampleFormatConversionPreview"
+            },
+            "type": "array"
+          },
+          "kind": {
+            "enum": [
+              "SAMPLE",
+              "SAMPLE_BANK"
+            ],
+            "type": "string",
+            "x-axklib-application-enum": {
+              "SAMPLE": "sample",
+              "SAMPLE_BANK": "sample-bank"
+            }
+          },
+          "partitionIndex": {
+            "maximum": 7,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "payloadSha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "sampleFormat": {
+            "$ref": "#/components/schemas/SampleFormatMetadata"
+          },
+          "volumeName": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "payloadSha256",
+          "partitionIndex",
+          "volumeName",
+          "sampleFormat",
+          "canConvertFormat",
+          "formatConversions",
+          "reason"
         ],
         "type": "object"
       },
@@ -25281,6 +25926,7 @@
               "examples": {
                 "default": {
                   "value": {
+                    "acknowledgeSourceIssues": false,
                     "destination": {
                       "kind": "CREATE_VOLUME",
                       "partitionIndex": 0,
@@ -42006,6 +42652,65 @@
         "x-axklib-operation-ids": [
           "package.verify"
         ]
+      }
+    },
+    "/program-editor-catalog": {
+      "get": {
+        "operationId": "programEditorCatalog",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/ProgramEditorCatalog"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Program editor catalog",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Request could not be completed",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          }
+        },
+        "summary": "Bounded Program parameter domains and effect reset vectors"
       }
     },
     "/reports/coverage": {

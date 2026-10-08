@@ -2470,7 +2470,8 @@ TEST(PortablePackage, RelocationProfilesCoverEveryAdmittedObjectAndOnlyDeclaredB
         }
 
         auto unknown_changed = node.raw_payload;
-        unknown_changed[0x30U] ^= std::byte{0x01};
+        // Program class 0x30 is validated identity, not an opaque preservation lane.
+        unknown_changed[node.object_type == "PROG" ? 0x42U : 0x30U] ^= std::byte{0x01};
         const auto unknown_decoded = axk::decode_object(unknown_changed);
         ASSERT_TRUE(unknown_decoded) << node.object_type;
         const auto unknown_profile = axk::package_internal::build_relocation_profile(*unknown_decoded, unknown_changed);

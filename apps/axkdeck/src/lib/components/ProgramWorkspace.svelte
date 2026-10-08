@@ -18,6 +18,8 @@
     import Icon from './Icon.svelte';
     import ObjectContextMenu from './ObjectContextMenu.svelte';
     import ObjectSizeIdentity from './ObjectSizeIdentity.svelte';
+    import ProgramFormatBadge from '../../features/object-editor/ProgramFormatBadge.svelte';
+    import { programConversionTarget, programConversionTitle } from '../programFormatLabels';
 
     export type ProgramPresentation = 'single' | 'multi';
 
@@ -36,6 +38,7 @@
         onpartselect: (part: SystemProgramPart, program: Program | null) => void;
         objectRenameAvailable?: boolean;
         onrenameobject?: (target: ObjectRenameTarget) => void;
+        onconvertprogram?: (program: Program) => void;
         objectDeletionAvailable?: boolean;
         ondeleteobjects?: (objects: PackageExportObject[]) => void;
         programGenerationAvailable?: boolean;
@@ -64,6 +67,7 @@
         onpartselect,
         objectRenameAvailable = false,
         onrenameobject = () => undefined,
+        onconvertprogram,
         objectDeletionAvailable = false,
         ondeleteobjects = () => undefined,
         programGenerationAvailable = false,
@@ -177,7 +181,8 @@
     }
 
     function programFor(programNumber: number): Program | null {
-        return programs.find((program) => program.programNumber === programNumber) ?? null;
+        const matches = programs.filter((program) => program.programNumber === programNumber);
+        return matches.length === 1 ? matches[0]! : null;
     }
 
     function programSlot(programNumber: number): string {
@@ -185,6 +190,7 @@
     }
 
     function programName(programNumber: number, program: Program | null): string {
+        if (!program && programs.some((item) => item.programNumber === programNumber)) return 'Ambiguous Program slot';
         const slot = programSlot(programNumber);
         return program?.name ?? `Pgm ${slot}`;
     }
@@ -222,6 +228,11 @@
     }
 
     function navigatePrograms(event: KeyboardEvent, currentIndex: number): void {
+        if (event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey)) {
+            const program = filteredPrograms[currentIndex];
+            if (program) openMenu(event, program);
+            return;
+        }
         if (hasDisallowedNavigationModifier(event)) return;
         const targetIndex = linearNavigationIndex(
             event.key,
@@ -260,15 +271,16 @@
         return { kind: 'program', object: program.object, name: program.name, programNumber: program.programNumber };
     }
 
-    function openMenu(event: MouseEvent, program: Program): void {
-        if (!objectRenameAvailable && !objectDeletionAvailable && !packageExportAvailable) return;
+    function openMenu(event: MouseEvent | KeyboardEvent, program: Program): void {
+        if (!objectRenameAvailable && !objectDeletionAvailable && !packageExportAvailable && !onconvertprogram) return;
         event.preventDefault();
         const exported = exportProgram(program);
+        const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
         objectMenu = {
             program,
             objects: selection.items.some((item) => item.objectId === program.objectId) ? selection.items : [exported],
-            left: Math.max(8, Math.min(event.clientX, window.innerWidth - 180)),
-            top: Math.max(8, Math.min(event.clientY, window.innerHeight - 56)),
+            left: Math.max(8, Math.min('clientX' in event ? event.clientX : rect.left + 16, window.innerWidth - 180)),
+            top: Math.max(8, Math.min('clientY' in event ? event.clientY : rect.bottom, window.innerHeight - 56)),
         };
     }
 </script>
@@ -411,7 +423,11 @@
                 >
                     <span class="object-slot">{program.slot}</span>
                     <span class="program-identity">
-                        <ObjectSizeIdentity name={program.name} object={program.object} />
+                        <ObjectSizeIdentity
+                            name={program.name}
+                            object={program.object}
+                            metadata={program.assignmentSummary}
+                        />
                     </span>
                 </button>
             {:else}
@@ -446,6 +462,9 @@
                             <span class="program-multi-program">
                                 <span class="program-multi-program-slot">{programSlot(part.programNumber)}: </span>
                                 <strong>{programName(part.programNumber, assigned)}</strong>
+                                {#if assigned?.object.programFormat}<ProgramFormatBadge
+                                        format={assigned.object.programFormat}
+                                    />{/if}
                             </span>
                             <span class="program-multi-role">{part.master ? 'Master' : '—'}</span>
                         </button>
@@ -471,6 +490,13 @@
             ? () => onrenameobject(renameTarget(objectMenu!.program))
             : undefined}
         onexportpackage={packageExportAvailable ? () => onexportobjects(objectMenu!.objects) : undefined}
+        convertLabel={`${programConversionTitle(programConversionTarget(objectMenu.program.object.programFormat?.format))}...`}
+        onconvert={onconvertprogram &&
+        objectMenu.objects.length === 1 &&
+        objectMenu.program.object.programFormat?.structurallyValid &&
+        programConversionTarget(objectMenu.program.object.programFormat.format)
+            ? () => onconvertprogram!(objectMenu!.program)
+            : undefined}
         ondelete={objectDeletionAvailable ? () => ondeleteobjects(objectMenu!.objects) : undefined}
     />
 {/if}

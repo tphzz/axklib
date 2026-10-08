@@ -355,12 +355,18 @@ Result<PortablePackage> build_portable_graph(const MediaContainer &source,
 Result<PortablePackage> package_internal::build_graph(MediaKind source_kind, const ObjectCatalog &catalog,
                                                       std::span<const PackageRootSelector> root_selectors,
                                                       const CancellationToken &cancellation) {
+    return build_graph(source_kind, catalog, build_relationship_graph(catalog), root_selectors, cancellation);
+}
+
+Result<PortablePackage> package_internal::build_graph(MediaKind source_kind, const ObjectCatalog &catalog,
+                                                      const RelationshipGraph &graph,
+                                                      std::span<const PackageRootSelector> root_selectors,
+                                                      const CancellationToken &cancellation) {
     if (const auto checked = cancellation.check(); !checked)
         return std::unexpected{checked.error()};
     auto selected = select_roots(catalog, root_selectors);
     if (!selected)
         return std::unexpected{selected.error()};
-    const auto graph = build_relationship_graph(catalog);
     const auto objects = catalog_objects(catalog);
     return build_selected_graph(source_kind, *selected, graph, objects, cancellation);
 }

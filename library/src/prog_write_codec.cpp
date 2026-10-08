@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "axklib/bytes.hpp"
+#include "axklib/program_format_conversion_internal.hpp"
 #include "axklib/program_parameter_codec.hpp"
 
 namespace axk::detail {
@@ -68,20 +69,14 @@ Result<std::vector<std::byte>> prepare_prog_payload(const ProgramSpec &program) 
             return std::unexpected{written.error()};
         result[offset + 0x14U] = assignment.target_kind == "SBAC" ? std::byte{0x11} : std::byte{0x10};
     }
-    for (std::size_t index = 0; index < 6U; ++index) {
-        const auto offset = index < 3U ? 0x98U + index * 0x28U : tail + (index - 3U) * 0x28U;
+    for (std::size_t index = 0; index < 3U; ++index) {
+        const auto offset = 0x98U + index * 0x28U;
         result[offset] = std::byte{1};
         result[offset + 1U] = result[offset + 2U] = std::byte{127};
     }
-    constexpr std::array<std::uint8_t, 16> controls{0x5b, 8, 1, 32, 0x5d, 0x1a, 1, 32, 0x5e, 0x2c, 1, 32, 0, 0, 0, 0};
-    for (const auto offset : {std::size_t{0x110U}, tail + 0x78U})
-        std::ranges::transform(controls, result.begin() + static_cast<std::ptrdiff_t>(offset),
-                               [](auto value) { return static_cast<std::byte>(value); });
-    constexpr std::array<std::uint8_t, 14> ad_defaults{0xff, 0xff, 0, 0, 0, 1, 0x40, 0, 0x40, 0, 1, 0x40, 0, 0x40};
-    std::ranges::transform(ad_defaults, result.begin() + static_cast<std::ptrdiff_t>(tail + 0x88U),
-                           [](auto value) { return static_cast<std::byte>(value); });
-    std::fill_n(result.begin() + static_cast<std::ptrdiff_t>(tail + 0x96U), 16U, std::byte{64});
-    result[tail + 0xa6U] = std::byte{4};
+    const auto extension = program_extension_defaults();
+    std::ranges::copy(extension, result.begin() + static_cast<std::ptrdiff_t>(tail));
+    std::copy_n(extension.begin() + 0x78, 16U, result.begin() + 0x110);
     if (auto applied =
             apply_program_parameters(result, program.parameters, program.model, ProgramParameterWriteMode::fresh);
         !applied)

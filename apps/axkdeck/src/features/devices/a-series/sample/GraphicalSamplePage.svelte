@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { sampleSnapshot } from '../../../../lib/objectEditing';
     import GraphPanel from '../../../object-editor/GraphPanel.svelte';
     import ParameterGroups from '../../../object-editor/ParameterGroups.svelte';
     import type { ObjectEditorDocument } from '../../../object-editor/workflow.svelte';
@@ -20,7 +21,7 @@
     const view = $derived(sampleView(document));
     const scaling = $derived(page.id.endsWith('-scaling'));
     const graphFields = $derived(page.fields.filter((field) => field.key.includes('_scaling_')));
-    const blocked = $derived(blockedGraphParameters(document.detail!.editing!));
+    const blocked = $derived(blockedGraphParameters(sampleSnapshot(document.detail)!));
     const groups = $derived(
         scaling
             ? [
@@ -99,7 +100,7 @@
     {@const programSpeed = field.key === 'lfo.speed' && document.draft.values['lfo.wave'] === 3}
     {@const shelfWidth =
         field.key === 'sample_eq_width_tenths' &&
-        document.detail!.editing!.sampleFormat.format !== 'A3000_188' &&
+        sampleSnapshot(document.detail)!.sampleFormat.format !== 'A3000_188' &&
         document.draft.values.sample_eq_type !== 0}
     {@const filterInactive =
         !(document.draft instanceof BankDraft) &&
@@ -119,9 +120,9 @@
                   }
                 : field}
         draft={document.draft}
-        unavailableReason={document.detail?.editing?.unavailableParameters[field.key]?.message}
+        unavailableReason={sampleSnapshot(document.detail)?.unavailableParameters[field.key]?.message}
         disabled={disabled || blocked.includes(field.key) || shelfWidth || filterInactive}
-        blockedReason={parameterBlockReason(field.key, document.detail!.editing!)}
+        blockedReason={parameterBlockReason(field.key, sampleSnapshot(document.detail)!)}
         readOnlyText={programSpeed ? 'Program' : undefined}
         oninvalid={(message) => (document.inputErrors = { ...document.inputErrors, [field.key]: message })}
     />

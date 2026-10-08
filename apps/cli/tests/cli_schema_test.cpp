@@ -218,6 +218,30 @@ TEST(CliSchema, ProgramMetadataUsesSharedParameterGroupsBesideRawStorage) {
     EXPECT_TRUE(decoded.contains("raw_extended_parameter_block_hex"));
 }
 
+TEST(CliSchema, ProgramEffectTypesDistinguishStoredIdsFromRevisionOneLoadNormalization) {
+    for (const auto revision : {1U, 2U, 4U}) {
+        axk::CurrentProg program;
+        program.layout.version = revision;
+        if (revision == 4U)
+            program.layout.parameter_tail_offset = 0x2e0U;
+        axk::ProgEffectBlock block;
+        block.type = revision == 1U ? 0U : 47U;
+        block.raw_bytes[revision == 4U ? 6U : 7U] = std::byte{47};
+        program.effect_blocks.push_back(block);
+        object_schema::ObjectOutput object;
+        object.header.raw_type = "PROG";
+        object.decoded.payload = std::move(program);
+        object_schema::ObjectsOutput output{
+            .shape = object_schema::ContainerShape::media, .container_kind = "object", .objects = {std::move(object)}};
+        const auto serialized = object_schema::serialize(output, false);
+        ASSERT_TRUE(serialized);
+        const auto decoded = nlohmann::json::parse(*serialized)["objects"][0]["decoded"];
+        EXPECT_EQ(decoded.at("effect_type_interpretation"), revision == 1U ? "a3000-v2-and-later-load" : "stored");
+        EXPECT_EQ(decoded.at("effect_blocks").at(0).at("stored_type"), 47U);
+        EXPECT_EQ(decoded.at("effect_blocks").at(0).at("type"), revision == 1U ? 0U : 47U);
+    }
+}
+
 TEST(CliSchema, SerializationRejectsInvalidInternalUtf8) {
     schema::AlterationOutput output{
         .source_path_utf8 = std::string{"\xc3\x28", 2U},

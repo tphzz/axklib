@@ -6,6 +6,7 @@ import { bankValues, overrideKey } from './draft.svelte';
 
 export function bankEdit(detail: ObjectDetail, changes: EditorValues, values: EditorValues): BankParameterEdit {
     const snapshot = detail.editing!;
+    if (snapshot.profile !== 'a-series/sample-bank') throw new Error('Sample Bank editing is unavailable');
     const units = snapshot.bankOverrides!.units;
     const enabled = units.filter((unit) => values[overrideKey(unit.id)] === true);
     const parameters = sampleEdit(

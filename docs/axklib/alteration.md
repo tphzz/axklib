@@ -134,6 +134,13 @@ Unrepresentable parameters or uninterpreted data also block it. The operation
 does not freeze the bank, clear overrides, or convert its members implicitly.
 An already matching format is a byte-preserving no-op.
 
+`convert_prog_format` converts one Program between `a3000` and `a4000_a5000`.
+It selects the Program by `program_number` (1..128), requires
+`expected_payload_sha256`, preserves assignments and dependencies, and writes
+A3000 revision 2 or current revision 4. Unrepresentable settings block the
+whole transaction, including inactive settings. See [Program Formats](program-formats.md)
+for the manifest shape, preservation guarantees and conversion limits.
+
 `duplicate_sbnk` creates a standalone Sample in the source volume, pointing to
 the same Wave Data. It requires `sample_name`, `new_name`, and `parameters`,
 which may be empty. Optional parameter and playback-window edits use the update
@@ -148,8 +155,8 @@ transaction, including unresolved references that would otherwise attach to
 the new Sample. Allocation, validation, and insertion are atomic.
 
 `update_program_parameters` applies [Program-wide and guarded assignment
-parameter patches](program-parameters.md) to a current-layout Program. It
-requires an explicit A4000/A5000 model and at least one writable leaf. Assignment
+parameter patches](program-parameters.md) to a revision-2 or revision-4 Program. It
+requires an explicit matching model and at least one writable leaf. Assignment
 patches use a counted ordinal plus the expected stored target kind and name.
 It preserves object size, unused rows, opaque state, and all other objects;
 global and assignment edits are committed together or not at all.
@@ -171,7 +178,16 @@ Retargeting clears the old transient handle. The operation maintains target
 Program bitmaps, preserves existing unused capacity and the complete parameter
 tail, and grows allocation only when necessary. Stale payload identity,
 unresolved targets, inconsistent bitmaps, or allocation failure reject the
-whole transaction. Legacy Program conversion is not implicit.
+whole transaction. Revision 2 requires A3000; revision 4 requires A4000 or A5000.
+Storage conversion is never implicit. Counted empty rows can be retained without
+normalizing their bytes; they do not create target relationships. New assignments
+to bank-member Samples are rejected: assign the Sample Bank instead.
+
+An optional top-level `parameters` object patches Program-wide fields in the
+same transaction. Its sparse effect updates apply to the retained Program's
+effect types and words, not a freshly initialized Program. Assignment parameters
+belong in each row's `parameters` object. Native headers, spare capacity,
+trailing padding, unrelated objects and unchanged row bytes are preserved.
 
 `retarget_sample_wave_data` requires `volume_name`, `sample_name`, a new
 `waveform_name`, and `expected_payload_sha256` for the complete source Sample.

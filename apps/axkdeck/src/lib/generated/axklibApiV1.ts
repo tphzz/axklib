@@ -1523,6 +1523,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    '/program-editor-catalog': {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Bounded Program parameter domains and effect reset vectors */
+        get: operations['programEditorCatalog'];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     '/reports/coverage': {
         parameters: {
             query?: never;
@@ -1994,6 +2011,7 @@ export interface components {
                 | 'DUPLICATE_SBNK'
                 | 'CONVERT_SBNK_FORMAT'
                 | 'CONVERT_SBAC_FORMAT'
+                | 'CONVERT_PROG_FORMAT'
                 | 'UPDATE_SAMPLE_BANK_OVERRIDES';
             volumeName: string;
         };
@@ -2033,6 +2051,31 @@ export interface components {
         };
         /** @enum {string} */
         ASeriesLoadTarget: 'A3000' | 'A4000_A5000';
+        ASeriesProgramEditor: {
+            assignments: {
+                /** @enum {unknown} */
+                kind: 'SBNK' | 'SBAC' | 'UNKNOWN';
+                name: string;
+                ordinal: number;
+                targetObjectId: string | null;
+            }[];
+            editable: boolean;
+            /** @enum {unknown} */
+            model: 'A3000' | 'A5000';
+            partitionIndex: number;
+            payloadSha256: string;
+            /** @constant */
+            profile: 'a-series/program';
+            programName: string;
+            programNumber: number | null;
+            reason: string;
+            storageRevision: number;
+            targets: components['schemas']['ProgramEditorTarget'][];
+            values: {
+                [key: string]: number | boolean;
+            };
+            volumeName: string;
+        };
         ASeriesSampleEditor: {
             bankOverrides?: {
                 members: {
@@ -2063,7 +2106,7 @@ export interface components {
             partitionIndex: number;
             payloadSha256: string;
             playbackWindow: components['schemas']['SamplePlaybackWindow'];
-            profile: string;
+            profile: 'a-series/sample' | 'a-series/sample-bank';
             reason: string;
             sampleFormat: components['schemas']['SampleFormatMetadata'];
             sources: {
@@ -2565,12 +2608,20 @@ export interface components {
             /** @default false */
             overwrite: boolean;
         };
+        FloppyImportFileSource: {
+            memberName: string;
+            path: string;
+            sizeBytes: number;
+        };
         FloppyImportInspection: {
+            canImport: boolean;
             complete: boolean;
             excludedFiles: {
                 memberName: string;
                 path: string;
+                reason: string;
                 sizeBytes: number;
+                unreadableObject: boolean;
             }[];
             /** @enum {string} */
             format: 'A_SERIES' | 'SU700' | 'TX16W' | 'UNKNOWN';
@@ -2586,6 +2637,8 @@ export interface components {
             }[];
             nextRequiredIndex: number | null;
             objects: components['schemas']['FloppyImportObject'][];
+            recoveryUsed: boolean;
+            requiresAcknowledgement: boolean;
         };
         FloppyImportInspectionReleaseRequest: {
             inspectionToken: string;
@@ -2602,6 +2655,7 @@ export interface components {
             objectType: 'PROG' | 'SBAC' | 'SBNK' | 'SMPL' | 'SEQU' | 'PRF3' | 'UNKNOWN';
             requiredObjectKeys: string[];
             sizeBytes: number;
+            sources: components['schemas']['FloppyImportFileSource'][];
         };
         FloppyImportSource:
             | components['schemas']['FilesystemFileInput']
@@ -3096,6 +3150,7 @@ export interface components {
             supportedImports: ('SU700_FLOPPY' | 'FAT_FLOPPY_CONTENTS')[];
         };
         ImageFloppyImportPlanRequest: {
+            acknowledgeSourceIssues: boolean;
             capacityPolicy?: components['schemas']['VolumeCapacityPolicy'];
             destination: components['schemas']['ImageSessionPackageImportDestination'];
             expectedRevision: number;
@@ -3210,7 +3265,8 @@ export interface components {
             warnings: components['schemas']['Issue'][];
         };
         ImageObjectDetail: {
-            editing?: components['schemas']['ASeriesSampleEditor'] | null;
+            editing?:
+                components['schemas']['ASeriesSampleEditor'] | components['schemas']['ASeriesProgramEditor'] | null;
             formatConversion?: components['schemas']['ObjectFormatConversion'] | null;
             image: {
                 format: string;
@@ -3247,7 +3303,7 @@ export interface components {
             recordSizeOrHeaderUsed0x18: number;
         };
         ImageObjectDetailObject: {
-            /** @description Type-specific decoded metadata with raw storage. PROG parameters and assignment parameters use the shared authoring parameter names (snake_case, numbered maps). Omitted semantic leaves have unavailable or unsupported encodings; inactive known values remain present. Raw blocks and rows retain all stored bytes. Decoded values do not imply authoring support for a target model. */
+            /** @description Type-specific decoded metadata with raw storage. PROG parameters and assignment parameters use the shared authoring parameter names (snake_case, numbered maps). PROG effectBlocks retain storedType separately from type. effectTypeInterpretation is a3000-v2-and-later-load for revision 1 (type and typed effects use later-loader normalization, not original V1 playback), otherwise stored. Omitted semantic leaves have unavailable or unsupported encodings; inactive known values remain present. Raw blocks and rows retain all stored bytes. Decoded values do not imply authoring support for a target model. */
             decoded: {
                 kind: string;
             } & {
@@ -3265,6 +3321,7 @@ export interface components {
             placementCandidates: components['schemas']['ImageObjectDetailPlacement'][];
             /** @enum {string} */
             placementResolution: 'EXACT' | 'MISSING' | 'AMBIGUOUS';
+            programFormat: components['schemas']['ProgramFormatMetadata'] | null;
             sampleFormat: components['schemas']['SampleFormatMetadata'] | null;
             scopeKey: string;
             sfsId: number;
@@ -3320,6 +3377,7 @@ export interface components {
             name: string;
             partitionIndex: number | null;
             partitionName: string;
+            programFormat: components['schemas']['ProgramFormatMetadata'] | null;
             sampleFormat: components['schemas']['SampleFormatMetadata'] | null;
             sequence: components['schemas']['SequenceMetadata'] | null;
             /** @description Complete stored object file or record size, including object metadata and stored payload bytes. */
@@ -4465,15 +4523,8 @@ export interface components {
         MidiInspectionRequest: {
             source: components['schemas']['InputRef'];
         };
-        ObjectFormatConversion: {
-            canConvertFormat: boolean;
-            formatConversions: components['schemas']['SampleFormatConversionPreview'][];
-            partitionIndex: number;
-            payloadSha256: string;
-            reason: string;
-            sampleFormat: components['schemas']['SampleFormatMetadata'];
-            volumeName: string;
-        };
+        ObjectFormatConversion:
+            components['schemas']['SampleObjectFormatConversion'] | components['schemas']['ProgramFormatConversion'];
         ObjectsRequest: {
             destination: components['schemas']['DirectoryRef'];
             /** @default false */
@@ -4823,6 +4874,90 @@ export interface components {
         PlanTokenRequest: {
             planToken: string;
         };
+        ProgramEditorCatalog: {
+            formats: components['schemas']['ProgramEditorFormat'][];
+            /** @constant */
+            schemaVersion: 1;
+        };
+        ProgramEditorFormat: {
+            effects: {
+                id: number;
+                label: string;
+                parameters: {
+                    editable: boolean;
+                    index: number;
+                    label: string;
+                    max: number;
+                    min: number;
+                }[];
+                printedNumber: number;
+                resetWords: number[];
+            }[];
+            fields: {
+                allowedValues?: number[];
+                boolean?: boolean;
+                defaultValue?: number | boolean;
+                key: string;
+                max: number;
+                min: number;
+            }[];
+            /** @enum {unknown} */
+            model: 'A3000' | 'A5000';
+        };
+        ProgramEditorTarget: {
+            assignable: boolean;
+            available: boolean;
+            /** @enum {unknown} */
+            kind: 'SBNK' | 'SBAC';
+            members: {
+                name: string;
+                objectId: string | null;
+            }[];
+            name: string;
+            objectId: string;
+            overrideKeys: string[];
+            reason: string;
+            values: {
+                [key: string]: number | boolean;
+            };
+        };
+        ProgramFormatConversion: {
+            canConvertFormat: boolean;
+            formatConversions: components['schemas']['ProgramFormatConversionPreview'][];
+            /** @enum {string} */
+            kind: 'PROGRAM';
+            partitionIndex: number;
+            payloadSha256: string;
+            programFormat: components['schemas']['ProgramFormatMetadata'];
+            programName: string;
+            programNumber: number | null;
+            reason: string;
+            volumeName: string;
+        };
+        ProgramFormatConversionIssue: {
+            key: string;
+            message: string;
+            storedValue: number | null;
+        };
+        ProgramFormatConversionPreview: {
+            allowed: boolean;
+            blockers: components['schemas']['ProgramFormatConversionIssue'][];
+            changes: string[];
+            /** @enum {string} */
+            targetFormat: 'A3000' | 'A4000_A5000';
+        };
+        ProgramFormatMetadata: {
+            assignmentCapacity: number | null;
+            format: components['schemas']['ProgramStorageFormat'];
+            headerRevision: number;
+            logicalSize: number | null;
+            /** @enum {integer|null} */
+            parameterTailBytes: 0 | 176 | null;
+            storedAssignmentCount: number | null;
+            structurallyValid: boolean;
+        };
+        /** @enum {string} */
+        ProgramStorageFormat: 'UNKNOWN' | 'A3000' | 'A4000_A5000';
         ReadinessResponse: {
             data: {
                 checks: {
@@ -4945,6 +5080,17 @@ export interface components {
             parameterIssues: components['schemas']['SampleParameterIssue'][];
             requiresA5000: boolean;
             structurallyValid: boolean;
+        };
+        SampleObjectFormatConversion: {
+            canConvertFormat: boolean;
+            formatConversions: components['schemas']['SampleFormatConversionPreview'][];
+            /** @enum {string} */
+            kind: 'SAMPLE' | 'SAMPLE_BANK';
+            partitionIndex: number;
+            payloadSha256: string;
+            reason: string;
+            sampleFormat: components['schemas']['SampleFormatMetadata'];
+            volumeName: string;
         };
         SampleParameterCapability: {
             a3000: components['schemas']['SampleParameterDomain'] | null;
@@ -14052,6 +14198,39 @@ export interface operations {
             };
             /** @description Contained internal failure */
             500: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+        };
+    };
+    programEditorCatalog: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Program editor catalog */
+            200: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': {
+                        data: components['schemas']['ProgramEditorCatalog'];
+                    };
+                };
+            };
+            /** @description Request could not be completed */
+            default: {
                 headers: {
                     'X-Request-Id': components['headers']['XRequestId'];
                     [name: string]: unknown;

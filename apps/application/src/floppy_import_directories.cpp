@@ -6,6 +6,7 @@
 #include <expected>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
 #include <utility>
@@ -114,6 +115,8 @@ Result<FloppyDirectorySources> open_floppy_directories(const Json &sources, cons
                     invalid("This folder mixes disk contents and nested folders; select one disk source."));
             result.members.push_back({directory.relative_path, std::move(direct->second)});
         } else {
+            std::map<std::uint16_t, FloppySetMarker> sequence;
+            std::optional<std::string> set_name;
             for (auto &[name, entries] : groups) {
                 if (name.empty())
                     continue;
@@ -121,8 +124,18 @@ Result<FloppyDirectorySources> open_floppy_directories(const Json &sources, cons
                 if (!member || !member->disk_identity().trusted_for_disk_set)
                     return std::unexpected(
                         invalid("Select a disk folder or a parent containing one catalog-identified companion set."));
+                const auto &identity = member->disk_identity();
+                if ((set_name && *set_name != identity.set_name) ||
+                    !sequence.emplace(identity.index, identity.marker).second)
+                    return std::unexpected(
+                        invalid("Automatically discovered disk folders have conflicting set identities."));
+                set_name = identity.set_name;
                 result.members.push_back({directory.relative_path + "/" + name, std::move(entries)});
             }
+            for (const auto &[index, marker] : sequence)
+                if (index != sequence.rbegin()->first && marker != FloppySetMarker::continuation)
+                    return std::unexpected(
+                        invalid("Automatically discovered disk folders have inconsistent set markers."));
         }
         if (result.members.size() > FloppyDiskSet::maximum_members)
             return std::unexpected(invalid("Select at most 32 companion disk folders."));

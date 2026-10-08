@@ -23,7 +23,7 @@ describe('editor autocomplete', () => {
         await fireEvent.input(input, { target: { value: 'Later' } });
         const option = view.getByRole('option', { name: 'Later function' });
         expect(option.querySelector('.editor-option-label .extended-parameter')).not.toBeNull();
-        expect(option.title).toBe('Later function');
+        expect(option.title).toBe('Later function: Requires a4k/a5k format.');
         await fireEvent.click(option);
         expect(onchange).toHaveBeenCalledWith(1);
         await view.rerender({ value: 1 });

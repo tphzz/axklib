@@ -11,10 +11,12 @@
 #include "axklib/export.hpp"
 #include "axklib/relationship.hpp"
 #include "axklib/sfs.hpp"
+#include "axklib/validation.hpp"
 
 namespace axk {
 
 class MediaContainer;
+struct MediaInventory;
 
 enum class ContentScopeRole : std::uint8_t {
     contained,
@@ -86,14 +88,16 @@ struct WaveformOrphanReport {
     std::size_t ambiguous_or_unresolved_count{};
 };
 
-enum class ValidationSeverity : std::uint8_t { info, warning, error };
-
 struct ValidationIssue {
     std::string code;
     ValidationSeverity severity{ValidationSeverity::error};
     std::string message;
     std::string sampler_path;
     std::string object_key;
+    std::string scope{"relationship"};
+    std::string quality{"Known"};
+    std::string basis{"validation"};
+    std::string recommended_next_check{};
 };
 
 struct CoverageSummary {
@@ -123,6 +127,8 @@ AXK_API ContentTree build_content_tree(std::string source_path, const ObjectCata
 AXK_API WaveformOrphanReport analyze_waveform_orphans(const Container &container, const ObjectCatalog &catalog,
                                                       const RelationshipGraph &graph);
 AXK_API ValidationReport validate_semantics(const Container &container, const ObjectCatalog &catalog,
+                                            const RelationshipGraph &graph);
+AXK_API ValidationReport validate_semantics(const MediaContainer &container, const MediaInventory &inventory,
                                             const RelationshipGraph &graph);
 AXK_API std::vector<ValidationIssue> validate_program_bitmaps(const ObjectCatalog &catalog,
                                                               const RelationshipGraph &graph);

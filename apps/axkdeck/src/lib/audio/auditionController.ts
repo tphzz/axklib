@@ -11,12 +11,19 @@ import type {
     AuditionSequenceResult,
     AuditionState,
     CachedAudition,
-    PlaybackDescriptor,
     PlaybackRun,
 } from './auditionTypes';
 import { planDirectPlayback } from './directPlaybackSchedule';
 import { bufferLevelSummary } from './bufferLevels';
 import { audibleContextTime, finishAfterOutput } from './audibleCompletion';
+import type {
+    ActivePlayback,
+    ActiveSequence,
+    SequenceCompletion,
+    OutputContextAccess,
+    ScheduledSequenceSegment,
+} from './auditionPlaybackState';
+import { HeldVoices, type PrepareVoices } from './heldVoices';
 
 export type {
     AuditionControllerOptions,
@@ -24,48 +31,6 @@ export type {
     AuditionSequenceResult,
     AuditionState,
 } from './auditionTypes';
-
-interface ActivePlayback {
-    entry: CachedAudition;
-    source: AudioBufferSourceNode;
-    gain: GainNode;
-    startFrame: number;
-    startTime: number;
-    endTime: number;
-    cancelCompletion?: () => void;
-    timelineDescriptor: PlaybackDescriptor;
-    animationFrame?: number;
-}
-
-interface ScheduledSequenceSegment {
-    entry: CachedAudition;
-    source: AudioBufferSourceNode;
-    startTime: number;
-    endTime: number;
-    startFrame: number;
-    timelineDescriptor: PlaybackDescriptor;
-}
-
-interface ActiveSequence {
-    segments: ScheduledSequenceSegment[];
-    gain: GainNode;
-    completionGeneration: number;
-    animationFrame?: number;
-    displayedObjectId?: string;
-    cancelCompletion?: () => void;
-}
-
-interface SequenceCompletion {
-    generation: number;
-    memberCount: number;
-    oncomplete: (result: AuditionSequenceResult) => void;
-}
-
-interface OutputContextAccess {
-    context: AudioContext;
-    reused: boolean;
-    creationDurationMs: number;
-}
 
 const startLeadSeconds = 0.01;
 const fadeSeconds = 0.005;
@@ -92,6 +57,7 @@ export class AuditionController {
     private generation = 0;
     private sequenceGeneration = 0;
     private run?: PlaybackRun;
+    private readonly voices: HeldVoices;
 
     constructor(
         private readonly transport: ImageTransport,
@@ -101,6 +67,20 @@ export class AuditionController {
         options: AuditionControllerOptions = {},
     ) {
         this.assets = new AuditionAssetStore(transport, (run, event, fields) => this.emit(run, event, fields), options);
+        this.voices = new HeldVoices(
+            () => this.ensureContext().context,
+            () => {
+                void this.stop();
+            },
+            update,
+        );
+    }
+
+    playVoices(sessionId: number, objectId: string, token: string, prepare: PrepareVoices): Promise<void> {
+        return this.voices.play(sessionId, objectId, token, prepare);
+    }
+    releaseVoices(token: string): void {
+        this.voices.stop(token);
     }
 
     async prefetch(sessionId: number, objectId: string): Promise<void> {
@@ -292,7 +272,8 @@ export class AuditionController {
         if (
             this.active?.entry.sessionId === sessionId ||
             this.sequence?.segments.some((segment) => segment.entry.sessionId === sessionId) ||
-            this.assets.hasActiveRequestForSession(sessionId)
+            this.assets.hasActiveRequestForSession(sessionId) ||
+            this.voices.sessionId === sessionId
         ) {
             await this.stop();
         }
@@ -544,6 +525,7 @@ export class AuditionController {
     }
 
     private releaseActive(reason: string): void {
+        this.voices.stop();
         const active = this.active;
         if (!active) return;
         this.active = undefined;

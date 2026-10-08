@@ -1,9 +1,11 @@
 <script lang="ts">
+    import { sampleSnapshot } from '../../../../lib/objectEditing';
     import type { ObjectEditorDocument } from '../../../object-editor/workflow.svelte';
     import type { SamplePage, SampleField } from './fields';
     import { pageGroups } from './pageGroups';
     import ParameterField from './ParameterField.svelte';
     import VelocityRange from './VelocityRange.svelte';
+    import SampleMapping from './SampleMapping.svelte';
     import GraphicalSamplePage from './GraphicalSamplePage.svelte';
     import { parameterBlockReason, parameterInactiveReason } from './parameterAvailability';
     import ControlPage from './ControlPage.svelte';
@@ -17,7 +19,7 @@
     );
     const blocked = (field: SampleField) =>
         disabled ||
-        (document.detail?.editing?.blockedParameters.includes(field.key) ?? true) ||
+        (sampleSnapshot(document.detail)?.blockedParameters.includes(field.key) ?? true) ||
         (!(document.draft instanceof BankDraft) && !!parameterInactiveReason(field.key, document.draft.values));
     let width = $state(initialEditorWidth());
     const columns = $derived(width >= 984 ? 3 : width >= 652 ? 2 : 1);
@@ -55,14 +57,15 @@
                         fields={group.fields}
                         {disabled}
                     />{:else}
-                    {#each group.fields as field (field.key)}
+                    {#each group.fields.filter((field) => !(document.draft instanceof BankDraft && page.id === 'mix-key' && ['root_key', 'key_low', 'key_high'].includes(field.key))) as field (field.key)}
                         <ParameterField
                             {field}
                             draft={document.draft}
-                            unavailableReason={document.detail?.editing?.unavailableParameters[field.key]?.message}
+                            unavailableReason={sampleSnapshot(document.detail)?.unavailableParameters[field.key]
+                                ?.message}
                             disabled={blocked(field)}
                             blockedReason={parameterInactiveReason(field.key, document.draft.values) ||
-                                parameterBlockReason(field.key, document.detail!.editing!)}
+                                parameterBlockReason(field.key, sampleSnapshot(document.detail)!)}
                             oninvalid={(message) =>
                                 (document.inputErrors = { ...document.inputErrors, [field.key]: message })}
                         />
@@ -70,6 +73,9 @@
                 {/if}
             </section>
         {/each}
+        {#if page.id === 'mix-key'}
+            <div class="mapping-row"><SampleMapping {document} {disabled} /></div>
+        {/if}
     </div>
 {/if}
 
@@ -79,6 +85,12 @@
         gap: var(--density-section-gap, 12px);
         align-content: start;
         justify-content: start;
+    }
+    .mapping-row {
+        grid-column: 1 / -1;
+        min-width: 0;
+        /* The mapping component already supplies its vertical spacing. */
+        margin-top: calc(-1 * var(--density-section-gap, 12px));
     }
     section {
         min-width: 0;

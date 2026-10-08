@@ -1,9 +1,15 @@
 #include "axklib/application/sample_formats.hpp"
+#include "axklib/application/program_formats.hpp"
 
 #include <algorithm>
+#include <cstddef>
+#include <optional>
+#include <span>
 #include <string>
+#include <vector>
 
 #include "axklib/package_archive.hpp"
+#include "axklib/sample_bank_overrides.hpp"
 #include "axklib/sample_format_conversion.hpp"
 #include "axklib/sample_format_conversion_internal.hpp"
 
@@ -27,17 +33,28 @@ Json domain(const std::optional<SampleParameterLocation> &location) {
             {"offset", location->offset},
             {"mask", location->mask}};
 }
-Json format_metadata(const SampleStorageInfo &storage, std::span<const std::byte> block) {
+Json format_metadata(const SampleStorageInfo &storage, std::span<const std::byte> block,
+                     const CurrentSbac *bank = nullptr) {
     auto issues = Json::array();
     bool a5000 = false;
     Json extension_differs = nullptr;
     if (storage.structurally_valid) {
         const auto generation = sample_parameter_generation(storage.format);
         block = block.first(*storage.parameter_bytes);
-        issues = issues_json(assess_sample_parameter_block(block, *generation));
+        std::vector<std::string> active_keys;
+        if (bank)
+            for (const auto &unit : sample_bank_override_units(*generation))
+                if (std::ranges::any_of(unit.selectors, [&](auto selector) {
+                        return (bank->override_enable_words[selector / 32U] & (1U << (selector % 32U))) != 0U;
+                    }))
+                    active_keys.insert(active_keys.end(), unit.keys.begin(), unit.keys.end());
+        const auto active = [&](const auto &key) { return !bank || std::ranges::contains(active_keys, key); };
+        auto parameter_issues = assess_sample_parameter_block(block, *generation);
+        std::erase_if(parameter_issues, [&](const auto &issue) { return !active(issue.key); });
+        issues = issues_json(parameter_issues);
         if (storage.format == SampleStorageFormat::a4000_a5000_224) {
             for (const auto &rule : sample_parameter_rules())
-                if (rule.a4000_a5000 && rule.a4000_a5000->a5000_minimum) {
+                if (active(rule.key) && rule.a4000_a5000 && rule.a4000_a5000->a5000_minimum) {
                     const auto value = read_sample_parameter_value(block, *rule.a4000_a5000);
                     a5000 = a5000 || (value && sample_parameter_value_allowed(*rule.a4000_a5000, *value) &&
                                       *value >= *rule.a4000_a5000->a5000_minimum);
@@ -65,7 +82,11 @@ Json sample_format_metadata(const CurrentSbnk &sample) {
 }
 
 Json sample_format_metadata(const CurrentSbac &bank) {
-    return format_metadata(bank.storage, bank.raw_sample_parameter_block);
+    auto result = format_metadata(bank.storage, bank.raw_sample_parameter_block, &bank);
+    if (bank.storage.structurally_valid && !sample_bank_override_state_supported(bank))
+        result["diagnostics"].push_back(
+            "Stored bank override selectors are not supported; the raw state is preserved.");
+    return result;
 }
 
 static Json parameter_capabilities(const SampleStorageInfo &storage, std::span<const std::byte> parameters) {
@@ -122,10 +143,11 @@ Json object_format_conversion(const ObjectSnapshot &snapshot, std::span<const st
     const auto *bank = std::get_if<CurrentSbac>(&snapshot.object.payload);
     const auto *sample = std::get_if<CurrentSbnk>(&snapshot.object.payload);
     if (!bank && !sample)
-        return nullptr;
+        return program_format_conversion(snapshot, payload, writable);
     const auto &storage = bank ? bank->storage : sample->storage;
     const bool supported = writable && snapshot.placement.has_value() && storage.structurally_valid;
-    return {{"payloadSha256", package_internal::hex_digest(package_internal::sha256(payload))},
+    return {{"kind", bank ? "sample-bank" : "sample"},
+            {"payloadSha256", package_internal::hex_digest(package_internal::sha256(payload))},
             {"partitionIndex", snapshot.partition.value},
             {"volumeName", snapshot.placement ? snapshot.placement->volume_name : ""},
             {"sampleFormat", bank ? sample_format_metadata(*bank) : sample_format_metadata(*sample)},

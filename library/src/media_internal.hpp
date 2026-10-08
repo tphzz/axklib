@@ -59,6 +59,7 @@ using FloppyPrefixReader = std::function<Result<std::vector<std::byte>>(std::siz
 [[nodiscard]] bool unsafe_component(std::string_view value);
 [[nodiscard]] Result<MediaDecode> decode_media_object(std::span<const std::byte> bytes, std::uint64_t stored_size);
 [[nodiscard]] std::string object_category(ObjectType type);
+[[nodiscard]] ObjectCatalog catalog_from_media_objects(std::vector<MediaObject> objects);
 [[nodiscard]] FloppyCatalogInspection inspect_yamaha_floppy_catalog(const FatImage &image,
                                                                     const CancellationToken &cancellation);
 

@@ -46,7 +46,7 @@ export function formatField(field: SampleField, snapshot?: SampleEditingSnapshot
                           const a5000 = capability.a5000Minimum !== null && option.value >= capability.a5000Minimum;
                           return {
                               ...option,
-                              label: `${option.label}${a5000 && !option.label.includes('(A5000)') ? ' (A5000)' : ''}`,
+                              a5000Only: a5000,
                               extended: laterOnly,
                               disabled: !allowed,
                               reason: allowed

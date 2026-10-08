@@ -5,8 +5,10 @@
     let { sessionId, ...props }: ComponentProps<typeof ObjectEditor> & { sessionId: number | null } = $props();
 </script>
 
-{#if props.selection?.kind === 'sample' || props.selection?.kind === 'sample-bank'}
-    <DeviceEditorHost {sessionId} selection={props.selection} />
+{#if props.selection?.kind === 'sample' || props.selection?.kind === 'sample-bank' || props.selection?.kind === 'program'}
+    <DeviceEditorHost {sessionId} {...props}>
+        {#snippet fallback()}<ObjectEditor {...props} />{/snippet}
+    </DeviceEditorHost>
 {:else}
     <ObjectEditor {...props} />
 {/if}

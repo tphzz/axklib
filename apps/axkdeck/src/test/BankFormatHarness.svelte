@@ -3,7 +3,7 @@
     import type { SampleStructureItem } from '../lib/types';
     import type { ObjectFormatConversionRequest, SampleStorageFormat } from '../lib/objectEditing';
     import { ObjectEditorWorkflow } from '../features/object-editor/workflow.svelte';
-    import SampleFormatDialog from '../features/object-editor/SampleFormatDialog.svelte';
+    import ObjectFormatDialog from '../features/object-editor/ObjectFormatDialog.svelte';
     import SampleFormatDetails from '../features/object-editor/SampleFormatDetails.svelte';
     import SampleCollectionHarness from './SampleCollectionHarness.svelte';
     import { sampleConversionFixture, sampleFormatFixture } from './sampleFormatFixture';
@@ -48,7 +48,10 @@
     }
     const members = [item('Native member', 'A3000_188'), item('Later member', 'A4000_A5000_224')];
     function detail(): ObjectDetail {
-        const capability = sampleConversionFixture(format, { payloadSha256: String(writes + 1).repeat(64) });
+        const capability = sampleConversionFixture(format, {
+            kind: 'SAMPLE_BANK',
+            payloadSha256: String(writes + 1).repeat(64),
+        });
         if (blocked) {
             capability.formatConversions[0]!.allowed = false;
             capability.formatConversions[0]!.blockers = [
@@ -105,7 +108,7 @@
     <output aria-label="Conversion writes">{writes}</output>
     <output aria-label="Workspace status">{status}</output>
 </main>
-{#if workflow.conversionDocument}<SampleFormatDialog {workflow} document={workflow.conversionDocument} />{/if}
+{#if workflow.conversionDocument}<ObjectFormatDialog {workflow} document={workflow.conversionDocument} />{/if}
 
 <style>
     main {

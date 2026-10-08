@@ -14,14 +14,15 @@
 
 namespace {
 
-std::vector<std::byte> assignments(std::uint16_t count = 3, std::size_t capacity = 8) {
-    const auto size = 0x120U + 0x38U * capacity + 0xb0U;
+std::vector<std::byte> assignments(std::uint16_t count = 3, std::size_t capacity = 8, std::uint32_t version = 4U) {
+    const auto size = 0x120U + 0x38U * capacity + (version == 4U ? 0xb0U : 0U);
     std::vector<std::byte> result(size + 64U, std::byte{0xa5});
     axk::ByteWriter writer{result};
     EXPECT_TRUE(writer.write_ascii_field(0, 16, "FSFSDEV3SPLXPROG"));
-    EXPECT_TRUE(writer.write_be32(0x14, 4));
-    EXPECT_TRUE(writer.write_be32(0x18, static_cast<std::uint32_t>(size - 0xe0U)));
-    EXPECT_TRUE(writer.write_be32(0x1c, static_cast<std::uint32_t>(size - 0x30U)));
+    EXPECT_TRUE(writer.write_be32(0x14, version));
+    EXPECT_TRUE(writer.write_be32(0x18, static_cast<std::uint32_t>(size - (version == 4U ? 0xe0U : 0x30U))));
+    EXPECT_TRUE(writer.write_be32(0x1c, version == 4U ? static_cast<std::uint32_t>(size - 0x30U) : 0U));
+    EXPECT_TRUE(writer.write_u8(0x30, 0x14));
     EXPECT_TRUE(writer.write_be16(0x96, count));
     for (std::size_t index = 0; index < count; ++index) {
         const auto row = 0x120U + index * 0x38U;
@@ -158,5 +159,123 @@ TEST(ProgramAssignments, ReceiveChannelsAreTypedAndModelBounded) {
         EXPECT_FALSE(
             axk::detail::apply_program_assignment_patches(payload, std::array{patch}, axk::ASeriesModel::a5000));
         EXPECT_EQ(payload, before);
+    }
+}
+
+TEST(ProgramAssignments, NativeOutputsUseTheirOwnLanesAndPreserveDormantRows) {
+    auto payload = assignments(3, 8, 2U);
+    auto patch = patch_for(1);
+    patch.parameters.output1 = 4;
+    patch.parameters.output2 = 5;
+    patch.parameters.output1_level_offset = -12;
+    patch.parameters.output2_level_offset = 34;
+    auto expected = payload;
+    constexpr auto row = 0x120U + 0x38U;
+    expected[row + 0x2dU] = std::byte{4};
+    expected[row + 0x2eU] = std::byte{0xf4};
+    expected[row + 0x30U] = std::byte{5};
+    expected[row + 0x31U] = std::byte{34};
+    ASSERT_TRUE(axk::detail::apply_program_assignment_patches(payload, std::array{patch}, axk::ASeriesModel::a3000));
+    EXPECT_EQ(payload, expected);
+    ASSERT_TRUE(axk::detail::apply_program_assignment_patches(payload, std::array{patch}, axk::ASeriesModel::a3000));
+    EXPECT_EQ(payload, expected);
+    const auto decoded = axk::decode_object(payload);
+    ASSERT_TRUE(decoded);
+    const auto &parameters = std::get<axk::CurrentProg>(decoded->payload).assignments[1].parameters;
+    EXPECT_EQ(parameters.output1, 4);
+    EXPECT_EQ(parameters.output2, 5);
+    EXPECT_EQ(parameters.output1_level_offset, -12);
+    EXPECT_EQ(parameters.output2_level_offset, 34);
+}
+
+TEST(ProgramAssignments, NativeInvalidLaterRowRejectsTheEntirePatchSet) {
+    const auto original = assignments(3, 8, 2U);
+    auto first = patch_for(0);
+    first.parameters.level_offset = 12;
+    std::array<axk::ProgramAssignmentParameters, 5> invalid{};
+    invalid[0].output1 = 5;
+    invalid[1].output2 = 6;
+    invalid[2].receive = axk::ProgramReceiveChannel{axk::MidiPort::b, 1};
+    invalid[3].high_velocity_crossfade_offset = 5;
+    invalid[4].velocity_sensitivity_offset = 0;
+    for (const auto &parameters : invalid) {
+        auto payload = original;
+        auto second = patch_for(1);
+        second.parameters = parameters;
+        EXPECT_FALSE(axk::detail::apply_program_assignment_patches(payload, std::array{first, second},
+                                                                   axk::ASeriesModel::a3000));
+        EXPECT_EQ(payload, original);
+    }
+}
+
+TEST(ProgramAssignments, NativeVelocityCrossfadePacksOnlyTheUpperTwoBits) {
+    for (const auto setting : {axk::ProgramInheritableSwitch::inherit, axk::ProgramInheritableSwitch::off,
+                               axk::ProgramInheritableSwitch::on}) {
+        SCOPED_TRACE(static_cast<int>(setting));
+        auto payload = assignments(3, 8, 2U);
+        auto patch = patch_for(1);
+        patch.parameters.velocity_crossfade = setting;
+        auto expected = payload;
+        constexpr auto row = 0x120U + 0x38U;
+        const auto packed = setting == axk::ProgramInheritableSwitch::inherit ? 3U : static_cast<unsigned>(setting);
+        expected[row + 0x23U] = static_cast<std::byte>(0x25U | (packed << 6U));
+        ASSERT_TRUE(
+            axk::detail::apply_program_assignment_patches(payload, std::array{patch}, axk::ASeriesModel::a3000));
+        EXPECT_EQ(payload, expected);
+        const auto decoded = axk::decode_object(payload);
+        ASSERT_TRUE(decoded);
+        const auto &parameters = std::get<axk::CurrentProg>(decoded->payload).assignments[1].parameters;
+        EXPECT_EQ(parameters.velocity_crossfade, setting);
+        EXPECT_FALSE(parameters.high_velocity_crossfade_offset);
+        EXPECT_FALSE(parameters.low_velocity_crossfade_offset);
+    }
+}
+
+TEST(ProgramAssignments, NativeVelocityCrossfadeRejectsReservedValueAtomically) {
+    auto payload = assignments(3, 8, 2U);
+    const auto original = payload;
+    auto first = patch_for(0);
+    first.parameters.level_offset = 12;
+    auto second = patch_for(1);
+    second.parameters.velocity_crossfade = static_cast<axk::ProgramInheritableSwitch>(2);
+    EXPECT_FALSE(
+        axk::detail::apply_program_assignment_patches(payload, std::array{first, second}, axk::ASeriesModel::a3000));
+    EXPECT_EQ(payload, original);
+    const auto decoded = axk::decode_object(payload);
+    ASSERT_TRUE(decoded);
+    EXPECT_FALSE(std::get<axk::CurrentProg>(decoded->payload).assignments[1].parameters.velocity_crossfade);
+}
+
+TEST(ProgramAssignments, CurrentVelocityCrossfadeUsesIndependentOffsetsNotTheNativeSwitch) {
+    auto payload = assignments();
+    const auto original = payload;
+    auto patch = patch_for(0);
+    patch.parameters.velocity_crossfade = axk::ProgramInheritableSwitch::on;
+    patch.parameters.level_offset = 12;
+    EXPECT_FALSE(axk::detail::apply_program_assignment_patches(payload, std::array{patch}, axk::ASeriesModel::a4000));
+    EXPECT_EQ(payload, original);
+    const auto decoded = axk::decode_object(payload);
+    ASSERT_TRUE(decoded);
+    EXPECT_FALSE(std::get<axk::CurrentProg>(decoded->payload).assignments[0].parameters.velocity_crossfade);
+}
+
+TEST(ProgramAssignments, NativeOutputBoundariesPreserveCurrentOnlyLanes) {
+    for (const auto output1 : std::array<std::int8_t, 3>{-1, 0, 4}) {
+        for (const auto output2 : std::array<std::int8_t, 3>{-1, 0, 5}) {
+            auto payload = assignments(3, 8, 2U);
+            auto patch = patch_for(0);
+            patch.parameters.output1 = output1;
+            patch.parameters.output2 = output2;
+            patch.parameters.output1_level_offset = -127;
+            patch.parameters.output2_level_offset = 127;
+            auto expected = payload;
+            expected[0x14d] = static_cast<std::byte>(static_cast<std::uint8_t>(output1));
+            expected[0x14e] = std::byte{0x81};
+            expected[0x150] = static_cast<std::byte>(static_cast<std::uint8_t>(output2));
+            expected[0x151] = std::byte{127};
+            ASSERT_TRUE(
+                axk::detail::apply_program_assignment_patches(payload, std::array{patch}, axk::ASeriesModel::a3000));
+            EXPECT_EQ(payload, expected);
+        }
     }
 }

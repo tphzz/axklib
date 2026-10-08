@@ -7,6 +7,9 @@ import { describe, expect, it, vi } from 'vitest';
 import type { SamplerObject, SystemProgramContexts } from '../transport';
 import type { Program } from '../types';
 import ProgramWorkspace from './ProgramWorkspace.svelte';
+import { programFormatFixture } from '../../test/programFormatFixture';
+import { sampleFormatFixture } from '../../test/sampleFormatFixture';
+import ObjectSizeIdentity from './ObjectSizeIdentity.svelte';
 
 const appStyles = readFileSync(resolve(process.cwd(), 'src/app.css'), 'utf8');
 const objectSizeIdentitySource = readFileSync(
@@ -109,6 +112,128 @@ const baseProps = {
 };
 
 describe('ProgramWorkspace', () => {
+    it('keeps mixed Program, Sample and Bank badges independent through selection changes', async () => {
+        const selected = program(3, 'Program');
+        selected.object.programFormat = programFormatFixture();
+        const view = render(ObjectSizeIdentity, { name: selected.name, object: selected.object });
+        expect(view.getByText('a3k')).toBeTruthy();
+        const sample = {
+            ...selected.object,
+            key: 'sample',
+            objectType: 'SBNK',
+            programFormat: null,
+            sampleFormat: sampleFormatFixture().sampleFormat,
+        };
+        await view.rerender({ name: 'Sample', object: sample });
+        expect(view.queryByText('a3k')).toBeNull();
+        expect(view.getByText('a4k/a5k')).toBeTruthy();
+        await view.rerender({
+            name: 'Bank',
+            object: {
+                ...sample,
+                key: 'bank',
+                objectType: 'SBAC',
+                sampleFormat: sampleFormatFixture('A3000_188').sampleFormat,
+            },
+        });
+        expect(view.queryByText('a4k/a5k')).toBeNull();
+        expect(view.getByText('a3k')).toBeTruthy();
+        await view.rerender({ name: selected.name, object: selected.object });
+        expect(view.getByText('a3k')).toBeTruthy();
+    });
+
+    it('does not offer a conversion command for unknown or structurally invalid Program storage', async () => {
+        for (const format of [
+            { ...programFormatFixture(), format: 'UNKNOWN' as const, structurallyValid: false },
+            { ...programFormatFixture(), structurallyValid: false },
+        ]) {
+            const selected = program(3, 'Unknown');
+            selected.object.programFormat = format;
+            const convert = vi.fn();
+            const view = render(ProgramWorkspace, {
+                ...baseProps,
+                programs: [selected],
+                presentation: 'single',
+                onconvertprogram: convert,
+            });
+            await fireEvent.keyDown(view.getByText('Unknown').closest('button')!, { key: 'F10', shiftKey: true });
+            expect(view.queryByRole('menuitem', { name: /Convert/ })).toBeNull();
+            expect(convert).not.toHaveBeenCalled();
+            view.unmount();
+        }
+    });
+
+    it('replaces known, unknown and current badges without borrowing the System format', async () => {
+        const selected = program(3, 'Bass');
+        selected.object.programFormat = programFormatFixture();
+        const unknown = {
+            ...selected,
+            object: {
+                ...selected.object,
+                programFormat: {
+                    ...programFormatFixture(),
+                    format: 'UNKNOWN' as const,
+                    structurallyValid: false,
+                    headerRevision: 3,
+                    logicalSize: null,
+                    storedAssignmentCount: null,
+                    assignmentCapacity: null,
+                    parameterTailBytes: null,
+                },
+            },
+        };
+        const current = { ...selected, object: { ...selected.object, programFormat: programFormatFixture(true) } };
+        for (const presentation of ['single', 'multi'] as const) {
+            const view = render(ProgramWorkspace, { ...baseProps, programs: [selected], presentation });
+            const count = presentation === 'single' ? 1 : 2;
+            expect(view.getAllByText('a3k')).toHaveLength(count);
+            await view.rerender({ ...baseProps, programs: [unknown], presentation });
+            expect(view.queryByText('a3k')).toBeNull();
+            expect(view.queryByText('a4k/a5k')).toBeNull();
+            expect(view.getAllByText('?')).toHaveLength(count);
+            await view.rerender({ ...baseProps, programs: [current], presentation });
+            expect(view.queryByText('?')).toBeNull();
+            expect(view.getAllByText('a4k/a5k')).toHaveLength(count);
+            view.unmount();
+        }
+    });
+
+    it('retains duplicate Single rows without arbitrarily resolving a Multi slot', async () => {
+        const first = program(3, 'First');
+        first.object.programFormat = programFormatFixture();
+        const second = { ...program(3, 'Second'), id: 'duplicate', objectId: 'duplicate' };
+        const onpartselect = vi.fn();
+        const view = render(ProgramWorkspace, { ...baseProps, programs: [first], onpartselect });
+        expect(view.getAllByText('a3k')).toHaveLength(2);
+        await view.rerender({ ...baseProps, programs: [first, second], onpartselect });
+        expect(view.queryByText('a3k')).toBeNull();
+        const row = view.getByRole('button', { name: /Part A01.*Ambiguous Program slot/ });
+        await fireEvent.click(row);
+        expect(onpartselect).toHaveBeenCalledWith(system2.parts[0], null);
+        await view.rerender({ ...baseProps, programs: [first, second], presentation: 'single' });
+        expect(view.getByText('First')).toBeTruthy();
+        expect(view.getByText('Second')).toBeTruthy();
+        await view.rerender({ ...baseProps, programs: [first] });
+        expect(view.getAllByText('a3k')).toHaveLength(2);
+    });
+    it('shows the Program format in Single and resolved Multi rows, with explicit conversion in Single', async () => {
+        const selected = program(3, 'Bass');
+        selected.object.programFormat = programFormatFixture();
+        const convert = vi.fn();
+        const view = render(ProgramWorkspace, {
+            ...baseProps,
+            programs: [selected],
+            presentation: 'single',
+            onconvertprogram: convert,
+        });
+        expect(view.getByText('a3k')).toBeTruthy();
+        const row = view.getByText('Bass').closest('button')!;
+        await fireEvent.keyDown(row, { key: 'F10', shiftKey: true });
+        await fireEvent.click(view.getByRole('menuitem', { name: 'Convert to a4k/a5k program format...' }));
+        expect(convert).toHaveBeenCalledWith(selected);
+        await view.rerender({ ...baseProps, programs: [selected], presentation: 'multi' });
+        expect(view.getAllByText('a3k')).toHaveLength(system2.parts.filter((part) => part.programNumber === 3).length);
+    });
     it('keeps presentation controls compact and moves saved System File details into the title popover', async () => {
         const onpresentationchange = vi.fn();
         render(ProgramWorkspace, { props: { ...baseProps, presentation: 'single', onpresentationchange } });

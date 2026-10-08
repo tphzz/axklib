@@ -159,6 +159,7 @@
     catalogHooks.stopPlayback = () => auditionWorkflow.stop();
     catalogHooks.resetPreviews = () => auditionWorkflow.resetPreviewQueue();
     const mutationWorkflow = new MutationWorkflow({
+        confirmEditorLeave: () => imageSessionWorkflow.confirmEditorLeave(),
         preferredASeriesGeneration: () => preferences.generation,
         transport,
         jobs: jobController,
@@ -203,6 +204,7 @@
         },
     });
     const deletionWorkflow = new DeletionWorkflow({
+        confirmEditorLeave: () => imageSessionWorkflow.confirmEditorLeave(),
         transport,
         jobs: jobController,
         sessionId: () => imageSessionWorkflow.sessionId,
@@ -233,6 +235,7 @@
         reportTiming: reportMutationTiming,
     });
     const programAssignmentCleanupWorkflow = new ProgramAssignmentCleanupWorkflow({
+        confirmEditorLeave: () => imageSessionWorkflow.confirmEditorLeave(),
         transport,
         jobs: jobController,
         sessionId: () => imageSessionWorkflow.sessionId,
@@ -534,7 +537,7 @@
     sequenceCancelled={() => directComputerWorkflow.cancelMidiSelection(sequenceImportWorkflow)}
 />
 
-<EditorBoundary {transport} imageSession={imageSessionWorkflow} audition={auditionWorkflow}>
+<EditorBoundary {transport} imageSession={imageSessionWorkflow} audition={auditionWorkflow} selection={editorSelection}>
     <WorkspaceShell
         bind:mode={workspaceMode}
         revision={imageSessionWorkflow.revision}

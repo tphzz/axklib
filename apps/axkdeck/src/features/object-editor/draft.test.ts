@@ -2,6 +2,19 @@ import { describe, expect, it } from 'vitest';
 import { EditorDraft } from './draft.svelte';
 
 describe('EditorDraft', () => {
+    it('cancels an active gesture without an undo entry and preserves prior redo', () => {
+        const draft = new EditorDraft({ x: 1 });
+        draft.set('x', 2);
+        draft.undo();
+        draft.beginGesture();
+        draft.set('x', 3);
+        draft.cancelGesture();
+        expect(draft.values.x).toBe(1);
+        expect(draft.canUndo).toBe(false);
+        expect(draft.canRedo).toBe(true);
+        draft.redo();
+        expect(draft.values.x).toBe(2);
+    });
     it('publishes one atomic patch and preserves redo on a no-op patch', () => {
         const draft = new EditorDraft({ x: 1, y: 2 });
         const set = draft.set.bind(draft);

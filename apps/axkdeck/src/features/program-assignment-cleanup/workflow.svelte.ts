@@ -23,6 +23,7 @@ export interface ProgramAssignmentCleanupRequest {
 }
 
 interface Dependencies {
+    confirmEditorLeave?: () => Promise<boolean>;
     transport: ImageTransport;
     jobs: JobController;
     sessionId: () => number | null;
@@ -42,6 +43,8 @@ export class ProgramAssignmentCleanupWorkflow {
 
     async open(): Promise<void> {
         const sessionId = this.dependencies.sessionId();
+        if (this.dependencies.confirmEditorLeave && !(await this.dependencies.confirmEditorLeave())) return;
+        if (sessionId !== this.dependencies.sessionId()) return;
         const source = this.dependencies.selectedSource();
         if (
             sessionId === null ||

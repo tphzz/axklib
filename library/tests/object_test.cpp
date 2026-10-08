@@ -363,6 +363,7 @@ TEST(CurrentProg, PreservesEmptyVisibleAndUnsupportedAssignmentRows) {
     ASSERT_TRUE(writer.write_be32(0x14, 4));
     ASSERT_TRUE(writer.write_be32(0x18, 0x2b0));
     ASSERT_TRUE(writer.write_be32(0x1c, 0x360));
+    ASSERT_TRUE(writer.write_u8(0x30, 0x14));
     ASSERT_TRUE(writer.write_be16(0x96, 2));
     ASSERT_TRUE(writer.write_ascii_field(0x32, 16, "001", std::byte{}));
     ASSERT_TRUE(writer.write_ascii_field(0x120, 16, "Sample Bank", std::byte{' '}));

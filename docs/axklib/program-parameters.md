@@ -7,11 +7,12 @@ zero, `false`, and `"inherit"` are values, not omissions. JSON rejects `null`,
 unknown properties, fractional numbers, overflowing integers, and noncanonical
 numbered keys such as `"01"`.
 
-These writes require the current Program layout (selector 4) and an explicit
-A4000 or A5000 target model. The model selects writable domains; it does not
+Updates require revision 2 with an explicit A3000 model, or revision 4 with an
+explicit A4000 or A5000 model. The model selects writable domains; it does not
 convert the Program or remove untouched settings belonging to another model.
-Legacy Programs remain readable and preservable but do not accept these
-parameter updates. Model-specific compatibility is bounded as described under
+Revision-1 Programs remain readable and preservable but do not accept parameter
+updates. Explicit [Program format conversion](program-formats.md)
+is a separate guarded operation. Model-specific compatibility is bounded as described under
 [Validation Limits](#validation-limits).
 
 The same sparse JSON groups are used by build manifests, Program insertion
@@ -61,8 +62,11 @@ storage. The raw receive selector is separate from the semantic receive value.
 
 Legacy selectors 1/2 expose shared stored fields and their three effects and
 four controllers. They do not synthesize port-B maps, StepWave, right A/D,
-current A/D routing, or effects 4..6. Legacy assignment routing is retained raw,
-not presented as current output destinations or level offsets. Controller
+current A/D routing, or effects 4..6. Native routing is exposed in its own
+domains: output 1 is -1..4, output 2 is -1..5 for assignments (A/D excludes -1).
+Native output levels and the inherited/off/on velocity-crossfade switch are
+also exposed. Native rows do not expose the current velocity-sensitivity or
+separate low/high velocity-crossfade offsets. Controller
 functions above the legacy domain likewise remain raw. These omissions do not
 reject an otherwise readable object or change byte-preserving operations.
 
@@ -106,11 +110,17 @@ the Program's current stored count. Both the stored target kind (`SBNK` or
 `SBAC`) and name must match. The expected identity is a guard, not a retarget
 request. Empty or unsupported rows cannot be patched.
 
+An optional `expected_payload_sha256` is a 64-character lowercase SHA-256 digest
+of the inspected logical Program payload. A mismatch rejects the operation
+before editing. The desktop editor supplies this guard together with the image
+revision, numeric Program slot and assignment identities on every save.
+
 All requested global and assignment edits validate together before replacing
 the fixed-size payload. Later operations see the updated state. Invalid values,
 stale guards, cancellation, or any later operation failure reject the complete
 transaction. The source image is never modified. Retrying an identical patch
-is byte-identical, including same-type effects and already-equal settings.
+is byte-identical, including already-equal settings. An explicitly requested
+effect reset reapplies its complete initialization vector.
 
 Updates preserve count, capacity, unused rows, assignment targets, opaque bits,
 runtime state, and allocation padding. No Program parameter operation changes
@@ -137,6 +147,13 @@ the other groups use the ranges below.
 | `effect_connections` | Connection `1` 0..4; connection `2` 0..4 requires A5000 |
 | `effects` | Slots 1..3 on A4000, 1..6 on A5000; fields below |
 
+For native A3000 Programs, the shared groups use the same domains except:
+LFO wave is 0..5, controller device is 0..125 and function is 0..63. There is
+no StepWave, port B, independent right A/D route or second effect-connection
+group. Native A/D destinations are output 1: 0..4 and output 2: 0..5. Only
+effect slots 1..3 and ordinary effect types 0..54 are writable. Native writes
+address the native lanes directly and preserve current-only/opaque bytes.
+
 Controller functions use canonical numeric IDs, not displayed menu indices.
 Changing a canonical controller record or A/D output updates only its dependent
 legacy projection. Already-equal settings do not normalize unrelated saved
@@ -146,7 +163,7 @@ them inactive on the sampler UI.
 ## Effects
 
 An effect accepts `enabled` (boolean), `input_level` and `output_level`
-(0..127), `pan` (-63..63), `width` (-126..0), `destination`, `type`, and
+(0..127), `pan` (-63..63), `width` (-126..0), `destination`, `type`, `reset_parameters`, and
 numbered `parameters` (physical slots 1..16). Destinations are 0..5; A5000
 effects 1..3 additionally allow 6..8.
 
@@ -159,7 +176,11 @@ enable flag can be changed without changing its type or words.
 
 A type change resets all sixteen words, including hidden words, then applies
 explicit parameter overrides against the new type. Reasserting the same type
-does not reset anything. Bypass changes only `enabled`. A fresh explicitly
+does not reset anything unless `reset_parameters: true` is supplied with an
+explicit `type`. This write intent permits a reviewed A-to-B-to-A selection
+to retain its final reset even though the type matches the original. Native
+types use their native sixteen-word defaults, including hidden tails.
+Bypass changes only `enabled`. A fresh explicitly
 selected type initializes its reset vector even when it is type 0; omitting
 the fresh effect leaves the original neutral template untouched.
 
@@ -185,6 +206,8 @@ counterparts. `output1` and `output2` are replacements: -1 means inherit,
 0..9 are A4000 destinations, and A5000 additionally permits 10..12.
 `alternate_group` is -1 (inherit) or 0..16. `portamento`, `mono`, and
 `key_crossfade` use `"inherit"`, `"off"`, or `"on"`. `midi_control` is boolean.
+Native revision-2 assignments additionally accept `velocity_crossfade` with
+the same three selections, instead of the current layout's velocity offsets.
 
 Changed output replacements or levels update only their dependent legacy
 projection. Output 2 is projected first and output 1 wins a shared bucket;
@@ -206,7 +229,122 @@ or every freshly authored parameter combination. Sample output destinations
 must be selected for the correct output lane; Output 1 value `2` selects Ef1,
 whereas value `7` selects AssgnOut3&4.
 
-Legacy layouts, raw effect type 97, unused/action effect words and runtime-only
+Revision-1 layouts, raw effect type 97, unused/action effect words and runtime-only
 fields remain preservation-only. Parameter support does not relax the entry
 point's existing assignment-count or topology limits. Release readiness is a
 separate verification gate from this parameter contract.
+
+## Desktop Editor
+
+The lower zone exposes Sample Select, Easy Edit, Effects, Setup and Control.
+Edits form a draft with gesture-based undo/redo, Discard and atomic Save.
+Sample Select edits membership and receive channels directly in its table.
+Turn off Show only assigned to expose available Samples and Sample Banks.
+Removing a row with non-default Easy Edit settings requires confirmation.
+Membership and parameter edits share one undo history and one atomic Save.
+Duplicate stored rows remain independent, including after another row is removed.
+
+Easy Edit is per assigned Sample or Sample Bank, not a global Program modifier.
+Its Sample/Bank selector follows the assignment table and mapping-block
+selection; Program-wide Effects, Setup and Control pages do not have that
+selector. A Sample Bank's
+active parameter overrides are applied when calculating member previews.
+Amp EG shows the source and effective curves and edits the three rate offsets;
+levels remain read-only in this view. Time spacing is relative, not calibrated
+milliseconds. A bank member selector chooses the envelope being previewed.
+
+Key/Velocity shows compact keyboard ranges. Mapping Editor opens the full view
+in a separate desktop window that follows the main Program selection. Both
+windows share the selected assignment, draft, undo history, Save and Discard;
+closing the Mapping Editor does not discard accepted edits. Source outlines,
+effective coverage, Program limits and root keys are distinct. Drag or
+keyboard-adjust the Program limits, or drag a mapping block to move its limits.
+A movement begins after a small pointer threshold, preserves the range's size,
+and clamps to the key/velocity boundaries. Release accepts one undo step; Escape
+or pointer cancellation accepts nothing. Moving a block does not move its root.
+Key shift is a separate parameter. Limits intersect the
+shifted Sample range and cannot expand its playable coverage. Bank members
+remain separately visible; unresolved sources do not acquire invented ranges.
+The compact view places low/high-key handles directly on the keyboard. Both
+views label every C key vertically, centered on its white key. All resolved
+Samples alternate between mint green and a shade 10% darker in source-range
+order. The shades distinguish neighboring mappings, not permanent Sample
+identities; selection, panning and zooming do not change their order. Overlapping
+coverage has subtle hatching and contributor tooltips.
+The selected Program limits have a separate outline, including keys with no
+playable source. Key fields also show note names, and the shared velocity editor
+adjusts low/high velocity. A small amber marker identifies the root without
+covering the keyboard's mapping colors. Roots are read-only here.
+The full view labels fitting regions vertically and highlights selected effective
+coverage. Velocity raster lines and labels occur every 5 steps, with heavier lines
+at 0, 25, 50, 75, 100 and 125. The plot keeps a minimum usable height and scrolls
+within short windows, leaving the action/status bars visible.
+Four dashed guides mark the outer edges of selected
+effective coverage, including grouped assignments. Individual member outlines
+remain visible; the group envelope does not fill unmapped gaps. The blue editable
+Program limits and handles remain separate and preview dragging locally.
+During a handle drag, a nearby readout shows the quantized key or velocity range;
+block movement shows both editable axes. The readout stays within the full plot.
+The compact view uses its existing summary line instead of covering the keys.
+Limit handles retain accessible names without hover tooltips.
+
+When zoomed, both views show a slim overview of the complete keyboard beneath
+the key labels. Drag its viewport to pan, or click elsewhere on the strip to
+recenter it. Arrow keys pan by one semitone, Shift+Arrow by an octave, Page Up/Down
+by a viewport, and Home/End reach the MIDI boundaries. Escape cancels an unfinished
+pan. Navigation changes only the view, not assignments, undo history or playback.
+The overview disappears when all 128 notes are visible. Compact keyboards are
+left-aligned and capped at 1280 CSS pixels, with white keys no wider than 20 CSS
+pixels; compact zoom stops at this cap. Full mapping views remain unrestricted.
+Thin or overlapping labels yield to the selected
+region, with complete names retained in tooltips.
+Program list subtitles summarize assignments,
+assigned banks, their distinct member Samples, and directly assigned Samples;
+unresolved assignments are identified separately from confirmed targets.
+
+Press and hold a keyboard key to audition every assignment whose effective
+key/velocity range matches it, regardless of selection. The audition velocity
+defaults to 100 and can be adjusted from 1 to 127. Releasing the key stops the
+group, including held loops; focus loss or window closure also releases it.
+The audition outline appears only while a key is pressed. Keyboard-only focus
+feedback remains available for navigation without leaving a pointer-click outline.
+Keyboard audition changes neither selection nor roots. The main window owns
+playback and uses the current canonical Sample/Bank drafts. Unresolved or
+unsupported members fail the group rather than playing a silently incomplete
+subset. Source preparation is bounded to four concurrent requests and a shared
+128 MiB working limit, with identical Wave Data reused across distinct voices.
+
+This is a draft preview, not a complete sampler sound engine. It applies trim,
+supported loops/reverse playback, fixed pitch, tuning, level and pan; active Bank
+overrides and Program Easy Edit key-shift/tuning/level/pan offsets are included,
+as is Program level. It does not emulate envelopes, filters, LFOs, effects,
+Program transpose/portamento, output routing or MIDI/controller behavior.
+Displayed Program coverage is the Easy Edit/source intersection before Program
+transpose. Use the sampler to judge those additional sound-engine settings.
+
+Effects routing uses the sampler's five fixed connection
+patterns, not an unrestricted patch graph. Selecting a block opens its type,
+levels, pan, width and destination beside the graph. The same independently
+scrollable pane includes algorithm parameters below a divider. Ef1-3 and Ef4-6
+routing selectors share a row when space permits; there is no separate Effects
+subtab row. Amp EG uses the same graph-left, controls-right layout, stacking
+the panes when the lower zone is narrow.
+Numeric effect words use their exact stored ranges; these are not universally
+MIDI-sized values or calibrated physical units.
+
+The blue `+` identifies a later-generation effect or parameter domain, not every
+parameter in a current Program. Raw effect IDs 0..54 (Through and the original
+54 effects) share their 593 visible parameter domains across generations.
+The first three effects retain the same sixteen-word layout; the type selector
+is stored in a different header byte and is copied during legacy import.
+Unused reset words can differ and are not treated as additional editable
+parameters. Ef4-6 are marked A5000-only at the effect heading; their ordinary
+level, pan and width controls do not each receive a redundant marker.
+
+The storage revision controls which parameter model is shown. A current
+Program uses the A4000/A5000 superset, with A5000-only selections identified;
+this does not infer which hardware originally saved it. Native Programs omit
+unavailable current-only pages. Multi mode retains the selected Program's
+settings and identifies pages whose playback depends on the master Program.
+Blue plus markers identify extended parameters and choices; their tooltips
+distinguish A4000/A5000-format extensions from A5000-only features.

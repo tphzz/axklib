@@ -32,7 +32,8 @@ Error invalid(const char *message) { return make_error(ErrorCode::manifest_inval
 
 bool has_program_effect_parameter_values(const ProgramEffectParameters &value) {
     return value.enabled || value.input_level || value.output_level || value.pan || value.width || value.destination ||
-           value.type || std::ranges::any_of(value.parameters, [](const auto &word) { return word.has_value(); });
+           value.type || value.reset_parameters ||
+           std::ranges::any_of(value.parameters, [](const auto &word) { return word.has_value(); });
 }
 
 ProgramEffectParameters decode_program_effect_parameters(const ProgEffectBlock &effect, std::size_t slot,
@@ -65,10 +66,12 @@ Result<void> apply_effect_parameter_block(std::span<std::byte, 40> block, const 
     const auto native = model == ASeriesModel::a3000;
     const auto recording = kind == EffectBlockKind::recording;
     if ((model != ASeriesModel::a3000 && model != ASeriesModel::a4000 && model != ASeriesModel::a5000) ||
-        (native && kind == EffectBlockKind::program) || slot >= (recording || model != ASeriesModel::a5000 ? 3U : 6U))
+        slot >= (recording || model != ASeriesModel::a5000 ? 3U : 6U))
         return std::unexpected{invalid("Effect block is not supported for the target model")};
     if (!has_program_effect_parameter_values(value))
         return {};
+    if (value.reset_parameters.value_or(false) && !value.type)
+        return std::unexpected{invalid("Resetting effect parameters requires a supported effect type")};
     if (outside(value.input_level, 0, 127) || outside(value.output_level, 0, 127) || outside(value.pan, -63, 63) ||
         outside(value.width, -126, 0) ||
         outside(value.destination, 0, model == ASeriesModel::a5000 && slot < 3U ? 8 : 5) ||
@@ -89,7 +92,8 @@ Result<void> apply_effect_parameter_block(std::span<std::byte, 40> block, const 
             return std::unexpected{invalid("Effect parameter word is outside the selected type's numeric domain")};
     }
     ByteWriter writer{block};
-    if (value.type && (mode == ProgramParameterWriteMode::fresh || *value.type != old_type)) {
+    if (value.type && (mode == ProgramParameterWriteMode::fresh || *value.type != old_type ||
+                       value.reset_parameters.value_or(false))) {
         for (std::size_t index = 0; index < info->reset_words.size(); ++index) {
             if (auto written = writer.write_be16(8U + index * 2U, info->reset_words[index]); !written)
                 return written;

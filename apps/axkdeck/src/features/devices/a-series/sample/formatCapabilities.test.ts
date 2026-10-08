@@ -45,7 +45,8 @@ describe('format-specific output routing', () => {
             for (const option of field(key).options!.filter((option) => option.value >= 10)) {
                 expect(option.reason).toContain('A5000');
                 expect(option.reason).not.toMatch(/select.*under/i);
-                expect(option.label.match(/A5000/g)).toHaveLength(1);
+                expect(option.label).not.toContain('A5000');
+                expect(option.a5000Only).toBe(true);
             }
         }
     });

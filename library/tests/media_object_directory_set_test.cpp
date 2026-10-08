@@ -109,14 +109,22 @@ TEST(ObjectDirectorySet, ImportAssemblesUnorderedFoldersAndRequiresEveryCompanio
     const auto prepared = complete->prepare(std::array{complete->inspection().objects.front().key});
     ASSERT_TRUE(prepared) << prepared.error().message;
     EXPECT_EQ(prepared->nodes.front().raw_payload, smpl_object());
-    EXPECT_FALSE(axk::FloppyImportSource::open_directories({one, one}));
-    EXPECT_FALSE(
-        axk::FloppyImportSource::open_directories({one, {"wrong", unpack(catalog_member(2U, true, "OTHER SET    "))}}));
+    const auto duplicated = axk::FloppyImportSource::open_directories({one, one});
+    ASSERT_TRUE(duplicated);
+    EXPECT_FALSE(duplicated->inspection().can_import);
+    const auto wrong_metadata =
+        axk::FloppyImportSource::open_directories({one, {"wrong", unpack(catalog_member(2U, true, "OTHER SET    "))}});
+    ASSERT_TRUE(wrong_metadata);
+    EXPECT_FALSE(wrong_metadata->inspection().complete);
+    EXPECT_TRUE(wrong_metadata->inspection().can_import);
+    EXPECT_TRUE(wrong_metadata->inspection().requires_acknowledgement);
     auto broken = one;
     for (auto &entry : broken.entries)
         if (entry.name == "YAMAHA.SYM")
             entry.reader = std::make_shared<axk::MemoryReader>(std::vector<std::byte>{std::byte{0xff}});
-    EXPECT_FALSE(axk::FloppyImportSource::open_directories({broken}));
+    const auto bad_catalog = axk::FloppyImportSource::open_directories({broken});
+    ASSERT_TRUE(bad_catalog);
+    EXPECT_FALSE(bad_catalog->inspection().issues.empty());
 }
 
 TEST(ObjectDirectorySet, RejectsMissingDuplicateWrongSetAndInvalidWaveRanges) {

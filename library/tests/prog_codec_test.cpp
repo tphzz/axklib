@@ -26,6 +26,7 @@ std::vector<std::byte> program_bytes(std::uint32_t version, std::uint16_t count,
     EXPECT_TRUE(writer.write_be32(0x14U, version));
     EXPECT_TRUE(writer.write_be32(0x18U, static_cast<std::uint32_t>(size - (version == 4U ? 0xe0U : 0x30U))));
     EXPECT_TRUE(writer.write_be32(0x1cU, version == 4U ? static_cast<std::uint32_t>(size - 0x30U) : 0U));
+    EXPECT_TRUE(writer.write_u8(0x30U, 0x14U));
     EXPECT_TRUE(writer.write_ascii_field(0x32U, 16, "001", std::byte{' '}));
     EXPECT_TRUE(writer.write_ascii_field(0x78U, 8, "COUNT", std::byte{' '}));
     EXPECT_TRUE(writer.write_be16(0x96U, count));
@@ -82,6 +83,8 @@ TEST(ProgCodec, LegacyParametersDoNotSynthesizeCurrentExtensions) {
         bytes[0x136] = std::byte{12};
         bytes[0x13d] = std::byte{7};
         bytes[0x148] = std::byte{9};
+        bytes[0x14d] = std::byte{4};
+        bytes[0x14e] = std::byte{11};
         bytes[0x14f] = std::byte{20};
         bytes[0x152] = std::byte{30};
         const auto decoded = axk::decode_object(bytes);
@@ -91,20 +94,37 @@ TEST(ProgCodec, LegacyParametersDoNotSynthesizeCurrentExtensions) {
         EXPECT_EQ(program.parameters.controllers[0].device, 71U);
         EXPECT_EQ(program.parameters.controllers[0].function, 5U);
         EXPECT_EQ(program.parameters.controllers[0].range, 20);
-        EXPECT_FALSE(program.parameters.ad.left.output1.destination);
+        EXPECT_EQ(program.parameters.ad.left.output1.destination, 0U);
         EXPECT_FALSE(program.parameters.ad.right.pan);
         EXPECT_FALSE(program.parameters.step_wave.step_count);
         EXPECT_FALSE(program.parameters.controller_reset.b[0]);
         EXPECT_FALSE(program.parameters.effects[3].enabled);
         const auto &row = program.assignments[0];
         EXPECT_EQ(row.parameters.level_offset, 12);
-        EXPECT_FALSE(row.parameters.output1);
-        EXPECT_FALSE(row.parameters.output2);
-        EXPECT_FALSE(row.parameters.output1_level_offset);
-        EXPECT_FALSE(row.parameters.output2_level_offset);
+        EXPECT_EQ(row.parameters.output1, 4);
+        EXPECT_EQ(row.parameters.output2, 0);
+        EXPECT_EQ(row.parameters.output1_level_offset, 11);
+        EXPECT_EQ(row.parameters.output2_level_offset, 0);
         EXPECT_EQ(row.raw_row[0x1d], std::byte{7});
         EXPECT_EQ(row.raw_row[0x2f], std::byte{20});
     }
+}
+
+TEST(ProgCodec, LegacyScalarAndEffectDomainsDoNotUseCurrentGenerationRules) {
+    auto bytes = program_bytes(2U, 0U, 0U);
+    bytes[0x80] = std::byte{0x80};
+    bytes[0x87] = std::byte{4};
+    bytes[0x89] = std::byte{5};
+    bytes[0x9c] = std::byte{8};
+    bytes[0x110] = std::byte{126};
+    const auto decoded = axk::decode_object(bytes);
+    ASSERT_TRUE(decoded);
+    const auto &program = std::get<axk::CurrentProg>(decoded->payload);
+    EXPECT_EQ(program.parameters.lfo.sync, 0U);
+    EXPECT_EQ(program.parameters.ad.left.output1.destination, 4U);
+    EXPECT_EQ(program.parameters.ad.left.output2.destination, 5U);
+    EXPECT_FALSE(program.parameters.controllers[0].device);
+    EXPECT_FALSE(program.parameters.effects[0].destination);
 }
 
 TEST(ProgCodec, InvalidParametersRemainRawWithoutRejectingReadableObjects) {

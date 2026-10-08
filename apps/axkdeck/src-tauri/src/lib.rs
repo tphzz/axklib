@@ -17,6 +17,7 @@ mod native_drag_cache;
 mod native_drag_cache_tests;
 mod native_drag_platform;
 mod private_directory;
+mod program_mapping;
 mod remote_settings;
 mod retained_download;
 mod server_sidecar;
@@ -529,7 +530,7 @@ pub fn run() {
                 }
             }
         })
-        .invoke_handler(tauri::generate_handler![
+        .invoke_handler(program_mapping::restricted_handler(tauri::generate_handler![
             diagnostic_logs::open_diagnostic_logs,
             diagnostic_logs::read_diagnostic_logs,
             diagnostic_logs::clear_diagnostic_log_view,
@@ -567,8 +568,11 @@ pub fn run() {
             a_series_preferences::desktop_preferred_a_series_generation,
             a_series_preferences::set_desktop_preferred_a_series_generation,
             open_allocation_inspector,
+            program_mapping::open_mapping_editor,
+            program_mapping::command_mapping_editor,
+            program_mapping::publish_mapping_editor,
             save_allocation_map_json
-        ]);
+        ]));
     startup.record(StartupMilestone::TauriBuilderConfigured);
     builder
         .build(tauri::generate_context!())

@@ -98,6 +98,8 @@ Result<TransactionState> prepare_alteration(std::shared_ptr<const RandomAccessRe
                     return convert_sbnk_format(state, context, operation, cancellation);
                 else if constexpr (std::same_as<T, ConvertSampleBankFormatOperation>)
                     return convert_sbac_format(state, context, operation, cancellation);
+                else if constexpr (std::same_as<T, ConvertProgramFormatOperation>)
+                    return convert_prog_format(state, context, operation, cancellation);
                 else if constexpr (std::same_as<T, DuplicateSampleOperation>)
                     return duplicate_sbnk(state, context, operation, cancellation);
                 else if constexpr (std::same_as<T, UpdateSampleBankParametersOperation>)
@@ -155,7 +157,8 @@ Result<TransactionState> prepare_alteration(std::shared_ptr<const RandomAccessRe
         if (!report)
             return std::unexpected{report.error()};
         if (state.object_payload_grew || state.load_references_added || report->type == "retarget_sample_wave_data" ||
-            !report->inserted_sfs_ids.empty() || !report->placed_sfs_ids.empty()) {
+            report->type == "convert_prog_format" || !report->inserted_sfs_ids.empty() ||
+            !report->placed_sfs_ids.empty()) {
             auto &partition = state.partitions.at(report->partition.value);
             const auto volume = unique_directory_child(state, partition, SfsId{1U}, report->volume_name, cancellation);
             if (!volume)

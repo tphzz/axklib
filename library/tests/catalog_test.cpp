@@ -1267,6 +1267,42 @@ TEST(ContentTree, DistinguishesContainedObjectsFromProgramReferences) {
     EXPECT_EQ(sample_structure->children.front().scope_role, axk::ContentScopeRole::contained);
 }
 
+TEST(ContentTree, RetainsDistinctProgramsWithDuplicateSlotsIncludingUnknownStorage) {
+    axk::ObjectCatalog catalog;
+    for (unsigned index = 0U; index < 2U; ++index) {
+        axk::DecodedObject object;
+        object.header.type = axk::ObjectType::prog;
+        object.header.name = "033";
+        if (index == 0U) {
+            axk::CurrentProg program;
+            program.program_name = "Visible";
+            object.payload = program;
+        } else {
+            object.payload = axk::GenericObject{};
+        }
+        const axk::ObjectPlacement placement{
+            axk::PartitionIndex{0}, "Partition", axk::SfsId{1}, "Volume", "PROG", "033", "GROUP/F001"};
+        catalog.objects.emplace_back("program" + std::to_string(index), axk::PartitionIndex{0}, axk::SfsId{index + 2U},
+                                     "iso:DISC", std::move(object), placement);
+    }
+    const auto graph = axk::build_relationship_graph(catalog);
+    for (const bool defaults : {false, true}) {
+        const auto tree = axk::build_content_tree("source.iso", catalog, graph, defaults);
+        const auto &volume = tree.roots.front().children.front();
+        const auto programs = std::ranges::find(volume.children, "Programs", &axk::ContentNode::display_name);
+        ASSERT_NE(programs, volume.children.end());
+        EXPECT_EQ(std::ranges::count_if(programs->children,
+                                        [](const auto &node) { return node.display_name.starts_with("033:"); }),
+                  2);
+        EXPECT_EQ(std::ranges::count_if(programs->children,
+                                        [](const auto &node) {
+                                            return node.object_key == "program1" &&
+                                                   node.quality == axk::RelationshipQuality::unknown;
+                                        }),
+                  1);
+    }
+}
+
 TEST(Validation, ReportsStableRelationshipAndCoverageResults) {
     const auto container = axk::open_image(fixture("HD00_512_single_sbnk_authored.hds"));
     ASSERT_TRUE(container);

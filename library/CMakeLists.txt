@@ -125,10 +125,14 @@ add_library(
   src/media_object_directory_set.cpp
   src/media_iso9660.cpp
   src/media_object_directory.cpp
+  src/media_smpl_segments.cpp
   src/media_yamaha.cpp
   src/su700.cpp
   src/object.cpp
   src/prog_codec.cpp
+  src/program_storage.cpp
+  src/program_format_conversion.cpp
+  src/program_conversion_parameters.cpp
         src/program_parameter_codec.cpp
         src/program_effect_parameter_codec.cpp
         src/program_assignment_parameter_codec.cpp
@@ -136,6 +140,7 @@ add_library(
   src/package_archive.cpp
   src/package_build.cpp
   src/floppy_import.cpp
+  src/floppy_import_recovery.cpp
   src/package_import.cpp
   src/package_import_fat12.cpp
   src/package_import_iso9660.cpp
@@ -157,6 +162,7 @@ add_library(
   src/report.cpp
   src/semantic.cpp
   src/semantic_analysis.cpp
+  src/media_semantics.cpp
   src/sequence.cpp
   src/sequence_diagnostics.cpp
   src/sfs.cpp
@@ -292,6 +298,8 @@ add_library(
   src/alteration_sample.cpp
   src/alteration_sample_update.cpp
   src/alteration_sample_format.cpp
+  src/alteration_program_format.cpp
+  src/alteration_manifest_program_format.cpp
   src/alteration_manifest_sample_format.cpp
   src/alteration_sample_duplicate.cpp
   src/alteration_manifest_duplicate.cpp
@@ -613,11 +621,14 @@ if(BUILD_TESTING)
     tests/media_ex5_test.cpp
     tests/media_ex5_capacity_test.cpp
     tests/media_iso9660_test.cpp
+    tests/media_semantics_test.cpp
     tests/media_conversion_test.cpp
     tests/media_floppy_catalog_test.cpp
     tests/media_yamaha_test.cpp
     tests/object_test.cpp
     tests/prog_codec_test.cpp
+    tests/program_format_conversion_test.cpp
+    tests/program_format_alteration_test.cpp
     tests/program_parameters_test.cpp
     tests/program_effect_parameters_test.cpp
     tests/program_assignment_parameters_test.cpp
@@ -631,6 +642,7 @@ if(BUILD_TESTING)
     tests/package_test.cpp
     tests/package_graph_test.cpp
     tests/floppy_import_test.cpp
+    tests/floppy_import_recovery_test.cpp
     tests/report_test.cpp
     tests/sequence_test.cpp
     tests/sfs_test.cpp
@@ -703,7 +715,7 @@ if(BUILD_TESTING)
     endif()
   endif()
   if(AXK_BUILD_SHARED_SDK)
-    target_sources(axk_core_tests PRIVATE tests/sdk_test.cpp)
+    target_sources(axk_core_tests PRIVATE tests/sdk_test.cpp tests/sdk_validation_test.cpp)
     target_link_libraries(axk_core_tests PRIVATE axklib::axklib)
   endif()
   axk_set_project_warnings(axk_core_tests)

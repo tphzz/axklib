@@ -13,8 +13,10 @@ export async function loadEditorAudio(
     objectId: string,
     context: BaseAudioContext,
     signal: AbortSignal,
+    budget?: { reserve(bytes: number): () => void },
 ): Promise<EditorAudioSource> {
     const bundle = await transport.prepareAuditionBundle(sessionId, [objectId], signal, true);
+    let release: (() => void) | undefined;
     try {
         const clip = bundle.clips[0];
         if (!clip || clip.lanes.length < 1 || clip.lanes.length > 2)
@@ -25,6 +27,7 @@ export async function loadEditorAudio(
         const workingBytes =
             bundle.contentSizeBytes * 2 + clip.lanes.reduce((sum, lane) => sum + lane.frameCount * 4, 0);
         if (workingBytes > 128 * 1024 * 1024) throw new Error('Source audio exceeds the 128 MiB preview working limit');
+        release = budget?.reserve(workingBytes);
         const content = await transport.readAuditionContent(bundle.auditionId, bundle.contentSizeBytes, signal);
         signal.throwIfAborted();
         const lanes = clip.lanes.map((lane) => {
@@ -44,6 +47,7 @@ export async function loadEditorAudio(
         signal.throwIfAborted();
         return { lanes, sampleRate, frames: Math.min(...lanes.map((lane) => lane.length)) };
     } finally {
+        release?.();
         await transport.deleteAudition(bundle.auditionId).catch(() => undefined);
     }
 }

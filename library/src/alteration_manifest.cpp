@@ -1,6 +1,7 @@
 #include "alteration_manifest_bank_overrides.hpp"
 #include "alteration_manifest_internal.hpp"
 #include "alteration_manifest_program.hpp"
+#include "alteration_manifest_program_format.hpp"
 #include "alteration_manifest_sample_format.hpp"
 #include "alteration_manifest_wave_data.hpp"
 
@@ -341,6 +342,8 @@ Result<void> validate_operation_data(const AlterationOperationData &data) {
                 } else if constexpr (std::same_as<T, ConvertSampleFormatOperation> ||
                                      std::same_as<T, ConvertSampleBankFormatOperation>) {
                     return detail::validate_sample_format_conversion(operation);
+                } else if constexpr (std::same_as<T, ConvertProgramFormatOperation>) {
+                    return detail::validate_program_format_conversion(operation);
                 } else if constexpr (std::same_as<T, UpdateSampleParametersOperation> ||
                                      std::same_as<T, DuplicateSampleOperation>) {
                     if (auto valid = require_object_name(operation.sample_name, "sample_name"); !valid)

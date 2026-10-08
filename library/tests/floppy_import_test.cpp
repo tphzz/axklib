@@ -77,14 +77,19 @@ TEST(FloppyImportTest, LeavesConfigurationAndUnknownFilesOutsideTheObjectGraph) 
     EXPECT_EQ(prepared->nodes.size(), 1U);
 }
 
-TEST(FloppyImportTest, RejectsUnrelatedDisksAndNonASeriesContents) {
+TEST(FloppyImportTest, KeepsIndependentlySelectedDisksScopedAndRejectsNonASeriesContents) {
     std::vector<axk::FatImage> members;
     for (const auto *name : {"one.img", "two.img"}) {
         auto fat = axk::FatImage::open(std::make_shared<axk::MemoryReader>(fat_fixture()), name);
         ASSERT_TRUE(fat);
         members.push_back(std::move(*fat));
     }
-    EXPECT_FALSE(axk::FloppyImportSource::open(std::move(members)));
+    const auto opened = axk::FloppyImportSource::open(std::move(members));
+    ASSERT_TRUE(opened) << opened.error().message;
+    ASSERT_EQ(opened->inspection().objects.size(), 2U);
+    EXPECT_NE(opened->inspection().objects[0].key, opened->inspection().objects[1].key);
+    for (const auto &object : opened->inspection().objects)
+        EXPECT_TRUE(opened->prepare(std::array{object.key}));
     auto bytes = fat_fixture();
     std::fill_n(bytes.begin() + 4U * 512U, 16U, std::byte{});
     EXPECT_FALSE(source(std::move(bytes)));
@@ -158,6 +163,32 @@ TEST(FloppyImportTest, UnpackedDirectoryUsesTheSamePayloadAndSelectionRules) {
     ASSERT_TRUE(prepared) << prepared.error().message;
     ASSERT_EQ(prepared->nodes.size(), 1U);
     EXPECT_EQ(prepared->nodes.front().raw_payload, smpl_object());
-    EXPECT_FALSE(axk::FloppyImportSource::open_directories({directory, directory}));
+    EXPECT_TRUE(axk::FloppyImportSource::open_directories({directory, directory}));
     EXPECT_FALSE(axk::FloppyImportSource::open_directories({}));
+}
+
+TEST(FloppyImportTest, JoinsExplicitSegmentsWithoutCatalogIdentity) {
+    auto first = smpl_object();
+    first.resize(0xaeU);
+    be32(first, 0x20U, 2U);
+    auto second = smpl_object();
+    second.erase(second.begin() + 0xac, second.begin() + 0xae);
+    be32(second, 0x20U, 2U);
+    be32(second, 0x24U, 2U);
+    const auto directory = [](std::string name, const std::vector<std::byte> &bytes) {
+        return axk::FloppyImportDirectory{std::move(name), {{"WAVE.001", std::make_shared<axk::MemoryReader>(bytes)}}};
+    };
+    const auto opened = axk::FloppyImportSource::open_directories({directory("one", first), directory("two", second)});
+    ASSERT_TRUE(opened) << opened.error().message;
+    ASSERT_EQ(opened->inspection().objects.size(), 1U);
+    const auto prepared = opened->prepare(std::array{opened->inspection().objects.front().key});
+    ASSERT_TRUE(prepared) << prepared.error().message;
+    EXPECT_EQ(prepared->nodes.front().raw_payload, smpl_object());
+    be32(second, 0x24U, 1U);
+    const auto overlap = axk::FloppyImportSource::open_directories({directory("one", first), directory("two", second)});
+    ASSERT_TRUE(overlap) << overlap.error().message;
+    for (const auto &object : overlap->inspection().objects) {
+        EXPECT_FALSE(object.exclusion_reason.empty());
+        EXPECT_FALSE(overlap->prepare(std::array{object.key}));
+    }
 }

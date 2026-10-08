@@ -136,6 +136,7 @@ OrderedJson decoded_json(const DecodedObject &object) {
                 {"slots", std::move(slots)}};
     }
     if (const auto *program = std::get_if<CurrentProg>(&object.payload)) {
+        const auto &layout = program->layout;
         auto assignments = OrderedJson::array();
         for (const auto &row : program->assignments) {
             assignments.push_back({{"name", row.name},
@@ -148,15 +149,17 @@ OrderedJson decoded_json(const DecodedObject &object) {
         auto effects = OrderedJson::array();
         for (const auto &block : program->effect_blocks)
             effects.push_back({{"raw_block_hex", hex(block.raw_bytes)},
+                               {"stored_type",
+                                std::to_integer<std::uint8_t>(block.raw_bytes[layout.parameter_tail_offset ? 6U : 7U])},
                                {"type", block.type},
                                {"parameter_values", block.parameter_values}});
-        const auto &layout = program->layout;
         return {{"kind", "PROG"},
                 {"common", common_json(program->common)},
                 {"program_name", program->program_name},
                 {"storage_layout",
                  layout.parameter_tail_offset ? "current-split-parameter-tail" : "legacy-without-parameter-tail"},
                 {"layout_version", layout.version},
+                {"effect_type_interpretation", layout.version == 1U ? "a3000-v2-and-later-load" : "stored"},
                 {"logical_size", layout.logical_size},
                 {"stored_assignment_count", layout.stored_assignment_count},
                 {"assignment_capacity", layout.assignment_capacity},

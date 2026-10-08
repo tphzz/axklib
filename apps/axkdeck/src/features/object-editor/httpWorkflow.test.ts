@@ -1,7 +1,7 @@
 import { sampleConversionFixture, sampleFormatFixture } from '../../test/sampleFormatFixture';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, waitFor } from '@testing-library/svelte';
-import SampleFormatDialog from './SampleFormatDialog.svelte';
+import ObjectFormatDialog from './ObjectFormatDialog.svelte';
 import { HttpImageTransport } from '../../lib/httpTransport';
 import { serverFileLocation } from '../../lib/storageLocations';
 import type { ObjectDetail } from '../../lib/transport';
@@ -13,6 +13,7 @@ function sampleDetail(): ObjectDetail {
         image: { imageId: 'image-1', revision: 1, format: 'sfs' },
         object: {
             sampleFormat: sampleFormatFixture().sampleFormat,
+            programFormat: null,
             id: 'sample-1',
             key: 'SBNK:1',
             type: 'SBNK',
@@ -161,7 +162,7 @@ describe('Sample editor over HTTP', () => {
         const { workflow, sessionId } = await setup(detail, true);
         await workflow.openConversion(sessionId, 'sample-1');
         const document = workflow.conversionDocument!;
-        const view = render(SampleFormatDialog, { workflow, document });
+        const view = render(ObjectFormatDialog, { workflow, document });
         await fireEvent.click(view.getByRole('button', { name: /^Convert$/ }));
         await waitFor(() => expect(view.getByRole('status').textContent).toContain('Conversion not started'));
         expect(workflow.locked).toBe(false);

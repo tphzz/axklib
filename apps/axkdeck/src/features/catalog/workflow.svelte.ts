@@ -2,6 +2,7 @@ import { objectPresentationName } from '../../lib/objectPresentation';
 import { inspectorRelationshipGroups, type InspectorRelationshipObject } from '../../lib/inspectorRelationships';
 import { collectPages } from '../../lib/pagination';
 import { programSampleSelectRows } from '../../lib/programSampleSelect';
+import { programSummaries } from './programSummary';
 import { isConfirmedRelationship } from '../../lib/relationshipResolution';
 import {
     distinctWaveDataForSample,
@@ -266,7 +267,7 @@ export class CatalogWorkflow {
             this.activeVolumeId = volumeId;
             this.relationships = scopedRelationships;
             this.objectsById = new Map(objects.map((object) => [object.key, object]));
-            this.programs = programItems(objects, names);
+            this.programs = programItems(objects, names, programSummaries(objects, scopedRelationships));
             this.sequences = sequenceItems(objects, names);
             const bankObjects = objects.filter((object) => object.objectType === 'SBAC');
             this.sampleBanks = bankItems(bankObjects, scopedRelationships, names);
@@ -455,7 +456,7 @@ export class CatalogWorkflow {
     }
 }
 
-function programItems(objects: SamplerObject[], names: Map<string, string>): Program[] {
+function programItems(objects: SamplerObject[], names: Map<string, string>, summaries: Map<string, string>): Program[] {
     return objects
         .filter((object) => object.objectType === 'PROG')
         .map((object) => {
@@ -468,6 +469,7 @@ function programItems(objects: SamplerObject[], names: Map<string, string>): Pro
                 slot: match?.[1] ?? object.name,
                 programNumber: Number(match?.[1] ?? object.name),
                 name: match?.[2] || name,
+                assignmentSummary: summaries.get(object.key),
             };
         });
 }

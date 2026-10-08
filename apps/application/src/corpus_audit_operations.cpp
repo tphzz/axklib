@@ -92,24 +92,24 @@ axk::app::Result<Json> execute_corpus_audit(const axk::app::Sandbox &sandbox, co
             if (row.quality == axk::RelationshipQuality::tentative)
                 ++ambiguous;
         }
-        if (const auto *container = std::get_if<axk::Container>(&source.media.storage())) {
-            const auto validation = axk::validate_semantics(*container, source.inventory.catalog, source.graph);
-            validation_failed = validation_failed || !validation.valid();
+        {
+            const auto validation = axk::validate_semantics(source.media, source.inventory, source.graph);
             for (const auto &issue : validation.issues) {
+                validation_failed = validation_failed || issue.severity == axk::ValidationSeverity::error ||
+                                    (request->policy == "strict" && issue.severity == axk::ValidationSeverity::warning);
                 const auto severity = issue.severity == axk::ValidationSeverity::error     ? "error"
                                       : issue.severity == axk::ValidationSeverity::warning ? "warning"
                                                                                            : "info";
-                validation_issues.push_back(
-                    {{"severity", severity},
-                     {"code", issue.code},
-                     {"message", issue.message},
-                     {"scope", issue.code == "SFS_VOLUME_UNRECOGNIZED_OBJECT_ENTRIES" ? "volume" : "relationship"},
-                     {"source_path", display},
-                     {"sampler_path", issue.sampler_path},
-                     {"object_key", issue.object_key},
-                     {"quality", "Known"},
-                     {"basis", "validation"},
-                     {"recommended_next_check", ""}});
+                validation_issues.push_back({{"severity", severity},
+                                             {"code", issue.code},
+                                             {"message", issue.message},
+                                             {"scope", issue.scope},
+                                             {"source_path", display},
+                                             {"sampler_path", issue.sampler_path},
+                                             {"object_key", public_object_key(source, issue.object_key)},
+                                             {"quality", issue.quality},
+                                             {"basis", issue.basis},
+                                             {"recommended_next_check", issue.recommended_next_check}});
             }
         }
         if (!request->skip_wave_smoke) {

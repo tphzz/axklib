@@ -11,6 +11,7 @@
 #include "axklib/io.hpp"
 #include "axklib/program_assignment_parameters.hpp"
 #include "axklib/program_parameters.hpp"
+#include "axklib/program_storage.hpp"
 #include "axklib/publication.hpp"
 #include "axklib/sample_bank_overrides.hpp"
 #include "axklib/sample_storage.hpp"
@@ -71,6 +72,14 @@ struct UpdateSampleParametersOperation {
     SampleParameters parameters;
     std::optional<SamplePlaybackWindow> playback_window{};
     std::optional<std::string> expected_payload_sha256{};
+};
+
+struct ConvertProgramFormatOperation {
+    PartitionSelector partition;
+    std::string volume_name;
+    std::uint8_t program_number{};
+    ProgramStorageFormat target_format{ProgramStorageFormat::unknown};
+    std::string expected_payload_sha256;
 };
 
 struct ConvertSampleFormatOperation {
@@ -203,10 +212,10 @@ struct UpdateProgramParametersOperation {
     PartitionSelector partition;
     std::string volume_name;
     std::uint8_t program_number{};
-    // No inferred model: the default is unsupported by this current-layout operation.
-    ASeriesModel model{ASeriesModel::a3000};
+    std::optional<ASeriesModel> model{};
     ProgramParameters parameters;
     std::vector<ProgramAssignmentParameterPatch> assignments;
+    std::optional<std::string> expected_payload_sha256{};
 };
 
 struct SequenceSpec {
@@ -271,6 +280,7 @@ struct ReplaceProgramAssignmentsOperation {
     ASeriesModel model{ASeriesModel::a4000};
     std::string expected_payload_sha256;
     std::vector<ProgramAssignmentEdit> assignments;
+    ProgramParameters parameters{};
 };
 
 struct RetargetSampleWaveDataOperation {
@@ -293,7 +303,7 @@ using AlterationOperationData =
                  UpdateProgramParametersOperation, UpdateSampleBankParametersOperation,
                  UpdateWaveDataParametersOperation, ReplaceProgramAssignmentsOperation, RetargetSampleWaveDataOperation,
                  DuplicateSampleOperation, ConvertSampleFormatOperation, ConvertSampleBankFormatOperation,
-                 UpdateSampleBankOverridesOperation>;
+                 UpdateSampleBankOverridesOperation, ConvertProgramFormatOperation>;
 
 struct AlterationOperation {
     std::string id;

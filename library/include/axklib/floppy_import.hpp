@@ -8,8 +8,15 @@
 
 #include "axklib/media.hpp"
 #include "axklib/package.hpp"
+#include "axklib/relationship.hpp"
 
 namespace axk {
+
+struct FloppyImportFileSource {
+    std::string member_name;
+    std::string path;
+    std::uint64_t size_bytes{};
+};
 
 struct FloppyImportObject {
     std::string key;
@@ -19,16 +26,22 @@ struct FloppyImportObject {
     std::uint64_t size_bytes{};
     std::vector<std::string> required_object_keys;
     std::string exclusion_reason;
+    std::vector<FloppyImportFileSource> sources;
 };
 
 struct FloppyImportExcludedFile {
     std::string member_name;
     std::string path;
     std::uint64_t size_bytes{};
+    std::string reason;
+    bool unreadable_object{};
 };
 
 struct FloppyImportInspection {
     bool complete{};
+    bool can_import{};
+    bool recovery_used{};
+    bool requires_acknowledgement{};
     std::string label;
     std::vector<FloppyDiskIdentity> members;
     std::optional<std::uint16_t> next_required_index;
@@ -42,7 +55,7 @@ struct FloppyImportDirectory {
     std::vector<AxkObjectDirectoryEntry> entries;
 };
 
-// One ordinary disk or one catalog-identified set, never unrelated disks combined.
+// Explicit source selection may recover complete objects without certifying a disk set.
 class AXK_API FloppyImportSource {
   public:
     [[nodiscard]] static Result<FloppyImportSource> open(std::vector<FatImage> members,
@@ -54,9 +67,11 @@ class AXK_API FloppyImportSource {
                                                   const CancellationToken &cancellation = {}) const;
 
   private:
-    FloppyImportSource(MediaKind kind, ObjectCatalog catalog, FloppyImportInspection inspection);
+    FloppyImportSource(MediaKind kind, ObjectCatalog catalog, RelationshipGraph relationships,
+                       FloppyImportInspection inspection);
     MediaKind kind_;
     ObjectCatalog catalog_;
+    RelationshipGraph relationships_;
     FloppyImportInspection inspection_;
 };
 

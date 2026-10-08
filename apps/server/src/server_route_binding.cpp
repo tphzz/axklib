@@ -5,6 +5,7 @@
 #include <utility>
 
 #include "authentication.hpp"
+#include "axklib/application/program_editor.hpp"
 #include "axklib/server/job_json.hpp"
 #include "axklib/server/telemetry.hpp"
 #include "axklib/utf8.hpp"
@@ -37,7 +38,15 @@ void ServerApplication::register_infrastructure_routes() {
                    [this](const crow::request &request) { return host_directory_roots_response(request); },
                .host_directory_list =
                    [this](const crow::request &request) { return host_directory_listing_response(request); },
-               .openapi = [this](const crow::request &request) { return openapi_response(request); }});
+               .openapi = [this](const crow::request &request) { return openapi_response(request); },
+               .program_editor_catalog =
+                   [this](const crow::request &request) {
+                       const auto id = request_id(request);
+                       if (auto denied = guard(request, id))
+                           return std::move(*denied);
+                       static const auto catalog = axk::app::program_editor_catalog();
+                       return json_response(200, {{"data", catalog}}, id);
+                   }});
 
     axk::server::detail::register_file_routes(
         app_,

@@ -272,6 +272,108 @@ def exercise(server: Path, fixture: Path, root: Path) -> None:
         assert closed.status == 200 and closed.json()["data"]["closed"] is True, (
             closed.content
         )
+        # Seed only the disposable, closed image. Both stored bank formats must survive a real session reopen.
+        opened = job("/api/v1/images", {"source": {"kind": "FILE", "file": {
+            "rootId": "workspace", "relativePath": "sample.hds"}}}, "open-root-fixture")
+        image_id = opened["imageId"]
+        base = f"/api/v1/images/{image_id}"
+        root_names = []
+        current_rows = get(f"{base}/objects?limit=100")["items"]
+        sample = next(row for row in current_rows if row["type"] == "SBNK" and row["name"] == sample["name"])
+        for index, target in enumerate(("a3000_188", "a4000_a5000_224")):
+            name = f"Root bank {index}"
+            root_names.append(name)
+            snapshot = get(f"{base}/objects/{sample['id']}")
+            alter(snapshot, {"id": f"insert-root-{index}", "type": "insert_sbac",
+                             "partition_index": snapshot["editing"]["partitionIndex"],
+                             "volume_name": snapshot["editing"]["volumeName"],
+                             "sample_bank": {"name": name, "member_samples": [sample["name"]],
+                                             "storage_format": target}})
+        assert request(port, TOKEN, "DELETE", base).status == 200
+        image_path = workspace / "sample.hds"
+        seeded = bytearray(image_path.read_bytes())
+        original_banks = {}
+        for name in root_names:
+            marker = b"FSFSDEV3SPLXSBAC"
+            offsets = []
+            offset = seeded.find(marker)
+            while offset != -1:
+                if bytes(seeded[offset + 0x32:offset + 0x42]).rstrip(b"\0 ").decode("ascii") == name:
+                    offsets.append(offset)
+                offset = seeded.find(marker, offset + len(marker))
+            assert len(offsets) == 1, offsets
+            offset = offsets[0]
+            seeded[offset + 0x137] = 0x40
+            seeded[offset + 0xA6:offset + 0xB2] = bytes.fromhex("433c5622ac44ff0012ab34cd")
+            seeded[offset + 0x140:offset + 0x144] = bytes.fromhex("abcdef01")
+            length_field = 0x18 if name == root_names[0] else 0x1C
+            length = int.from_bytes(seeded[offset + length_field:offset + length_field + 4], "big") + 0x30
+            original_banks[name] = bytes(seeded[offset:offset + length])
+        image_path.write_bytes(seeded)
+        opened = job("/api/v1/images", {"source": {"kind": "FILE", "file": {
+            "rootId": "workspace", "relativePath": "sample.hds"}}}, "open-preserved-root")
+        image_id = opened["imageId"]
+        base = f"/api/v1/images/{image_id}"
+        root_rows = get(f"{base}/objects?limit=100")["items"]
+        unaffected = {(row["type"], row["name"]): get(f"{base}/objects/{row['id']}")["formatConversion"]["payloadSha256"]
+                      for row in root_rows if row["type"] in ("SBNK", "SBAC") and row["name"] not in root_names}
+        for index, name in enumerate(root_names):
+            row = next(item for item in root_rows if item["name"] == name)
+            root_path = f"{base}/objects/{row['id']}"
+            snapshot = get(root_path)
+            edges = relationship_values(snapshot)
+            editing = snapshot["editing"]
+            assert editing["editable"] and editing["reason"] == "", editing
+            assert editing["sampleFormat"]["diagnostics"] == []
+            assert editing["sampleFormat"]["parameterIssues"] == []
+            assert "root_key" in editing["blockedParameters"]
+            assert all(unit["id"] != 6 and "root_key" not in unit["keys"] for unit in editing["bankOverrides"]["units"])
+            for active in (True, False):
+                change = {"id": f"root-save-{index}-{active}", "type": "update_sample_bank_overrides",
+                          "partition_index": editing["partitionIndex"], "volume_name": editing["volumeName"],
+                          "sample_bank_name": name, "expected_payload_sha256": editing["payloadSha256"],
+                          "parameters": {"level": 82} if active else {},
+                          "enable": [33] if active else [], "disable": [] if active else [33]}
+                alter(snapshot, change)
+                snapshot = get(root_path)
+                editing = snapshot["editing"]
+                assert editing["parameters"]["root_key"] == 67
+                assert relationship_values(snapshot) == edges
+            expected = bytearray(original_banks[name])
+            expected[0xE6] = 82
+            assert editing["payloadSha256"] == hashlib.sha256(expected).hexdigest()
+            for rejection, forbidden in enumerate((
+                {"parameters": {"root_key": 64, "level": 83}, "enable": [33], "disable": []},
+                {"parameters": {}, "enable": [6], "disable": []},
+                {"parameters": {}, "enable": [], "disable": [6]},
+            )):
+                identity = f"root-reject-{index}-{rejection}"
+                invalid = {**change, **forbidden, "id": identity,
+                           "expected_payload_sha256": editing["payloadSha256"]}
+                body = {"imageId": image_id, "expectedRevision": snapshot["image"]["revision"],
+                        "manifest": {"inline": {"schema_version": "1.0", "operations": [invalid]}}, "inputBindings": []}
+                response = request(port, TOKEN, "POST", "/api/v1/image-session-alterations", body,
+                                   {"Idempotency-Key": identity})
+                assert response.status == 202, response.content
+                failed = wait_for_job(port, TOKEN, response.json()["data"]["jobId"], process)
+                assert failed["state"] == "FAILED", failed
+                assert get(root_path)["editing"]["payloadSha256"] == editing["payloadSha256"]
+                assert get(base)["revision"] == snapshot["image"]["revision"]
+            assert not snapshot["formatConversion"]["formatConversions"][0]["allowed"]
+        assert request(port, TOKEN, "DELETE", base).status == 200
+        reopened = job("/api/v1/images", {"source": {"kind": "FILE", "file": {
+            "rootId": "workspace", "relativePath": "sample.hds"}}}, "reopen-preserved-root")
+        base = f"/api/v1/images/{reopened['imageId']}"
+        for row in get(f"{base}/objects?limit=100")["items"]:
+            snapshot = get(f"{base}/objects/{row['id']}")
+            if row["name"] in root_names:
+                expected = bytearray(original_banks[row["name"]])
+                expected[0xE6] = 82
+                assert snapshot["editing"]["editable"]
+                assert snapshot["editing"]["payloadSha256"] == hashlib.sha256(expected).hexdigest()
+            elif (row["type"], row["name"]) in unaffected:
+                assert snapshot["formatConversion"]["payloadSha256"] == unaffected[(row["type"], row["name"])]
+        assert request(port, TOKEN, "DELETE", base).status == 200
 
 
 def main() -> None:

@@ -34,7 +34,7 @@ bool has_program_parameter_values(const ProgramParameters &value) {
                                }) ||
            std::ranges::any_of(value.effects, [&](const auto &effect) {
                return effect.enabled || effect.input_level || effect.output_level || effect.pan || effect.width ||
-                      effect.destination || effect.type || any(effect.parameters);
+                      effect.destination || effect.type || effect.reset_parameters || any(effect.parameters);
            });
 }
 
@@ -188,7 +188,8 @@ ProgramParameters decode_program_parameters(std::span<const std::byte> payload, 
     if (layout.parameter_tail_offset)
         blocks.extended =
             std::span<const std::byte, 0x28>{payload.subspan(*layout.parameter_tail_offset + 0x88U, 0x28U)};
-    return decode_program_parameter_blocks(blocks);
+    return decode_program_parameter_blocks(blocks, layout.parameter_tail_offset ? ProgramParameterGeneration::current
+                                                                                : ProgramParameterGeneration::a3000);
 }
 
 ProgramParameters decode_program_parameter_blocks(const ProgramParameterBlocks &blocks,
@@ -326,15 +327,22 @@ Result<void> apply_program_parameters(std::vector<std::byte> &payload, const Pro
     if (!decoded)
         return std::unexpected{decoded.error()};
     const auto *program = std::get_if<CurrentProg>(&decoded->payload);
-    if (!program || !program->layout.parameter_tail_offset)
-        return std::unexpected{make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
-                                          "Program parameter writes require the current Program layout")};
-    const auto tail = *program->layout.parameter_tail_offset;
+    const bool native = model == ASeriesModel::a3000;
+    if (!program || (native ? program->layout.version != 2U
+                            : program->layout.version != 4U || !program->layout.parameter_tail_offset))
+        return std::unexpected{
+            make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported,
+                       "Program parameter model does not match a writable revision-2 or revision-4 layout")};
     auto bytes = payload;
     const auto span = std::span{bytes};
-    const MutableProgramParameterBlocks blocks{span.subspan<0x80U, 0x16U>(), span.subspan(tail + 0x78U).first<0x10U>(),
-                                               span.subspan<0x110U, 0x10U>(),
-                                               span.subspan(tail + 0x88U).first<0x28U>()};
+    MutableProgramParameterBlocks blocks{span.subspan<0x80U, 0x16U>(), span.subspan<0x110U, 0x10U>(), std::nullopt,
+                                         std::nullopt};
+    if (!native) {
+        const auto tail = *program->layout.parameter_tail_offset;
+        blocks.controllers = span.subspan(tail + 0x78U).first<0x10U>();
+        blocks.legacy_controllers = span.subspan<0x110U, 0x10U>();
+        blocks.extended = span.subspan(tail + 0x88U).first<0x28U>();
+    }
     if (auto fields = apply_program_parameter_blocks(blocks, value, model); !fields)
         return fields;
     if (auto effects = apply_program_effect_parameters(bytes, program->layout, value, model, mode); !effects)

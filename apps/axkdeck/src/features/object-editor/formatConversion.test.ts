@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ObjectDetail } from '../../lib/transport';
+import { sampleSnapshot } from '../../lib/objectEditing';
 import { sampleConversionFixture, sampleFormatFixture } from '../../test/sampleFormatFixture';
 import { ObjectEditorWorkflow } from './workflow.svelte';
 
@@ -7,7 +8,7 @@ function setup(bank = false) {
     const detail = {
         image: { revision: 1 },
         object: { id: 'sample', key: 'sample', name: bank ? 'Bank' : 'Sample', type: bank ? 'SBAC' : 'SBNK' },
-        formatConversion: sampleConversionFixture('A3000_188'),
+        formatConversion: sampleConversionFixture('A3000_188', { kind: bank ? 'SAMPLE_BANK' : 'SAMPLE' }),
         editing: {
             profile: 'a-series/sample',
             editable: true,
@@ -25,7 +26,10 @@ function setup(bank = false) {
     } as unknown as ObjectDetail;
     const converted = structuredClone(detail);
     Object.assign(converted.editing!, sampleFormatFixture('A4000_A5000_224'), { payloadSha256: 'b'.repeat(64) });
-    converted.formatConversion = sampleConversionFixture('A4000_A5000_224', { payloadSha256: 'b'.repeat(64) });
+    converted.formatConversion = sampleConversionFixture('A4000_A5000_224', {
+        kind: bank ? 'SAMPLE_BANK' : 'SAMPLE',
+        payloadSha256: 'b'.repeat(64),
+    });
     if (bank) {
         detail.editing = null;
         converted.editing = null;
@@ -104,7 +108,7 @@ describe('explicit Sample format conversion', () => {
         expect(transport.startObjectFormatConversion.mock.calls[0]![1].operation).not.toHaveProperty('sample_name');
         expect(transport.startObjectParameterEdit).not.toHaveBeenCalled();
         expect(workflow.navigation('a-series/sample')).toBe(navigation);
-        expect(document.detail!.formatConversion!.sampleFormat.format).toBe('A4000_A5000_224');
+        expect(document.detail!.formatConversion).toMatchObject({ sampleFormat: { format: 'A4000_A5000_224' } });
         expect(document.status).toBe('Sample Bank format converted');
         expect(workflow.locked).toBe(false);
         expect(workflow.conversionDocument).toBeNull();
@@ -148,7 +152,7 @@ describe('explicit Sample format conversion', () => {
         expect(transport.startObjectFormatConversion).toHaveBeenCalledWith(1, {
             expectedRevision: 1,
             operation: {
-                id: 'sample-format',
+                id: 'object-format',
                 type: 'convert_sbnk_format',
                 target_format: 'a4000_a5000_224',
                 partition_index: 0,
@@ -159,7 +163,7 @@ describe('explicit Sample format conversion', () => {
         });
         expect(await workflow.load(1, 'sample')).toBe(document);
         expect(workflow.navigation('a-series/sample')).toBe(navigation);
-        expect(document.detail!.editing!.sampleFormat.format).toBe('A4000_A5000_224');
+        expect(sampleSnapshot(document.detail)!.sampleFormat.format).toBe('A4000_A5000_224');
         expect(document.draft.dirty).toBe(false);
         expect(document.phase).toBe('editable');
         expect(workflow.conversionDocument).toBeNull();

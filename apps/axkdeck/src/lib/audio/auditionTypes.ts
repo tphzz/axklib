@@ -5,6 +5,7 @@ export interface AuditionState {
     status: 'idle' | 'preparing' | 'playing' | 'failed';
     playheadFrame: number;
     draft?: boolean;
+    mapping?: boolean;
     error?: string;
     errorCode?: string;
     errorContext?: unknown;

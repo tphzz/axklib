@@ -5,6 +5,8 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
+#include <map>
 #include <memory>
 #include <optional>
 #include <ranges>
@@ -41,6 +43,7 @@ class ProgramBitmapReporting : public testing::TestWithParam<BitmapReportingCase
     std::filesystem::path root;
     std::unique_ptr<axk::app::Sandbox> sandbox;
     const std::string image_name{"source.img"};
+    std::map<std::string, std::uint64_t> object_offsets;
 
     void SetUp() override {
         std::string name = testing::UnitTest::GetInstance()->current_test_info()->name();
@@ -114,6 +117,7 @@ class ProgramBitmapReporting : public testing::TestWithParam<BitmapReportingCase
                                     partition.sectors_per_cluster) *
                                sfs->superblock().sector_size_bytes;
                 }
+                object_offsets.emplace(object.decoded.header.name, absolute);
                 if (object.decoded.header.type == axk::ObjectType::sbac)
                     patches.emplace_back(absolute + 0x90U, 1U << 7U);
                 if (object.decoded.header.type == axk::ObjectType::sbnk && object.decoded.header.name == "909 HH")
@@ -154,12 +158,25 @@ class ProgramBitmapReporting : public testing::TestWithParam<BitmapReportingCase
         return {{"sources", {{{"rootId", "workspace"}, {"relativePath", image_name}}}},
                 {"destination", {{"rootId", "workspace"}, {"relativePath", std::move(destination)}}}};
     }
+
+    void remove_wave_link(std::string_view name) {
+        const auto offset = object_offsets.at(std::string{name});
+        std::fstream output{root / image_name, std::ios::binary | std::ios::in | std::ios::out};
+        ASSERT_TRUE(output);
+        constexpr std::array<char, 16> missing{'A', 'b', 's', 'e', 'n', 't'};
+        constexpr std::array<char, 4> no_cache{};
+        output.seekp(static_cast<std::streamoff>(offset + 0x78U));
+        output.write(missing.data(), static_cast<std::streamsize>(missing.size()));
+        output.seekp(static_cast<std::streamoff>(offset + 0xa0U));
+        output.write(no_cache.data(), static_cast<std::streamsize>(no_cache.size()));
+        ASSERT_TRUE(output);
+    }
 };
 
 TEST_P(ProgramBitmapReporting, ReportsEachObjectMismatchOnceAndStrictPolicyFails) {
     auto registry = axk::app::make_operation_registry();
     ASSERT_TRUE(axk::app::bind_validation_operations(registry, *sandbox));
-    for (const auto *policy : {"normal", "strict"}) {
+    for (const auto *policy : {"normal", "strict", "salvage-aware"}) {
         auto input = request(std::string{"reports/"} + policy);
         input["policy"] = policy;
         const auto result = registry.invoke("report.validate", input, context());
@@ -209,6 +226,73 @@ TEST_P(ProgramBitmapReporting, WritesGenericCrossCheckRowsAndSchemaForBothObject
     EXPECT_EQ(sample->at("program_bitmap_offset"), 0xc0U);
     EXPECT_EQ(sample->at("bitmap_programs"), "005");
     EXPECT_EQ(sample->at("direct_prog_assignment_programs"), "008");
+}
+
+TEST_P(ProgramBitmapReporting, CorpusIncludesMediaWarningsAndHonorsStrictPolicyWithoutWaveSmoke) {
+    auto registry = axk::app::make_operation_registry();
+    ASSERT_TRUE(axk::app::bind_file_operations(registry, *sandbox));
+    for (const auto *policy : {"normal", "strict", "salvage-aware"}) {
+        auto input = request(std::string{"reports/corpus-"} + policy);
+        input["policy"] = policy;
+        input["skipWaveSmoke"] = true;
+        const auto result = registry.invoke("corpus.audit", input, context());
+        ASSERT_TRUE(result) << result.error().message;
+        EXPECT_EQ(result->at("validationIssueCount"), 2U);
+        EXPECT_EQ(result->at("validationFailed"), std::string_view{policy} == "strict");
+        EXPECT_EQ(result->at("waveSmokeDecoded"), 0U);
+        std::ifstream file{root / "reports" / (std::string{"corpus-"} + policy) / "validation_issues.csv"};
+        ASSERT_TRUE(file);
+        const std::string issues{std::istreambuf_iterator<char>{file}, std::istreambuf_iterator<char>{}};
+        for (const auto *code : {"REL_SBAC_PROGRAM_BITMAP_MISMATCH", "REL_SBNK_PROGRAM_BITMAP_MISMATCH"}) {
+            const auto first = issues.find(code);
+            ASSERT_NE(first, std::string::npos);
+            EXPECT_EQ(issues.find(code, first + 1U), std::string::npos);
+        }
+    }
+}
+
+TEST_P(ProgramBitmapReporting, ActiveMissingWaveDataConvergesAcrossReportCorpusAndSession) {
+    remove_wave_link("909 HH");
+    remove_wave_link("DX Member");
+    auto registry = axk::app::make_operation_registry();
+    ASSERT_TRUE(axk::app::bind_validation_operations(registry, *sandbox));
+    ASSERT_TRUE(axk::app::bind_file_operations(registry, *sandbox));
+    const auto standard = registry.invoke("report.validate", request("reports/missing"), context());
+    ASSERT_TRUE(standard) << standard.error().message;
+    EXPECT_TRUE(standard->at("failed").get<bool>());
+    std::ifstream standard_file{root / "reports" / "missing" / "validation_issues.json"};
+    const auto issues = nlohmann::json::parse(standard_file);
+    ASSERT_EQ(issues.size(), 3U) << issues.dump(2);
+    const auto active = std::ranges::find_if(
+        issues, [](const auto &issue) { return issue.at("code") == "REL_ACTIVE_PROGRAM_SBNK_MEMBER_TARGET_MISSING"; });
+    ASSERT_NE(active, issues.end());
+    EXPECT_EQ(active->at("severity"), "error");
+    EXPECT_TRUE(active->at("message").template get<std::string>().starts_with(
+        "2 Sample-to-Wave-Data link(s) across 2 Sample(s)"));
+    for (const auto *policy : {"normal", "strict", "salvage-aware"}) {
+        auto input = request(std::string{"reports/missing-corpus-"} + policy);
+        input["policy"] = policy;
+        input["skipWaveSmoke"] = true;
+        const auto result = registry.invoke("corpus.audit", input, context());
+        ASSERT_TRUE(result) << result.error().message;
+        EXPECT_EQ(result->at("validationIssueCount"), issues.size());
+        EXPECT_TRUE(result->at("validationFailed").get<bool>());
+    }
+    axk::app::PathReservationCoordinator reservations;
+    axk::app::ImageSessionManager sessions{
+        *sandbox, 4U, 100U, std::chrono::minutes{15}, std::chrono::steady_clock::now, &reservations};
+    const auto opened = sessions.open({"workspace", image_name}, "owner");
+    ASSERT_TRUE(opened) << opened.error().message;
+    const auto session_issues = sessions.validation_issues(opened->image_id, "owner", 100U);
+    ASSERT_TRUE(session_issues);
+    EXPECT_EQ(session_issues->items.size(), issues.size());
+    for (const auto &issue : session_issues->items) {
+        EXPECT_TRUE(issue.object_id);
+        const auto found = std::ranges::find_if(issues, [&](const auto &row) { return row.at("code") == issue.code; });
+        ASSERT_NE(found, issues.end());
+        EXPECT_EQ(found->at("message").template get<std::string>(), issue.message);
+        EXPECT_EQ(found->at("severity").template get<std::string>(), issue.severity);
+    }
 }
 
 TEST_P(ProgramBitmapReporting, ExposesObjectBoundMismatchWarningsWhenOpeningEachContainer) {

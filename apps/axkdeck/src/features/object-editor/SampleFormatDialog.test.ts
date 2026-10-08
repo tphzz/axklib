@@ -5,12 +5,12 @@ import { sampleConversionFixture, sampleFormatFixture } from '../../test/sampleF
 import type { ObjectDetail } from '../../lib/transport';
 import type { SampleStorageFormat } from '../../lib/objectEditing';
 import { ObjectEditorWorkflow } from './workflow.svelte';
-import SampleFormatDialog from './SampleFormatDialog.svelte';
+import ObjectFormatDialog from './ObjectFormatDialog.svelte';
 import SampleFormatBadge from './SampleFormatBadge.svelte';
 
 async function setup(dirty = false, allowed = true, source: SampleStorageFormat = 'A3000_188', bank = false) {
     const format = sampleFormatFixture(source);
-    const conversion = sampleConversionFixture(source);
+    const conversion = sampleConversionFixture(source, { kind: bank ? 'SAMPLE_BANK' : 'SAMPLE' });
     conversion.formatConversions[0]!.allowed = allowed;
     if (!allowed)
         conversion.formatConversions[0]!.blockers = [
@@ -43,7 +43,7 @@ async function setup(dirty = false, allowed = true, source: SampleStorageFormat 
     await workflow.openConversion(1, 'sample');
     const document = workflow.conversionDocument!;
     if (dirty) document.draft.set('level', 90);
-    return { workflow, document, transport, view: render(SampleFormatDialog, { workflow, document }) };
+    return { workflow, document, transport, view: render(ObjectFormatDialog, { workflow, document }) };
 }
 describe('Sample format UI', () => {
     it('names the bank target and keeps pending-operation blockers visible with dismissal available', async () => {
@@ -54,7 +54,7 @@ describe('Sample format UI', () => {
         document.detail = {
             ...document.detail!,
             formatConversion: {
-                ...document.detail!.formatConversion!,
+                ...sampleConversionFixture('A3000_188', { kind: 'SAMPLE_BANK' }),
                 formatConversions: [
                     {
                         targetFormat: 'A4000_A5000_224',
@@ -103,7 +103,7 @@ describe('Sample format UI', () => {
     it('names the reverse target and explains parameter-preserving conversion', async () => {
         const { view } = await setup(false, true, 'A4000_A5000_224');
         const dialog = view.getByRole('dialog', { name: 'Convert to a3k sample format' });
-        expect(dialog.textContent).toContain('incompatible settings');
+        expect(dialog.textContent).toMatch(/incompatible settings/i);
         expect(dialog.textContent).not.toMatch(/bytes|prefix|extension/);
     });
     it.each(['submission', 'job'] as const)('unlocks dismissal after a path conflict during %s', async (stage) => {

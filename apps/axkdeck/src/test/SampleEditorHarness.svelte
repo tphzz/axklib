@@ -10,7 +10,8 @@
     import type { AuditionWorkflow } from '../features/audition/workflow.svelte';
     import { sampleFields } from '../features/devices/a-series/sample/fields';
     import { sampleConversionFixture, sampleFormatFixture } from './sampleFormatFixture';
-    import type { ObjectDetail, ImageTransport } from '../lib/transport';
+    import type { ObjectDetail, ImageTransport, PreviewEnvelope } from '../lib/transport';
+    import { sampleSnapshot } from '../lib/objectEditing';
     import type {
         ObjectParameterEdit,
         SampleDuplicationRequest,
@@ -20,8 +21,16 @@
     import type { InspectorSelection } from '../lib/types';
     import { bankEditorUnits } from './bankEditorFixture';
     let { bank = false }: { bank?: boolean } = $props();
+    const resolvedMembers = [
+        { objectId: 'Member A', name: 'PB BRASS A' },
+        { objectId: 'Member B', name: 'DNBS drum loop 1' },
+        { objectId: 'Member C', name: 'A deliberately long sample preview name' },
+    ];
     let selected = $state(untrack(() => (bank ? 'Bank A' : 'Sample A')));
-    const bankOverrides = new Map<string, Set<number>>();
+    const bankOverrides = new Map<string, Set<number>>(
+        untrack(() => (bank ? ['Bank A', 'Bank B'].map((name) => [name, new Set([6])] as const) : [])),
+    );
+    let rootPreserved = $state(untrack(() => bank));
     let lowerOpen = $state(false);
     let writes = $state(0);
     let names = $state(['Sample A', 'Sample B', 'Sample C with a very long name that must truncate in narrow panes']);
@@ -77,7 +86,10 @@
             storedFormats[name] ?? ((bank && !isBank ? name === 'Member A' : stereo) ? 'A3000_188' : 'A4000_A5000_224'),
         );
         const currentParameters = structuredClone(
-            copies.get(name) ?? { ...parameters, ...(name === 'Sample B' ? { level: 75, root_key: 64 } : {}) },
+            copies.get(name) ?? {
+                ...parameters,
+                ...(isBank ? { root_key: 67 } : name === 'Sample B' ? { level: 75, root_key: 64 } : {}),
+            },
         );
         if (bank && !isBank) {
             Object.assign(currentParameters, {
@@ -95,7 +107,22 @@
         }
         return {
             image: { revision: writes + 1 },
-            object: { id: name, key: name, name, type: isBank ? 'SBAC' : 'SBNK' },
+            object: {
+                id: name,
+                key: name,
+                name: bank ? (resolvedMembers.find((member) => member.objectId === name)?.name ?? name) : name,
+                type: isBank ? 'SBAC' : 'SBNK',
+            },
+            relationships: isBank
+                ? resolvedMembers.map((member, index) => ({
+                      id: `slot-${index}`,
+                      type: 'SBAC_SLOT_TO_SBNK',
+                      quality: 'KNOWN',
+                      selectedObjectRoles: ['SOURCE'],
+                      sourceObject: { id: name, type: 'SBAC' },
+                      targetObject: { id: member.objectId, type: 'SBNK' },
+                  }))
+                : [],
             formatConversion: sampleConversionFixture(format.sampleFormat.format, { volumeName: 'Test' }),
             editing: {
                 profile: isBank ? 'a-series/sample-bank' : 'a-series/sample',
@@ -132,11 +159,7 @@
                                   format.sampleFormat.format === 'A3000_188',
                                   bankOverrides.get(name) ?? new Set(),
                               ),
-                              members: [
-                                  { name: 'Member A', objectId: 'Member A' },
-                                  { name: 'Member B', objectId: 'Member B' },
-                                  { name: 'Missing member', objectId: null },
-                              ],
+                              members: [...resolvedMembers, { name: 'Missing member', objectId: null }],
                           },
                       }
                     : {}),
@@ -145,23 +168,47 @@
     }
     const transport = {
         objectDetail: async (_: number, id: string) => detail(id),
+        preview: async (_: number, objectId: string, count: number): Promise<PreviewEnvelope> => ({
+            objectId,
+            lanes: (stereo ? (['LEFT', 'RIGHT'] as const) : (['MONO'] as const)).map((role) => ({
+                role,
+                sourceObjectId: `${objectId}-${role}`,
+                sampleRate: fixtureRate,
+                sampleWidthBytes: 2,
+                storedFrameCount: fixtureFrames,
+                playbackStartFrame: 0,
+                playbackLengthFrames: fixtureFrames,
+                loopStartFrame: 20401,
+                loopLengthFrames: 42195,
+                bins: fixtureBins(count),
+            })),
+        }),
         startObjectParameterEdit: async (_: number, edit: ObjectParameterEdit) => {
             writes++;
-            if (edit.operation.type === 'update_sample_bank_overrides') {
-                const name = edit.operation.sample_bank_name;
-                const stored = copies.get(name) ?? structuredClone(parameters);
-                patchParameters(stored, edit.operation.parameters);
-                copies.set(name, stored);
-                const enabled = bankOverrides.get(name) ?? new Set<number>();
-                edit.operation.enable.forEach((id) => enabled.add(id));
-                edit.operation.disable.forEach((id) => enabled.delete(id));
-                bankOverrides.set(name, enabled);
-            } else patchParameters(parameters, edit.operation.parameters);
+            for (const operation of edit.operations) {
+                if (operation.type === 'update_sample_bank_overrides') {
+                    if (
+                        'root_key' in operation.parameters ||
+                        operation.enable.includes(6) ||
+                        operation.disable.includes(6)
+                    )
+                        throw new Error('Original Key cannot be edited or toggled at bank level');
+                    const name = operation.sample_bank_name;
+                    const stored = copies.get(name) ?? structuredClone(sampleSnapshot(detail(name))!.parameters);
+                    patchParameters(stored, operation.parameters);
+                    copies.set(name, stored);
+                    const enabled = bankOverrides.get(name) ?? new Set<number>();
+                    operation.enable.forEach((id) => enabled.add(id));
+                    operation.disable.forEach((id) => enabled.delete(id));
+                    bankOverrides.set(name, enabled);
+                    rootPreserved = enabled.has(6) && stored.root_key === 67;
+                } else patchParameters(parameters, operation.parameters);
+            }
             return { jobId: 1, kind: 'edit', status: 'queued' };
         },
         startSampleDuplication: async (_: number, edit: SampleDuplicationRequest) => {
             writes++;
-            const parameters = detail(edit.operation.sample_name).editing!.parameters;
+            const parameters = sampleSnapshot(detail(edit.operation.sample_name))!.parameters;
             patchParameters(parameters, edit.operation.parameters);
             copies.set(edit.operation.new_name, parameters);
             names = [...names, edit.operation.new_name];
@@ -261,7 +308,7 @@
     } as unknown as InspectorSelection);
 </script>
 
-<nav>
+<nav data-root-preserved={rootPreserved}>
     <button onclick={() => (selected = bank ? 'Bank A' : 'Sample A')}>Select A</button><button
         onclick={() => (selected = bank ? 'Bank B' : 'Sample B')}>Select B</button
     ><output aria-label="Write count">{writes}</output>

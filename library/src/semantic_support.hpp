@@ -9,6 +9,8 @@
 
 namespace axk::semantic_detail {
 
+ValidationReport validate_sfs_structure(const Container &container, const ObjectCatalog &catalog);
+
 inline const ObjectSnapshot *find_object(const ObjectCatalog &catalog, std::string_view key) {
     const auto found = std::ranges::find(catalog.objects, key, &ObjectSnapshot::key);
     return found == catalog.objects.end() ? nullptr : &*found;

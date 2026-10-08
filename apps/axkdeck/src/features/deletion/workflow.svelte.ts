@@ -25,6 +25,7 @@ export interface WaveDataCleanupRequest {
 }
 
 interface DeletionWorkflowDependencies {
+    confirmEditorLeave?: () => Promise<boolean>;
     transport: ImageTransport;
     jobs: JobController;
     sessionId: () => number | null;
@@ -54,8 +55,11 @@ export class DeletionWorkflow {
         this.cleanupRequest = null;
     }
 
-    requestObjects(targets: PackageExportObject[]): void {
+    async requestObjects(targets: PackageExportObject[]): Promise<void> {
         if (this.dependencies.sessionId() === null || targets.length === 0) return;
+        const session = this.dependencies.sessionId();
+        if (this.dependencies.confirmEditorLeave && !(await this.dependencies.confirmEditorLeave())) return;
+        if (session !== this.dependencies.sessionId()) return;
         const generation = ++this.objectGeneration;
         this.objectRequest = {
             targets,
