@@ -44,10 +44,10 @@ describe('ImageNavigator', () => {
 
         const emptyActions = container.querySelector('.image-empty-actions');
         expect(emptyActions).toBeTruthy();
-        expect(screen.getByRole('button', { name: 'Open image' }).closest('.image-empty-actions')).toBe(emptyActions);
+        expect(screen.getByRole('button', { name: 'Open' }).closest('.image-empty-actions')).toBe(emptyActions);
         expect(screen.getByRole('button', { name: 'Create image' }).closest('.image-empty-actions')).toBe(emptyActions);
 
-        await fireEvent.click(screen.getByRole('button', { name: 'Open image' }));
+        await fireEvent.click(screen.getByRole('button', { name: 'Open' }));
         await fireEvent.click(screen.getByRole('button', { name: 'Create image' }));
         expect(onopen).toHaveBeenCalledOnce();
         expect(oncreate).toHaveBeenCalledOnce();
@@ -82,10 +82,10 @@ describe('ImageNavigator', () => {
         expect(screen.getByText('Yamaha/images')).toBeTruthy();
         const imageRow = container.querySelector('.active-image');
         expect(imageRow).toBeTruthy();
-        expect(screen.getByRole('button', { name: 'Open another image' }).closest('.active-image')).toBe(imageRow);
+        expect(screen.getByRole('button', { name: 'Open' }).closest('.active-image')).toBe(imageRow);
         expect(screen.getByRole('button', { name: 'Eject image' }).closest('.active-image')).toBe(imageRow);
 
-        await fireEvent.click(screen.getByRole('button', { name: 'Open another image' }));
+        await fireEvent.click(screen.getByRole('button', { name: 'Open' }));
         await fireEvent.click(screen.getByRole('button', { name: 'Eject image' }));
         expect(onopen).toHaveBeenCalledOnce();
         expect(onclose).toHaveBeenCalledOnce();
@@ -112,7 +112,7 @@ describe('ImageNavigator', () => {
             },
         });
 
-        expect((screen.getByRole('button', { name: 'Open another image' }) as HTMLButtonElement).disabled).toBe(true);
+        expect((screen.getByRole('button', { name: 'Open' }) as HTMLButtonElement).disabled).toBe(true);
         expect((screen.getByRole('button', { name: 'Eject image' }) as HTMLButtonElement).disabled).toBe(true);
         expect((screen.getByRole('button', { name: 'Image options' }) as HTMLButtonElement).disabled).toBe(true);
     });

@@ -341,6 +341,13 @@ axk::app::Result<axk::server::CommandLine> axk::server::parse_command_line(int a
             if (!process_id || *process_id == 0U)
                 return std::unexpected(argument_error("--parent-pid must be a positive integer"));
             command_line.config.parent_process_id = *process_id;
+        } else if (argument == "--enable-devices") {
+            command_line.config.enable_devices = true;
+        } else if (argument == "--device-helper") {
+            auto value = value_after(argument);
+            if (!value)
+                return std::unexpected(value.error());
+            command_line.config.device_helper = std::filesystem::path{*value};
         } else if (argument == "--workers") {
             auto value = value_after(argument);
             if (!value)
@@ -464,6 +471,8 @@ std::string axk::server::command_line_help() {
            "  --state-directory PATH private upload and sidecar state directory\n"
            "  --connection-file PATH atomically publish sidecar connection metadata\n"
            "  --parent-pid PID        stop when the owning desktop process exits\n"
+           "  --enable-devices        explicit desktop-owned USB device access\n"
+           "  --device-helper PATH    trusted Windows axklib_helper executable\n"
            "  --workers COUNT         Crow worker threads (2-64)\n"
            "  --job-workers COUNT     application job workers (1-32)\n"
            "  --write-job-workers N   image-writing job workers (1-16)\n"
@@ -480,6 +489,9 @@ std::string axk::server::command_line_help() {
 }
 
 axk::app::Result<void> axk::server::validate_config(const Config &config) {
+    if ((config.enable_devices || !config.device_helper.empty()) &&
+        (config.connection_file.empty() || config.parent_process_id == 0U || config.state_directory.empty()))
+        return std::unexpected(argument_error("device access requires an explicitly enabled desktop-owned sidecar"));
     if (config.bind_address.empty())
         return std::unexpected(argument_error("listen address must not be empty"));
     if (config.parent_process_id != 0U && config.connection_file.empty())

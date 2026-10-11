@@ -82,6 +82,60 @@ function connectWorkflow(workflow: ImageSessionWorkflow, loadVolume = vi.fn(asyn
 }
 
 describe('ImageSessionWorkflow open progress', () => {
+    it('applies writable capabilities before publishing a prepared device session', async () => {
+        const device: ImageLocation = {
+            kind: 'device',
+            reference: { sessionId: 'owned', targetId: 'disk' },
+            displayName: 'USB / Disk',
+        };
+        const readOnly = {
+            ...opened(7),
+            objectRenameAvailable: false,
+            objectDeletionAvailable: false,
+            packageImportAvailable: false,
+        };
+        const transport = {
+            openImage: vi.fn(async () => readOnly),
+            refreshImage: vi.fn(async () => opened(7)),
+            closeImage: vi.fn(async () => undefined),
+        };
+        const workflow = new ImageSessionWorkflow(transport as unknown as ImageTransport, {} as PickerController);
+        connectWorkflow(workflow);
+        const prepare = vi.fn(async () => {
+            expect(workflow.location).toBeNull();
+            expect(workflow.objectDeletionAvailable).toBe(false);
+        });
+        await workflow.open(device, undefined, prepare);
+        expect(prepare).toHaveBeenCalledOnce();
+        expect(workflow.location).toEqual(device);
+        expect(workflow.objectDeletionAvailable).toBe(true);
+        expect(workflow.packageImportAvailable).toBe(true);
+        expect(transport.refreshImage).toHaveBeenCalledWith(7);
+    });
+
+    it('retains the active workspace and reports a failed device authorization', async () => {
+        const transport = {
+            openImage: vi.fn().mockResolvedValueOnce(opened(1)).mockResolvedValueOnce(opened(2)),
+            closeImage: vi.fn(async () => undefined),
+        };
+        const workflow = new ImageSessionWorkflow(transport as unknown as ImageTransport, {} as PickerController);
+        connectWorkflow(workflow);
+        await workflow.open(location);
+        await workflow.open(
+            { kind: 'device', reference: { sessionId: 'owned', targetId: 'disk' }, displayName: 'USB' },
+            undefined,
+            async () => {
+                throw new Error('Permission declined');
+            },
+        );
+        expect(workflow.location).toEqual(location);
+        expect(workflow.sessionId).toBe(1);
+        expect(workflow.selectedSource.id).toBe('volume-1');
+        expect(workflow.status).toBe('Permission declined');
+        expect(transport.closeImage).toHaveBeenCalledWith(2);
+        expect(transport.closeImage).not.toHaveBeenCalledWith(1);
+    });
+
     it.each(['resolve', 'reject'] as const)('ignores a stale integrity %s after a clean revision', async (outcome) => {
         const image = opened(7);
         image.format = 'ex5-disk';

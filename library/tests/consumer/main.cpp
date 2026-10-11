@@ -4,6 +4,7 @@
 #include <string>
 
 #include "axklib/sdk.hpp"
+#include "axklib/sdk/devices.hpp"
 #include "axklib/sdk/version.hpp"
 
 int main() {
@@ -28,6 +29,24 @@ int main() {
     std::error_code error;
     std::filesystem::remove_all(root, error);
     std::filesystem::create_directories(root, error);
+    {
+        const auto inspected = axk::inspect_scsi2sd_xml(
+            "<SCSI2SD><SCSITarget id='0'><enabled>true</enabled><sdSectorStart>2048</sdSectorStart>"
+            "<scsiSectors>100</scsiSectors><bytesPerSector>512</bytesPerSector></SCSITarget></SCSI2SD>");
+        if (axk::device_host::available() ? (!inspected || inspected->size() != 1U || !inspected->at(0).eligible)
+                                          : static_cast<bool>(inspected))
+            return 17;
+        auto host = axk::device_host::create((root / "devices").string());
+        if (axk::device_host::available()) {
+            if (!host)
+                return 14;
+            auto operations = host->operations();
+            if (!operations || !operations->empty())
+                return 15;
+        } else if (host) {
+            return 16;
+        }
+    }
     const auto manifest = root / "build.json";
     const auto output = root / "output.hds";
     const auto imported = root / "imported.hds";

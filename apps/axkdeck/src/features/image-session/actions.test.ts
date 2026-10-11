@@ -52,6 +52,107 @@ function opened(sessionId: number): OpenedImage {
 }
 
 describe('ImageSessionController', () => {
+    it('prepares and refreshes a candidate before replacing the previous workspace', async () => {
+        const closeImage = vi.fn(async () => undefined);
+        const refreshImage = vi.fn(async () => ({ ...opened(2), objectRenameAvailable: true }));
+        const controller = new ImageSessionController(
+            {
+                openImage: vi.fn().mockResolvedValueOnce(opened(1)).mockResolvedValueOnce(opened(2)),
+                keepImageAlive: vi.fn(),
+                refreshImage,
+                closeImage,
+            },
+            async () => undefined,
+            () => undefined,
+        );
+        await controller.open(firstLocation);
+        const prepare = vi.fn(async (candidate: OpenedImage) => {
+            expect(candidate.sessionId).toBe(2);
+            expect(controller.snapshot().sessionId).toBe(1);
+            expect(closeImage).not.toHaveBeenCalled();
+        });
+        await expect(controller.open(secondLocation, undefined, prepare)).resolves.toMatchObject({
+            sessionId: 2,
+            objectRenameAvailable: true,
+        });
+        expect(refreshImage).toHaveBeenCalledWith(2);
+        expect(closeImage).toHaveBeenCalledWith(1);
+        expect(controller.snapshot().sessionId).toBe(2);
+    });
+
+    it('leaves the current session intact when candidate preparation or refresh fails', async () => {
+        const closeImage = vi.fn(async () => undefined);
+        const controller = new ImageSessionController(
+            {
+                openImage: vi.fn().mockResolvedValueOnce(opened(1)).mockResolvedValue(opened(2)),
+                keepImageAlive: vi.fn(),
+                refreshImage: vi.fn(async () => {
+                    throw new Error('Refresh failed');
+                }),
+                closeImage,
+            },
+            async () => undefined,
+            () => undefined,
+        );
+        await controller.open(firstLocation);
+        await expect(
+            controller.open(secondLocation, undefined, async () => {
+                throw new Error('Permission declined');
+            }),
+        ).rejects.toThrow('Permission declined');
+        expect(controller.snapshot()).toMatchObject({ sessionId: 1, location: firstLocation, opening: false });
+        expect(closeImage).toHaveBeenCalledWith(2);
+        expect(closeImage).not.toHaveBeenCalledWith(1);
+        await expect(controller.open(secondLocation, undefined, async () => {})).rejects.toThrow('Refresh failed');
+        expect(controller.snapshot().sessionId).toBe(1);
+    });
+
+    it('does not adopt a candidate cancelled while authorization is pending', async () => {
+        let finish!: () => void;
+        const closeImage = vi.fn(async () => undefined);
+        const refreshImage = vi.fn(async () => opened(2));
+        const controller = new ImageSessionController(
+            {
+                openImage: vi.fn().mockResolvedValueOnce(opened(1)).mockResolvedValueOnce(opened(2)),
+                keepImageAlive: vi.fn(),
+                refreshImage,
+                closeImage,
+            },
+            async () => undefined,
+            () => undefined,
+        );
+        await controller.open(firstLocation);
+        const prepare = vi.fn(() => new Promise<void>((resolve) => (finish = resolve)));
+        const opening = controller.open(secondLocation, undefined, prepare);
+        await vi.waitFor(() => expect(prepare).toHaveBeenCalledOnce());
+        controller.cancelOpen();
+        finish();
+        await expect(opening).rejects.toMatchObject({ name: 'AbortError' });
+        expect(controller.snapshot().sessionId).toBe(1);
+        expect(refreshImage).not.toHaveBeenCalled();
+        expect(closeImage).toHaveBeenCalledWith(2);
+    });
+
+    it('retains failed staged cleanup so it can be retried without another authorization', async () => {
+        const closeImage = vi.fn(async (): Promise<void> => {
+            throw new Error('Cleanup failed');
+        });
+        const controller = new ImageSessionController(
+            { openImage: vi.fn(async () => opened(2)), keepImageAlive: vi.fn(), refreshImage: vi.fn(), closeImage },
+            async () => undefined,
+            () => undefined,
+        );
+        const prepare = vi.fn(async () => {
+            throw new Error('Denied');
+        });
+        await expect(controller.open(secondLocation, undefined, prepare)).rejects.toThrow('Cleanup failed');
+        closeImage.mockResolvedValue(undefined);
+        await controller.cleanupOpen();
+        expect(closeImage).toHaveBeenCalledTimes(2);
+        expect(prepare).toHaveBeenCalledOnce();
+        expect(controller.snapshot().sessionId).toBeNull();
+    });
+
     it('keeps only the active session alive', async () => {
         const keepImageAlive = vi.fn(async () => undefined);
         const controller = new ImageSessionController(

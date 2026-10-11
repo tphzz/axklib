@@ -6,10 +6,15 @@
 #include <memory>
 #include <span>
 #include <string>
+#include <string_view>
 
 #include "axklib/package.hpp"
 
 namespace axk::package_import_internal {
+
+// File targets use SHA-256; owned device sessions use an explicit device:<id>:<revision>
+// binding checked together with metadata guards by their session owner.
+bool valid_target_snapshot_id(std::string_view value);
 
 struct RetainedPackageImportStats {
     std::uint64_t target_payload_bytes_read{};

@@ -1,6 +1,9 @@
 #include "axklib/server/process_lifetime.hpp"
 
+#include <fstream>
 #include <limits>
+#include <string>
+#include <system_error>
 
 #ifdef _WIN32
 #ifndef NOMINMAX
@@ -33,4 +36,25 @@ bool axk::server::process_is_running(std::uint64_t process_id) noexcept {
     const auto result = kill(static_cast<pid_t>(process_id), 0);
     return result == 0 || errno == EPERM;
 #endif
+}
+
+bool axk::server::desktop_shutdown_requested(const std::filesystem::path &connection_file,
+                                             std::string_view bearer_token) noexcept {
+    if (connection_file.empty() || bearer_token.empty() || bearer_token.size() > 256U)
+        return false;
+    try {
+        auto path = connection_file;
+        path.replace_extension("shutdown");
+        std::error_code error;
+        const auto status = std::filesystem::symlink_status(path, error);
+        if (error || !std::filesystem::is_regular_file(status) ||
+            std::filesystem::file_size(path, error) != bearer_token.size() || error)
+            return false;
+        std::ifstream file{path, std::ios::binary};
+        std::string token(bearer_token.size(), '\0');
+        file.read(token.data(), static_cast<std::streamsize>(token.size()));
+        return file && token == bearer_token;
+    } catch (...) {
+        return false;
+    }
 }

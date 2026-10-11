@@ -48,7 +48,8 @@ class ServerApplication {
                                                    app::UploadStore &uploads, app::ImageSessionManager &images,
                                                    app::AlterationJournalStore &journals,
                                                    app::DownloadArchiveStore &downloads,
-                                                   const MediaBuildLimits &media_limits);
+                                                   const MediaBuildLimits &media_limits,
+                                                   app::DeviceSessionManager &devices);
 
     struct EventClient {
         EventClient(std::size_t maximum_events, std::uint64_t maximum_bytes)
@@ -145,6 +146,7 @@ class ServerApplication {
     app::DownloadArchiveStore download_archives_;
     ArchiveDownloadBudget archive_download_budget_;
     app::AlterationJournalStore alteration_journals_;
+    app::DeviceSessionManager devices_;
     app::ImageSessionManager images_;
     app::OperationRegistry registry_;
     Json openapi_document_;

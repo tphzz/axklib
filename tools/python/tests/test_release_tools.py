@@ -4,6 +4,7 @@ import importlib.util
 import json
 import re
 import shlex
+import sys
 import tarfile
 import tomllib
 import zipfile
@@ -185,6 +186,7 @@ def test_sbom_includes_base_cli_and_test_dependencies(
         "asio",
         "cli11",
         "crow",
+        "expat",
         "gtest",
         "hash-library",
         "libsndfile",
@@ -198,6 +200,16 @@ def test_sbom_includes_base_cli_and_test_dependencies(
     assert document["name"] == "axklib-workspace-release"
     assert document["documentNamespace"].startswith("https://github.com/tphzz/axklib/spdx/")
     assert document["comment"] == "axklib source identity: v1.2.3-rc.1-a1b2c3d"
+
+
+def test_device_xml_dependency_has_pinned_source_and_license() -> None:
+    root = Path(__file__).resolve().parents[3]
+    row, material = generate_sbom.device_xml_dependency(root)
+    assert row["name"] == "expat"
+    assert row["versionInfo"] == "2.8.5"
+    assert row["licenseDeclared"] == "MIT"
+    assert "920dde485e15eda0" in str(row["comment"])
+    assert "Permission is hereby granted" in material.path.read_text(encoding="utf-8")
 
 
 def test_sdk_sbom_excludes_cli_and_test_only_dependencies(
@@ -229,6 +241,11 @@ def test_sdk_sbom_excludes_cli_and_test_only_dependencies(
     names = {item["name"] for item in json.loads(output.read_text())["packages"]}
     assert {"fatfs", "libsndfile", "soxr", "libflac", "libvorbis", "opus"} <= names
     assert names.isdisjoint({"cli11", "hash-library", "gtest"})
+    assert "expat" in names
+    monkeypatch.setattr("sys.argv", [*sys.argv, "--without-devices"])
+    assert generate_sbom.main() == 0
+    names = {item["name"] for item in json.loads(output.read_text())["packages"]}
+    assert "expat" not in names
 
 
 def test_server_sbom_includes_crow_without_cli_or_test_dependencies(
@@ -900,16 +917,21 @@ def test_desktop_contract_and_rpm_inspection_are_cross_platform() -> None:
         "libc++1-18",
         "libc++abi1-18",
         "libunwind-18",
+        "libdbus-1-3",
+        "udisks2 (>= 2.7.3)",
     ]
     assert linux_bundle["bundle"]["linux"]["rpm"]["depends"] == [
         "libcxx",
         "llvm-libunwind",
+        "dbus-libs",
+        "udisks2 >= 2.7.3",
     ]
     assert "for command in curl wget file pkg-config patchelf rpm bsdtar dpkg-deb" in workflow_with_platform
     assert 'dpkg-deb -f "$deb" Depends' in workflow_with_platform
     assert 'rpm -qp --requires "$rpm"' in workflow_with_platform
-    assert "for dependency in libcxx llvm-libunwind; do" in workflow_with_platform
-    assert "for capability in libwebkit2gtk-4.1.so.0 libgtk-3.so.0; do" in workflow_with_platform
+    assert "for dependency in libcxx llvm-libunwind dbus-libs 'udisks2 >= 2.7.3'; do" in workflow_with_platform
+    assert "for capability in libwebkit2gtk-4.1.so.0 libgtk-3.so.0 libdbus-1.so.3; do" in workflow_with_platform
+    assert "'dbus-1 >= 1.10'" in native_platform
     assert 'grep -F "${capability}()"' in workflow_with_platform
     assert "webkit2gtk4.1 gtk3 libcxx llvm-libunwind" not in workflow_with_platform
     assert 'rpm -Kv "$rpm"' in workflow_with_platform

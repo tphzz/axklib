@@ -1,5 +1,7 @@
 <script lang="ts">
     import Icon from './Icon.svelte';
+    import { useDevices } from '../../features/physical-devices/workflow.svelte';
+    const devices = useDevices();
     interface Props {
         image: { displayName: string } | null;
         opening: boolean;
@@ -64,8 +66,8 @@
                 <button
                     class="icon-button"
                     type="button"
-                    aria-label="Open another image"
-                    title="Open another image"
+                    aria-label="Open"
+                    title="Open"
                     disabled={opening}
                     onclick={onopen}
                 >
@@ -87,7 +89,7 @@
         <div class="image-empty-state">
             <div class="image-empty-actions">
                 <button class="primary-button" type="button" disabled={opening} onclick={onopen}>
-                    <Icon name="folder-open" size={14} /> Open image
+                    <Icon name="folder-open" size={14} /> Open
                 </button>
                 <button class="secondary-button" type="button" disabled={opening} onclick={oncreate}>
                     <Icon name="file-plus" size={14} /> Create image
@@ -104,6 +106,16 @@
             onclick={(event) => event.stopPropagation()}
             onkeydown={(event) => event.stopPropagation()}
         >
+            {#if devices}
+                <button
+                    type="button"
+                    role="menuitem"
+                    onclick={() => {
+                        imageMenuOpen = false;
+                        void devices.show();
+                    }}><Icon name="refresh" size={14} /> Device operation status...</button
+                >
+            {/if}
             {#if image}
                 <button
                     type="button"

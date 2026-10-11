@@ -23,6 +23,12 @@ export interface AxkObjectDirectoryLocation {
     displayName: string;
 }
 
+export interface DeviceLocation {
+    kind: 'device';
+    reference: { sessionId: string; targetId: string };
+    displayName: string;
+}
+
 export interface UploadRef {
     uploadId: string;
 }
@@ -38,7 +44,7 @@ export interface ClientUploadLocation {
 
 export type FileLocation = ServerFileLocation;
 export type DirectoryLocation = ServerDirectoryLocation;
-export type ImageLocation = FileLocation | AxkObjectDirectoryLocation;
+export type ImageLocation = FileLocation | AxkObjectDirectoryLocation | DeviceLocation;
 export type InputFileLocation = FileLocation | ClientUploadLocation;
 
 export interface SandboxRoot {
@@ -88,7 +94,9 @@ export function clientUploadLocation(
     return { kind: 'client-upload', reference, uploadKind, displayName };
 }
 
-export function locationKey(location: FileLocation | DirectoryLocation | AxkObjectDirectoryLocation): string {
+export function locationKey(location: ImageLocation | DirectoryLocation): string {
+    if (location.kind === 'device')
+        return JSON.stringify(['device', location.reference.sessionId, location.reference.targetId]);
     return JSON.stringify([location.reference.rootId, location.reference.relativePath]);
 }
 

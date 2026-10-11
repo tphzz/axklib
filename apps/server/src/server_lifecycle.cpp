@@ -236,13 +236,16 @@ ServerApplication::ServerApplication(axk::server::Config config, axk::app::Opera
                          std::chrono::seconds{config_.download_archive_retention_seconds}),
       archive_download_budget_(config_.maximum_concurrent_archive_downloads),
       alteration_journals_(alteration_journal_directory(), config_.maximum_alteration_journal_bytes),
+      devices_(config_.state_directory / "devices", config_.enable_devices, app::native_device_writes_qualified(),
+               app::native_device_provider(config_.device_helper)),
       images_(sandbox_, config_.maximum_image_sessions, config_.maximum_page_size,
               std::chrono::seconds{config_.image_idle_seconds}, std::chrono::steady_clock::now, &path_reservations_,
-              config_.maximum_audition_bundle_bytes),
+              config_.maximum_audition_bundle_bytes, 256U, &devices_),
       registry_(prepare_registry(std::move(registry), sandbox_, uploads_, images_, alteration_journals_,
                                  download_archives_,
                                  {config_.maximum_media_build_object_bytes, config_.maximum_media_build_payload_bytes,
-                                  config_.maximum_media_build_output_bytes})),
+                                  config_.maximum_media_build_output_bytes},
+                                 devices_)),
       openapi_document_(axk::server::build_openapi_document(axk::server::embedded_openapi(), registry_)),
       openapi_validator_(), jobs_(
                                 registry_, config_.job_worker_threads, config_.write_job_worker_threads,
@@ -336,6 +339,9 @@ axk::app::Result<int> ServerApplication::run() {
         while (server.wait_for(std::chrono::milliseconds{25}) != std::future_status::ready) {
             if (config_.parent_process_id != 0U && std::chrono::steady_clock::now() >= next_parent_check) {
                 next_parent_check = std::chrono::steady_clock::now() + std::chrono::milliseconds{250};
+                if (axk::server::desktop_shutdown_requested(config_.connection_file, config_.bearer_token)) {
+                    shutdown_requested_.store(true, std::memory_order_release);
+                }
                 if (!axk::server::process_is_running(config_.parent_process_id)) {
                     std::clog << "axklib-server: owning desktop process exited; stopping\n";
                     app_.stop();
@@ -363,9 +369,12 @@ axk::app::Result<int> ServerApplication::run() {
 axk::app::OperationRegistry ServerApplication::prepare_registry(
     axk::app::OperationRegistry registry, const axk::app::Sandbox &sandbox, axk::app::UploadStore &uploads,
     axk::app::ImageSessionManager &images, axk::app::AlterationJournalStore &journals,
-    axk::app::DownloadArchiveStore &downloads, const axk::MediaBuildLimits &media_limits) {
+    axk::app::DownloadArchiveStore &downloads, const axk::MediaBuildLimits &media_limits,
+    axk::app::DeviceSessionManager &devices) {
     auto prepared = axk::app::make_application_registry(sandbox, uploads, std::move(registry), media_limits);
     if (!prepared)
+        std::terminate();
+    if (!axk::app::bind_device_operations(*prepared, devices))
         std::terminate();
     if (const auto session_operations = axk::app::bind_session_application_operations(
             *prepared, sandbox, uploads, images, journals, downloads, media_limits);

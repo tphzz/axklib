@@ -181,6 +181,29 @@ TEST(JobManager, CancellationAfterQueuePopPreventsOperationExecution) {
     EXPECT_EQ(calls.load(), 0U);
 }
 
+TEST(JobManager, CancellationDoesNotHideRecoveryFailure) {
+    std::atomic_bool started{};
+    auto registry = test_registry(
+        [&](const nlohmann::json &, const axk::app::OperationContext &context) -> axk::app::Result<nlohmann::json> {
+            started = true;
+            while (!context.cancellation.is_cancelled())
+                std::this_thread::sleep_for(1ms);
+            return std::unexpected(axk::app::Error{"device_recovery_required", "restoration could not be verified"});
+        });
+    axk::app::JobManager jobs{registry, 1U, 1U, 2U, 8U};
+    const auto submitted = jobs.submit(
+        "test.job", {},
+        {.owner_id = "owner", .request_id = "recovery", .cancellation = {}, .progress = nullptr, .display_path = {}});
+    ASSERT_TRUE(submitted);
+    while (!started.load())
+        std::this_thread::sleep_for(1ms);
+    ASSERT_TRUE(jobs.cancel(submitted->job_id, "owner"));
+    const auto terminal = wait_terminal(jobs, submitted->job_id);
+    EXPECT_EQ(terminal.state, axk::app::JobState::failed);
+    ASSERT_TRUE(terminal.error);
+    EXPECT_EQ(terminal.error->code, "device_recovery_required");
+}
+
 TEST(JobManager, QueuedSubscriberCanSubmitAnotherJobReentrantly) {
     std::atomic_uint32_t calls{};
     auto registry = test_registry([&](const nlohmann::json &, const axk::app::OperationContext &) {

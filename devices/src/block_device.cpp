@@ -1,0 +1,171 @@
+#include "rawdisk/block_device.hpp"
+#include "detail.hpp"
+
+#include <algorithm>
+#include <cstring>
+#include <optional>
+
+namespace rawdisk {
+namespace {
+
+constexpr std::size_t kMaxChunk = std::size_t{1} << 20; // 1 MiB per OS call
+
+bool is_aligned(const void *p) noexcept { return reinterpret_cast<std::uintptr_t>(p) % kIoAlignment == 0; }
+
+Result<void> check_range(std::uint32_t ss, std::uint64_t count, std::uint64_t lba, std::size_t bytes) {
+    if (ss == 0 || bytes % ss != 0)
+        return detail::fail(Errc::bad_length);
+    const std::uint64_t n = bytes / ss;
+    if (lba > count || n > count - lba)
+        return detail::fail(Errc::out_of_range);
+    return {};
+}
+
+std::size_t chunk_size(std::uint32_t ss) noexcept { return std::max<std::size_t>(ss, kMaxChunk / ss * ss); }
+
+// Rejects readers that report more capacity than they can deliver (a real failure mode of
+// cheap USB CF readers) before anything is written.
+Result<void> check_capacity(BlockDevice &dev) {
+    const std::uint64_t count = dev.sector_count();
+    if (count == 0)
+        return detail::fail(Errc::capacity_unreadable);
+    AlignedBuffer buf(dev.sector_size());
+    if (auto r = dev.read(0, buf.span()); !r)
+        return r;
+    if (auto r = dev.read(count - 1, buf.span()); !r)
+        return detail::fail(Errc::capacity_unreadable);
+    return {};
+}
+
+std::mutex g_options_mutex;
+ElevationOptions g_options;
+
+} // namespace
+
+Result<void> BlockDevice::read(std::uint64_t lba, std::span<std::byte> out) noexcept {
+    return detail::guard([&]() -> Result<void> {
+        const std::uint32_t ss = sector_size();
+        if (auto r = check_range(ss, sector_count(), lba, out.size()); !r)
+            return r;
+        if (out.empty())
+            return {};
+
+        std::lock_guard lock(mutex_);
+        const std::uint64_t base = lba * ss;
+        const std::size_t chunk = chunk_size(ss);
+        const bool direct = is_aligned(out.data());
+        std::optional<AlignedBuffer> bounce;
+        if (!direct)
+            bounce.emplace(std::min(chunk, out.size()));
+
+        for (std::size_t done = 0; done < out.size();) {
+            const std::size_t n = std::min(chunk, out.size() - done);
+            const auto dst = out.subspan(done, n);
+            if (direct) {
+                if (auto r = read_raw(base + done, dst); !r)
+                    return r;
+            } else {
+                const auto tmp = bounce->span().first(n);
+                if (auto r = read_raw(base + done, tmp); !r)
+                    return r;
+                std::memcpy(dst.data(), tmp.data(), n);
+            }
+            done += n;
+        }
+        return {};
+    });
+}
+
+Result<void> BlockDevice::write(std::uint64_t lba, std::span<const std::byte> in) noexcept {
+    return detail::guard([&]() -> Result<void> {
+        if (!writable())
+            return detail::fail(Errc::read_only_handle);
+        const std::uint32_t ss = sector_size();
+        if (auto r = check_range(ss, sector_count(), lba, in.size()); !r)
+            return r;
+        if (in.empty())
+            return {};
+        if (auto r = check_write(lba, in.size() / ss); !r)
+            return r;
+
+        std::lock_guard lock(mutex_);
+        const std::uint64_t base = lba * ss;
+        const std::size_t chunk = chunk_size(ss);
+        const bool direct = is_aligned(in.data());
+        std::optional<AlignedBuffer> bounce;
+        if (!direct)
+            bounce.emplace(std::min(chunk, in.size()));
+
+        for (std::size_t done = 0; done < in.size();) {
+            const std::size_t n = std::min(chunk, in.size() - done);
+            const auto src = in.subspan(done, n);
+            if (direct) {
+                if (auto r = write_raw(base + done, src); !r)
+                    return r;
+            } else {
+                const auto tmp = bounce->span().first(n);
+                std::memcpy(tmp.data(), src.data(), n);
+                if (auto r = write_raw(base + done, tmp); !r)
+                    return r;
+            }
+            done += n;
+        }
+        return {};
+    });
+}
+
+Result<void> BlockDevice::flush() noexcept {
+    return detail::guard([&]() -> Result<void> {
+        if (!writable())
+            return {};
+        std::lock_guard lock(mutex_);
+        return flush_raw();
+    });
+}
+
+Result<std::vector<DeviceInfo>> list_usb_devices() noexcept {
+    return detail::guard([] { return detail::list_platform(); });
+}
+
+Result<std::unique_ptr<BlockDevice>> open_device(const DeviceInfo &expected, Access access) noexcept {
+    return detail::guard([&]() -> Result<std::unique_ptr<BlockDevice>> {
+        auto devices = detail::list_platform();
+        if (!devices)
+            return detail::fail(devices.error());
+
+        const auto it =
+            std::ranges::find_if(*devices, [&](const DeviceInfo &d) { return detail::same_identity(d, expected); });
+        if (it == devices->end())
+            return detail::fail(Errc::device_changed);
+
+        auto dev = detail::open_platform(*it, access);
+        if (!dev)
+            return dev;
+        if (!*dev)
+            return detail::fail(Errc::internal_error);
+        if (auto r = check_capacity(**dev); !r)
+            return detail::fail(r.error());
+        return dev;
+    });
+}
+
+Result<std::unique_ptr<BlockDevice>> open_image(const std::filesystem::path &path, Access access,
+                                                std::uint32_t sector_size) noexcept {
+    return detail::guard([&]() -> Result<std::unique_ptr<BlockDevice>> {
+        if (!detail::valid_sector_size(sector_size) || path.empty())
+            return detail::fail(Errc::invalid_argument);
+        return detail::open_image_platform(path, access, sector_size);
+    });
+}
+
+void set_elevation_options(ElevationOptions options) {
+    std::lock_guard lock(g_options_mutex);
+    g_options = std::move(options);
+}
+
+ElevationOptions detail::elevation_options() {
+    std::lock_guard lock(g_options_mutex);
+    return g_options;
+}
+
+} // namespace rawdisk

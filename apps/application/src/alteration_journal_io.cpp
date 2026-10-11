@@ -149,16 +149,16 @@ axk::app::Result<void> read_journal_chunk(Reader &reader, std::uint64_t offset, 
 
 } // namespace
 
-axk::app::Result<std::uint64_t> axk::app::journal_io::encoded_size(const FileRef &target,
+axk::app::Result<std::uint64_t> axk::app::journal_io::encoded_size(const MutationIdentity &target,
                                                                    std::string_view target_identity,
                                                                    std::span<const AlterationJournalPatch> patches) {
-    if (target.root_id.size() > std::numeric_limits<std::uint32_t>::max() ||
-        target.relative_path.size() > std::numeric_limits<std::uint32_t>::max() ||
+    if (target.scope.size() > std::numeric_limits<std::uint32_t>::max() ||
+        target.key.size() > std::numeric_limits<std::uint32_t>::max() ||
         target_identity.size() > std::numeric_limits<std::uint32_t>::max() || patches.size() > maximum_patch_count) {
         return std::unexpected(journal_error("alteration journal metadata exceeds supported limits"));
     }
     std::uint64_t size = header_size + checksum_size;
-    if (!checked_add(size, target.root_id.size()) || !checked_add(size, target.relative_path.size()) ||
+    if (!checked_add(size, target.scope.size()) || !checked_add(size, target.key.size()) ||
         !checked_add(size, target_identity.size())) {
         return std::unexpected(journal_error("alteration journal size exceeds supported limits"));
     }
@@ -178,7 +178,7 @@ axk::app::Result<std::uint64_t> axk::app::journal_io::encoded_size(const FileRef
 }
 
 axk::app::Result<axk::app::journal_io::Publication>
-axk::app::journal_io::publish(const std::filesystem::path &path, const FileRef &target,
+axk::app::journal_io::publish(const std::filesystem::path &path, const MutationIdentity &target,
                               std::string_view target_identity, std::uint64_t image_size_bytes,
                               std::span<const AlterationJournalPatch> patches, std::uint64_t maximum_journal_bytes,
                               const CancellationToken &cancellation, std::size_t chunk_bytes) {
@@ -223,14 +223,15 @@ axk::app::journal_io::publish(const std::filesystem::path &path, const FileRef &
     std::array<std::byte, header_size> header{};
     std::ranges::copy(journal_magic, header.begin());
     header[journal_magic.size()] = prepared_state;
-    write_u32(header, 16U, static_cast<std::uint32_t>(target.root_id.size()));
-    write_u32(header, 20U, static_cast<std::uint32_t>(target.relative_path.size()));
+    header[9U] = static_cast<std::byte>(target.kind);
+    write_u32(header, 16U, static_cast<std::uint32_t>(target.scope.size()));
+    write_u32(header, 20U, static_cast<std::uint32_t>(target.key.size()));
     write_u32(header, 24U, static_cast<std::uint32_t>(target_identity.size()));
     write_u64(header, 28U, image_size_bytes);
     write_u32(header, 36U, static_cast<std::uint32_t>(patches.size()));
     if (auto written = append(*publication, payload_hash, file_hash, header); !written)
         return std::unexpected(written.error());
-    const std::array strings{std::string_view{target.root_id}, std::string_view{target.relative_path}, target_identity};
+    const std::array strings{std::string_view{target.scope}, std::string_view{target.key}, target_identity};
     for (const auto value : strings) {
         if (auto written = append(*publication, payload_hash, file_hash, std::as_bytes(std::span{value})); !written)
             return std::unexpected(written.error());
@@ -335,8 +336,14 @@ axk::app::Result<axk::app::journal_io::Inspection> axk::app::journal_io::inspect
             return std::unexpected(relative_path.error());
         return std::unexpected(identity.error());
     }
-    Inspection inspection{
-        {std::move(*root), std::move(*relative_path)}, std::move(*identity), image_size, {}, file_hash.getHash()};
+    const auto source_kind = std::to_integer<std::uint8_t>(header[9U]);
+    if (source_kind > static_cast<std::uint8_t>(MutationSourceKind::device))
+        return std::unexpected(journal_error("alteration journal source kind is invalid"));
+    Inspection inspection{{static_cast<MutationSourceKind>(source_kind), std::move(*root), std::move(*relative_path)},
+                          std::move(*identity),
+                          image_size,
+                          {},
+                          file_hash.getHash()};
     inspection.patches.reserve(patch_count);
     for (std::uint32_t index = 0U; index < patch_count; ++index) {
         if (offset > payload_size || 16U > payload_size - offset)
@@ -378,7 +385,7 @@ axk::app::Result<bool> axk::app::journal_io::commit_marker_matches(const std::fi
     return std::string_view{reinterpret_cast<const char *>(bytes.data()), bytes.size()} == file_checksum;
 }
 
-axk::app::Result<void> axk::app::journal_io::compare_target(const SandboxMutation &target,
+axk::app::Result<void> axk::app::journal_io::compare_target(const MutationTarget &target,
                                                             const std::filesystem::path &journal_path,
                                                             const Inspection &journal, bool replacement,
                                                             std::size_t chunk_bytes) {
@@ -407,7 +414,7 @@ axk::app::Result<void> axk::app::journal_io::compare_target(const SandboxMutatio
     return {};
 }
 
-axk::app::Result<void> axk::app::journal_io::recognize_uncommitted_target(const SandboxMutation &target,
+axk::app::Result<void> axk::app::journal_io::recognize_uncommitted_target(const MutationTarget &target,
                                                                           const std::filesystem::path &journal_path,
                                                                           const Inspection &journal,
                                                                           std::size_t chunk_bytes) {
@@ -443,7 +450,7 @@ axk::app::Result<void> axk::app::journal_io::recognize_uncommitted_target(const 
     return {};
 }
 
-axk::app::Result<void> axk::app::journal_io::restore_original_bytes(SandboxMutation &target,
+axk::app::Result<void> axk::app::journal_io::restore_original_bytes(MutationTarget &target,
                                                                     const std::filesystem::path &journal_path,
                                                                     const Inspection &journal, std::size_t chunk_bytes,
                                                                     const std::function<bool()> &after_flush) {

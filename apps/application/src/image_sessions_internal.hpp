@@ -170,6 +170,7 @@ struct axk::app::ImageSessionManager::Implementation {
     std::chrono::seconds idle_retention;
     Clock clock;
     PathReservationCoordinator *path_reservations;
+    DeviceSessionManager *devices;
     std::mutex mutex;
     std::unordered_map<std::string, std::shared_ptr<Session>> sessions;
     std::unordered_map<std::string, std::weak_ptr<Session>> audition_sessions;
@@ -190,12 +191,13 @@ struct axk::app::ImageSessionManager::Implementation {
 
     Implementation(const Sandbox &sandbox_value, std::size_t session_count, std::size_t page_size,
                    std::chrono::seconds retention, Clock now, PathReservationCoordinator *reservations,
-                   std::uint64_t audition_bundle_bytes, std::size_t audition_clips)
+                   std::uint64_t audition_bundle_bytes, std::size_t audition_clips,
+                   DeviceSessionManager *device_manager)
         : sandbox(sandbox_value), maximum_sessions(std::max<std::size_t>(session_count, 1U)),
           maximum_page_size(std::max<std::size_t>(page_size, 1U)),
           maximum_audition_bundle_bytes(std::max<std::uint64_t>(audition_bundle_bytes, 45U)),
           maximum_audition_clips(std::max<std::size_t>(audition_clips, 1U)), idle_retention(retention),
-          clock(std::move(now)), path_reservations(reservations) {}
+          clock(std::move(now)), path_reservations(reservations), devices(device_manager) {}
 
     void cleanup_locked() {
         const auto now = clock();

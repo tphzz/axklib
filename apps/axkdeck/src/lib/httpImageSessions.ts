@@ -1,5 +1,6 @@
 import type { AxklibHttpApiClient } from './httpApiClient';
 import type { components } from './generated/axklibApiV1';
+import { imageSourceReference, imageLocation } from './httpImageSources';
 import { AxklibApiError } from './httpErrors';
 import { HttpJobController } from './httpJobController';
 import { HttpCapacityGate } from './httpCapacityGate';
@@ -179,7 +180,7 @@ export class HttpImageSessions {
     }
 
     async open(location: ImageLocation, options: ImageOpenOptions = {}): Promise<OpenedImage> {
-        if (location.kind !== 'server-file' && location.kind !== 'axk-object-directory') {
+        if (!['server-file', 'axk-object-directory', 'device'].includes(location.kind)) {
             throw new Error('Opening images requires a server sandbox file selection or AXK object directory');
         }
         const wireSource = imageSourceReference(location);
@@ -207,6 +208,7 @@ export class HttpImageSessions {
         }
         const summary = completed.result as ApiImageSummary;
         const sessionId = this.nextSessionId++;
+        if (location.kind === 'device') this.client.deviceWrites.bind(summary.imageId, location);
         this.sessions.set(sessionId, {
             remoteId: summary.imageId,
             revision: summary.revision,
@@ -389,7 +391,17 @@ export class HttpImageSessions {
         const session = this.sessions.get(sessionId);
         if (!session) return;
         await this.client.request('DELETE', `/images/${encodeURIComponent(session.remoteId)}`);
+        this.client.deviceWrites.unbind(session.remoteId);
         this.sessions.delete(sessionId);
+        const source = session.source;
+        if (
+            source.kind === 'device' &&
+            ![...this.sessions.values()].some(
+                (other) =>
+                    other.source.kind === 'device' && other.source.reference.sessionId === source.reference.sessionId,
+            )
+        )
+            await this.client.invoke('devices.close', { sessionId: source.reference.sessionId });
     }
 
     async inspectVolumeDeletion(
@@ -665,25 +677,4 @@ export class HttpImageSessions {
         session.objectCursors.clear();
         session.relationshipCursors.clear();
     }
-}
-
-function imageSourceReference(location: ImageLocation): components['schemas']['ImageSourceRef'] {
-    return location.kind === 'server-file'
-        ? { kind: 'FILE', file: location.reference }
-        : { kind: 'AXK_OBJECT_DIRECTORY', directory: location.reference };
-}
-
-function imageLocation(source: components['schemas']['ImageSourceRef']): ImageLocation {
-    if (source.kind === 'FILE') {
-        return {
-            kind: 'server-file',
-            reference: source.file,
-            displayName: source.file.relativePath || source.file.rootId,
-        };
-    }
-    return {
-        kind: 'axk-object-directory',
-        reference: source.directory,
-        displayName: source.directory.relativePath || source.directory.rootId,
-    };
 }

@@ -61,12 +61,13 @@ class AlterationJournalStore {
     explicit AlterationJournalStore(std::filesystem::path directory,
                                     std::uint64_t maximum_journal_bytes = default_maximum_alteration_journal_bytes,
                                     InterruptionHook interruption_hook = {},
-                                    std::size_t maximum_patch_write_bytes = 1024U * 1024U);
+                                    std::size_t maximum_patch_write_bytes = 1024U * 1024U,
+                                    bool retain_completed_journal = false);
 
     [[nodiscard]] bool storage_ready() const noexcept;
     [[nodiscard]] Result<void> recover(const Sandbox &sandbox);
     [[nodiscard]] Result<void>
-    apply(const std::shared_ptr<SandboxMutation> &target, std::uint64_t image_size_bytes,
+    apply(const std::shared_ptr<MutationTarget> &target, std::uint64_t image_size_bytes,
           std::span<const AlterationJournalPatch> patches, const CancellationToken &cancellation = {},
           const std::function<Result<void>()> &validate = {}, const std::function<void()> &on_rollback_verified = {},
           const std::function<Result<void>(std::shared_ptr<const RandomAccessReader>)> &admit_frozen = {});
@@ -76,6 +77,7 @@ class AlterationJournalStore {
     std::uint64_t maximum_journal_bytes_;
     InterruptionHook interruption_hook_;
     std::size_t maximum_patch_write_bytes_;
+    bool retain_completed_journal_{};
     std::atomic_bool storage_available_{};
     std::atomic_bool storage_ready_{};
 };

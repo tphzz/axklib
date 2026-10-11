@@ -54,6 +54,8 @@ class AXK_SDK_API operation_context final {
     friend class portable_package;
     friend class package_import_plan;
     friend class alteration;
+    friend class device_host;
+    friend struct image_factory;
 };
 
 struct content_node {
@@ -443,6 +445,7 @@ class AXK_SDK_API image final {
     struct impl;
     std::unique_ptr<impl> impl_;
     friend class snapshot;
+    friend struct image_factory;
 };
 
 class AXK_SDK_API portable_package final {

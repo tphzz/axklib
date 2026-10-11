@@ -11,6 +11,7 @@ const extensions = {
 } as const;
 
 function locationBasename(location: ImageLocation): string {
+    if (location.kind === 'device') return location.displayName.split('/').at(-1)?.trim() ?? 'device';
     const referenceName = location.reference.relativePath.replaceAll('\\', '/').split('/').filter(Boolean).at(-1);
     if (referenceName) return referenceName;
     return location.displayName.replaceAll('\\', '/').split('/').filter(Boolean).at(-1) ?? '';

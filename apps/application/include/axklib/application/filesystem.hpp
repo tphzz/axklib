@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "axklib/application/contracts.hpp"
+#include "axklib/application/mutation_target.hpp"
 #include "axklib/io.hpp"
 
 namespace axk::app {
@@ -70,7 +71,7 @@ struct SandboxFile {
     std::function<Result<void>()> verify_unchanged;
 };
 
-class SandboxMutation final : public axk::RandomAccessReader {
+class SandboxMutation final : public MutationTarget {
   public:
     ~SandboxMutation() override;
     SandboxMutation(const SandboxMutation &) = delete;
@@ -79,14 +80,15 @@ class SandboxMutation final : public axk::RandomAccessReader {
     [[nodiscard]] std::uint64_t size() const noexcept override;
     [[nodiscard]] axk::Result<void> read_exact_at(std::uint64_t offset,
                                                   std::span<std::byte> destination) const override;
-    [[nodiscard]] Result<void> write_exact_at(std::uint64_t offset, std::span<const std::byte> source);
-    [[nodiscard]] Result<void> flush();
-    [[nodiscard]] Result<void> verify_bound() const;
+    [[nodiscard]] Result<void> write_exact_at(std::uint64_t offset, std::span<const std::byte> source) override;
+    [[nodiscard]] Result<void> flush() override;
+    [[nodiscard]] Result<void> verify_bound() const override;
     // Only before the first write; our own writes legitimately change the revision.
-    [[nodiscard]] Result<void> verify_unchanged() const;
-    [[nodiscard]] std::string revision() const;
+    [[nodiscard]] Result<void> verify_unchanged() const override;
+    [[nodiscard]] std::string revision() const override;
     [[nodiscard]] const FileRef &reference() const noexcept;
-    [[nodiscard]] std::string stable_identity() const;
+    [[nodiscard]] std::string stable_identity() const override;
+    [[nodiscard]] MutationIdentity journal_identity() const override { return MutationIdentity{reference()}; }
 
   private:
     struct Implementation;

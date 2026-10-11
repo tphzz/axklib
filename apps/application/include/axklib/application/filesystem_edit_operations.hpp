@@ -38,6 +38,6 @@ apply_filesystem_edits(ImageSessionManager &images, AlterationJournalStore &jour
                        std::string_view owner_id, std::uint64_t expected_revision, PartitionIndex partition,
                        std::span<const FilesystemEdit> edits, const CancellationToken &cancellation = {},
                        ProgressSink *progress = nullptr, const FilesystemInputVerification &input_verification = {},
-                       const VolumeCapacityPolicy &capacity_policy = {});
+                       const VolumeCapacityPolicy &capacity_policy = {}, std::string_view operation_id = {});
 
 } // namespace axk::app

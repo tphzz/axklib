@@ -16,6 +16,7 @@
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
         "AXK_BUILD_CLI": "ON",
         "AXK_BUILD_SERVER": "ON",
+        "AXK_BUILD_DEVICES": "ON",
         "AXK_WARNINGS_AS_ERRORS": "ON",
         "BUILD_TESTING": "ON"
       }

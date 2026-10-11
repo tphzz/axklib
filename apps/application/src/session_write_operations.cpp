@@ -124,7 +124,7 @@ axk::app::Result<void> axk::app::bind_session_write_operations(OperationRegistry
         }
 
         const auto admission_started = Clock::now();
-        auto mutation = images.begin_mutation(image_id, context.owner_id, expected_revision);
+        auto mutation = images.begin_mutation(image_id, context.owner_id, expected_revision, context.mutation_id);
         if (!mutation)
             return std::unexpected(mutation.error());
         bool mutation_finished{};
@@ -152,6 +152,13 @@ axk::app::Result<void> axk::app::bind_session_write_operations(OperationRegistry
         auto manifest = axk::parse_alteration_manifest(document->json.dump());
         if (!manifest)
             return std::unexpected(core_error(manifest.error(), mutation->source.relative_path));
+        if (mutation->source.kind == ImageSourceKind::device &&
+            std::ranges::any_of(manifest->operations, [](const auto &operation) {
+                return std::holds_alternative<RenamePartitionOperation>(operation.data) ||
+                       std::holds_alternative<RepairObjectPlacementsOperation>(operation.data);
+            }))
+            return std::unexpected(operation_error("device_mutation_unsupported",
+                                                   "partition edits and repairs are disabled for physical devices"));
         const auto required_paths = external_paths(*manifest);
         if (auto admitted = require_bound_inputs(required_paths, document->bound_input_paths); !admitted)
             return std::unexpected(admitted.error());
@@ -220,10 +227,19 @@ axk::app::Result<void> axk::app::bind_session_write_operations(OperationRegistry
             return {};
         };
         guard.invalidate_session = true;
-        if (auto applied = journals.apply(mutation->target, prepared->image_size_bytes, patches, context.cancellation,
-                                          validate_commit, {}, admit_frozen);
+        bool rollback_verified{};
+        if (auto applied = images.apply_mutation(
+                journals, *mutation, patches, context.cancellation, validate_commit, [&] { rollback_verified = true; },
+                admit_frozen);
             !applied) {
-            guard.invalidate_session = !journals.storage_ready();
+            guard.invalidate_session = !journals.storage_ready() || applied.error().code == "device_recovery_required";
+            if (rollback_verified && !guard.invalidate_session) {
+                if (auto restored = images.refresh_rolled_back_mutation(image_id, context.owner_id, expected_revision);
+                    !restored) {
+                    guard.invalidate_session = true;
+                    return std::unexpected(restored.error());
+                }
+            }
             return std::unexpected(applied.error());
         }
         if (!prepared_commit)

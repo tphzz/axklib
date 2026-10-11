@@ -13,6 +13,11 @@
 
 namespace axk {
 
+class MediaContainer;
+struct image_factory {
+    static result<image> open(MediaContainer container, operation_context &context);
+};
+
 struct AXK_SDK_HIDDEN operation_context::impl final : ProgressSink {
     CancellationSource cancellation;
     std::mutex mutex;

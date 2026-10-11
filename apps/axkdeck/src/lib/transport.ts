@@ -478,6 +478,7 @@ export interface ImageTransport
     readonly storageMode: 'server' | 'unavailable';
     readonly connectionMode: ConnectionMode;
     readonly supportsClientUploads: boolean;
+    readonly devices?: import('./httpDevices').DeviceService;
     sandboxRoots(): Promise<SandboxRoot[]>;
     sandboxDirectory(directory: DirectoryRef, cursor?: string): Promise<DirectoryListing>;
     inspectSandboxMediaSource(directory: DirectoryRef): Promise<'AXK_OBJECT_DIRECTORY' | null>;

@@ -30,8 +30,15 @@ axk::app::Result<axk::app::ImageSessionSummary> axk::app::ImageSessionManager::i
         available_operations.emplace_back("images.volume_floppy_export");
         available_operations.emplace_back("images.media_conversion");
     }
+    const auto device_source = (*session)->source.kind == ImageSourceKind::device;
     const auto source_metadata =
-        implementation_->sandbox.metadata((*session)->source.root_id, (*session)->source.relative_path);
+        device_source ? Result<EntryMetadata>{std::unexpected(Error{"device_source", "device source"})}
+                      : implementation_->sandbox.metadata((*session)->source.root_id, (*session)->source.relative_path);
+    bool device_writable{};
+    if (device_source && implementation_->devices) {
+        auto device = implementation_->devices->status((*session)->source.device_session_id, owner_id);
+        device_writable = device && device->writes_authorized && !device->invalidated;
+    }
     const auto *mutable_container = (*session)->media ? std::get_if<Container>(&(*session)->media->storage()) : nullptr;
     if ((*session)->format == "sfs" && (*session)->source.kind == ImageSourceKind::file &&
         mutable_container != nullptr && inspect_sfs_extent_layout_repair(*mutable_container)) {
@@ -43,9 +50,11 @@ axk::app::Result<axk::app::ImageSessionSummary> axk::app::ImageSessionManager::i
             return partition.sectors_per_cluster == 2U && allocation_is_safe_for_mutation(partition.allocation) &&
                    locate_partition_root_record(partition).has_value();
         });
-    if ((*session)->format == "sfs" && supported_mutation_profile && source_metadata && source_metadata->writable) {
+    if ((*session)->format == "sfs" && supported_mutation_profile &&
+        (device_writable || (source_metadata && source_metadata->writable))) {
         available_operations.emplace_back("images.alter.volumes");
-        available_operations.emplace_back("images.alter.partitions");
+        if (!device_source)
+            available_operations.emplace_back("images.alter.partitions");
         available_operations.emplace_back("images.alter.objects");
         available_operations.emplace_back("images.package.import");
         available_operations.emplace_back("images.floppy.import");

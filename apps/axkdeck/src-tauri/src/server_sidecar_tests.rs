@@ -1,7 +1,7 @@
 use super::{
     ConnectionFile, FrontendConnection, PrivateRuntimeDirectory, RotatingLogWriter, ServerSidecar,
     prepare_persistent_state_directory, request_shutdown, require_http_status, sidecar_arguments,
-    validate_connection, wait_for_connection,
+    signal_shutdown, validate_connection, wait_for_connection,
 };
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -91,7 +91,52 @@ fn sidecar_arguments_never_expose_the_bearer_token() {
         rendered.contains("--workspace-store config/tphzz/axkdeck/axklib-server/workspaces.json")
     );
     assert!(rendered.contains("--port 0"));
+    assert!(rendered.contains("--enable-devices"));
     assert!(rendered.contains(&format!("--parent-pid {}", std::process::id())));
+}
+
+#[test]
+fn private_shutdown_signal_is_repeatable_and_cleaned_after_reaping() {
+    let base = temporary_directory("shutdown-signal");
+    std::fs::create_dir_all(&base).expect("create base");
+    let runtime = PrivateRuntimeDirectory::create(&base).expect("private runtime");
+    let path = runtime.connection_path();
+    let connection = FrontendConnection {
+        base_url: "http://127.0.0.1:1/api/v1".to_owned(),
+        bearer_token: "0123456789abcdef0123456789abcdef".to_owned(),
+        mode: "local".to_owned(),
+    };
+    signal_shutdown(&path, &connection).expect("publish signal");
+    signal_shutdown(&path, &connection).expect("repeat signal");
+    assert_eq!(
+        std::fs::read(path.with_extension("shutdown")).expect("signal"),
+        connection.bearer_token.as_bytes()
+    );
+    assert!(request_shutdown(&connection).is_err());
+    drop(runtime);
+    assert!(!path.parent().expect("runtime parent").exists());
+    std::fs::remove_dir(base).expect("remove base");
+}
+
+#[test]
+fn failed_shutdown_signal_publication_removes_pending_file_and_allows_retry() {
+    let base = temporary_directory("shutdown-publication-failure");
+    std::fs::create_dir_all(&base).expect("create base");
+    let runtime = PrivateRuntimeDirectory::create(&base).expect("private runtime");
+    let path = runtime.connection_path();
+    let final_path = path.with_extension("shutdown");
+    let connection = FrontendConnection {
+        base_url: "http://127.0.0.1:1/api/v1".to_owned(),
+        bearer_token: "0123456789abcdef0123456789abcdef".to_owned(),
+        mode: "local".to_owned(),
+    };
+    std::fs::create_dir(&final_path).expect("block publication");
+    assert!(signal_shutdown(&path, &connection).is_err());
+    assert!(!path.with_extension("shutdown.pending").exists());
+    std::fs::remove_dir(&final_path).expect("remove publication blocker");
+    signal_shutdown(&path, &connection).expect("retry publication");
+    drop(runtime);
+    std::fs::remove_dir(base).expect("remove base");
 }
 
 #[test]
@@ -286,7 +331,6 @@ fn crashed_sidecar_is_reported_and_drop_reaps_the_child_and_state() {
             bearer_token: "0123456789abcdef0123456789abcdef".to_owned(),
             mode: "local".to_owned(),
         },
-        shutdown_timeout: Duration::from_millis(20),
     };
 
     let error = sidecar

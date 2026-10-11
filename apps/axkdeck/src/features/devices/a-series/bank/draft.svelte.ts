@@ -70,6 +70,10 @@ export class BankDraft extends EditorDraft {
         const unit = this.unit(key);
         if (unit) super.patch({ [overrideKey(unit.id)]: false });
     }
+    restore(values: EditorValues): void {
+        const allowed = new Set(this.units.flatMap((unit) => [...unit.keys, overrideKey(unit.id)]));
+        super.patch(Object.fromEntries(Object.entries(values).filter(([key]) => allowed.has(key))));
+    }
     resetUnits(keys: string[]): void {
         const patch: EditorValues = {};
         for (const unit of this.units.filter((unit) => unit.keys.some((key) => keys.includes(key))))

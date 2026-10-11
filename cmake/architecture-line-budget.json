@@ -3,6 +3,10 @@
   "maximumLines": 700,
   "sourceRoots": [
     {
+      "path": "devices",
+      "extensions": [".cpp", ".hpp"]
+    },
+    {
       "path": "library/include",
       "extensions": [
         ".c",
@@ -140,6 +144,11 @@
       "path": "apps/axkdeck/src/vite-env.d.ts",
       "classification": "machine-maintained",
       "reason": "Vite environment declarations are maintained by the frontend toolchain"
+    },
+    {
+      "path": "devices/vendor/expat",
+      "classification": "vendored",
+      "reason": "Unmodified private Expat 2.8.5 parser with upstream license and pinned archive checksum"
     },
     {
       "path": "tools/python/.venv",

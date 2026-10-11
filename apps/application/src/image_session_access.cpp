@@ -27,6 +27,8 @@ axk::app::ImageSessionManager::begin_read(std::string_view image_id, std::string
             return std::unexpected(core_error(checked.error(), state->source));
         if (auto checked = state->verify_source_unchanged(); !checked)
             return std::unexpected(checked.error());
+        if (state->source.kind == ImageSourceKind::device)
+            return "device:" + state->source_revision;
         if (!state->content_fingerprint) {
             auto digest = detail::reader_sha256(*state->source_reader, cancellation);
             if (!digest)
@@ -61,20 +63,20 @@ axk::app::ImageSessionManager::begin_read(std::string_view image_id, std::string
 
 axk::app::Result<axk::app::ImageSessionMutation>
 axk::app::ImageSessionManager::begin_mutation(std::string_view image_id, std::string_view owner_id,
-                                              std::uint64_t expected_revision) {
-    return begin_mutation_access(image_id, owner_id, expected_revision, std::nullopt);
+                                              std::uint64_t expected_revision, std::string_view operation_id) {
+    return begin_mutation_access(image_id, owner_id, expected_revision, std::nullopt, operation_id);
 }
 
 axk::app::Result<axk::app::ImageSessionMutation>
 axk::app::ImageSessionManager::begin_filesystem_mutation(std::string_view image_id, std::string_view owner_id,
-                                                         std::uint64_t expected_revision, PartitionIndex partition) {
-    return begin_mutation_access(image_id, owner_id, expected_revision, partition);
+                                                         std::uint64_t expected_revision, PartitionIndex partition,
+                                                         std::string_view operation_id) {
+    return begin_mutation_access(image_id, owner_id, expected_revision, partition, operation_id);
 }
 
-axk::app::Result<axk::app::ImageSessionMutation>
-axk::app::ImageSessionManager::begin_mutation_access(std::string_view image_id, std::string_view owner_id,
-                                                     std::uint64_t expected_revision,
-                                                     std::optional<PartitionIndex> filesystem_partition) {
+axk::app::Result<axk::app::ImageSessionMutation> axk::app::ImageSessionManager::begin_mutation_access(
+    std::string_view image_id, std::string_view owner_id, std::uint64_t expected_revision,
+    std::optional<PartitionIndex> filesystem_partition, std::string_view operation_id) {
     const auto session = implementation_->owned(image_id, owner_id);
     if (!session)
         return std::unexpected(session.error());
@@ -135,10 +137,22 @@ axk::app::ImageSessionManager::begin_mutation_access(std::string_view image_id, 
         return std::unexpected(session_error("entry_in_use", "image session mutation is already active", true));
     if (auto unchanged = (*session)->verify_source_unchanged(); !unchanged)
         return std::unexpected(session_error("image_source_changed", "image source changed after it was opened", true));
-    if (auto upgraded = (*session)->path_lease.try_upgrade(); !upgraded)
-        return std::unexpected(upgraded.error());
-    const FileRef source{(*session)->source.root_id, (*session)->source.relative_path};
-    auto target = implementation_->sandbox.open_mutation(source);
+    const auto source = (*session)->source;
+    Result<std::shared_ptr<MutationTarget>> target;
+    if (source.kind == ImageSourceKind::device) {
+        if (!implementation_->devices || (*session)->format != "sfs")
+            return std::unexpected(session_error("device_read_only", "this device target is read-only"));
+        target = implementation_->devices->begin_mutation(source.device_session_id, source.device_target_id, owner_id,
+                                                          operation_id);
+    } else {
+        if (auto upgraded = (*session)->path_lease.try_upgrade(); !upgraded)
+            return std::unexpected(upgraded.error());
+        auto file = implementation_->sandbox.open_mutation({source.root_id, source.relative_path});
+        if (file)
+            target = std::move(*file);
+        else
+            target = std::unexpected(file.error());
+    }
     if (!target) {
         (*session)->path_lease.downgrade();
         return std::unexpected(target.error());
@@ -169,8 +183,15 @@ axk::app::ImageSessionManager::prepare_mutation_commit(std::string_view image_id
         return std::unexpected(session_error("image_revision_stale", "image session mutation is not current", true));
     }
 
-    ImageSessionManager refreshed{implementation_->sandbox, 1U, implementation_->maximum_page_size,
-                                  implementation_->idle_retention, implementation_->clock};
+    ImageSessionManager refreshed{implementation_->sandbox,
+                                  1U,
+                                  implementation_->maximum_page_size,
+                                  implementation_->idle_retention,
+                                  implementation_->clock,
+                                  nullptr,
+                                  implementation_->maximum_audition_bundle_bytes,
+                                  implementation_->maximum_audition_clips,
+                                  implementation_->devices};
     auto opened = refreshed.open(session->source, std::string{owner_id}, cancellation);
     if (!opened)
         return std::unexpected(opened.error());
@@ -212,12 +233,9 @@ axk::app::Result<void> axk::app::ImageSessionManager::refresh_rolled_back_mutati
         return std::unexpected(prepared.error());
     auto current = std::static_pointer_cast<Implementation::Session>(prepared->current_state);
     auto fresh = std::static_pointer_cast<Implementation::Session>(prepared->refreshed_state);
-    // A byte-exact rollback can still change native timestamps. Refresh only
-    // file access metadata, keeping the same revision and logical identities.
-    current->source_reader = std::move(fresh->source_reader);
-    current->verify_source_unchanged = std::move(fresh->verify_source_unchanged);
-    current->source_revision = std::move(fresh->source_revision);
-    current->content_fingerprint.reset();
+    // Rebind containers as well as their access metadata: device readers from
+    // before a write are invalid even after byte-exact restoration.
+    Implementation::adopt_refreshed_state(*current, *fresh);
     return {};
 }
 

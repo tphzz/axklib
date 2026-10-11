@@ -26,6 +26,8 @@ struct Config {
     std::filesystem::path state_directory;
     std::filesystem::path connection_file;
     std::uint64_t parent_process_id{};
+    bool enable_devices{};
+    std::filesystem::path device_helper;
     std::size_t maximum_json_bytes{1024U * 1024U};
     std::size_t maximum_json_depth{32U};
     std::size_t maximum_json_nodes{100000U};

@@ -403,6 +403,9 @@ if(AXK_BUILD_SHARED_SDK)
       $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
   )
   target_link_libraries(axklib_shared PRIVATE axklib::audio)
+  if(NOT AXK_BUILD_DEVICES)
+    target_sources(axklib_shared PRIVATE src/sdk_devices_stub.cpp)
+  endif()
   if(APPLE)
     set(_axk_macos_exports "${CMAKE_CURRENT_BINARY_DIR}/axklib-macos-exports.txt")
     file(WRITE "${_axk_macos_exports}" "__Z*3axk*\n")
@@ -433,6 +436,7 @@ if(AXK_BUILD_SHARED_SDK)
   # every installed SDK header is consumable as C++17.
   add_library(axk_sdk_header_tests OBJECT
     tests/sdk_header_test.cpp
+    tests/sdk_devices_header_test.cpp
     tests/sdk_result_header_test.cpp
     tests/sdk_export_header_test.cpp
     tests/sdk_build_info_header_test.cpp

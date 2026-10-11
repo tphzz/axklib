@@ -21,6 +21,6 @@ using SessionFilesystemAdmitter =
     ImageSessionManager &images, AlterationJournalStore &journals, std::string_view image_id, std::string_view owner_id,
     std::uint64_t expected_revision, PartitionIndex partition, const SessionFilesystemPlanner &prepare,
     const std::function<Result<void>()> &verify_inputs, const CancellationToken &cancellation, ProgressSink *progress,
-    const SessionFilesystemAdmitter &admit = {});
+    const SessionFilesystemAdmitter &admit = {}, std::string_view operation_id = {});
 
 } // namespace axk::app::detail

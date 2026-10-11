@@ -9,6 +9,7 @@
 #include <tuple>
 
 #include "axklib/package_archive.hpp"
+#include "axklib/package_import_planning.hpp"
 
 #include "package_import_program_slots.hpp"
 
@@ -98,6 +99,22 @@ bool valid_sfs_index_capacity(const PackageImportPlan &plan) {
 } // namespace
 
 namespace package_import_internal {
+
+bool valid_target_snapshot_id(std::string_view value) {
+    if (valid_digest(value))
+        return true;
+    constexpr std::string_view prefix = "device:";
+    if (!value.starts_with(prefix))
+        return false;
+    value.remove_prefix(prefix.size());
+    if (value.size() < 34U || value[32U] != ':' || !std::ranges::all_of(value.substr(0U, 32U), [](unsigned char byte) {
+            return (byte >= '0' && byte <= '9') || (byte >= 'a' && byte <= 'f');
+        }))
+        return false;
+    const auto revision = value.substr(33U);
+    return revision.size() <= 20U && revision.front() >= '1' && revision.front() <= '9' &&
+           std::ranges::all_of(revision, [](unsigned char byte) { return byte >= '0' && byte <= '9'; });
+}
 
 std::string plan_identity(const PackageImportPlan &plan) {
     std::string source;
@@ -293,8 +310,8 @@ std::string plan_identity(const PackageImportPlan &plan) {
 } // namespace package_import_internal
 
 Result<void> verify_package_import_plan(const PackageImportPlan &plan) {
-    if (plan.schema_version != "1.0" || !valid_digest(plan.target_snapshot_id) || !valid_digest(plan.policy_digest) ||
-        !valid_digest(plan.plan_id)) {
+    if (plan.schema_version != "1.0" || !package_import_internal::valid_target_snapshot_id(plan.target_snapshot_id) ||
+        !valid_digest(plan.policy_digest) || !valid_digest(plan.plan_id)) {
         return std::unexpected{planner_error("package import plan identity fields are invalid")};
     }
     if (!valid_sfs_index_capacity(plan))

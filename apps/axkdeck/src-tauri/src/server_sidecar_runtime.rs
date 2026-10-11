@@ -119,6 +119,8 @@ impl Drop for PrivateRuntimeDirectory {
     fn drop(&mut self) {
         if validate_private_directory(&self.path).is_ok() {
             let _ = self.remove_connection();
+            let _ = std::fs::remove_file(self.connection_path().with_extension("shutdown"));
+            let _ = std::fs::remove_file(self.connection_path().with_extension("shutdown.pending"));
             let _ = std::fs::remove_dir(&self.path);
         }
     }

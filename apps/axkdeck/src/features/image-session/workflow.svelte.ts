@@ -1,6 +1,6 @@
-import { collectVolumes, findPartition, findSourceItem } from './sourceTree';
+import { collectVolumes, findPartition, findSourceItem, noImageSource } from './sourceTree';
 import { findRefreshedVolume, refreshVolumeSelection } from './sourceTree';
-import { axkObjectDirectoryLocation } from '../../lib/storageLocations';
+import { axkObjectDirectoryLocation, locationKey } from '../../lib/storageLocations';
 import type { DirectoryLocation, DirectoryRef, FileLocation, FileRef, ImageLocation } from '../../lib/storageLocations';
 import type {
     CompanionSelection,
@@ -24,13 +24,13 @@ import type { ExportCompanionRetry, ExportWorkflow } from '../export/workflow.sv
 import type { MediaExportWorkflow } from '../export/mediaWorkflow.svelte';
 import type { VolumePackageExportWorkflow } from '../export/volumePackageWorkflow.svelte';
 import type { VolumeFloppyExportWorkflow } from '../export/volumeFloppyWorkflow.svelte';
-import { ImageSessionController } from './actions';
+import { ImageSessionController, type ImageSessionPreparation } from './actions';
 import type { PackageImportWorkflow } from '../import/packageWorkflow.svelte';
 import type { FloppyImportWorkflow } from '../import/floppyWorkflow.svelte';
 import type { MutationWorkflow } from '../mutation/workflow.svelte';
 import type { ProgramGenerationWorkflow } from '../program-generation/workflow.svelte';
 import type { ExtentLayoutRepairWorkflow } from './extentLayoutRepairWorkflow.svelte';
-import { validationStatus } from './validationStatus';
+import { allocationBlockerKey, validationStatus } from './validationStatus';
 import { applyOpenedImageMetadata } from './openedImageMetadata';
 
 export type CompanionRetry =
@@ -38,12 +38,6 @@ export type CompanionRetry =
 
 type CompanionSourceKind = 'file' | 'directory';
 
-const allocationBlockerCodes = new Set([
-    'SFS_ALLOCATION_BITMAP_COPIES_DIFFER',
-    'SFS_ALLOCATION_CROSS_LINK',
-    'SFS_ALLOCATION_MISMATCH',
-    'SFS_EXTENT_BYTE_TOTAL_MISMATCH',
-]);
 const imageSessionKeepAliveIntervalMs = 5 * 60 * 1000;
 const imageOpenProgressDelayMs = 750;
 
@@ -227,13 +221,21 @@ export class ImageSessionWorkflow {
         };
     }
 
-    async open(location: ImageLocation, preferred?: { partitionIndex: number; volumeName?: string }): Promise<void> {
+    async open(
+        location: ImageLocation,
+        preferred?: { partitionIndex: number; volumeName?: string },
+        prepare?: ImageSessionPreparation,
+    ): Promise<void> {
         if (!(await this.confirmEditorLeave())) return;
         const requestId = this.nextOpenRequestId++;
         this.beginOpenProgress(requestId, location);
         this.status = 'Opening image';
         try {
-            const opened = await this.controller.open(location, (job) => this.updateOpenProgress(requestId, job));
+            const opened = await this.controller.open(
+                location,
+                (job) => this.updateOpenProgress(requestId, job),
+                prepare,
+            );
             if (!opened || requestId !== this.nextOpenRequestId - 1) return;
             this.openProgressCancellable = false;
             this.openProgressCancelling = false;
@@ -276,6 +278,10 @@ export class ImageSessionWorkflow {
         this.controller.cancelOpen();
     }
 
+    cleanupOpen(): Promise<void> {
+        return this.controller.cleanupOpen();
+    }
+
     async reopen(preferred?: { partitionIndex: number; volumeName?: string }): Promise<void> {
         if (this.location) await this.open(this.location, preferred);
     }
@@ -299,7 +305,12 @@ export class ImageSessionWorkflow {
         try {
             await this.controller.keepAlive();
         } catch (error) {
-            if (error instanceof AxklibApiError && error.code === 'image_not_found' && this.sessionId === sessionId) {
+            if (
+                error instanceof AxklibApiError &&
+                error.code === 'image_not_found' &&
+                this.sessionId === sessionId &&
+                this.location?.kind !== 'device'
+            ) {
                 await this.reopen(this.currentSourcePreference());
             }
         } finally {
@@ -347,7 +358,7 @@ export class ImageSessionWorkflow {
                 parentDialog: 'companion-disks',
                 initialDirectory:
                     this.lastCompanionDirectory ??
-                    (this.location
+                    (this.location && this.location.kind !== 'device'
                         ? {
                               rootId: this.location.reference.rootId,
                               relativePath: this.location.reference.relativePath.replace(/\/?[^/]+\/?$/, ''),
@@ -525,10 +536,11 @@ export class ImageSessionWorkflow {
         if (this.transport.storageMode !== 'server') return null;
         const selection = await this.picker.chooseLocation(
             'media-source',
-            'Open image',
+            'Open',
             ['hds', 'hda', 'ima', 'img', 'iso', 'a3k', 'zip'],
             '',
             {
+                purpose: 'open-source',
                 initialDirectory: this.lastImageDirectory,
                 initialFile: this.lastOpenedImageFile,
                 ondirectorychange: (directory) => (this.lastImageDirectory = directory),
@@ -600,11 +612,8 @@ export class ImageSessionWorkflow {
             capacityWarnings.add(key);
         }
         this.automaticCapacityWarnings = capacityWarnings;
-        const blockerCodes = [...new Set(this.integrityIssues.map((issue) => issue.code))]
-            .filter((code) => allocationBlockerCodes.has(code))
-            .sort();
-        if (blockerCodes.length === 0) return;
-        const automaticKey = `${opened.sessionId}:${opened.revision}:${blockerCodes.join(',')}`;
+        const automaticKey = allocationBlockerKey(this.integrityIssues, opened.sessionId, opened.revision);
+        if (!automaticKey) return;
         if (automaticKey === this.lastAutomaticIntegrityKey) return;
         this.lastAutomaticIntegrityKey = automaticKey;
         this.integrityDialogOpen = true;
@@ -685,13 +694,5 @@ export class ImageSessionWorkflow {
 }
 
 function sameImageSource(left: ImageLocation, right: ImageLocation): boolean {
-    return (
-        left.kind === right.kind &&
-        left.reference.rootId === right.reference.rootId &&
-        left.reference.relativePath === right.reference.relativePath
-    );
-}
-
-function noImageSource(): DiskTreeItem {
-    return { id: 'none', name: 'No image', kind: 'disk', childCount: 0 };
+    return left.kind === right.kind && locationKey(left) === locationKey(right);
 }

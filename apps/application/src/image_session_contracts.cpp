@@ -36,13 +36,25 @@ axk::app::Result<axk::app::ImageSourceRef> axk::app::image_source_ref_from_json(
                                   directory.at("relativePath").get<std::string>(),
                                   ImageSourceKind::axk_object_directory};
         }
+        if (kind == "DEVICE") {
+            const auto &device = reference.at("device");
+            const auto session = device.at("sessionId").get<std::string>();
+            const auto target = device.at("targetId").get<std::string>();
+            if (session.empty() || target.empty() || reference.size() != 2U || device.size() != 2U)
+                return std::unexpected(Error{"invalid_request", "device source requires an owned session and target"});
+            return ImageSourceRef{{}, {}, ImageSourceKind::device, session, target};
+        }
     } catch (const nlohmann::json::exception &) {
-        return std::unexpected(Error{"invalid_request", "source must be one FILE or AXK_OBJECT_DIRECTORY reference"});
+        return std::unexpected(
+            Error{"invalid_request", "source must be one FILE, AXK_OBJECT_DIRECTORY or DEVICE reference"});
     }
     return std::unexpected(Error{"invalid_request", "image source kind is unsupported"});
 }
 
 nlohmann::json axk::app::image_source_ref_json(const ImageSourceRef &source) {
+    if (source.kind == ImageSourceKind::device)
+        return {{"kind", "DEVICE"},
+                {"device", {{"sessionId", source.device_session_id}, {"targetId", source.device_target_id}}}};
     if (source.kind == ImageSourceKind::file) {
         return {{"kind", "FILE"}, {"file", {{"rootId", source.root_id}, {"relativePath", source.relative_path}}}};
     }

@@ -77,6 +77,14 @@ add_library(axk_application STATIC src/alteration_journal.cpp src/alteration_jou
                                    src/session_write_operations.cpp src/write_manifest_operations.cpp
                                    src/write_manifest_support.cpp src/write_operations.cpp src/write_plan_support.cpp)
 add_library(axklib::application ALIAS axk_application)
+set_target_properties(axk_application PROPERTIES POSITION_INDEPENDENT_CODE ON CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
+target_sources(axk_application PRIVATE src/device_provider.cpp src/device_xml.cpp src/device_source.cpp src/device_sessions.cpp
+                                       src/device_patch_alignment.cpp src/device_transactions.cpp src/image_device_mutation.cpp
+                                       src/operation_registry_devices.cpp)
+if(AXK_BUILD_DEVICES)
+  target_compile_definitions(axk_application PRIVATE AXK_BUILD_DEVICES=1)
+  target_link_libraries(axk_application PRIVATE axklib::devices)
+endif()
 target_compile_features(axk_application PUBLIC cxx_std_23)
 target_include_directories(
   axk_application
@@ -141,6 +149,11 @@ if(BUILD_TESTING)
                                        tests/secure_random_test.cpp tests/uploads_test.cpp
                                        tests/write_operations_test.cpp)
   target_compile_features(axk_application_tests PRIVATE cxx_std_23)
+  target_sources(axk_application_tests PRIVATE tests/device_sessions_test.cpp)
+  if(AXK_BUILD_DEVICES)
+    target_sources(axk_application_tests PRIVATE tests/device_candidates_test.cpp)
+    target_link_libraries(axk_application_tests PRIVATE axklib::devices)
+  endif()
   target_compile_definitions(axk_application_tests PRIVATE AXK_SOURCE_ROOT="${AXK_REPOSITORY_ROOT}")
   target_include_directories(
     axk_application_tests

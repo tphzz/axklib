@@ -361,6 +361,19 @@ def vcpkg_license_materials(
     return [LicenseMaterial(f"vcpkg {name}", found[name]) for name in sorted(found)]
 
 
+def device_xml_dependency(root: Path) -> tuple[dict[str, object], LicenseMaterial]:
+    row = package(
+        "expat",
+        "2.8.5",
+        "libexpat",
+        license_expression="MIT",
+        download_location="https://github.com/libexpat/libexpat/releases/download/R_2_8_5/expat-2.8.5.tar.gz",
+        comment="Private device XML parser; official source archive SHA-256: "
+        "920dde485e15eda0cce8d2310b41d492c534e5e3d89ad407a0b4176dd2ff88fe",
+    )
+    return row, LicenseMaterial("Expat 2.8.5", root / "devices/vendor/expat/COPYING")
+
+
 def validate_declared_licenses(packages: list[dict[str, object]]) -> None:
     unresolved = sorted(
         f"{row['name']}@{row['versionInfo']}"
@@ -463,6 +476,9 @@ def main() -> int:
     parser.add_argument("--vcpkg-installed-root", type=Path)
     parser.add_argument("--license-bundle", type=Path)
     parser.add_argument(
+        "--without-devices", action="store_true", help="Match an AXK_BUILD_DEVICES=OFF build"
+    )
+    parser.add_argument(
         "--profile", choices=("sdk", "cli", "server", "workspace"), default="workspace"
     )
     args = parser.parse_args()
@@ -473,12 +489,14 @@ def main() -> int:
     packages = [package("axklib", version, "axklib", license_expression="MPL-2.0")]
     packages.extend(vcpkg_packages(args.axklib_root, args.profile))
     materials: list[LicenseMaterial] = []
+    if not args.without_devices:
+        device_package, device_license = device_xml_dependency(args.axklib_root)
+        packages.append(device_package)
+        materials.append(device_license)
     product = "axklib"
     if args.axkdeck_root:
         if not args.cargo_metadata_file or not args.pnpm_license_file:
-            parser.error(
-                "--axkdeck-root requires --cargo-metadata-file and --pnpm-license-file"
-            )
+            parser.error("--axkdeck-root requires --cargo-metadata-file and --pnpm-license-file")
         product = "axkdeck"
         packages.append(
             package(

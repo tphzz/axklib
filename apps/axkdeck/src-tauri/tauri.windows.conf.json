@@ -1,5 +1,6 @@
 {
   "bundle": {
+    "externalBin": ["binaries/axklib-server", "binaries/axklib_helper"],
     "targets": ["nsis"]
   }
 }

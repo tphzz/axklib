@@ -165,9 +165,9 @@ Result<void> bind_filesystem_edit_operations(OperationRegistry &registry, const 
                 return Json{
                     {"imageId", image_id}, {"revision", revision}, {"capacity", capacity_admission_json(capacity)}};
             }
-            auto result =
-                apply_filesystem_edits(images, journals, image_id, context.owner_id, revision, resolved->partition,
-                                       resolved->edits, context.cancellation, context.progress, verification, *policy);
+            auto result = apply_filesystem_edits(images, journals, image_id, context.owner_id, revision,
+                                                 resolved->partition, resolved->edits, context.cancellation,
+                                                 context.progress, verification, *policy, context.mutation_id);
             if (!result)
                 return std::unexpected(result.error());
             // The relationship notice was acknowledged before execution, not produced by this write.

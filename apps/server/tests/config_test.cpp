@@ -142,6 +142,21 @@ TEST(ServerConfig, GeneratesSidecarTokenWithoutPuttingASecretInProcessArguments)
                                     [](unsigned char character) { return std::isxdigit(character) != 0; }));
 }
 
+TEST(ServerConfig, DeviceAccessRequiresAnExplicitDesktopOwnerAndPrivateState) {
+    axk::server::Config config;
+    EXPECT_FALSE(config.enable_devices);
+    config.enable_devices = true;
+    EXPECT_FALSE(axk::server::validate_config(config));
+    config.connection_file = std::filesystem::temp_directory_path() / "connection.json";
+    config.parent_process_id = 4242U;
+    EXPECT_FALSE(axk::server::validate_config(config));
+    config.state_directory = std::filesystem::temp_directory_path() / "private-state";
+    config.bearer_token = "0123456789abcdef0123456789abcdef";
+    EXPECT_TRUE(axk::server::validate_config(config));
+    config.bind_address = "0.0.0.0";
+    EXPECT_FALSE(axk::server::validate_config(config));
+}
+
 TEST(ServerConfig, RejectsExplicitConfigInSidecarMode) {
     const auto root = std::filesystem::current_path();
     ScopedEnvironment inherited_bind{"AXKLIB_SERVER_BIND", "0.0.0.0"};

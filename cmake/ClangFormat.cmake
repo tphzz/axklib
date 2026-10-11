@@ -31,6 +31,8 @@ file(GLOB_RECURSE AXK_CLANG_FORMAT_FILES
   "${AXK_SOURCE_ROOT}/library/*.hh"
   "${AXK_SOURCE_ROOT}/library/*.hpp"
   "${AXK_SOURCE_ROOT}/library/*.hxx"
+  "${AXK_SOURCE_ROOT}/devices/*.cpp"
+  "${AXK_SOURCE_ROOT}/devices/*.hpp"
   "${AXK_SOURCE_ROOT}/apps/cli/*.c"
   "${AXK_SOURCE_ROOT}/apps/cli/*.cc"
   "${AXK_SOURCE_ROOT}/apps/cli/*.cpp"

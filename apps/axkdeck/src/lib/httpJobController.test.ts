@@ -42,7 +42,13 @@ describe('HttpJobController', () => {
             .mockResolvedValueOnce(snapshot('COMPLETED', 71));
         const close = vi.fn();
         const connectEvents = vi.fn().mockResolvedValue({ opened: Promise.resolve(), close });
-        const client = { replayJobEvents, request, connectEvents } as unknown as AxklibHttpApiClient;
+        const terminal = vi.fn();
+        const client = {
+            replayJobEvents,
+            request,
+            connectEvents,
+            deviceWrites: { terminal },
+        } as unknown as AxklibHttpApiClient;
         const controller = new HttpJobController(client);
         const submitted = controller.map(snapshot('QUEUED', 1));
         const updates: string[] = [];
@@ -55,5 +61,6 @@ describe('HttpJobController', () => {
         expect(updates).toContain('running');
         expect(updates.at(-1)).toBe('completed');
         expect(close).toHaveBeenCalledOnce();
+        expect(terminal).toHaveBeenCalledWith('job-import');
     });
 });

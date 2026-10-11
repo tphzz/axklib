@@ -18,6 +18,7 @@ export class HttpJobController {
     }
 
     map(job: ApiJobSnapshot, existingId?: number): JobState {
+        if (this.terminalState(job.state)) this.client.deviceWrites.terminal(job.jobId);
         const jobId = existingId ?? this.nextJobId++;
         const progress = job.progress as
             { phase?: string; completed?: number; total?: number | null; message?: string } | undefined;

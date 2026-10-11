@@ -22,7 +22,7 @@ struct PatchLocation {
 };
 
 struct Inspection {
-    FileRef target;
+    MutationIdentity target;
     std::string target_identity;
     std::uint64_t image_size_bytes{};
     std::vector<PatchLocation> patches;
@@ -35,10 +35,10 @@ struct Publication {
     std::uint64_t size_bytes{};
 };
 
-[[nodiscard]] Result<std::uint64_t> encoded_size(const FileRef &target, std::string_view target_identity,
+[[nodiscard]] Result<std::uint64_t> encoded_size(const MutationIdentity &target, std::string_view target_identity,
                                                  std::span<const AlterationJournalPatch> patches);
 
-[[nodiscard]] Result<Publication> publish(const std::filesystem::path &path, const FileRef &target,
+[[nodiscard]] Result<Publication> publish(const std::filesystem::path &path, const MutationIdentity &target,
                                           std::string_view target_identity, std::uint64_t image_size_bytes,
                                           std::span<const AlterationJournalPatch> patches,
                                           std::uint64_t maximum_journal_bytes, const CancellationToken &cancellation,
@@ -50,14 +50,14 @@ struct Publication {
 [[nodiscard]] Result<bool> commit_marker_matches(const std::filesystem::path &journal_path,
                                                  std::string_view file_checksum);
 
-[[nodiscard]] Result<void> compare_target(const SandboxMutation &target, const std::filesystem::path &journal_path,
+[[nodiscard]] Result<void> compare_target(const MutationTarget &target, const std::filesystem::path &journal_path,
                                           const Inspection &journal, bool replacement, std::size_t chunk_bytes);
 
-[[nodiscard]] Result<void> recognize_uncommitted_target(const SandboxMutation &target,
+[[nodiscard]] Result<void> recognize_uncommitted_target(const MutationTarget &target,
                                                         const std::filesystem::path &journal_path,
                                                         const Inspection &journal, std::size_t chunk_bytes);
 
-[[nodiscard]] Result<void> restore_original_bytes(SandboxMutation &target, const std::filesystem::path &journal_path,
+[[nodiscard]] Result<void> restore_original_bytes(MutationTarget &target, const std::filesystem::path &journal_path,
                                                   const Inspection &journal, std::size_t chunk_bytes,
                                                   const std::function<bool()> &after_flush = {});
 

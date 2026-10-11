@@ -862,6 +862,74 @@
           "relativePath": {"type": "string"}
         }
       },
+      "DeviceCandidate": {
+        "type": "object", "additionalProperties": false, "required": ["id", "model", "serial", "sizeBytes", "sectorSize"],
+        "properties": {"id": {"type": "string", "minLength": 1}, "model": {"type": "string"}, "serial": {"type": "string"}, "sizeBytes": {"type": "integer", "minimum": 1}, "sectorSize": {"type": "integer", "minimum": 512}}
+      },
+      "DeviceCandidateList": {
+        "type": "object", "additionalProperties": false, "required": ["devices", "writesSupported"],
+        "properties": {"devices": {"type": "array", "items": {"$ref": "#/components/schemas/DeviceCandidate"}}, "writesSupported": {"type": "boolean"}}
+      },
+      "DeviceXmlInspectionRequest": {
+        "type": "object", "additionalProperties": false, "required": ["xml"],
+        "properties": {"xml": {"type": "string", "minLength": 1, "maxLength": 262144}}
+      },
+      "DeviceXmlTarget": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "label", "sizeBytes", "sectorSize", "enabled", "eligible", "readOnly", "notices"],
+        "properties": {"id": {"type": "string", "minLength": 1}, "label": {"type": "string"}, "sizeBytes": {"type": "integer", "minimum": 0}, "sectorSize": {"type": "integer", "minimum": 0, "maximum": 8192}, "enabled": {"type": "boolean"}, "eligible": {"type": "boolean"}, "readOnly": {"type": "boolean"}, "notices": {"type": "array", "items": {"type": "string"}}}
+      },
+      "DeviceXmlInspection": {
+        "type": "object", "additionalProperties": false, "required": ["targets"],
+        "properties": {"targets": {"type": "array", "maxItems": 8, "items": {"$ref": "#/components/schemas/DeviceXmlTarget"}}}
+      },
+      "DeviceConnectRequest": {
+        "type": "object", "additionalProperties": false, "required": ["candidateId", "layout"],
+        "properties": {"candidateId": {"type": "string", "minLength": 1}, "layout": {"type": "string", "enum": ["RAW", "SCSI2SD_V6", "SCSI2SD_XML"], "x-axklib-application-enum": {"RAW": "raw", "SCSI2SD_V6": "scsi2sd-v6", "SCSI2SD_XML": "scsi2sd-xml"}}, "xml": {"type": "string", "maxLength": 262144}}
+      },
+      "DeviceScsiTarget": {
+        "type": "object", "additionalProperties": false, "required": ["id", "deviceType", "vendor", "product", "revision", "serial"],
+        "properties": {"id": {"type": "integer", "minimum": 0, "maximum": 7}, "deviceType": {"type": "string", "enum": ["FIXED", "REMOVABLE", "OPTICAL", "FLOPPY", "MAGNETO_OPTICAL", "SEQUENTIAL"]}, "vendor": {"type": "string"}, "product": {"type": "string"}, "revision": {"type": "string"}, "serial": {"type": "string"}}
+      },
+      "DeviceTarget": {
+        "type": "object", "additionalProperties": false, "required": ["id", "label", "offsetBytes", "scsi", "sizeBytes", "sectorSize", "readOnly", "notices"],
+        "properties": {"id": {"type": "string", "minLength": 1}, "label": {"type": "string"}, "offsetBytes": {"type": "integer", "minimum": 0}, "scsi": {"oneOf": [{"$ref": "#/components/schemas/DeviceScsiTarget"}, {"type": "null"}]}, "sizeBytes": {"type": "integer", "minimum": 1, "maximum": 9000000000}, "sectorSize": {"type": "integer", "minimum": 512}, "readOnly": {"type": "boolean"}, "notices": {"type": "array", "items": {"type": "string"}}}
+      },
+      "DeviceSession": {
+        "type": "object", "additionalProperties": false, "required": ["sessionId", "candidate", "targets", "writesSupported", "writesAuthorized", "invalidated"],
+        "properties": {"sessionId": {"type": "string", "minLength": 1}, "candidate": {"$ref": "#/components/schemas/DeviceCandidate"}, "targets": {"type": "array", "items": {"$ref": "#/components/schemas/DeviceTarget"}}, "writesSupported": {"type": "boolean"}, "writesAuthorized": {"type": "boolean"}, "invalidated": {"type": "boolean"}}
+      },
+      "DeviceSessionRequest": {
+        "type": "object", "additionalProperties": false, "required": ["sessionId"], "properties": {"sessionId": {"type": "string", "minLength": 1}}
+      },
+      "DeviceAuthorizationRequest": {
+        "type": "object", "additionalProperties": false, "required": ["sessionId", "targetId", "exclusiveUseAcknowledged"],
+        "properties": {"sessionId": {"type": "string", "minLength": 1}, "targetId": {"type": "string", "minLength": 1}, "exclusiveUseAcknowledged": {"type": "boolean", "const": true}}
+      },
+      "DeviceCloseResult": {
+        "type": "object", "additionalProperties": false, "required": ["closed"], "properties": {"closed": {"type": "boolean", "const": true}}
+      },
+      "DeviceAuthorizationResult": {
+        "type": "object", "additionalProperties": false, "required": ["authorized"], "properties": {"authorized": {"type": "boolean", "const": true}}
+      },
+      "DeviceRecoveryResult": {
+        "type": "object", "additionalProperties": false, "required": ["recovered"], "properties": {"recovered": {"type": "boolean", "const": true}}
+      },
+      "DeviceOperation": {
+        "type": "object", "additionalProperties": false, "required": ["operationId", "state", "model", "serial", "targetLabel", "targetSize"],
+        "properties": {"operationId": {"type": "string", "minLength": 1}, "state": {"type": "string", "enum": ["NO_WRITE", "PREPARED", "COMMITTED", "ROLLED_BACK", "RECOVERY_REQUIRED"], "x-axklib-application-enum": {"NO_WRITE": "no_write", "PREPARED": "prepared", "COMMITTED": "committed", "ROLLED_BACK": "rolled_back", "RECOVERY_REQUIRED": "recovery_required"}}, "model": {"type": "string"}, "serial": {"type": "string"}, "targetLabel": {"type": "string"}, "targetSize": {"type": "integer", "minimum": 0}}
+      },
+      "DeviceOperationRequest": {
+        "type": "object", "additionalProperties": false, "required": ["operationId"],
+        "properties": {"operationId": {"type": "string", "minLength": 1, "maxLength": 128}}
+      },
+      "DeviceOperationList": {
+        "type": "object", "additionalProperties": false, "required": ["operations"], "properties": {"operations": {"type": "array", "items": {"$ref": "#/components/schemas/DeviceOperation"}}}
+      },
+      "DeviceRecoveryRequest": {
+        "type": "object", "additionalProperties": false, "required": ["operationId", "sessionId", "targetId", "exclusiveUseAcknowledged"],
+        "properties": {"operationId": {"type": "string", "minLength": 1, "maxLength": 128}, "sessionId": {"type": "string", "minLength": 1}, "targetId": {"type": "string", "minLength": 1}, "exclusiveUseAcknowledged": {"type": "boolean", "const": true}}
+      },
       "ImageSourceRef": {
         "oneOf": [
           {
@@ -881,6 +949,13 @@
               "kind": {"const": "AXK_OBJECT_DIRECTORY"},
               "directory": {"$ref": "#/components/schemas/DirectoryRef"}
             }
+          },
+          {
+            "type": "object", "additionalProperties": false, "required": ["kind", "device"],
+            "properties": {"kind": {"const": "DEVICE"}, "device": {
+              "type": "object", "additionalProperties": false, "required": ["sessionId", "targetId"],
+              "properties": {"sessionId": {"type": "string", "minLength": 1}, "targetId": {"type": "string", "minLength": 1}}
+            }}
           }
         ]
       },

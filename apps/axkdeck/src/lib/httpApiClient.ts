@@ -1,4 +1,5 @@
 import type { components } from './generated/axklibApiV1';
+import { DeviceWriteTracking } from './deviceWriteTracking';
 import type { ClientUploadSource } from './clientUploadSource';
 import { AxklibApiError } from './httpErrors';
 import {
@@ -150,13 +151,15 @@ function isJobEvent(value: unknown): value is ApiJobEvent {
 }
 
 export class AxklibHttpApiClient {
+    readonly deviceWrites: DeviceWriteTracking;
     private readonly baseUrl: string;
     private readonly bearerToken: string;
     private capabilities?: ApiCapabilities;
     private operations = new Map<string, OperationCapability>();
     private routeCounts = new Map<string, number>();
 
-    constructor(connection: AxklibApiConnection) {
+    constructor(connection: AxklibApiConnection, deviceStorage?: Storage) {
+        this.deviceWrites = new DeviceWriteTracking(deviceStorage);
         this.baseUrl = connection.baseUrl.replace(/\/+$/, '');
         this.bearerToken = connection.bearerToken;
     }
@@ -236,12 +239,19 @@ export class AxklibHttpApiClient {
         }
 
         const requestInput = this.routeCounts.get(routeKey) === 1 ? input : { ...input, operationId };
-        return this.request<Result | ApiJobSnapshot>(
+        const tracked =
+            operation.operationClass === 'WRITE'
+                ? this.deviceWrites.begin(input.imageId, operationId, options.idempotencyKey)
+                : undefined;
+        const result = await this.request<Result | ApiJobSnapshot>(
             operation.method,
             this.operationPath(operation.route),
             requestInput,
             headers,
         );
+        if (tracked && result && typeof result === 'object' && 'jobId' in result && typeof result.jobId === 'string')
+            this.deviceWrites.acknowledge(tracked, result.jobId);
+        return result;
     }
 
     async roots(): Promise<SandboxRoot[]> {

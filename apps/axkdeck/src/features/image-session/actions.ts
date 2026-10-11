@@ -1,7 +1,9 @@
 import type { ImageLocation } from '../../lib/storageLocations';
 import type { ImageTransport, JobState, OpenedImage } from '../../lib/transport';
+import { userFacingMessage } from '../../lib/userFacingMessage';
 
 type SessionTransport = Pick<ImageTransport, 'openImage' | 'keepImageAlive' | 'refreshImage' | 'closeImage'>;
+export type ImageSessionPreparation = (candidate: OpenedImage) => Promise<void>;
 
 export interface ImageSessionSnapshot {
     sessionId: number | null;
@@ -14,6 +16,7 @@ export class ImageSessionController {
     private snapshotValue: ImageSessionSnapshot = { sessionId: null, location: null, opening: false };
     private disposed = false;
     private activeOpen: AbortController | null = null;
+    private readonly pendingOpenCleanup = new Set<number>();
 
     constructor(
         private readonly transport: SessionTransport,
@@ -25,8 +28,13 @@ export class ImageSessionController {
         return this.snapshotValue;
     }
 
-    async open(location: ImageLocation, onUpdate?: (job: JobState) => void): Promise<OpenedImage | null> {
+    async open(
+        location: ImageLocation,
+        onUpdate?: (job: JobState) => void,
+        prepare?: ImageSessionPreparation,
+    ): Promise<OpenedImage | null> {
         if (this.disposed) throw new Error('Image session controller is disposed');
+        if (this.pendingOpenCleanup.size) await this.cleanupOpen();
         this.activeOpen?.abort();
         const abortController = new AbortController();
         this.activeOpen = abortController;
@@ -34,35 +42,59 @@ export class ImageSessionController {
         const previousSessionId = this.snapshotValue.sessionId;
         this.update({ ...this.snapshotValue, opening: true });
         let candidateSessionId: number | null = null;
+        let failure: unknown;
+        const current = () => {
+            if (!this.isCurrent(generation)) return false;
+            abortController.signal.throwIfAborted();
+            return true;
+        };
         try {
-            const opened = await this.transport.openImage(location, {
+            let opened = await this.transport.openImage(location, {
                 signal: abortController.signal,
                 onUpdate,
             });
             candidateSessionId = opened.sessionId;
-            if (!this.isCurrent(generation)) {
-                await this.transport.closeImage(opened.sessionId);
-                return null;
+            if (!current()) return null;
+            if (prepare) {
+                await prepare(opened);
+                if (!current()) return null;
+                opened = await this.transport.refreshImage(candidateSessionId);
+                if (opened.sessionId !== candidateSessionId) throw new Error('Prepared image session changed');
+                if (!current()) return null;
             }
             if (previousSessionId !== null) {
                 await this.invalidateSession(previousSessionId);
                 await this.transport.closeImage(previousSessionId);
             }
-            if (!this.isCurrent(generation)) {
-                await this.transport.closeImage(opened.sessionId);
-                return null;
-            }
+            if (!current()) return null;
             candidateSessionId = null;
             this.update({ sessionId: opened.sessionId, location, opening: false });
             return opened;
         } catch (error) {
-            if (candidateSessionId !== null) {
-                await this.transport.closeImage(candidateSessionId).catch(() => undefined);
-            }
-            if (this.isCurrent(generation)) this.update({ ...this.snapshotValue, opening: false });
+            failure = error;
             throw error;
         } finally {
-            if (this.activeOpen === abortController) this.activeOpen = null;
+            try {
+                if (candidateSessionId !== null) {
+                    this.pendingOpenCleanup.add(candidateSessionId);
+                    await this.cleanupOpen();
+                }
+            } catch (error) {
+                throw new Error(
+                    `${failure ? `${userFacingMessage(failure)}. ` : ''}Connection cleanup failed: ${userFacingMessage(error)}`,
+                );
+            } finally {
+                if (this.isCurrent(generation) && this.snapshotValue.opening)
+                    this.update({ ...this.snapshotValue, opening: false });
+                if (this.activeOpen === abortController) this.activeOpen = null;
+            }
+        }
+    }
+
+    async cleanupOpen(): Promise<void> {
+        for (const sessionId of this.pendingOpenCleanup) {
+            await this.transport.closeImage(sessionId);
+            this.pendingOpenCleanup.delete(sessionId);
         }
     }
 
@@ -101,6 +133,7 @@ export class ImageSessionController {
         if (this.disposed) return;
         this.disposed = true;
         await this.close();
+        await this.cleanupOpen();
     }
 
     private isCurrent(generation: number): boolean {

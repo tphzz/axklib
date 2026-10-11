@@ -215,13 +215,16 @@ axk::app::Result<void> axk::app::bind_session_package_operations(OperationRegist
                     if (auto verified = record->package_set->verify_sources(context.cancellation); !verified)
                         return std::unexpected(verified.error());
                 }
-                auto mutation = images.begin_mutation(record->image_id, context.owner_id, record->expected_revision);
+                auto mutation = images.begin_mutation(record->image_id, context.owner_id, record->expected_revision,
+                                                      context.mutation_id);
                 if (!mutation)
                     return std::unexpected(mutation.error());
                 SessionMutationGuard mutation_guard{images, record->image_id, context.owner_id,
                                                     record->expected_revision};
 
-                auto current_snapshot = detail::reader_sha256(*mutation->target, context.cancellation);
+                auto current_snapshot = mutation->source.kind == ImageSourceKind::device
+                                            ? Result<std::string>{"device:" + mutation->target->revision()}
+                                            : detail::reader_sha256(*mutation->target, context.cancellation);
                 if (!current_snapshot)
                     return std::unexpected(current_snapshot.error());
                 if (*current_snapshot != record->plan.target_snapshot_id) {
@@ -261,10 +264,21 @@ axk::app::Result<void> axk::app::bind_session_package_operations(OperationRegist
                     return {};
                 };
                 mutation_guard.invalidate_on_abort(true);
-                if (auto applied = journals.apply(mutation->target, prepared->image_size_bytes, patches,
-                                                  context.cancellation, validate_commit, {}, admit_frozen);
+                bool rollback_verified{};
+                if (auto applied = images.apply_mutation(
+                        journals, *mutation, patches, context.cancellation, validate_commit,
+                        [&] { rollback_verified = true; }, admit_frozen);
                     !applied) {
-                    mutation_guard.invalidate_on_abort(!journals.storage_ready());
+                    const auto unsafe = !journals.storage_ready() || applied.error().code == "device_recovery_required";
+                    mutation_guard.invalidate_on_abort(unsafe);
+                    if (rollback_verified && !unsafe) {
+                        if (auto restored = images.refresh_rolled_back_mutation(record->image_id, context.owner_id,
+                                                                                record->expected_revision);
+                            !restored) {
+                            mutation_guard.invalidate_on_abort(true);
+                            return std::unexpected(restored.error());
+                        }
+                    }
                     return std::unexpected(applied.error());
                 }
                 if (!prepared_commit)

@@ -41,6 +41,16 @@ fn main() {
             sidecar_path.display()
         )
     });
+    if target_os == "windows" {
+        let helper = native_build_directory.join("devices/axklib_helper.exe");
+        let destination = manifest_dir
+            .join("binaries")
+            .join(format!("axklib_helper-{target_triple}.exe"));
+        std::fs::copy(&helper, &destination).unwrap_or_else(|error| {
+            panic!("stage device helper from {}: {error}", helper.display())
+        });
+        println!("cargo:rerun-if-changed={}", helper.display());
+    }
 
     tauri_build::build();
     println!(

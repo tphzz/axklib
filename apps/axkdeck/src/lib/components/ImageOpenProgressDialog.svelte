@@ -20,14 +20,14 @@
         class="dialog-shell image-open-progress-dialog"
         role="dialog"
         aria-modal="true"
-        aria-label="Open image progress"
+        aria-label="Open progress"
         aria-busy="true"
         use:modal={{ onescape: cancellable && !cancelling ? oncancel : undefined }}
     >
         <header class="dialog-header">
             <div>
                 <Icon name="folder-open" size={16} />
-                <h2>Open image</h2>
+                <h2>Open</h2>
             </div>
         </header>
 

@@ -13,13 +13,15 @@ use url::{Host, Url};
 
 #[path = "server_sidecar_runtime.rs"]
 mod runtime;
+#[path = "server_sidecar_shutdown.rs"]
+mod shutdown;
+use shutdown::{request_shutdown, signal_shutdown};
 
 use crate::startup_diagnostics::{ServerOutcome, StartupDiagnostics, StartupMilestone};
 use runtime::PrivateRuntimeDirectory;
 
 const CONNECTION_SCHEMA_VERSION: u32 = 1;
 const API_VERSION: &str = "v1";
-const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(3);
 const LOG_FILE_SIZE: u64 = 5 * 1024 * 1024;
 const RETAINED_LOG_FILES: usize = 3;
 const ALLOWED_ORIGINS: [&str; 3] = [
@@ -108,7 +110,6 @@ pub struct ServerSidecar {
     log_threads: Vec<JoinHandle<()>>,
     _runtime_directory: PrivateRuntimeDirectory,
     connection: FrontendConnection,
-    shutdown_timeout: Duration,
 }
 
 impl ServerSidecar {
@@ -185,7 +186,21 @@ impl ServerSidecar {
         let runtime_directory = PrivateRuntimeDirectory::create(&std::env::temp_dir())?;
         record_startup(startup, StartupMilestone::SidecarStatePrepared);
         let connection_path = runtime_directory.connection_path();
-        let arguments = sidecar_arguments(state_directory, workspace_store, &connection_path);
+        let mut arguments = sidecar_arguments(state_directory, workspace_store, &connection_path);
+        if cfg!(windows) {
+            let directory = binary.parent().ok_or("server binary has no directory")?;
+            let packaged = directory.join("axklib_helper.exe");
+            let helper = if packaged.is_file() {
+                packaged
+            } else {
+                directory.join("../../devices/axklib_helper.exe")
+            };
+            let helper = helper.canonicalize().map_err(|error| {
+                format!("device helper is missing at {}: {error}", helper.display())
+            })?;
+            arguments.push("--device-helper".into());
+            arguments.push(helper.into_os_string());
+        }
         let mut command = Command::new(binary);
         command
             .args(arguments)
@@ -244,7 +259,6 @@ impl ServerSidecar {
             log_threads,
             _runtime_directory: runtime_directory,
             connection,
-            shutdown_timeout: SHUTDOWN_TIMEOUT,
         })
     }
 
@@ -290,17 +304,23 @@ impl Drop for ServerSidecar {
     fn drop(&mut self) {
         if let Ok(mut child) = self.child.lock() {
             if let Some(mut child) = child.take() {
-                let _ = request_shutdown(&self.connection);
-                let deadline = Instant::now() + self.shutdown_timeout;
-                while Instant::now() < deadline {
-                    if child.try_wait().is_ok_and(|status| status.is_some()) {
+                let path = self._runtime_directory.connection_path();
+                loop {
+                    if child.try_wait().ok().flatten().is_some() {
                         break;
                     }
-                    std::thread::sleep(Duration::from_millis(20));
+                    let signalled = signal_shutdown(&path, &self.connection);
+                    let requested = request_shutdown(&self.connection);
+                    if signalled.is_ok() || requested.is_ok() {
+                        break;
+                    }
+                    eprintln!(
+                        "axkdeck: graceful shutdown not acknowledged; retaining sidecar ownership and retrying"
+                    );
+                    std::thread::sleep(Duration::from_secs(1));
                 }
-                if child.try_wait().is_ok_and(|status| status.is_none()) {
-                    let _ = child.kill();
-                }
+                // The server cancels queued work and drains any write/restoration.
+                // A timeout must never kill it in the middle of a physical write.
                 let _ = child.wait();
             }
         }
@@ -503,39 +523,6 @@ fn prepare_persistent_state_directory(state_directory: &Path) -> Result<(), Stri
     }
     Ok(())
 }
-fn request_shutdown(connection: &FrontendConnection) -> Result<(), String> {
-    let parsed = parse_loopback_endpoint(&connection.base_url, "http", "/api/v1")?;
-    let authority = format!(
-        "127.0.0.1:{}",
-        parsed
-            .port()
-            .ok_or_else(|| "sidecar base URL requires an explicit port".to_owned())?
-    );
-    let mut stream = TcpStream::connect(&authority)
-        .map_err(|error| format!("connect for sidecar shutdown: {error}"))?;
-    stream
-        .set_read_timeout(Some(Duration::from_secs(2)))
-        .map_err(|error| format!("set sidecar shutdown read timeout: {error}"))?;
-    stream
-        .set_write_timeout(Some(Duration::from_secs(2)))
-        .map_err(|error| format!("set sidecar shutdown write timeout: {error}"))?;
-    let request = format!(
-        "POST /api/v1/system/shutdown HTTP/1.1\r\nHost: {authority}\r\nAuthorization: Bearer {}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-        connection.bearer_token
-    );
-    stream
-        .write_all(request.as_bytes())
-        .map_err(|error| format!("write sidecar shutdown request: {error}"))?;
-    let mut response = Vec::new();
-    stream
-        .read_to_end(&mut response)
-        .map_err(|error| format!("read sidecar shutdown response: {error}"))?;
-    if !response.starts_with(b"HTTP/1.1 202 ") {
-        return Err("axklib-server rejected the sidecar shutdown request".to_owned());
-    }
-    Ok(())
-}
-
 fn sidecar_arguments(
     state_directory: &Path,
     workspace_store: &Path,
@@ -544,6 +531,7 @@ fn sidecar_arguments(
     let mut arguments = vec![
         "--port".into(),
         "0".into(),
+        "--enable-devices".into(),
         "--state-directory".into(),
         state_directory.as_os_str().into(),
         "--workspace-store".into(),

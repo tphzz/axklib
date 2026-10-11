@@ -25,10 +25,10 @@ Result<ImageSessionSummary> apply_session_filesystem_mutation(
     ImageSessionManager &images, AlterationJournalStore &journals, std::string_view image_id, std::string_view owner_id,
     std::uint64_t expected_revision, PartitionIndex partition, const SessionFilesystemPlanner &prepare,
     const std::function<Result<void>()> &verify_inputs, const CancellationToken &cancellation, ProgressSink *progress,
-    const SessionFilesystemAdmitter &admit) {
+    const SessionFilesystemAdmitter &admit, std::string_view operation_id) {
     if (auto checked = cancellation.check(); !checked)
         return std::unexpected(write_operations_internal::core_error(checked.error()));
-    auto mutation = images.begin_filesystem_mutation(image_id, owner_id, expected_revision, partition);
+    auto mutation = images.begin_filesystem_mutation(image_id, owner_id, expected_revision, partition, operation_id);
     if (!mutation)
         return std::unexpected(mutation.error());
     MutationGuard guard{images, *mutation, owner_id};
@@ -70,12 +70,12 @@ Result<ImageSessionSummary> apply_session_filesystem_mutation(
         return admit ? admit(*mutation, std::move(preview)) : Result<void>{};
     };
     guard.invalidate_session = true;
-    if (auto applied = journals.apply(
-            mutation->target, prepared->image_size_bytes, patches, cancellation, validate,
-            [&] { rollback_verified = true; }, admit_frozen);
+    if (auto applied = images.apply_mutation(
+            journals, *mutation, patches, cancellation, validate, [&] { rollback_verified = true; }, admit_frozen);
         !applied) {
         refreshed.reset();
-        guard.invalidate_session = !journals.storage_ready() || rollback_verified;
+        guard.invalidate_session =
+            !journals.storage_ready() || rollback_verified || applied.error().code == "device_recovery_required";
         if (rollback_verified && journals.storage_ready()) {
             if (auto bound = mutation->target->verify_bound(); !bound)
                 return std::unexpected(bound.error());

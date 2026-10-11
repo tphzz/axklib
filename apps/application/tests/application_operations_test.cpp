@@ -10,7 +10,7 @@
 namespace {
 
 bool session_operation(std::string_view id) {
-    return id == "images.volume_capacity.inspect" || id == "images.alter.inspect" ||
+    return id.starts_with("devices.") || id == "images.volume_capacity.inspect" || id == "images.alter.inspect" ||
            id == "images.filesystem.edit.inspect" || id.ends_with(".prepare") || id == "auditions.prepare" ||
            id == "files.archive" || id == "images.open" || id == "images.alter" || id == "images.deletion.inspect" ||
            id == "images.deletion.orphans.inspect" || id == "images.delete" ||

@@ -86,6 +86,7 @@ import { HttpImageSessions } from './httpImageSessions';
 import { HttpImportOperations } from './httpImportOperations';
 import { HttpCapacityGate, type CapacityReviewHandler } from './httpCapacityGate';
 import { HttpJobController } from './httpJobController';
+import { createHttpDeviceConnection, type HttpDevices } from './httpDevices';
 import { HttpPackageOperations } from './httpPackageOperations';
 import type { ApiAlterationInspection, ApiWritePlan } from './httpTransportModels';
 import { planSummary } from './httpTransportModels';
@@ -111,6 +112,7 @@ export class HttpImageTransport extends HttpPackageTransport implements ImageTra
     readonly storageMode = 'server' as const;
     readonly connectionMode: Exclude<ConnectionMode, 'unavailable'>;
     readonly supportsClientUploads = true;
+    readonly devices?: HttpDevices;
     private readonly client: AxklibHttpApiClient;
     private readonly jobs: HttpJobController;
     private readonly imports: HttpImportOperations;
@@ -118,14 +120,14 @@ export class HttpImageTransport extends HttpPackageTransport implements ImageTra
     programEditorCatalog = () => loadProgramEditorCatalog(this.client);
 
     constructor(connection: HttpImageTransportConnection, capacityReviewer?: CapacityReviewHandler) {
-        const client = new AxklibHttpApiClient(connection);
-        const jobs = new HttpJobController(client);
+        const { client, jobs, devices } = createHttpDeviceConnection(connection);
         const imageSessions = new HttpImageSessions(client, jobs, new HttpCapacityGate(client, jobs, capacityReviewer));
         super(imageSessions, new HttpPackageOperations(client, jobs, imageSessions));
         this.client = client;
         this.jobs = jobs;
         this.imports = new HttpImportOperations(this.client, this.jobs, this.imageSessions);
         this.connectionMode = connection.mode;
+        this.devices = devices;
     }
     sandboxRoots(): Promise<SandboxRoot[]> {
         return this.client.roots();

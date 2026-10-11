@@ -99,6 +99,7 @@ type Dependencies = {
 };
 
 export class ObjectEditorWorkflow {
+    beforeClear: (() => void) | undefined;
     visible = $state(false);
     documents = $state.raw<ObjectEditorDocument[]>([]);
     conversionDocument = $state.raw<ObjectEditorDocument | null>(null);
@@ -421,6 +422,7 @@ export class ObjectEditorWorkflow {
         }
     }
     clear(): void {
+        this.beforeClear?.();
         this.members.clear();
         this.generation++;
         this.conversionOpenRequest++;

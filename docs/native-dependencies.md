@@ -28,6 +28,7 @@ architecture matrix.
 | ICU | Unicode-aware natural filename ordering in application storage browsers | ICU |
 | nlohmann/json | Versioned JSON manifests and reports | MIT |
 | FatFs | FAT12 image authoring | BSD-1-Clause |
+| Expat 2.8.5 | Bounded SCSI2SD configuration XML parsing (device builds) | MIT |
 | libsndfile | WAV, AIFF, and FLAC decoding | LGPL-2.1-or-later |
 | libFLAC | FLAC codec used by libsndfile | BSD-3-Clause |
 | libogg | Ogg container support used by libsndfile | BSD-3-Clause |
@@ -36,6 +37,22 @@ architecture matrix.
 | libsoxr | Very-high-quality resampling | LGPL-2.1-or-later |
 | utfcpp 4.1.1 | Internal UTF-8 validation and checked UTF-16 conversion | BSL-1.0 |
 | GoogleTest | Native tests only | BSD-3-Clause |
+
+Device builds embed a private Expat parser from the official 2.8.5 source
+archive. `devices/vendor/expat/README.md` records the source URL and SHA-256;
+the unmodified source and license are retained there so the device library
+also builds standalone. DTDs and external entities are rejected. SDK, CLI and
+server installs include its license under `share/licenses/expat/`.
+The SBOM includes this vendored dependency and its license; pass
+`--without-devices` only when packaging an `AXK_BUILD_DEVICES=OFF` build.
+
+Linux device builds also link the distribution's libdbus-1 (1.10 or newer)
+dynamically, discovered through `pkg-config`. Install `libdbus-1-dev` to build
+on Debian/Ubuntu. Permission fallback uses the system UDisks2 service (2.7.3 or
+newer), polkit and the desktop authentication agent; none is vendored or bundled.
+DEB/RPM packages declare libdbus-1 and UDisks2 runtime dependencies. Builds with
+`AXK_BUILD_DEVICES=OFF` require neither. macOS uses system `authopen` and adds no
+third-party authorization dependency.
 
 The audio quantizer and its PCG32 generator are implemented inside axklib and
 add no runtime dependency. The generator uses the specified PCG-XSH-RR

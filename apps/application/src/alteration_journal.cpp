@@ -53,7 +53,7 @@ axk::app::Result<axk::PublicationOutcome> publish_file(const std::filesystem::pa
     return std::move(*published);
 }
 
-axk::app::Result<void> compare_original_patch(const axk::app::SandboxMutation &target,
+axk::app::Result<void> compare_original_patch(const axk::app::MutationTarget &target,
                                               const axk::app::AlterationJournalPatch &patch, std::size_t chunk_bytes,
                                               const axk::CancellationToken &cancellation) {
     const auto &expected = patch.original;
@@ -111,10 +111,12 @@ axk::app::Result<void> remove_completed_journal(const std::filesystem::path &pat
 axk::app::AlterationJournalStore::AlterationJournalStore(std::filesystem::path directory,
                                                          std::uint64_t maximum_journal_bytes,
                                                          InterruptionHook interruption_hook,
-                                                         std::size_t maximum_patch_write_bytes)
+                                                         std::size_t maximum_patch_write_bytes,
+                                                         bool retain_completed_journal)
     : directory_(std::move(directory)), maximum_journal_bytes_(std::max<std::uint64_t>(maximum_journal_bytes, 1U)),
       interruption_hook_(std::move(interruption_hook)),
-      maximum_patch_write_bytes_(std::clamp<std::size_t>(maximum_patch_write_bytes, 1U, 1024U * 1024U)) {
+      maximum_patch_write_bytes_(std::clamp<std::size_t>(maximum_patch_write_bytes, 1U, 1024U * 1024U)),
+      retain_completed_journal_(retain_completed_journal) {
     const auto available = detail::prepare_private_directory(directory_).has_value();
     storage_available_.store(available, std::memory_order_relaxed);
     storage_ready_.store(available, std::memory_order_relaxed);
@@ -125,7 +127,7 @@ bool axk::app::AlterationJournalStore::storage_ready() const noexcept {
 }
 
 axk::app::Result<void> axk::app::AlterationJournalStore::apply(
-    const std::shared_ptr<SandboxMutation> &target, std::uint64_t image_size_bytes,
+    const std::shared_ptr<MutationTarget> &target, std::uint64_t image_size_bytes,
     std::span<const AlterationJournalPatch> patches, const CancellationToken &cancellation,
     const std::function<Result<void>()> &validate, const std::function<void()> &on_rollback_verified,
     const std::function<Result<void>(std::shared_ptr<const RandomAccessReader>)> &admit_frozen) {
@@ -133,6 +135,13 @@ axk::app::Result<void> axk::app::AlterationJournalStore::apply(
         return std::unexpected(journal_error("alteration journal storage is not ready"));
     if (!target || target->size() != image_size_bytes)
         return std::unexpected(journal_error("alteration target size changed"));
+    const auto alignment = target->write_alignment();
+    if (alignment == 0U || maximum_patch_write_bytes_ % alignment != 0U ||
+        std::ranges::any_of(patches, [&](const auto &patch) {
+            return patch.offset % alignment != 0U || patch.original.size() % alignment != 0U ||
+                   patch.replacement.size() != patch.original.size();
+        }))
+        return std::unexpected(journal_error("alteration patches do not cover complete target sectors"));
     if (const auto checked = cancellation.check(); !checked)
         return std::unexpected(Error{"operation_cancelled", checked.error().message});
     if (auto bound = target->verify_unchanged(); !bound)
@@ -151,7 +160,7 @@ axk::app::Result<void> axk::app::AlterationJournalStore::apply(
     const auto path = directory_ / ("alteration-" + *identifier + ".axkjournal");
     const auto quarantine = [&] { storage_ready_.store(false, std::memory_order_relaxed); };
     auto journal_publication =
-        journal_io::publish(path, target->reference(), target_identity, image_size_bytes, patches,
+        journal_io::publish(path, target->journal_identity(), target_identity, image_size_bytes, patches,
                             maximum_journal_bytes_, cancellation, maximum_patch_write_bytes_);
     if (!journal_publication)
         return std::unexpected{journal_publication.error()};
@@ -184,28 +193,29 @@ axk::app::Result<void> axk::app::AlterationJournalStore::apply(
             quarantine();
             return restored;
         }
+        if (remove_marker) {
+            std::error_code error;
+            const auto marker = commit_marker_path(path);
+            if (std::filesystem::exists(marker, error)) {
+                if (auto removed = remove_file(marker, "alteration commit marker"); !removed) {
+                    quarantine();
+                    return removed;
+                }
+            }
+            if (error) {
+                quarantine();
+                return std::unexpected(journal_error("alteration commit marker cannot be inspected", true));
+            }
+        }
         if (on_rollback_verified)
             on_rollback_verified();
-        if (auto removed = remove_file(path, "alteration journal"); !removed) {
-            quarantine();
-            return removed;
-        }
-        if (!remove_marker) {
+        if (retain_completed_journal_) {
             journal_guard.resolved = true;
             return {};
         }
-        const auto marker = commit_marker_path(path);
-        std::error_code error;
-        const auto exists = std::filesystem::exists(marker, error);
-        if (error) {
+        if (auto removed = remove_file(path, "alteration journal"); !removed) {
             quarantine();
-            return std::unexpected(journal_error("alteration commit marker cannot be inspected", true));
-        }
-        if (exists) {
-            if (auto removed = remove_file(marker, "alteration commit marker"); !removed) {
-                quarantine();
-                return removed;
-            }
+            return removed;
         }
         journal_guard.resolved = true;
         return {};
@@ -345,6 +355,10 @@ axk::app::Result<void> axk::app::AlterationJournalStore::apply(
         quarantine();
         return {};
     }
+    if (retain_completed_journal_) {
+        journal_guard.resolved = true;
+        return {};
+    }
     if (auto removed = remove_completed_journal(path); !removed) {
         quarantine();
         return {};
@@ -381,7 +395,9 @@ axk::app::Result<void> axk::app::AlterationJournalStore::recover(const Sandbox &
         auto committed = journal_io::commit_marker_matches(path, journal->file_checksum);
         if (!committed)
             return std::unexpected(committed.error());
-        auto target = sandbox.open_mutation(journal->target);
+        if (journal->target.kind != MutationSourceKind::file)
+            return std::unexpected(Error{"device_recovery_required", "device recovery requires explicit selection"});
+        auto target = sandbox.open_mutation({journal->target.scope, journal->target.key});
         if (!target)
             return std::unexpected(target.error());
         if ((*target)->size() != journal->image_size_bytes)

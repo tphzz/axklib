@@ -1553,7 +1553,8 @@ input:focus-visible {
   outline-offset: -2px;
 }
 
-.dialog-segmented-control > button[aria-pressed='true'] {
+.dialog-segmented-control > button[aria-pressed='true'],
+.dialog-segmented-control > button[aria-selected='true'] {
   color: #fff;
   background: var(--color-accent-strong);
 }

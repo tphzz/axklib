@@ -24,10 +24,10 @@ axk::app::ImageSessionManager::ImageSessionManager(const Sandbox &sandbox, std::
                                                    std::size_t maximum_page_size, std::chrono::seconds idle_retention,
                                                    Clock clock, PathReservationCoordinator *path_reservations,
                                                    std::uint64_t maximum_audition_bundle_bytes,
-                                                   std::size_t maximum_audition_clips)
-    : implementation_(std::make_unique<Implementation>(sandbox, maximum_sessions, maximum_page_size, idle_retention,
-                                                       std::move(clock), path_reservations,
-                                                       maximum_audition_bundle_bytes, maximum_audition_clips)) {}
+                                                   std::size_t maximum_audition_clips, DeviceSessionManager *devices)
+    : implementation_(std::make_unique<Implementation>(
+          sandbox, maximum_sessions, maximum_page_size, idle_retention, std::move(clock), path_reservations,
+          maximum_audition_bundle_bytes, maximum_audition_clips, devices)) {}
 
 axk::app::ImageSessionManager::~ImageSessionManager() = default;
 axk::app::ImageSessionManager::ImageSessionManager(ImageSessionManager &&) noexcept = default;

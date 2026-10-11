@@ -14,6 +14,7 @@
 
 #include "axklib/application/allocation_map.hpp"
 #include "axklib/application/contracts.hpp"
+#include "axklib/application/device_sessions.hpp"
 #include "axklib/application/filesystem.hpp"
 #include "axklib/application/image_filesystem.hpp"
 #include "axklib/application/path_reservations.hpp"
@@ -74,8 +75,8 @@ struct CompanionSelection {
 struct ImageSessionMutation {
     std::string image_id;
     std::uint64_t revision{};
-    FileRef source;
-    std::shared_ptr<SandboxMutation> target;
+    ImageSourceRef source;
+    std::shared_ptr<MutationTarget> target;
     MediaKind media_kind{MediaKind::sfs};
 };
 
@@ -102,7 +103,7 @@ struct ImageSessionRead {
     ImageSourceRef source;
     std::shared_ptr<const RandomAccessReader> reader;
     const MediaContainer *media{};
-    // Explicit content identity for retained plans, evaluated only while this read lease is held.
+    // File SHA-256 or an explicit guarded device-session revision; never hashes a whole device.
     std::function<Result<std::string>(const CancellationToken &)> content_fingerprint;
     std::vector<const ObjectSnapshot *> catalog_objects;
     std::vector<CatalogIssue> catalog_issues;
@@ -474,7 +475,7 @@ class ImageSessionManager {
                         Clock clock = std::chrono::steady_clock::now,
                         PathReservationCoordinator *path_reservations = nullptr,
                         std::uint64_t maximum_audition_bundle_bytes = 128ULL * 1024ULL * 1024ULL,
-                        std::size_t maximum_audition_clips = 256U);
+                        std::size_t maximum_audition_clips = 256U, DeviceSessionManager *devices = nullptr);
     ~ImageSessionManager();
     ImageSessionManager(ImageSessionManager &&) noexcept;
     ImageSessionManager &operator=(ImageSessionManager &&) noexcept;
@@ -532,11 +533,17 @@ class ImageSessionManager {
     [[nodiscard]] Result<ImageSessionRead> begin_read(std::string_view image_id, std::string_view owner_id,
                                                       std::uint64_t expected_revision);
     [[nodiscard]] Result<ImageSessionMutation> begin_mutation(std::string_view image_id, std::string_view owner_id,
-                                                              std::uint64_t expected_revision);
-    [[nodiscard]] Result<ImageSessionMutation> begin_filesystem_mutation(std::string_view image_id,
-                                                                         std::string_view owner_id,
-                                                                         std::uint64_t expected_revision,
-                                                                         PartitionIndex partition);
+                                                              std::uint64_t expected_revision,
+                                                              std::string_view operation_id = {});
+    [[nodiscard]] Result<ImageSessionMutation>
+    begin_filesystem_mutation(std::string_view image_id, std::string_view owner_id, std::uint64_t expected_revision,
+                              PartitionIndex partition, std::string_view operation_id = {});
+    [[nodiscard]] Result<void>
+    apply_mutation(AlterationJournalStore &journals, const ImageSessionMutation &mutation,
+                   std::span<const AlterationJournalPatch> patches, const CancellationToken &cancellation = {},
+                   const std::function<Result<void>()> &validate = {},
+                   const std::function<void()> &on_rollback_verified = {},
+                   const std::function<Result<void>(std::shared_ptr<const RandomAccessReader>)> &admit_frozen = {});
     [[nodiscard]] Result<PreparedImageSessionCommit>
     prepare_mutation_commit(std::string_view image_id, std::string_view owner_id, std::uint64_t expected_revision,
                             const CancellationToken &cancellation = {});
@@ -590,7 +597,7 @@ class ImageSessionManager {
   private:
     [[nodiscard]] Result<ImageSessionMutation>
     begin_mutation_access(std::string_view image_id, std::string_view owner_id, std::uint64_t expected_revision,
-                          std::optional<PartitionIndex> filesystem_partition);
+                          std::optional<PartitionIndex> filesystem_partition, std::string_view operation_id);
     [[nodiscard]] Result<ImageSessionSummary>
     open_with_companion_sources(const ImageSourceRef &source, std::string owner_id,
                                 const std::vector<ImageSourceRef> &companion_sources,

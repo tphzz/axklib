@@ -105,7 +105,7 @@ axk::app::Result<axk::app::ImageSessionSummary> axk::app::ImageSessionManager::o
     const FileRef path_reference{source.root_id, source.relative_path};
     PathReservationCoordinator::Lease path_lease;
     PathReservationCoordinator::Lease companion_path_lease;
-    if (implementation_->path_reservations != nullptr) {
+    if (implementation_->path_reservations != nullptr && source.kind != ImageSourceKind::device) {
         auto acquired = implementation_->path_reservations->try_acquire({path_reference, PathAccessMode::shared});
         if (!acquired)
             return std::unexpected(acquired.error());
@@ -117,6 +117,7 @@ axk::app::Result<axk::app::ImageSessionSummary> axk::app::ImageSessionManager::o
     std::optional<MediaContainer> media;
     std::vector<ImageSourceRef> matched_companion_sources;
     std::optional<ImageFloppySetSummary> floppy_set;
+    std::function<Result<void>()> seal_device;
     if (source.kind == ImageSourceKind::file) {
         const auto file = implementation_->sandbox.open_file(path_reference);
         if (!file)
@@ -146,6 +147,24 @@ axk::app::Result<axk::app::ImageSessionSummary> axk::app::ImageSessionManager::o
             media.emplace(std::move(*opened_media));
             verify_source_unchanged = file->verify_unchanged;
         }
+    } else if (source.kind == ImageSourceKind::device) {
+        if (!implementation_->devices || !companion_sources.empty())
+            return std::unexpected(session_error("devices_unavailable", "device sources are unavailable"));
+        auto opened =
+            implementation_->devices->open_source(source.device_session_id, source.device_target_id, owner_id);
+        if (!opened)
+            return std::unexpected(opened.error());
+        source_reader = opened->reader;
+        source_revision = opened->revision;
+        verify_source_unchanged = std::move(opened->verify_unchanged);
+        seal_device = std::move(opened->seal);
+        auto opened_media = axk::open_media(source_reader, "device.hds", cancellation);
+        if (!opened_media)
+            return std::unexpected(core_error(opened_media.error(), source));
+        if (opened_media->kind() != MediaKind::sfs && opened_media->kind() != MediaKind::iso9660)
+            return std::unexpected(
+                session_error("device_format_unsupported", "device access currently supports A-series SFS and ISO"));
+        media.emplace(std::move(*opened_media));
     } else {
         auto opened_directory = image_sessions_internal::open_directory_source(
             implementation_->sandbox, source, companion_sources, implementation_->path_reservations, cancellation);
@@ -170,6 +189,10 @@ axk::app::Result<axk::app::ImageSessionSummary> axk::app::ImageSessionManager::o
     auto inventory = axk::build_media_inventory(*media, inventory_mode, 64U * 1024U * 1024U, cancellation);
     if (!inventory)
         return std::unexpected(core_error(inventory.error(), source));
+    if (seal_device) {
+        if (auto sealed = seal_device(); !sealed)
+            return std::unexpected(sealed.error());
+    }
     if (auto reported = report_image_open_progress(progress, cancellation, ProgressPhase::resolving, 2U,
                                                    "Resolving sampler objects");
         !reported) {

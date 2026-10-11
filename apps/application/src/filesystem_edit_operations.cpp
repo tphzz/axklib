@@ -17,13 +17,12 @@
 #include "write_operations_internal.hpp"
 
 namespace axk::app {
-Result<ImageSessionSummary> apply_filesystem_edits(ImageSessionManager &images, AlterationJournalStore &journals,
-                                                   std::string_view image_id, std::string_view owner_id,
-                                                   std::uint64_t expected_revision, PartitionIndex partition,
-                                                   std::span<const FilesystemEdit> edits,
-                                                   const CancellationToken &cancellation, ProgressSink *progress,
-                                                   const FilesystemInputVerification &input_verification,
-                                                   const VolumeCapacityPolicy &capacity_policy) {
+Result<ImageSessionSummary>
+apply_filesystem_edits(ImageSessionManager &images, AlterationJournalStore &journals, std::string_view image_id,
+                       std::string_view owner_id, std::uint64_t expected_revision, PartitionIndex partition,
+                       std::span<const FilesystemEdit> edits, const CancellationToken &cancellation,
+                       ProgressSink *progress, const FilesystemInputVerification &input_verification,
+                       const VolumeCapacityPolicy &capacity_policy, std::string_view operation_id) {
     using write_operations_internal::core_error;
     if (auto checked = cancellation.check(); !checked)
         return std::unexpected(core_error(checked.error()));
@@ -79,6 +78,7 @@ Result<ImageSessionSummary> apply_filesystem_edits(ImageSessionManager &images, 
         return admitted ? Result<void>{} : std::unexpected{core_error(admitted.error())};
     };
     return detail::apply_session_filesystem_mutation(images, journals, image_id, owner_id, expected_revision, partition,
-                                                     prepare, verify_inputs, cancellation, progress, admit);
+                                                     prepare, verify_inputs, cancellation, progress, admit,
+                                                     operation_id);
 }
 } // namespace axk::app

@@ -242,6 +242,11 @@ Library users build from the repository source. CMake 3.22.1 or newer, Ninja,
 Git, and a compiler with C++23 support are required to build the implementation;
 installed public headers compile as C++17.
 
+Optional direct USB access is enabled with `AXK_BUILD_DEVICES` (default `OFF`,
+enabled by release presets). Its C++17 interface is
+`<axklib/sdk/devices.hpp>`; see [Native Devices](devices/README.md) for ownership,
+write authorization and interrupted-write recovery.
+
 ```bash
 git clone --recurse-submodules https://github.com/tphzz/axklib.git
 cd axklib

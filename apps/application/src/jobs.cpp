@@ -304,7 +304,7 @@ struct axk::app::JobManager::Impl {
             }
             if (result) {
                 transition(record, JobState::completed, "completed", std::optional<nlohmann::json>{std::move(*result)});
-            } else if (record->cancellation.token().is_cancelled() || result.error().code == "operation_cancelled") {
+            } else if (result.error().code == "operation_cancelled" || result.error().code == "cancelled") {
                 transition(record, JobState::cancelled, "cancelled");
             } else {
                 transition(record, JobState::failed, "failed", std::nullopt, result.error());
@@ -531,6 +531,7 @@ axk::app::Result<axk::app::JobSnapshot> axk::app::JobManager::submit(std::string
                     return std::unexpected(job_id.error());
                 record->job_id = std::move(*job_id);
             } while (impl_->jobs.contains(record->job_id));
+            record->context.mutation_id = idempotency_key.value_or(record->job_id);
             {
                 const std::scoped_lock record_lock{record->mutex};
                 record->submitted_at = impl_->now();

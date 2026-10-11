@@ -1,5 +1,6 @@
 <script lang="ts">
     import type { ImageLocation } from '../storageLocations';
+    import { locationKey } from '../storageLocations';
     import { modal } from '../modal';
     import Icon from './Icon.svelte';
 
@@ -80,17 +81,23 @@
                     </p>
                 {:else}
                     <div class="companion-disk-list">
-                        {#each sources as source (`${source.kind}:${source.reference.rootId}:${source.reference.relativePath}`)}
+                        {#each sources as source (locationKey(source))}
+                            {@const label =
+                                source.kind === 'device'
+                                    ? source.displayName
+                                    : source.reference.relativePath || source.reference.rootId}
                             <div class="companion-disk-row">
                                 <Icon name={source.kind === 'server-file' ? 'archive' : 'folder'} size={15} />
                                 <span>
-                                    <strong>{source.reference.relativePath || source.reference.rootId}</strong>
-                                    {#if source.reference.relativePath}<small>{source.reference.rootId}</small>{/if}
+                                    <strong>{label}</strong>
+                                    {#if source.kind !== 'device' && source.reference.relativePath}<small
+                                            >{source.reference.rootId}</small
+                                        >{/if}
                                 </span>
                                 <button
                                     class="icon-button"
                                     type="button"
-                                    aria-label={`Remove ${source.reference.relativePath || source.reference.rootId}`}
+                                    aria-label={`Remove ${label}`}
                                     disabled={busy}
                                     onclick={() => onremove(source)}
                                 >

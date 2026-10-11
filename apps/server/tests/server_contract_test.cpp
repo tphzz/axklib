@@ -55,6 +55,38 @@ void expect_upper_snake_enums(const nlohmann::json &value, std::string_view path
     }
 }
 
+TEST(ServerContract, RequiresExactDeviceTargetMetadataAndRejectsMalformedScsiIdentity) {
+    const axk::server::OpenApiValidator validator;
+    nlohmann::json target{{"id", "2"},
+                          {"label", "CD-ROM"},
+                          {"offsetBytes", 1536000U},
+                          {"sizeBytes", 2048000U},
+                          {"sectorSize", 2048U},
+                          {"readOnly", true},
+                          {"notices", nlohmann::json::array()},
+                          {"scsi",
+                           {{"id", 2U},
+                            {"deviceType", "OPTICAL"},
+                            {"vendor", "codesrc"},
+                            {"product", "CD-ROM"},
+                            {"revision", "6.0"},
+                            {"serial", "target-2"}}}};
+    EXPECT_TRUE(validator.validate("DeviceTarget", target));
+    auto missing = target;
+    missing.erase("offsetBytes");
+    EXPECT_FALSE(validator.validate("DeviceTarget", missing));
+    missing = target;
+    missing.erase("scsi");
+    EXPECT_FALSE(validator.validate("DeviceTarget", missing));
+    target["scsi"]["id"] = 8;
+    EXPECT_FALSE(validator.validate("DeviceTarget", target));
+    target["scsi"]["id"] = 2;
+    target["scsi"]["deviceType"] = "UNKNOWN";
+    EXPECT_FALSE(validator.validate("DeviceTarget", target));
+    target["scsi"] = nullptr;
+    EXPECT_TRUE(validator.validate("DeviceTarget", target));
+}
+
 TEST(ServerContract, EmbedsValidOpenApi31WithSandboxReferences) {
     const auto document = nlohmann::json::parse(axk::server::embedded_openapi());
     EXPECT_EQ(document.at("openapi"), "3.1.0");
@@ -325,7 +357,7 @@ TEST(ServerContract, SystemProgramContextsArePartitionScopedAndIndependentlyAvai
 TEST(ServerContract, RegistryIsTheOnlyDomainOperationRouteInventory) {
     const auto registry = axk::app::make_operation_registry();
     const auto entries = registry.entries();
-    EXPECT_EQ(entries.size(), 77U);
+    EXPECT_EQ(entries.size(), 86U);
     EXPECT_EQ(entries.front().descriptor.id, "system.version");
     EXPECT_EQ(entries.front().descriptor.route, "/api/v1/system/version");
 }

@@ -43,7 +43,7 @@ plan_package_import_impl(std::shared_ptr<const RandomAccessReader> target_reader
         if (!digest)
             return std::unexpected{digest.error()};
         before.emplace(*digest);
-    } else if (retained_session->snapshot_id.size() != 64U) {
+    } else if (!package_import_internal::valid_target_snapshot_id(retained_session->snapshot_id)) {
         return std::unexpected{planner_error("retained target snapshot identity is invalid")};
     }
 

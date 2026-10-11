@@ -1,6 +1,10 @@
 import type { DiskTreeItem } from '../../lib/types';
 import type { VolumeSelectionState } from '../../lib/volumeSelection';
 
+export function noImageSource(): DiskTreeItem {
+    return { id: 'none', name: 'No image', kind: 'disk', childCount: 0 };
+}
+
 export function collectVolumes(items: readonly DiskTreeItem[]): DiskTreeItem[] {
     const result: DiskTreeItem[] = [];
     for (const item of items) {

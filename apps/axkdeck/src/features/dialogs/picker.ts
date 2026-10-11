@@ -19,6 +19,7 @@ export type PickerParentDialog =
 export type PickerSelection = ImageLocation | DirectoryLocation | FileLocation[];
 
 export interface PickerNavigation {
+    purpose?: 'open-source';
     parentDialog?: PickerParentDialog;
     requireWritableDirectory?: boolean;
     initialDirectory?: DirectoryRef | null;

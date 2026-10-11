@@ -15,6 +15,7 @@
     import type { InspectorSelection } from '../../lib/types';
     import { MappingController, provideMappingEditor } from '../program-mapping/controller.svelte';
     import MappingBridge from '../program-mapping/MappingBridge.svelte';
+    import DeviceDraftRetention from '../physical-devices/DeviceDraftRetention.svelte';
     import { mappingRoles } from '../program-mapping/protocol';
     import { MappingAudition } from '../program-mapping/audition';
     let {
@@ -183,6 +184,7 @@
         {selection}
     />{/each}
 {@render children()}
+{#if transport.devices}<DeviceDraftRetention {editors} images={imageSession} />{/if}
 {#if editors.duplication.visible}<SampleDuplicateDialog workflow={editors.duplication} />{/if}
 {#if editors.conversionDocument}<ObjectFormatDialog workflow={editors} document={editors.conversionDocument} />{/if}
 {#if confirmation}

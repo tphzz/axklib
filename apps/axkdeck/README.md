@@ -6,6 +6,31 @@ HTTP/WebSocket API. The Tauri shell owns sidecar lifecycle and protected remote
 server settings but contains no duplicate axklib domain implementation.
 Production builds contain no scripting runtime or demo-data fallback.
 
+## Physical Devices
+
+The local desktop sidecar can open USB sampler disks and SCSI2SD targets through
+the optional native devices module. Remote server profiles do not expose this
+feature. **Open** has **Image**, **Device**, **SCSI2SDv6**, and **SCSI2SD XML** tabs.
+Device opens an individual USB disk or exposed SCSI2SD target. SCSI2SDv6 reads
+the selected card's final two sectors read-only and lists its configured targets;
+missing or invalid configurations are rejected. SCSI2SD XML validates an exported
+configuration natively before selecting the whole card and a target. Supported
+devices default to **Read & write**; select **Read only** for
+browsing. Write access requires exclusive-use acknowledgement in **Open**, with
+the sampler and other SCSI hosts disconnected, and OS permission when needed.
+Normal Save, Import, Delete and Rename actions then commit individual transactions.
+To change access mode, eject and reopen the device.
+
+Linux device access uses UDisks2/polkit when permission is required; keep the
+system D-Bus, UDisks2 service and desktop polkit authentication agent available.
+macOS uses `authopen`; Windows uses UAC. The app itself is not elevated.
+
+After an uncertain write, retain application state and use **Device operation
+status** instead of repeating the action. Recovery requires explicit selection;
+startup never writes to a device. Unsaved parameter drafts can be explicitly
+restored against an unchanged base payload. See
+[Native Devices](../../devices/README.md) for limits and recovery details.
+
 ## Stack
 
 - Svelte 5 with runes and TypeScript
@@ -58,6 +83,10 @@ the server and `AXKLIB_BUILD_DIRECTORY` to its matching build directory. Metadat
 stored elsewhere can be selected with `AXKLIB_VERSION_METADATA_FILE` and
 `AXKLIB_PACKAGE_BASENAME_FILE`.
 
+Native release presets enable `AXK_BUILD_DEVICES`. On Windows, building
+`axklib_server` also builds `axklib_helper`; desktop packaging requires both
+executables from the same native build.
+
 The same Git tag versions axklib and axkdeck. `desktop:dev` and
 `desktop:build` read `version_metadata.json` and `package_basename.txt` from the
 native build, inject that identity into Tauri, and embed it in the Rust binary.
@@ -89,6 +118,8 @@ sudo apt install \
   file \
   libxdo-dev \
   libssl-dev \
+  libdbus-1-dev \
+  udisks2 \
   libayatana-appindicator3-dev \
   librsvg2-dev
 ```

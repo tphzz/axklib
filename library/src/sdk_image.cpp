@@ -254,25 +254,30 @@ result<image> image::open(const std::string &utf8_path, operation_context &conte
         auto path = checked_path(utf8_path, "image path");
         if (!path)
             return path.error();
-        OpenOptions options;
-        options.cancellation = context.impl_->cancellation.token();
-        options.progress = context.impl_.get();
-        auto container = open_media(*path, options.cancellation);
+        auto container = open_media(*path, context.impl_->cancellation.token());
         if (!container)
             return public_error(container.error());
-        auto inventory = build_media_inventory(*container, MediaObjectReadMode::decoded_metadata, 64U * 1024U * 1024U,
-                                               options.cancellation);
+        return image_factory::open(std::move(*container), context);
+    });
+}
+
+result<image> image_factory::open(MediaContainer container, operation_context &context) {
+    return protect<image>([&]() -> result<image> {
+        if (!context.impl_)
+            return invalid_argument("operation context is not initialized");
+        auto inventory = build_media_inventory(container, MediaObjectReadMode::decoded_metadata, 64U * 1024U * 1024U,
+                                               context.impl_->cancellation.token());
         if (!inventory)
             return public_error(inventory.error());
         auto graph = build_relationship_graph(inventory->catalog);
-        auto tree = build_content_tree(*container, inventory->catalog, graph);
-        auto validation = validate_semantics(*container, *inventory, graph);
+        auto tree = build_content_tree(container, inventory->catalog, graph);
+        auto validation = validate_semantics(container, *inventory, graph);
         std::unordered_map<std::string, MediaObjectDescriptor> descriptors;
         descriptors.reserve(inventory->objects.size());
         for (auto &descriptor : inventory->objects)
             descriptors.emplace(descriptor.key, std::move(descriptor));
         auto state = std::make_shared<image_state>(image_state{
-            std::move(*container),
+            std::move(container),
             std::move(descriptors),
             std::move(inventory->catalog),
             std::move(graph),
@@ -280,7 +285,7 @@ result<image> image::open(const std::string &utf8_path, operation_context &conte
             std::move(validation),
         });
         image output;
-        output.impl_ = std::make_unique<impl>(impl{std::move(state)});
+        output.impl_ = std::make_unique<image::impl>(image::impl{std::move(state)});
         return output;
     });
 }

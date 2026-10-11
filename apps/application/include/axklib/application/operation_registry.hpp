@@ -40,6 +40,7 @@ struct OperationContext {
     ProgressSink *progress{};
     std::function<std::string(const FileRef &)> display_path;
     std::function<void(const nlohmann::json &)> diagnostic{};
+    std::string mutation_id{};
 };
 
 struct OperationEntry {

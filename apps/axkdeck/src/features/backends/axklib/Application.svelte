@@ -34,8 +34,9 @@
     import { createFilesystemBindings } from './filesBindings';
     import { workspaceTabs } from '../../../features/workspace/tabs';
     import ExperimentalWarningDialog from '../../../lib/components/ExperimentalWarningDialog.svelte';
-    import ImageIntegrityDialog from '../../../lib/components/ImageIntegrityDialog.svelte';
-    import ImageOpenProgressDialog from '../../../lib/components/ImageOpenProgressDialog.svelte';
+    import SessionDialogs from '../../image-session/SessionDialogs.svelte';
+    import { provideDevices } from '../../physical-devices/workflow.svelte';
+    import DeviceDialog from '../../physical-devices/DeviceDialog.svelte';
     import WorkspaceGuard from '../../../lib/components/WorkspaceGuard.svelte';
     import { createCapacityConnection } from './capacityConnection';
     import type { RemoteServerSettingsView } from '../../../lib/serverSettings';
@@ -80,6 +81,7 @@
     });
     const packagePickerHistory = new PackagePickerHistory();
     const imageSessionWorkflow = new ImageSessionWorkflow(transport, pickerController);
+    const physicalDevices = provideDevices(transport.devices, imageSessionWorkflow);
     const fileBindings = createFilesystemBindings({
         imageFormat: () => imageSessionWorkflow.imageFormat,
         transport,
@@ -387,13 +389,32 @@
     });
 
     onMount(() => {
+        if (physicalDevices)
+            void physicalDevices
+                .checkStatus()
+                .then(() => {
+                    if (
+                        physicalDevices.operations.some((operation) =>
+                            ['prepared', 'recovery_required'].includes(operation.state),
+                        ) ||
+                        physicalDevices.uncertain.length
+                    )
+                        imageSessionWorkflow.setStatus(
+                            'Retained device operations require review. Open Device operation status.',
+                        );
+                })
+                .catch((error) => imageSessionWorkflow.setStatus(userFacingMessage(error)));
         const unmountNativeDrops = mediaDropWorkflow.mountNativeDrops();
         if (openConnectionSettingsOnStart) void openConnectionSettings();
         return unmountNativeDrops;
     });
 
     const selectedProgram = $derived(programs.find((item) => item.objectId === catalog.selectedProgramId));
-    const activeWorkspaceId = $derived(imageSessionWorkflow.location?.reference.rootId ?? null);
+    const activeWorkspaceId = $derived(
+        imageSessionWorkflow.location?.kind !== 'device'
+            ? (imageSessionWorkflow.location?.reference.rootId ?? null)
+            : null,
+    );
     const selectedBank = $derived(sampleBanks.find((item) => item.objectId === catalog.selectedBankId));
     const selectedSample = $derived(samples.find((item) => item.objectId === catalog.selectedSampleId));
     const auditionableSampleObjectIds = $derived(auditionWorkflow.auditionableSampleObjectIds);
@@ -617,40 +638,17 @@
     <ExperimentalWarningDialog onacknowledge={() => (experimentalWarningAcknowledged = true)} />
 {/if}
 
-{#if !experimentalWarningOpen && imageSessionWorkflow.integrityDialogOpen}
-    <ImageIntegrityDialog
-        issues={imageSessionWorkflow.integrityIssues}
-        loading={imageSessionWorkflow.integrityLoading}
-        error={imageSessionWorkflow.integrityError}
-        repairAvailable={imageSessionWorkflow.extentLayoutRepairAvailable}
-        repairing={extentLayoutRepairWorkflow.busy}
-        repairLabel={extentLayoutRepairWorkflow.progressLabel}
-        repairError={extentLayoutRepairWorkflow.error}
-        onrepair={() => void extentLayoutRepairWorkflow.repair()}
-        onclose={() => imageSessionWorkflow.closeIntegrity()}
-    />
-{/if}
-
 <WorkspaceGuard enabled={!experimentalWarningOpen} bind:open={workspaceManagerOpen} {activeWorkspaceId} />
 
 {#if !experimentalWarningOpen}
+    <SessionDialogs workflow={imageSessionWorkflow} repairs={extentLayoutRepairWorkflow} />
+    {#if physicalDevices?.mode}<DeviceDialog workflow={physicalDevices} />{/if}
     <MutationCapacityDialog workflow={mutationCapacity} />
     <PickerDialogHost
         {transport}
         request={pickerRequest}
         finish={(selection) => pickerController.finish(selection)}
         manageLocations={() => (workspaceManagerOpen = true)}
-    />
-{/if}
-
-{#if !experimentalWarningOpen && imageSessionWorkflow.openProgressVisible}
-    <ImageOpenProgressDialog
-        label={imageSessionWorkflow.openProgressLabel}
-        completed={imageSessionWorkflow.openProgressCompleted}
-        total={imageSessionWorkflow.openProgressTotal}
-        cancellable={imageSessionWorkflow.openProgressCancellable}
-        cancelling={imageSessionWorkflow.openProgressCancelling}
-        oncancel={() => imageSessionWorkflow.cancelOpen()}
     />
 {/if}
 
