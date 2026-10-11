@@ -35,7 +35,7 @@ function fixture() {
         connect: vi.fn(async () => connection),
         close: vi.fn(async () => {}),
         status: vi.fn(),
-        authorize: vi.fn(async () => {}),
+        authorize: vi.fn<DeviceService['authorize']>(async () => {}),
         recover: vi.fn(),
         operations: vi.fn(),
     } satisfies DeviceService;
@@ -54,6 +54,22 @@ async function selectDevice(workflow: OpenSourceWorkflow) {
 }
 
 describe('device access during Open', () => {
+    it('forwards authorization stages to Open progress and the persistent status', async () => {
+        const { workflow, service, openImage } = fixture();
+        const progress = { phase: 0, completed: 512, total: 1024, label: 'Verifying write access' };
+        const onProgress = vi.fn();
+        service.authorize.mockImplementation(async (_session, _target, update) => update?.(progress));
+        openImage.mockImplementation(async (_location, prepare) => {
+            await prepare?.(image, onProgress);
+            expect(workflow.status).toBe(progress.label);
+            return true;
+        });
+        await selectDevice(workflow);
+        workflow.acknowledged = true;
+        expect(await workflow.open()).toBe(true);
+        expect(onProgress).toHaveBeenCalledExactlyOnceWith(progress);
+    });
+
     it('defaults to write access but requires exclusive-use acknowledgement before connecting', async () => {
         const { workflow, service } = fixture();
         await selectDevice(workflow);
@@ -64,7 +80,7 @@ describe('device access during Open', () => {
         expect(service.connect).not.toHaveBeenCalled();
         workflow.acknowledged = true;
         expect(await workflow.open()).toBe(true);
-        expect(service.authorize).toHaveBeenCalledWith('owned', 'disk');
+        expect(service.authorize).toHaveBeenCalledWith('owned', 'disk', expect.any(Function));
         expect(workflow.connection).toBeNull();
         await workflow.dispose();
         expect(service.close).not.toHaveBeenCalled();
@@ -131,7 +147,7 @@ describe('device access during Open', () => {
         workflow.acknowledged = true;
         service.connect.mockResolvedValue({ ...connection, targets: [{ ...target, id: '0' }] });
         expect(await workflow.open()).toBe(true);
-        expect(service.authorize).toHaveBeenCalledWith('owned', '0');
+        expect(service.authorize).toHaveBeenCalledWith('owned', '0', expect.any(Function));
     });
 
     it('does not silently downgrade when connected layout checks disallow writing', async () => {

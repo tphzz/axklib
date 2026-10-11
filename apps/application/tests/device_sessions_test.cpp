@@ -8,6 +8,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -19,6 +20,7 @@
 #include "axklib/application/secure_random.hpp"
 #include "axklib/application/write_operations.hpp"
 #include "axklib/audio.hpp"
+#include "axklib/sfs.hpp"
 #include "axklib/writer.hpp"
 
 namespace {
@@ -27,6 +29,9 @@ using namespace axk::app;
 struct Storage {
     std::vector<std::byte> bytes = std::vector<std::byte>(1024U * 1024U, std::byte{0x42});
     std::size_t reads{};
+    std::size_t bytes_read{};
+    std::optional<std::pair<std::uint64_t, std::uint64_t>> pcm_region;
+    std::uint64_t pcm_bytes_read{};
     std::size_t writes{};
     std::size_t upgrades{};
     bool fail_writes{};
@@ -52,9 +57,16 @@ class FakeTransport final : public DeviceTransport {
     }
     axk::Result<void> read_exact_at(std::uint64_t offset, std::span<std::byte> bytes) const override {
         ++storage_->reads;
+        storage_->bytes_read += bytes.size();
         if (offset > size() || bytes.size() > size() - offset || storage_->disconnected)
             return std::unexpected(
                 axk::make_error(axk::ErrorCode::io_read_failed, axk::ErrorCategory::io, "test read failed"));
+        if (storage_->pcm_region) {
+            const auto first = std::max(offset, storage_->pcm_region->first);
+            const auto last = std::min(offset + bytes.size(), storage_->pcm_region->second);
+            if (first < last)
+                storage_->pcm_bytes_read += last - first;
+        }
         std::copy_n(storage_->bytes.begin() + static_cast<std::ptrdiff_t>(offset), bytes.size(), bytes.begin());
         return {};
     }
@@ -99,6 +111,12 @@ class FakeProvider final : public DeviceProvider {
     }
 };
 
+class RecordedProgress final : public axk::ProgressSink {
+  public:
+    std::vector<axk::Progress> events;
+    void report(const axk::Progress &value) noexcept override { events.push_back(value); }
+};
+
 class DeviceSessions : public testing::Test {
   protected:
     std::filesystem::path directory;
@@ -123,8 +141,31 @@ class DeviceSessions : public testing::Test {
         ASSERT_TRUE(source);
         std::vector<std::byte> metadata(512U);
         ASSERT_TRUE(source->reader->read_exact_at(0U, metadata));
-        ASSERT_TRUE(source->seal());
+        ASSERT_TRUE(source->seal({}, nullptr));
         ASSERT_TRUE(manager.authorize_writes(id, "disk", "owner", true));
+    }
+    void load_sfs(std::size_t frames) {
+        std::filesystem::create_directories(directory);
+        axk::Waveform waveform;
+        waveform.format = {1U, 2U, 44'100U};
+        waveform.frame_count = frames;
+        waveform.pcm.resize(frames * 2U, std::byte{0x12});
+        const auto audio_path = directory / "tone.wav";
+        ASSERT_TRUE(axk::write_wav_atomic(audio_path, waveform, true));
+        axk::VolumeSpec volume;
+        volume.name = "Original";
+        volume.waveforms.push_back({"wave", "Tone", audio_path, 60U, {}});
+        axk::SampleSpec sample;
+        sample.name = "Sample";
+        sample.waveform_id = "wave";
+        volume.samples.push_back(sample);
+        const axk::HdsBuildManifest manifest{"1.0", 4U * 1024U * 1024U, {{"disk", {volume}}}};
+        const auto path = directory / "fixture.hds";
+        ASSERT_TRUE(axk::write_hds_image(manifest, path, true));
+        const auto file = axk::FileReader::open(path);
+        ASSERT_TRUE(file);
+        provider->storage->bytes.resize(static_cast<std::size_t>((*file)->size()));
+        ASSERT_TRUE((*file)->read_exact_at(0U, provider->storage->bytes));
     }
 };
 
@@ -234,7 +275,7 @@ TEST_F(DeviceSessions, MetadataChangePreventsWriteUpgrade) {
     ASSERT_TRUE(source);
     std::vector<std::byte> metadata(512U);
     ASSERT_TRUE(source->reader->read_exact_at(0U, metadata));
-    ASSERT_TRUE(source->seal());
+    ASSERT_TRUE(source->seal({}, nullptr));
     provider->storage->bytes[25U] = std::byte{0x44};
     EXPECT_FALSE(manager.authorize_writes(id, "disk", "owner", true));
     EXPECT_EQ(provider->storage->upgrades, 0U);
@@ -325,8 +366,118 @@ TEST_F(DeviceSessions, SequentialReadsAndGuardVerificationAreBatched) {
     ASSERT_TRUE(source);
     std::vector<std::byte> bytes(256U * 1024U);
     ASSERT_TRUE(source->reader->read_exact_at(0U, bytes));
-    ASSERT_TRUE(source->seal());
+    ASSERT_TRUE(source->seal({}, nullptr));
     EXPECT_LE(provider->storage->reads, 5U);
+}
+
+TEST_F(DeviceSessions, SmallMetadataReadsUseFourKiBPagesAndGuardOnlyTouchedSectors) {
+    DeviceSessionManager manager{directory, true, true, provider};
+    const auto id = open(manager);
+    auto source = manager.open_source(id, "disk", "owner");
+    ASSERT_TRUE(source);
+    std::array<std::byte, 1U> byte{};
+    ASSERT_TRUE(source->reader->read_exact_at(0U, byte));
+    ASSERT_TRUE(source->reader->read_exact_at(512U, byte));
+    EXPECT_EQ(provider->storage->reads, 1U);
+    EXPECT_EQ(provider->storage->bytes_read, 4096U);
+    provider->storage->bytes[2048U] = std::byte{0x11};
+    ASSERT_TRUE(source->seal({}, nullptr));
+    EXPECT_TRUE(manager.authorize_writes(id, "disk", "owner", true));
+}
+
+TEST_F(DeviceSessions, MetadataCacheIsBoundedAndEvictsLeastRecentlyUsedPages) {
+    provider->storage->bytes.resize(8U * 1024U * 1024U, std::byte{0x42});
+    DeviceSessionManager manager{directory, true, true, provider};
+    const auto id = open(manager);
+    auto source = manager.open_source(id, "disk", "owner");
+    ASSERT_TRUE(source);
+    std::array<std::byte, 1U> byte{};
+    for (std::uint64_t page = 0U; page < 1024U; ++page)
+        ASSERT_TRUE(source->reader->read_exact_at(page * 4096U, byte));
+    EXPECT_EQ(provider->storage->reads, 1024U);
+    ASSERT_TRUE(source->reader->read_exact_at(0U, byte));
+    ASSERT_TRUE(source->reader->read_exact_at(1024U * 4096U, byte));
+    ASSERT_TRUE(source->reader->read_exact_at(0U, byte));
+    EXPECT_EQ(provider->storage->reads, 1025U);
+    ASSERT_TRUE(source->reader->read_exact_at(4096U, byte));
+    EXPECT_EQ(provider->storage->reads, 1026U);
+}
+
+TEST_F(DeviceSessions, LargeReadsStreamFreshBytesWithoutEvictingMetadataPages) {
+    DeviceSessionManager manager{directory, true, true, provider};
+    const auto id = open(manager);
+    auto source = manager.open_source(id, "disk", "owner");
+    ASSERT_TRUE(source);
+    std::array<std::byte, 1U> byte{};
+    ASSERT_TRUE(source->reader->read_exact_at(0U, byte));
+    ASSERT_TRUE(source->seal({}, nullptr));
+    const auto reads = provider->storage->reads;
+    provider->storage->bytes[512U] = std::byte{0x11};
+    std::vector<std::byte> streamed(128U * 1024U);
+    ASSERT_TRUE(source->reader->read_exact_at(0U, streamed));
+    EXPECT_EQ(provider->storage->reads, reads + 2U);
+    EXPECT_EQ(streamed[512U], std::byte{0x11});
+    ASSERT_TRUE(source->reader->read_exact_at(0U, byte));
+    EXPECT_EQ(provider->storage->reads, reads + 2U);
+}
+
+TEST_F(DeviceSessions, MutationPlanningCachesMetadataButVerificationAlwaysReadsFreshBytes) {
+    DeviceSessionManager manager{directory, true, true, provider};
+    const auto id = open(manager);
+    read_and_authorize(manager, id);
+    auto mutation = manager.begin_mutation(id, "disk", "owner", "planning-cache");
+    ASSERT_TRUE(mutation);
+    provider->storage->reads = 0U;
+    provider->storage->bytes_read = 0U;
+    std::array<std::byte, 1U> byte{};
+    ASSERT_TRUE((*mutation)->read_exact_at(4096U, byte));
+    ASSERT_TRUE((*mutation)->read_exact_at(4100U, byte));
+    EXPECT_EQ(provider->storage->reads, 1U);
+    EXPECT_EQ(provider->storage->bytes_read, 4096U);
+    provider->storage->bytes[4096U] = std::byte{0x11};
+    EXPECT_FALSE((*mutation)->verify_unchanged());
+    EXPECT_GT(provider->storage->reads, 1U);
+    EXPECT_EQ(provider->storage->writes, 0U);
+}
+
+TEST_F(DeviceSessions, AuthorizationReportsFreshByteProgressAndIndeterminateOsPermission) {
+    DeviceSessionManager manager{directory, true, true, provider};
+    const auto id = open(manager);
+    auto source = manager.open_source(id, "disk", "owner");
+    ASSERT_TRUE(source);
+    std::array<std::byte, 1U> byte{};
+    ASSERT_TRUE(source->reader->read_exact_at(0U, byte));
+    RecordedProgress progress;
+    ASSERT_TRUE(source->seal({}, &progress));
+    ASSERT_EQ(progress.events.back().completed, 512U);
+    progress.events.clear();
+    ASSERT_TRUE(manager.authorize_writes(id, "disk", "owner", true, {}, &progress));
+    ASSERT_EQ(progress.events.size(), 5U);
+    EXPECT_EQ(progress.events[0].label, "Verifying device metadata");
+    EXPECT_EQ(progress.events[1].completed, 512U);
+    EXPECT_EQ(progress.events[1].total, 512U);
+    EXPECT_EQ(progress.events[2].label, "Requesting write permission");
+    EXPECT_FALSE(progress.events[2].total);
+    EXPECT_EQ(progress.events[3].label, "Verifying write access");
+    EXPECT_EQ(progress.events[4].completed, 512U);
+    EXPECT_EQ(progress.events[4].total, 512U);
+}
+
+TEST_F(DeviceSessions, CancelledVerificationNeverRequestsWritePermission) {
+    DeviceSessionManager manager{directory, true, true, provider};
+    const auto id = open(manager);
+    auto source = manager.open_source(id, "disk", "owner");
+    ASSERT_TRUE(source);
+    std::array<std::byte, 1U> byte{};
+    ASSERT_TRUE(source->reader->read_exact_at(0U, byte));
+    ASSERT_TRUE(source->seal({}, nullptr));
+    axk::CancellationSource cancellation;
+    cancellation.cancel();
+    const auto result = manager.authorize_writes(id, "disk", "owner", true, cancellation.token());
+    ASSERT_FALSE(result);
+    EXPECT_EQ(result.error().code, "operation_cancelled");
+    EXPECT_EQ(provider->storage->upgrades, 0U);
+    EXPECT_EQ(provider->storage->writes, 0U);
 }
 
 TEST_F(DeviceSessions, CompletedOperationsCannotBeReplayedByRecovery) {
@@ -391,15 +542,19 @@ TEST_F(DeviceSessions, OldReadersRejectCachedAndUncachedReadsAfterASave) {
     ASSERT_TRUE(source);
     std::array<std::byte, 1U> byte{};
     ASSERT_TRUE(source->reader->read_exact_at(0U, byte));
-    ASSERT_TRUE(source->seal());
+    ASSERT_TRUE(source->seal({}, nullptr));
     ASSERT_TRUE(manager.authorize_writes(id, "disk", "owner", true));
     auto mutation = manager.begin_mutation(id, "disk", "owner", "reader-revision");
     ASSERT_TRUE(mutation);
+    ASSERT_TRUE((*mutation)->read_exact_at(4096U, byte));
     std::vector<AlterationJournalPatch> patches{{4096U, {std::byte{0x42}}, {std::byte{0x11}}}};
     ASSERT_TRUE(manager.apply(*mutation, patches, {}, {}, {}, {}));
+    ASSERT_TRUE((*mutation)->read_exact_at(4096U, byte));
+    EXPECT_EQ(byte.front(), std::byte{0x11});
     mutation->reset();
     EXPECT_FALSE(source->reader->read_exact_at(0U, byte));
     EXPECT_FALSE(source->reader->read_exact_at(512U * 1024U, byte));
+    EXPECT_FALSE(source->seal({}, nullptr));
     auto current = manager.open_source(id, "disk", "owner");
     ASSERT_TRUE(current);
     ASSERT_TRUE(current->reader->read_exact_at(4096U, byte));
@@ -421,30 +576,102 @@ TEST_F(DeviceSessions, LargePayloadOriginalsStreamWithoutConsumingMetadataGuardC
     EXPECT_EQ(provider->storage->bytes.front(), std::byte{0x42});
 }
 
-TEST_F(DeviceSessions, SfsEditingUsesTheSameSessionPipelineWithoutCopyingTheDevice) {
-    std::filesystem::create_directories(directory);
-    axk::Waveform waveform;
-    waveform.format = {1U, 2U, 44'100U};
-    waveform.frame_count = 3U;
-    waveform.pcm = {std::byte{}, std::byte{}, std::byte{0xe8}, std::byte{0x03}, std::byte{0x18}, std::byte{0xfc}};
-    const auto audio_path = directory / "tone.wav";
-    ASSERT_TRUE(axk::write_wav_atomic(audio_path, waveform));
-    axk::VolumeSpec volume;
-    volume.name = "Original";
-    volume.waveforms.push_back({"wave", "Tone", audio_path, 60U, {}});
-    axk::SampleSpec sample;
-    sample.name = "Sample";
-    sample.waveform_id = "wave";
-    volume.samples.push_back(sample);
-    const axk::HdsBuildManifest manifest{"1.0", 4U * 1024U * 1024U, {{"disk", {volume}}}};
-    const auto path = directory / "fixture.hds";
-    ASSERT_TRUE(axk::write_hds_image(manifest, path));
-    {
-        const auto file = axk::FileReader::open(path);
-        ASSERT_TRUE(file);
-        provider->storage->bytes.resize(static_cast<std::size_t>((*file)->size()));
-        ASSERT_TRUE((*file)->read_exact_at(0U, provider->storage->bytes));
+TEST_F(DeviceSessions, OpeningAndSampleRenameDoNotReadUnrelatedPcm) {
+    std::size_t small_open_bytes{};
+    std::size_t small_rename_bytes{};
+    for (const auto frames : {3U, 512U * 1024U}) {
+        ASSERT_NO_FATAL_FAILURE(load_sfs(frames));
+        const auto geometry =
+            axk::open_image(std::make_shared<axk::MemoryReader>(provider->storage->bytes), "fixture.hds");
+        ASSERT_TRUE(geometry);
+        const auto &partition = geometry->partitions().front();
+        const auto cluster_bytes = geometry->superblock().sector_size_bytes * partition.sectors_per_cluster;
+        const auto index_bytes = static_cast<std::uint64_t>(cluster_bytes) * partition.directory_index_span_clusters;
+        const auto wave = std::ranges::find(partition.records, "SMPL", &axk::IndexRecord::object_type);
+        ASSERT_NE(wave, partition.records.end());
+        ASSERT_EQ(wave->extents.size(), 1U);
+        const auto physical =
+            static_cast<std::uint64_t>(partition.start_sector) * geometry->superblock().sector_size_bytes +
+            static_cast<std::uint64_t>(wave->extents.front().cluster_offset) * cluster_bytes;
+        // Boundary pages may include PCM beside the header or the next object.
+        // Interior PCM pages must never be fetched by this metadata-only edit.
+        const auto pcm_start = ((physical + 0xacU + 4095U) / 4096U) * 4096U;
+        const auto pcm_end = ((physical + wave->data_size) / 4096U) * 4096U;
+        provider->storage->pcm_region.reset();
+        provider->storage->pcm_bytes_read = 0U;
+        if (pcm_start < pcm_end)
+            provider->storage->pcm_region.emplace(pcm_start, pcm_end);
+        DeviceSessionManager devices{directory / std::to_string(frames), true, true, provider};
+        const auto id = open(devices);
+        const auto sandbox = Sandbox::create({});
+        ASSERT_TRUE(sandbox);
+        ImageSessionManager images{
+            *sandbox,      8U,  100U,    std::chrono::minutes{15}, std::chrono::steady_clock::now, nullptr,
+            1024U * 1024U, 16U, &devices};
+        ImageSourceRef source;
+        source.kind = ImageSourceKind::device;
+        source.device_session_id = id;
+        source.device_target_id = "disk";
+        provider->storage->bytes_read = 0U;
+        RecordedProgress progress;
+        const auto image = images.open(source, "owner", {}, &progress);
+        ASSERT_TRUE(image) << image.error().message;
+        const auto open_bytes = provider->storage->bytes_read;
+        EXPECT_LE(open_bytes, 4U * index_bytes + 64U * 1024U);
+        EXPECT_EQ(provider->storage->pcm_bytes_read, 0U);
+        for (const auto label : {"Reading filesystem metadata", "Reading object metadata", "Verifying device metadata"})
+            EXPECT_TRUE(std::ranges::any_of(progress.events, [&](const auto &event) {
+                return event.label == label && event.total && event.completed == event.total;
+            })) << label;
+        ASSERT_TRUE(devices.authorize_writes(id, "disk", "owner", true));
+        UploadStore uploads{directory / "uploads", 1024U, 1024U, 1U, 1024U, std::chrono::minutes{1}};
+        AlterationJournalStore journals{directory / "file-journals"};
+        auto registry = make_operation_registry();
+        ASSERT_TRUE(bind_session_write_operations(registry, *sandbox, uploads, images, journals));
+        const nlohmann::json manifest{{"schema_version", "1.0"},
+                                      {"operations", nlohmann::json::array({{{"id", "rename"},
+                                                                             {"type", "rename_sbnk"},
+                                                                             {"partition_index", 0U},
+                                                                             {"volume_name", "Original"},
+                                                                             {"sample_name", "Sample"},
+                                                                             {"new_sample_name", "Renamed"}}})}};
+        std::vector<nlohmann::json> diagnostics;
+        OperationContext context{"owner", "request", {}, nullptr, {}, {}, "sample-rename"};
+        context.diagnostic = [&](const auto &event) { diagnostics.push_back(event); };
+        provider->storage->bytes_read = 0U;
+        const auto renamed = registry.invoke(
+            "images.alter",
+            {{"imageId", image->image_id}, {"expectedRevision", 1U}, {"manifest", {{"inline", manifest}}}}, context);
+        ASSERT_TRUE(renamed) << renamed.error().message;
+        const auto rename_bytes = provider->storage->bytes_read;
+        EXPECT_LE(rename_bytes, 20U * index_bytes + 128U * 1024U);
+        EXPECT_EQ(provider->storage->pcm_bytes_read, 0U);
+        ASSERT_FALSE(diagnostics.empty());
+        EXPECT_EQ(diagnostics.back().at("phase").get<std::string>(), "total");
+        EXPECT_GT(diagnostics.back().at("deviceIo").at("physicalReads").get<std::uint64_t>(), 0U);
+        EXPECT_GT(diagnostics.back().at("deviceIo").at("cacheHits").get<std::uint64_t>(), 0U);
+        const auto samples = images.objects(image->image_id, "owner", 100U, {}, "SBNK");
+        ASSERT_TRUE(samples);
+        ASSERT_EQ(samples->items.size(), 1U);
+        EXPECT_EQ(samples->items.front().name, "Renamed");
+        if (frames == 3U) {
+            small_open_bytes = open_bytes;
+            small_rename_bytes = rename_bytes;
+        } else {
+            EXPECT_LE(open_bytes, small_open_bytes + 16U * 1024U);
+            EXPECT_LE(rename_bytes, small_rename_bytes + 32U * 1024U);
+        }
+        RecordProperty(frames == 3U ? "smallOpenBytes" : "largeOpenBytes", std::to_string(open_bytes));
+        RecordProperty(frames == 3U ? "smallRenameBytes" : "largeRenameBytes", std::to_string(rename_bytes));
+        RecordProperty("indexBytes", std::to_string(index_bytes));
+        RecordProperty(frames == 3U ? "smallDiagnostics" : "largeDiagnostics", nlohmann::json(diagnostics).dump());
+        ASSERT_TRUE(images.close(image->image_id, "owner"));
+        ASSERT_TRUE(devices.close(id, "owner"));
     }
+}
+
+TEST_F(DeviceSessions, SfsEditingUsesTheSameSessionPipelineWithoutCopyingTheDevice) {
+    ASSERT_NO_FATAL_FAILURE(load_sfs(3U));
     DeviceSessionManager devices{directory / "devices", true, true, provider};
     const auto id = open(devices);
     const auto sandbox = Sandbox::create({});

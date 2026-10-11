@@ -86,10 +86,11 @@ Result<ObjectCatalog> build_object_catalog(const MediaContainer &container, std:
 }
 
 Result<MediaInventory> build_media_inventory(const MediaContainer &container, MediaObjectReadMode mode,
-                                             std::size_t maximum_object_bytes, const CancellationToken &cancellation) {
+                                             std::size_t maximum_object_bytes, const CancellationToken &cancellation,
+                                             ProgressSink *progress) {
     if (const auto *sfs = std::get_if<Container>(&container.storage())) {
         const bool retain_raw_payloads = mode == MediaObjectReadMode::complete;
-        auto catalog = detail::build_object_catalog(*sfs, maximum_object_bytes, cancellation, retain_raw_payloads);
+        auto catalog = detail::build_object_catalog(*sfs, maximum_object_bytes, cancellation, mode, progress);
         if (!catalog)
             return std::unexpected{catalog.error()};
         std::map<std::pair<std::uint32_t, std::uint32_t>, std::uint64_t> stored_sizes;
@@ -127,7 +128,8 @@ Result<MediaObject> load_media_object(const MediaContainer &container, const Med
                                           "media object exceeds the configured size limit")};
     }
     if (const auto *sfs = std::get_if<Container>(&container.storage())) {
-        auto catalog = detail::build_object_catalog(*sfs, maximum_object_bytes, cancellation, false);
+        auto catalog = detail::build_object_catalog(*sfs, maximum_object_bytes, cancellation,
+                                                    MediaObjectReadMode::decoded_metadata);
         if (!catalog)
             return std::unexpected{catalog.error()};
         const auto found = std::ranges::find(catalog->objects, descriptor.key, &ObjectSnapshot::key);

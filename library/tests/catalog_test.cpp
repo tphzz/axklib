@@ -1,12 +1,14 @@
 #include <algorithm>
 #include <filesystem>
 #include <limits>
+#include <memory>
 #include <string>
 #include <tuple>
 #include <variant>
 
 #include <gtest/gtest.h>
 
+#include "axklib/bytes.hpp"
 #include "axklib/catalog.hpp"
 #include "axklib/media.hpp"
 #include "axklib/relationship.hpp"
@@ -26,6 +28,20 @@ const axk::ObjectSnapshot *object_named(const axk::ObjectCatalog &catalog, axk::
     });
     return found == catalog.objects.end() ? nullptr : &*found;
 }
+
+class CountingReader final : public axk::RandomAccessReader {
+  public:
+    explicit CountingReader(std::shared_ptr<const axk::RandomAccessReader> source) : source_(std::move(source)) {}
+    std::uint64_t size() const noexcept override { return source_->size(); }
+    axk::Result<void> read_exact_at(std::uint64_t offset, std::span<std::byte> bytes) const override {
+        bytes_read += bytes.size();
+        return source_->read_exact_at(offset, bytes);
+    }
+    mutable std::uint64_t bytes_read{};
+
+  private:
+    std::shared_ptr<const axk::RandomAccessReader> source_;
+};
 
 } // namespace
 
@@ -94,6 +110,88 @@ TEST(ObjectCatalog, SfsMetadataInventoryRetainsDecodedTopologyWithoutRawPayloads
         EXPECT_EQ(actual.object.header.name, expected.object.header.name);
         EXPECT_EQ(metadata->objects[index].size, complete->objects[index].size);
         EXPECT_NE(metadata->objects[index].size, 0U);
+        if (const auto *wave = std::get_if<axk::CurrentSmpl>(&actual.object.payload)) {
+            const auto &full = std::get<axk::CurrentSmpl>(expected.object.payload);
+            EXPECT_EQ(wave->compact_record, full.compact_record);
+            EXPECT_EQ(wave->stored_pcm_bytes, full.stored_pcm_bytes);
+            EXPECT_EQ(wave->stored_segment_bytes, full.stored_segment_bytes);
+        }
+    }
+}
+
+TEST(ObjectCatalog, SfsMetadataInventoryReadsOnlyWaveDataHeaders) {
+    const auto source = axk::FileReader::open(fixture("HD00_512_single_sbnk_authored.hds"));
+    ASSERT_TRUE(source);
+    const auto reader = std::make_shared<CountingReader>(*source);
+    const auto media = axk::open_media(reader, fixture("HD00_512_single_sbnk_authored.hds"));
+    ASSERT_TRUE(media) << media.error().message;
+    reader->bytes_read = 0U;
+    const auto complete = axk::build_media_inventory(*media, axk::MediaObjectReadMode::complete);
+    ASSERT_TRUE(complete) << complete.error().message;
+    const auto complete_bytes = reader->bytes_read;
+    reader->bytes_read = 0U;
+    const auto metadata = axk::build_media_inventory(*media, axk::MediaObjectReadMode::decoded_metadata);
+    ASSERT_TRUE(metadata) << metadata.error().message;
+    std::uint64_t expected_bytes{};
+    for (const auto &object : complete->catalog.objects) {
+        expected_bytes += object.object.header.type == axk::ObjectType::smpl
+                              ? std::min<std::size_t>(object.raw_payload.size(), 0xacU)
+                              : object.raw_payload.size();
+    }
+    EXPECT_EQ(reader->bytes_read, expected_bytes);
+    EXPECT_LT(reader->bytes_read, complete_bytes / 4U);
+}
+
+TEST(ObjectCatalog, MetadataReadsFragmentedHeadersAndRejectsInvalidPcmExtentsWithoutReadingThem) {
+    const auto path = fixture("HD00_512_single_sbnk_authored.hds");
+    const auto file = axk::FileReader::open(path);
+    ASSERT_TRUE(file);
+    std::vector<std::byte> original(static_cast<std::size_t>((*file)->size()));
+    ASSERT_TRUE((*file)->read_exact_at(0U, original));
+    const auto source = axk::open_image(std::make_shared<axk::MemoryReader>(original), path);
+    ASSERT_TRUE(source);
+    const auto &partition = source->partitions().front();
+    const auto found = std::ranges::find(partition.records, "SMPL", &axk::IndexRecord::object_type);
+    ASSERT_NE(found, partition.records.end());
+    ASSERT_EQ(found->extents.size(), 1U);
+    ASSERT_GE(found->extents.front().cluster_count, 2U);
+    const auto cluster_bytes = source->superblock().sector_size_bytes * partition.sectors_per_cluster;
+    const auto physical = static_cast<std::size_t>(partition.start_sector) * source->superblock().sector_size_bytes +
+                          static_cast<std::size_t>(found->extents.front().cluster_offset) * cluster_bytes;
+    const auto index = static_cast<std::size_t>(found->record_offset.value);
+    for (const bool invalid_tail : {false, true}) {
+        auto bytes = original;
+        axk::ByteWriter writer{bytes};
+        ASSERT_TRUE(writer.write_be16(index, 2U));
+        ASSERT_TRUE(writer.write_be16(index + 4U, 2U));
+        ASSERT_TRUE(writer.write_be32(index + 6U, invalid_tail ? found->data_size : 0xacU));
+        ASSERT_TRUE(writer.write_be32(index + 0x0eU, 1U));
+        ASSERT_TRUE(writer.write_be32(index + 0x12U, invalid_tail ? 512U : 100U));
+        ASSERT_TRUE(writer.write_be32(index + 0x16U, invalid_tail ? partition.cluster_count
+                                                                  : found->extents.front().cluster_offset + 1U));
+        ASSERT_TRUE(writer.write_be32(index + 0x1aU, 1U));
+        ASSERT_TRUE(writer.write_be32(index + 0x1eU, invalid_tail ? found->data_size - 512U : 0xacU - 100U));
+        if (!invalid_tail)
+            std::copy_n(original.begin() + static_cast<std::ptrdiff_t>(physical + 100U), 0xacU - 100U,
+                        bytes.begin() + static_cast<std::ptrdiff_t>(physical + cluster_bytes));
+        const auto media = axk::open_media(std::make_shared<axk::MemoryReader>(std::move(bytes)), path);
+        ASSERT_TRUE(media);
+        const auto complete = axk::build_media_inventory(*media, axk::MediaObjectReadMode::complete);
+        const auto metadata = axk::build_media_inventory(*media, axk::MediaObjectReadMode::decoded_metadata);
+        if (invalid_tail) {
+            ASSERT_FALSE(complete);
+            ASSERT_FALSE(metadata);
+            EXPECT_EQ(metadata.error().code, complete.error().code);
+        } else {
+            ASSERT_TRUE(complete) << complete.error().message;
+            ASSERT_TRUE(metadata) << metadata.error().message;
+            const auto *full = object_named(complete->catalog, axk::ObjectType::smpl, found->object_name);
+            const auto *header = object_named(metadata->catalog, axk::ObjectType::smpl, found->object_name);
+            ASSERT_NE(full, nullptr);
+            ASSERT_NE(header, nullptr);
+            EXPECT_EQ(std::get<axk::CurrentSmpl>(header->object.payload).compact_record,
+                      std::get<axk::CurrentSmpl>(full->object.payload).compact_record);
+        }
     }
 }
 

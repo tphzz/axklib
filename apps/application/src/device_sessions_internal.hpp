@@ -8,6 +8,8 @@
 #include <nlohmann/json.hpp>
 
 #include "axklib/application/device_sessions.hpp"
+#include "device_read_cache.hpp"
+#include "device_read_metrics.hpp"
 
 namespace axk::app::device_detail {
 
@@ -25,6 +27,7 @@ struct Connection {
     bool mutation_active{};
     std::uint64_t revision{1U};
     std::map<std::string, Guards, std::less<>> metadata_guards;
+    mutable ReadCounters reads;
 };
 
 [[nodiscard]] Result<std::string> digest(std::span<const std::byte> bytes);
@@ -33,7 +36,9 @@ struct Connection {
 [[nodiscard]] std::string target_identity(const Connection &connection, const DeviceTargetDescription &target);
 [[nodiscard]] const DeviceTargetDescription *find_target(const Connection &connection, std::string_view id);
 [[nodiscard]] Result<void> verify_guards(const Connection &connection, const DeviceTargetDescription &target,
-                                         const Guards &guards, std::span<const AlterationJournalPatch> excluded = {});
+                                         const Guards &guards, std::span<const AlterationJournalPatch> excluded = {},
+                                         const CancellationToken &cancellation = {}, ProgressSink *progress = nullptr,
+                                         std::string_view label = "Verifying device metadata");
 [[nodiscard]] axk::Result<void> read_target(const Connection &connection, const DeviceTargetDescription &target,
                                             std::uint64_t offset, std::span<std::byte> bytes);
 
@@ -42,15 +47,17 @@ class Source final : public RandomAccessReader {
     Source(std::shared_ptr<Connection> connection, DeviceTargetDescription target);
     std::uint64_t size() const noexcept override;
     axk::Result<void> read_exact_at(std::uint64_t offset, std::span<std::byte> bytes) const override;
-    Result<void> seal();
+    Result<void> seal(const CancellationToken &cancellation, ProgressSink *progress);
+    Json read_metrics() const;
 
   private:
     std::shared_ptr<Connection> connection_;
     DeviceTargetDescription target_;
     mutable Guards guards_;
-    mutable std::map<std::uint64_t, std::vector<std::byte>> cache_;
+    mutable MetadataReadCache cache_;
     mutable bool sealed_{};
     std::uint64_t revision_{};
+    ReadCounters initial_reads_;
 };
 
 class Mutation final : public MutationTarget {
@@ -69,7 +76,11 @@ class Mutation final : public MutationTarget {
     MutationIdentity journal_identity() const override;
     std::uint32_t write_alignment() const noexcept override;
     Result<void> set_state(std::string_view state) const;
-    void journal_streaming(bool value) noexcept { journal_streaming_ = value; }
+    Json read_metrics() const;
+    void journal_streaming(bool value) noexcept {
+        cache_.clear();
+        journal_streaming_ = value;
+    }
 
     std::shared_ptr<Connection> connection;
     DeviceTargetDescription target;
@@ -81,6 +92,8 @@ class Mutation final : public MutationTarget {
     std::unique_lock<std::recursive_mutex> lease_;
     mutable bool writing_{};
     bool journal_streaming_{};
+    mutable MetadataReadCache cache_;
+    ReadCounters initial_reads_;
 };
 
 [[nodiscard]] Result<std::vector<AlterationJournalPatch>>

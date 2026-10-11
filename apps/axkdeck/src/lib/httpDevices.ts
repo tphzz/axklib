@@ -4,6 +4,7 @@ import { AxklibApiError } from './httpErrors';
 import { HttpJobController } from './httpJobController';
 import { randomIdempotencyKey } from './httpTransportWire';
 import type { PendingDeviceWrite } from './deviceWriteTracking';
+import type { JobState } from './transport';
 
 export function createHttpDeviceConnection(connection: AxklibApiConnection & { mode: string }) {
     const enabled = connection.mode === 'local' && '__TAURI_INTERNALS__' in window;
@@ -17,6 +18,7 @@ export type DeviceSession = components['schemas']['DeviceSession'];
 export type DeviceOperation = components['schemas']['DeviceOperation'];
 export type DeviceLayout = components['schemas']['DeviceConnectRequest']['layout'];
 export type DeviceXmlInspection = components['schemas']['DeviceXmlInspection'];
+export type DeviceProgress = NonNullable<JobState['progress']>;
 export interface DeviceService {
     available(): Promise<boolean>;
     inspectXml(xml: string): Promise<DeviceXmlInspection>;
@@ -24,7 +26,7 @@ export interface DeviceService {
     connect(candidateId: string, layout: DeviceLayout, xml?: string): Promise<DeviceSession>;
     status(sessionId: string): Promise<DeviceSession>;
     close(sessionId: string): Promise<void>;
-    authorize(sessionId: string, targetId: string): Promise<void>;
+    authorize(sessionId: string, targetId: string, onProgress?: (progress: DeviceProgress) => void): Promise<void>;
     recover(operationId: string, sessionId: string, targetId: string): Promise<void>;
     operations(): Promise<{ operations: DeviceOperation[]; uncertain: PendingDeviceWrite[] }>;
 }
@@ -57,8 +59,12 @@ export class HttpDevices implements DeviceService {
     connect(candidateId: string, layout: DeviceLayout, xml?: string): Promise<DeviceSession> {
         return this.run('devices.connect', { candidateId, layout, ...(xml ? { xml } : {}) });
     }
-    async authorize(sessionId: string, targetId: string): Promise<void> {
-        await this.run('devices.authorize', { sessionId, targetId, exclusiveUseAcknowledged: true });
+    async authorize(
+        sessionId: string,
+        targetId: string,
+        onProgress?: (progress: DeviceProgress) => void,
+    ): Promise<void> {
+        await this.run('devices.authorize', { sessionId, targetId, exclusiveUseAcknowledged: true }, onProgress);
     }
     async recover(operationId: string, sessionId: string, targetId: string): Promise<void> {
         await this.run('devices.recover', { operationId, sessionId, targetId, exclusiveUseAcknowledged: true });
@@ -89,12 +95,19 @@ export class HttpDevices implements DeviceService {
         }
         return { ...result, uncertain: this.client.deviceWrites.pending() };
     }
-    private async run<T>(operation: string, input: Record<string, unknown>): Promise<T> {
+    private async run<T>(
+        operation: string,
+        input: Record<string, unknown>,
+        onProgress?: (progress: DeviceProgress) => void,
+    ): Promise<T> {
         const submitted = await this.client.invoke(operation, input, { idempotencyKey: randomIdempotencyKey() });
         if (!this.jobs.isJob(submitted)) throw new Error(`${operation} did not return a job`);
         let job = this.jobs.map(submitted);
-        if (!['completed', 'failed', 'cancelled'].includes(job.status))
-            job = await this.jobs.wait(job.jobId, () => undefined);
+        const update = (value: JobState) => {
+            if (value.progress) onProgress?.(value.progress);
+        };
+        update(job);
+        if (!['completed', 'failed', 'cancelled'].includes(job.status)) job = await this.jobs.wait(job.jobId, update);
         if (job.status !== 'completed')
             throw new AxklibApiError(
                 job.errorCode ?? 'device_operation_failed',

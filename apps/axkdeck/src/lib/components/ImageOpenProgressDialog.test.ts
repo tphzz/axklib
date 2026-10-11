@@ -4,6 +4,26 @@ import { describe, expect, it, vi } from 'vitest';
 import ImageOpenProgressDialog from './ImageOpenProgressDialog.svelte';
 
 describe('ImageOpenProgressDialog', () => {
+    it('switches from verified bytes to indeterminate permission and back without retaining stale totals', async () => {
+        const props = {
+            label: 'Verifying device metadata',
+            completed: 512,
+            total: 1024 as number | undefined,
+            cancellable: false,
+            cancelling: false,
+            oncancel: vi.fn(),
+        };
+        const { rerender } = render(ImageOpenProgressDialog, { props });
+        expect(screen.getByRole('progressbar').getAttribute('value')).toBe('512');
+        await rerender({ ...props, label: 'Requesting write permission', completed: 0, total: undefined });
+        expect(screen.getByRole('progressbar').hasAttribute('value')).toBe(false);
+        expect(screen.getByRole('status').textContent).toBe('Requesting write permission');
+        await rerender({ ...props, label: 'Verifying write access', completed: 1024 });
+        expect(screen.getByRole('progressbar').getAttribute('value')).toBe('1024');
+        expect(screen.getByRole('progressbar').getAttribute('max')).toBe('1024');
+        expect((screen.getByRole('button', { name: 'Cancel' }) as HTMLButtonElement).disabled).toBe(true);
+    });
+
     it('renders determinate job progress and exposes cancellation while opening', async () => {
         const oncancel = vi.fn();
         render(ImageOpenProgressDialog, {

@@ -15,6 +15,8 @@
 
 namespace axk {
 
+enum class MediaObjectReadMode : std::uint8_t { complete, decoded_metadata };
+
 struct ObjectPlacement {
     PartitionIndex partition;
     std::string partition_name;

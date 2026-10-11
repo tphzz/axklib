@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <format>
 #include <limits>
 
@@ -60,14 +61,30 @@ axk::Result<void> read_target(const Connection &connection, const DeviceTargetDe
     if (connection.invalidated || offset > target.size_bytes || bytes.size() > target.size_bytes - offset)
         return std::unexpected(make_error(ErrorCode::io_read_failed, ErrorCategory::io,
                                           "device session is invalidated or read is outside target"));
-    return connection.device.transport->read_exact_at(target.offset + offset, bytes);
+    const auto started = std::chrono::steady_clock::now();
+    const auto result = connection.device.transport->read_exact_at(target.offset + offset, bytes);
+    ++connection.reads.calls;
+    connection.reads.bytes += bytes.size();
+    connection.reads.nanoseconds += static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - started).count());
+    return result;
 }
 
 Result<void> verify_guards(const Connection &connection, const DeviceTargetDescription &target, const Guards &guards,
-                           std::span<const AlterationJournalPatch> excluded) {
+                           std::span<const AlterationJournalPatch> excluded, const CancellationToken &cancellation,
+                           ProgressSink *progress, std::string_view label) {
     const auto sector_size = connection.device.transport->sector_size();
     std::vector<std::byte> buffer;
+    std::uint64_t completed{};
+    const auto report = [&] {
+        if (progress)
+            progress->report(
+                {ProgressPhase::validating, completed, guards.size() * sector_size, std::string{label}, {}});
+    };
+    report();
     for (auto at = guards.begin(); at != guards.end();) {
+        if (const auto active = cancellation.check(); !active)
+            return std::unexpected(Error{"operation_cancelled", active.error().message});
         const auto offset = at->first;
         if (offset % sector_size != 0U || offset > target.size_bytes || sector_size > target.size_bytes - offset)
             return std::unexpected(Error{"device_state_unavailable", "device guard is outside the target"});
@@ -75,6 +92,7 @@ Result<void> verify_guards(const Connection &connection, const DeviceTargetDescr
             return offset < patch.offset + patch.original.size() && patch.offset < offset + sector_size;
         });
         if (overlaps) {
+            completed += sector_size;
             ++at;
             continue;
         }
@@ -97,12 +115,17 @@ Result<void> verify_guards(const Connection &connection, const DeviceTargetDescr
                 return std::unexpected(
                     Error{"device_changed", "device metadata changed; reopen and review the operation"});
         }
+        completed += buffer.size();
+        report();
     }
+    if (const auto active = cancellation.check(); !active)
+        return std::unexpected(Error{"operation_cancelled", active.error().message});
     return {};
 }
 
 Source::Source(std::shared_ptr<Connection> connection, DeviceTargetDescription target)
-    : connection_(std::move(connection)), target_(std::move(target)), revision_(connection_->revision) {}
+    : connection_(std::move(connection)), target_(std::move(target)), revision_(connection_->revision),
+      initial_reads_(connection_->reads) {}
 std::uint64_t Source::size() const noexcept { return target_.size_bytes; }
 
 axk::Result<void> Source::read_exact_at(std::uint64_t offset, std::span<std::byte> bytes) const {
@@ -111,42 +134,36 @@ axk::Result<void> Source::read_exact_at(std::uint64_t offset, std::span<std::byt
         bytes.size() > size() - offset)
         return std::unexpected(make_error(ErrorCode::io_read_failed, ErrorCategory::io, "device read is unavailable"));
     const auto sector_size = connection_->device.transport->sector_size();
-    const auto block_size = std::max<std::uint32_t>(64U * 1024U, sector_size);
-    while (!bytes.empty()) {
-        const auto aligned = offset - offset % block_size;
-        const auto within = static_cast<std::size_t>(offset - aligned);
-        auto found = cache_.find(aligned);
-        if (found == cache_.end()) {
-            std::vector<std::byte> data(
-                static_cast<std::size_t>(std::min<std::uint64_t>(block_size, size() - aligned)));
-            if (auto read = read_target(*connection_, target_, aligned, data); !read) {
+    return cache_.read(
+        size(), sector_size, offset, bytes,
+        [&](std::uint64_t at, std::span<std::byte> data) {
+            auto read = read_target(*connection_, target_, at, data);
+            if (!read) {
                 connection_->invalidated = true;
                 connection_->authorized_target.clear();
-                return read;
             }
-            if (cache_.size() >= 64U)
-                cache_.erase(cache_.begin());
-            found = cache_.emplace(aligned, std::move(data)).first;
-        }
-        const auto count = std::min<std::size_t>(bytes.size(), found->second.size() - within);
-        if (!sealed_) {
-            for (auto at = within - within % sector_size; at < within + count; at += sector_size) {
-                if (!guards_.contains(aligned + at) && guards_.size() >= maximum_guard_sectors)
+            return read;
+        },
+        [&](std::uint64_t start, std::span<const std::byte> data) -> axk::Result<void> {
+            if (sealed_)
+                return {};
+            for (std::size_t at = 0U; at < data.size(); at += sector_size) {
+                if (guards_.contains(start + at))
+                    continue;
+                if (guards_.size() >= maximum_guard_sectors)
                     return std::unexpected(make_error(ErrorCode::io_unsupported_size, ErrorCategory::io,
                                                       "device metadata guard budget exhausted"));
-                guards_.try_emplace(aligned + at, *digest(std::span{found->second}.subspan(at, sector_size)));
+                guards_.emplace(start + at, *digest(data.subspan(at, sector_size)));
             }
-        }
-        std::copy_n(found->second.begin() + static_cast<std::ptrdiff_t>(within), count, bytes.begin());
-        bytes = bytes.subspan(count);
-        offset += count;
-    }
-    return {};
+            return {};
+        });
 }
 
-Result<void> Source::seal() {
+Result<void> Source::seal(const CancellationToken &cancellation, ProgressSink *progress) {
     const std::scoped_lock lock{connection_->io};
-    if (auto verified = verify_guards(*connection_, target_, guards_); !verified)
+    if (connection_->invalidated || connection_->revision != revision_)
+        return std::unexpected(Error{"device_changed", "device session changed before metadata verification"});
+    if (auto verified = verify_guards(*connection_, target_, guards_, {}, cancellation, progress); !verified)
         return verified;
     connection_->metadata_guards[target_.id] = guards_;
     sealed_ = true;
@@ -156,7 +173,7 @@ Result<void> Source::seal() {
 Mutation::Mutation(std::shared_ptr<Connection> value, DeviceTargetDescription description, std::string operation,
                    std::filesystem::path path, bool recovery)
     : connection(std::move(value)), target(std::move(description)), operation_id(std::move(operation)),
-      directory(std::move(path)), lease_(connection->io), writing_(recovery) {
+      directory(std::move(path)), lease_(connection->io), writing_(recovery), initial_reads_(connection->reads) {
     connection->mutation_active = true;
     guards = connection->metadata_guards[target.id];
 }
@@ -167,34 +184,24 @@ std::uint32_t Mutation::write_alignment() const noexcept { return connection->de
 axk::Result<void> Mutation::read_exact_at(std::uint64_t offset, std::span<std::byte> bytes) const {
     if (writing_ || journal_streaming_ || bytes.empty())
         return read_target(*connection, target, offset, bytes);
-    if (offset > size() || bytes.size() > size() - offset)
-        return std::unexpected(
-            make_error(ErrorCode::out_of_bounds, ErrorCategory::io, "device read is outside target"));
     const auto alignment = write_alignment();
-    while (!bytes.empty()) {
-        const auto start = offset - offset % alignment;
-        const auto within = static_cast<std::size_t>(offset - start);
-        const auto count = std::min<std::size_t>(bytes.size(), 64U * 1024U - within);
-        const auto rounded = ((within + count + alignment - 1U) / alignment) * alignment;
-        std::vector<std::byte> data(rounded);
-        if (auto read = read_target(*connection, target, start, data); !read)
-            return read;
-        for (std::size_t at = 0U; at < data.size(); at += alignment) {
-            const auto hash = *digest(std::span{data}.subspan(at, alignment));
-            const auto existing = guards.find(start + at);
-            if (existing != guards.end() && existing->second != hash)
-                return std::unexpected(make_error(ErrorCode::io_read_failed, ErrorCategory::io,
-                                                  "device changed during mutation planning"));
-            if (existing == guards.end() && guards.size() >= maximum_guard_sectors)
-                return std::unexpected(make_error(ErrorCode::io_unsupported_size, ErrorCategory::io,
-                                                  "device planning guard budget exhausted"));
-            guards.try_emplace(start + at, hash);
-        }
-        std::copy_n(data.begin() + static_cast<std::ptrdiff_t>(within), count, bytes.begin());
-        bytes = bytes.subspan(count);
-        offset += count;
-    }
-    return {};
+    return cache_.read(
+        size(), alignment, offset, bytes,
+        [&](std::uint64_t at, std::span<std::byte> data) { return read_target(*connection, target, at, data); },
+        [&](std::uint64_t start, std::span<const std::byte> data) -> axk::Result<void> {
+            for (std::size_t at = 0U; at < data.size(); at += alignment) {
+                const auto hash = *digest(data.subspan(at, alignment));
+                const auto existing = guards.find(start + at);
+                if (existing != guards.end() && existing->second != hash)
+                    return std::unexpected(make_error(ErrorCode::io_read_failed, ErrorCategory::io,
+                                                      "device changed during mutation planning"));
+                if (existing == guards.end() && guards.size() >= maximum_guard_sectors)
+                    return std::unexpected(make_error(ErrorCode::io_unsupported_size, ErrorCategory::io,
+                                                      "device planning guard budget exhausted"));
+                guards.try_emplace(start + at, hash);
+            }
+            return {};
+        });
 }
 Result<void> Mutation::write_exact_at(std::uint64_t offset, std::span<const std::byte> bytes) {
     if (offset > size() || bytes.size() > size() - offset)
@@ -207,6 +214,7 @@ Result<void> Mutation::write_exact_at(std::uint64_t offset, std::span<const std:
             return saved;
         ++connection->revision;
     }
+    cache_.clear();
     writing_ = true;
     return connection->device.transport->write_exact_at(target.offset + offset, bytes);
 }
@@ -228,6 +236,33 @@ Result<void> Mutation::set_state(std::string_view state) const {
         return std::unexpected(record.error());
     (*record)["state"] = state;
     return save_json(directory / "operation.json", *record, false);
+}
+
+namespace {
+Json metrics(const Connection &connection, const ReadCounters &initial, const MetadataReadCache &cache,
+             std::size_t guards) {
+    return {{"physicalReads", connection.reads.calls - initial.calls},
+            {"physicalBytes", connection.reads.bytes - initial.bytes},
+            {"readTimeUs", (connection.reads.nanoseconds - initial.nanoseconds) / 1000U},
+            {"cacheHits", cache.hits},
+            {"cacheMisses", cache.misses},
+            {"guardSectors", guards}};
+}
+} // namespace
+
+Json Source::read_metrics() const {
+    const std::scoped_lock lock{connection_->io};
+    return metrics(*connection_, initial_reads_, cache_, guards_.size());
+}
+
+Json Mutation::read_metrics() const { return metrics(*connection, initial_reads_, cache_, guards.size()); }
+
+Json device_read_metrics(const RandomAccessReader *reader) {
+    if (const auto *source = dynamic_cast<const Source *>(reader))
+        return source->read_metrics();
+    if (const auto *mutation = dynamic_cast<const Mutation *>(reader))
+        return mutation->read_metrics();
+    return Json::object();
 }
 
 } // namespace axk::app::device_detail

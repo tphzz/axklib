@@ -74,7 +74,7 @@ describe('Open dialog', () => {
         expect((open as HTMLButtonElement).disabled).toBe(false);
         await fireEvent.click(open);
         await waitFor(() => expect(oncancel).toHaveBeenCalledOnce());
-        expect(service.authorize).toHaveBeenCalledWith('owned', 'disk');
+        expect(service.authorize).toHaveBeenCalledWith('owned', 'disk', expect.any(Function));
         expect(view.queryByRole('dialog', { name: 'Authorize device writes' })).toBeNull();
     });
 

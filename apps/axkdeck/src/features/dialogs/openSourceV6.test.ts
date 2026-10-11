@@ -163,7 +163,7 @@ describe('SCSI2SDv6 opening', () => {
         expect(await workflow.open()).toBe(false);
         workflow.acknowledged = true;
         expect(await workflow.open()).toBe(true);
-        expect(service.authorize).toHaveBeenCalledWith('preview', '0');
+        expect(service.authorize).toHaveBeenCalledWith('preview', '0', expect.any(Function));
     });
     it('clears a vanished carrier and its targets without opening a replacement', async () => {
         const { workflow, service } = fixture();

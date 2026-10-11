@@ -318,12 +318,15 @@ export class OpenSourceWorkflow {
                 throw new Error('This target is read-only. Select Read only to open it.');
             const sessionId = this.connection.sessionId;
             const prepare: ImageSessionPreparation | undefined = writeAccess
-                ? async (image) => {
+                ? async (image, onProgress) => {
                       if (this.disposed) throw new Error('Device opening was cancelled.');
                       if (image.format !== 'sfs')
                           throw new Error('This format is read-only. Select Read only to open it.');
-                      this.status = 'Authorizing device writes';
-                      await this.service!.authorize(sessionId, targetId);
+                      this.status = 'Verifying device metadata';
+                      await this.service!.authorize(sessionId, targetId, (progress) => {
+                          this.status = progress.label;
+                          onProgress?.(progress);
+                      });
                   }
                 : undefined;
             this.status = 'Opening device';

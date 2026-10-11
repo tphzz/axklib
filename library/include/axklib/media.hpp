@@ -32,7 +32,6 @@ enum class MediaKind : std::uint8_t {
     axk_object_directory
 };
 enum class LabelStatus : std::uint8_t { confirmed, navigation_aid, raw_identifier };
-enum class MediaObjectReadMode : std::uint8_t { complete, decoded_metadata };
 enum class FloppySetMarker : std::uint8_t { none, ordinary, continuation, final, invalid };
 enum class FloppySetStatus : std::uint8_t { incomplete, complete };
 enum class FatProfile : std::uint8_t { a_series_floppy, ex5_disk, fat16, ex5_removable };
@@ -429,15 +428,16 @@ class AXK_API MediaContainer {
 AXK_API Result<MediaContainer> open_media(const std::filesystem::path &path,
                                           const CancellationToken &cancellation = {});
 AXK_API Result<MediaContainer> open_media(std::shared_ptr<const RandomAccessReader> reader,
-                                          std::filesystem::path source_path,
-                                          const CancellationToken &cancellation = {});
+                                          std::filesystem::path source_path, const CancellationToken &cancellation = {},
+                                          ProgressSink *progress = nullptr);
 AXK_API Result<ObjectCatalog> build_object_catalog(const MediaContainer &container,
                                                    std::size_t maximum_object_bytes = 64U * 1024U * 1024U,
                                                    const CancellationToken &cancellation = {});
 AXK_API Result<MediaInventory> build_media_inventory(const MediaContainer &container,
                                                      MediaObjectReadMode mode = MediaObjectReadMode::complete,
                                                      std::size_t maximum_object_bytes = 64U * 1024U * 1024U,
-                                                     const CancellationToken &cancellation = {});
+                                                     const CancellationToken &cancellation = {},
+                                                     ProgressSink *progress = nullptr);
 AXK_API Result<MediaObject> load_media_object(const MediaContainer &container, const MediaObjectDescriptor &descriptor,
                                               std::size_t maximum_object_bytes = 64U * 1024U * 1024U,
                                               const CancellationToken &cancellation = {});

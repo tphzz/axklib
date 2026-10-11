@@ -5,6 +5,7 @@
 namespace axk::detail {
 
 Result<ObjectCatalog> build_object_catalog(const Container &container, std::size_t maximum_object_bytes,
-                                           const CancellationToken &cancellation, bool retain_raw_payloads);
+                                           const CancellationToken &cancellation, MediaObjectReadMode mode,
+                                           ProgressSink *progress = nullptr);
 
 } // namespace axk::detail

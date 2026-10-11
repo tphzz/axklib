@@ -1,4 +1,5 @@
 #include "alteration_internal.hpp"
+#include "axklib/catalog_internal.hpp"
 
 #include "axklib/bytes.hpp"
 #include "axklib/file_publication.hpp"
@@ -413,7 +414,9 @@ Result<TransactionState> open_transaction_state(std::shared_ptr<const RandomAcce
         return std::unexpected{transaction_error("source allocation geometry cannot safely support alteration")};
     }
     if (include_object_graph) {
-        auto catalog = build_object_catalog(state.container, 64U * 1024U * 1024U, cancellation);
+        auto catalog = detail::build_object_catalog(
+            state.container, 64U * 1024U * 1024U, cancellation,
+            extent_repair_partition ? MediaObjectReadMode::complete : MediaObjectReadMode::decoded_metadata, progress);
         if (!catalog)
             return std::unexpected{catalog.error()};
         state.catalog = std::move(*catalog);

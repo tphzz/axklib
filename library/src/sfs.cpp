@@ -410,12 +410,20 @@ Result<Partition> parse_partition(const RandomAccessReader &image, const Partiti
     const auto first_payload = result.directory_index_cluster + result.directory_index_span_clusters;
     std::vector<std::uint32_t> owners(result.cluster_count);
     std::ranges::fill(std::span{owners}.first(first_payload), reserved_owner);
+    const auto report = [&](std::uint64_t completed) {
+        if (options.progress)
+            options.progress->report(
+                {ProgressPhase::reading, completed, *raw_index_bytes, "Reading filesystem metadata", {}});
+    };
+    report(0U);
     for (std::size_t block = 0; block + index_block_size <= index_data->size(); block += index_block_size) {
         if (const auto check = options.cancellation.check(); !check) {
             return std::unexpected{check.error()};
         }
         for (std::size_t slot = 0; slot < records_per_index_block; ++slot) {
             const auto relative = block + slot * index_record_size;
+            if (slot % 64U == 0U)
+                report(relative);
             const auto bytes =
                 std::span<const std::byte>{*index_data}.subspan(relative, static_cast<std::size_t>(index_record_size));
             if (std::all_of(bytes.begin(), bytes.begin() + 4, [](std::byte value) { return value == std::byte{}; }) &&
@@ -532,6 +540,7 @@ Result<Partition> parse_partition(const RandomAccessReader &image, const Partiti
             result.records.push_back(std::move(record));
         }
     }
+    report(*raw_index_bytes);
 
     if (result.allocation.conflicting_cluster_count != 0U) {
         result.diagnostics.push_back(partition_error(

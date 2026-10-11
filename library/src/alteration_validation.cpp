@@ -147,12 +147,15 @@ Result<void> validate_post_write_placements(const ObjectCatalog &before, const O
 
 Result<void> validate_post_write_placements(const TransactionState &state, const Container &actual,
                                             const CancellationToken &cancellation) {
-    auto after = detail::build_object_catalog(actual, 64U * 1024U * 1024U, cancellation, true);
-    if (!after)
-        return std::unexpected{after.error()};
     auto expected = expected_object_placements(state, actual);
     if (!expected)
         return std::unexpected{expected.error()};
+    const auto mode = std::ranges::any_of(*expected, &ExpectedObjectPlacement::preserve_payload)
+                          ? MediaObjectReadMode::complete
+                          : MediaObjectReadMode::decoded_metadata;
+    auto after = detail::build_object_catalog(actual, 64U * 1024U * 1024U, cancellation, mode);
+    if (!after)
+        return std::unexpected{after.error()};
     return validate_post_write_placements(state.catalog, *after, *expected);
 }
 

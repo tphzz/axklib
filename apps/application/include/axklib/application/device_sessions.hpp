@@ -90,7 +90,7 @@ struct DeviceSessionSummary {
 struct OpenedDeviceSource {
     std::shared_ptr<const RandomAccessReader> reader;
     std::function<Result<void>()> verify_unchanged;
-    std::function<Result<void>()> seal;
+    std::function<Result<void>(const CancellationToken &, ProgressSink *)> seal;
     std::string revision;
 };
 
@@ -120,7 +120,9 @@ class DeviceSessionManager {
     [[nodiscard]] Result<DeviceSessionSummary> status(std::string_view session_id, std::string_view owner) const;
     [[nodiscard]] Result<void> close(std::string_view session_id, std::string_view owner);
     [[nodiscard]] Result<void> authorize_writes(std::string_view session_id, std::string_view target_id,
-                                                std::string_view owner, bool exclusive_use_acknowledged);
+                                                std::string_view owner, bool exclusive_use_acknowledged,
+                                                const CancellationToken &cancellation = {},
+                                                ProgressSink *progress = nullptr);
     [[nodiscard]] Result<OpenedDeviceSource> open_source(std::string_view session_id, std::string_view target_id,
                                                          std::string_view owner);
     [[nodiscard]] Result<std::shared_ptr<MutationTarget>> begin_mutation(std::string_view session_id,

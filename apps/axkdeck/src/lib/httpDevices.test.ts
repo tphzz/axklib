@@ -84,3 +84,26 @@ describe('device XML inspection', () => {
         expect(invoke).toHaveBeenCalledExactlyOnceWith('devices.xml.inspect', { xml: '<SCSI2SD/>' });
     });
 });
+
+it('forwards initial and live write-authorization progress', async () => {
+    const { invoke } = setup();
+    const initial = { jobId: 'authorization', operationId: 'devices.authorize', state: 'RUNNING' };
+    invoke.mockResolvedValue(initial as never);
+    const client = { invoke, deviceWrites: new DeviceWriteTracking(localStorage) } as unknown as AxklibHttpApiClient;
+    const jobs = new HttpJobController(client);
+    const verifying = { phase: 0, completed: 512, total: 1024, label: 'Verifying device metadata' };
+    const requesting = { phase: 0, completed: 0, total: undefined, label: 'Requesting write permission' };
+    vi.spyOn(jobs, 'map').mockReturnValue({
+        jobId: 1,
+        kind: 'devices.authorize',
+        status: 'running',
+        progress: verifying,
+    });
+    vi.spyOn(jobs, 'wait').mockImplementation(async (_id, onUpdate) => {
+        onUpdate({ jobId: 1, kind: 'devices.authorize', status: 'running', progress: requesting });
+        return { jobId: 1, kind: 'devices.authorize', status: 'completed' };
+    });
+    const onProgress = vi.fn();
+    await new HttpDevices(client, jobs).authorize('owned', 'disk', onProgress);
+    expect(onProgress.mock.calls).toEqual([[verifying], [requesting]]);
+});

@@ -219,7 +219,8 @@ Result<void> bind_device_operations(OperationRegistry &registry, DeviceSessionMa
                           [&devices](const Json &input, const OperationContext &context) -> Result<Json> {
                               auto result = devices.authorize_writes(
                                   input.at("sessionId").get<std::string>(), input.at("targetId").get<std::string>(),
-                                  context.owner_id, input.at("exclusiveUseAcknowledged").get<bool>());
+                                  context.owner_id, input.at("exclusiveUseAcknowledged").get<bool>(),
+                                  context.cancellation, context.progress);
                               if (!result)
                                   return std::unexpected(result.error());
                               return Json{{"authorized", true}};

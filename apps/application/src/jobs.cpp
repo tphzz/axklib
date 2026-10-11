@@ -224,7 +224,7 @@ struct axk::app::JobManager::Impl {
             JobProgress update{job_runtime_detail::progress_phase_name(progress.phase), progress.completed,
                                progress.total, progress.label};
             if (record->progress && record->progress->phase == update.phase &&
-                record->progress->completed > update.completed) {
+                record->progress->total == update.total && record->progress->completed > update.completed) {
                 return;
             }
             const auto current = now();

@@ -117,13 +117,14 @@ axk::app::Result<axk::app::ImageSessionSummary> axk::app::ImageSessionManager::o
     std::optional<MediaContainer> media;
     std::vector<ImageSourceRef> matched_companion_sources;
     std::optional<ImageFloppySetSummary> floppy_set;
-    std::function<Result<void>()> seal_device;
+    std::function<Result<void>(const CancellationToken &, ProgressSink *)> seal_device;
     if (source.kind == ImageSourceKind::file) {
         const auto file = implementation_->sandbox.open_file(path_reference);
         if (!file)
             return std::unexpected(file.error());
         source_revision = file->revision;
-        auto opened_media = axk::open_media(file->reader, std::filesystem::path{file->filename}, cancellation);
+        auto opened_media =
+            axk::open_media(file->reader, std::filesystem::path{file->filename}, cancellation, progress);
         if (!opened_media)
             return std::unexpected(core_error(opened_media.error(), source));
         source_reader = file->reader;
@@ -158,7 +159,7 @@ axk::app::Result<axk::app::ImageSessionSummary> axk::app::ImageSessionManager::o
         source_revision = opened->revision;
         verify_source_unchanged = std::move(opened->verify_unchanged);
         seal_device = std::move(opened->seal);
-        auto opened_media = axk::open_media(source_reader, "device.hds", cancellation);
+        auto opened_media = axk::open_media(source_reader, "device.hds", cancellation, progress);
         if (!opened_media)
             return std::unexpected(core_error(opened_media.error(), source));
         if (opened_media->kind() != MediaKind::sfs && opened_media->kind() != MediaKind::iso9660)
@@ -179,18 +180,18 @@ axk::app::Result<axk::app::ImageSessionSummary> axk::app::ImageSessionManager::o
         companion_path_lease = std::move(opened.companion_path_lease);
     }
     if (auto reported =
-            report_image_open_progress(progress, cancellation, ProgressPhase::reading, 1U, "Reading image metadata");
+            report_image_open_progress(progress, cancellation, ProgressPhase::reading, 1U, "Reading object metadata");
         !reported) {
         return std::unexpected(reported.error());
     }
     const auto inventory_mode = media->kind() == axk::MediaKind::fat12_floppy_set
                                     ? axk::MediaObjectReadMode::complete
                                     : axk::MediaObjectReadMode::decoded_metadata;
-    auto inventory = axk::build_media_inventory(*media, inventory_mode, 64U * 1024U * 1024U, cancellation);
+    auto inventory = axk::build_media_inventory(*media, inventory_mode, 64U * 1024U * 1024U, cancellation, progress);
     if (!inventory)
         return std::unexpected(core_error(inventory.error(), source));
     if (seal_device) {
-        if (auto sealed = seal_device(); !sealed)
+        if (auto sealed = seal_device(cancellation, progress); !sealed)
             return std::unexpected(sealed.error());
     }
     if (auto reported = report_image_open_progress(progress, cancellation, ProgressPhase::resolving, 2U,

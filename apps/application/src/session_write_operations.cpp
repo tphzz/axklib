@@ -43,6 +43,7 @@
 #include <nlohmann/json.hpp>
 
 #include "content_digest.hpp"
+#include "device_read_metrics.hpp"
 
 #include "write_operations_internal.hpp"
 
@@ -101,6 +102,8 @@ axk::app::Result<void> axk::app::bind_session_write_operations(OperationRegistry
     const auto alter_session = [&sandbox, &uploads, &images,
                                 &journals](const Json &input, const OperationContext &context) -> Result<Json> {
         const auto operation_started = Clock::now();
+        const RandomAccessReader *measured_reader{};
+        Json previous_reads = Json::object();
         const auto diagnostic = [&](std::string_view phase, Clock::time_point started,
                                     const Json &details = Json::object()) {
             if (!context.diagnostic)
@@ -111,6 +114,18 @@ axk::app::Result<void> axk::app::bind_session_write_operations(OperationRegistry
             event["phase"] = phase;
             event["durationMs"] = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - started).count();
             event["strategy"] = "journaled-in-place";
+            auto reads = measured_reader ? device_detail::device_read_metrics(measured_reader) : previous_reads;
+            if (!reads.empty()) {
+                auto delta = reads;
+                if (phase != "total") {
+                    for (auto &[key, value] : delta.items()) {
+                        if (key != "guardSectors")
+                            value = value.get<std::uint64_t>() - previous_reads.value(key, std::uint64_t{});
+                    }
+                }
+                event["deviceIo"] = std::move(delta);
+                previous_reads = std::move(reads);
+            }
             context.diagnostic(event);
         };
 
@@ -127,6 +142,7 @@ axk::app::Result<void> axk::app::bind_session_write_operations(OperationRegistry
         auto mutation = images.begin_mutation(image_id, context.owner_id, expected_revision, context.mutation_id);
         if (!mutation)
             return std::unexpected(mutation.error());
+        measured_reader = mutation->target.get();
         bool mutation_finished{};
         struct AbortGuard {
             ImageSessionManager &images;
@@ -253,6 +269,7 @@ axk::app::Result<void> axk::app::bind_session_write_operations(OperationRegistry
 
         const auto refresh_started = Clock::now();
         mutation->target.reset();
+        measured_reader = nullptr;
         auto summary = images.finalize_mutation_commit(std::move(*prepared_commit));
         mutation_finished = true;
         diagnostic("session-refresh", refresh_started,

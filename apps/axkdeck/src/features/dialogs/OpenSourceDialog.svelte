@@ -20,8 +20,14 @@
                 prepare
                     ? async (candidate) => {
                           devices.images.openProgressCancellable = false;
-                          devices.images.openProgressLabel = 'Authorizing device writes';
-                          await prepare(candidate);
+                          devices.images.openProgressLabel = 'Verifying device metadata';
+                          devices.images.openProgressCompleted = 0;
+                          devices.images.openProgressTotal = undefined;
+                          await prepare(candidate, (progress) => {
+                              devices.images.openProgressLabel = progress.label;
+                              devices.images.openProgressCompleted = progress.completed;
+                              devices.images.openProgressTotal = progress.total;
+                          });
                       }
                     : undefined,
             );

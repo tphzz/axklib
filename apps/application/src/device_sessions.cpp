@@ -132,7 +132,8 @@ Result<void> DeviceSessionManager::close(std::string_view id, std::string_view o
 }
 
 Result<void> DeviceSessionManager::authorize_writes(std::string_view id, std::string_view target_id,
-                                                    std::string_view owner, bool acknowledged) {
+                                                    std::string_view owner, bool acknowledged,
+                                                    const CancellationToken &cancellation, ProgressSink *progress) {
     if (!writes_supported() || !acknowledged)
         return std::unexpected(Error{"device_write_authorization_required",
                                      "write support and exclusive sampler/host use acknowledgement are required"});
@@ -145,16 +146,21 @@ Result<void> DeviceSessionManager::authorize_writes(std::string_view id, std::st
         return checked;
     if (target->read_only || target->sector_size != 512U || !(*connection)->metadata_guards.contains(target->id))
         return std::unexpected(Error{"device_read_only", "open a supported SFS target before authorizing writes"});
-    if (auto checked =
-            device_detail::verify_guards(**connection, *target, (*connection)->metadata_guards.at(target->id));
+    if (auto checked = device_detail::verify_guards(
+            **connection, *target, (*connection)->metadata_guards.at(target->id), {}, cancellation, progress);
         !checked)
         return checked;
+    if (progress)
+        progress->report({ProgressPhase::opening, 0U, std::nullopt, "Requesting write permission", {}});
+    if (const auto active = cancellation.check(); !active)
+        return std::unexpected(Error{"operation_cancelled", active.error().message});
     if (auto authorized = (*connection)->device.transport->authorize_writes(); !authorized) {
         (*connection)->invalidated = true;
         return authorized;
     }
     if (auto checked =
-            device_detail::verify_guards(**connection, *target, (*connection)->metadata_guards.at(target->id));
+            device_detail::verify_guards(**connection, *target, (*connection)->metadata_guards.at(target->id), {},
+                                         cancellation, progress, "Verifying write access");
         !checked) {
         (*connection)->invalidated = true;
         return checked;
@@ -187,7 +193,10 @@ Result<OpenedDeviceSource> DeviceSessionManager::open_source(std::string_view id
             }
             return checked;
         },
-        [source] { return source->seal(); }, std::format("{}:{}", id, (*connection)->revision)};
+        [source](const CancellationToken &cancellation, ProgressSink *progress) {
+            return source->seal(cancellation, progress);
+        },
+        std::format("{}:{}", id, (*connection)->revision)};
 }
 
 Result<std::shared_ptr<MutationTarget>> DeviceSessionManager::begin_mutation(std::string_view id,

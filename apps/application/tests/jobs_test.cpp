@@ -711,6 +711,33 @@ TEST(JobManager, IgnoresRegressingProgressWithinAPhaseAndContainsSubscriberFailu
     jobs.unsubscribe(throwing);
 }
 
+TEST(JobManager, AllowsByteAndObjectCountersWithinTheSameReadingPhase) {
+    auto registry = test_registry([](const nlohmann::json &, const axk::app::OperationContext &context) {
+        if (context.progress) {
+            context.progress->report({axk::ProgressPhase::reading, 4096U, 4096U, "Reading filesystem metadata", {}});
+            context.progress->report({axk::ProgressPhase::reading, 0U, 2U, "Reading object metadata", {}});
+            context.progress->report({axk::ProgressPhase::reading, 1U, 2U, "Reading object metadata", {}});
+            context.progress->report({axk::ProgressPhase::reading, 0U, 2U, "Reading object metadata", {}});
+            context.progress->report({axk::ProgressPhase::reading, 2U, 2U, "Reading object metadata", {}});
+        }
+        return axk::app::Result<nlohmann::json>{nlohmann::json::object()};
+    });
+    axk::app::JobManager jobs{registry, 1U, 1U, 4U, 16U};
+    const auto submitted = jobs.submit(
+        "test.job", {},
+        {.owner_id = "owner", .request_id = "counters", .cancellation = {}, .progress = nullptr, .display_path = {}});
+    ASSERT_TRUE(submitted);
+    ASSERT_EQ(wait_terminal(jobs, submitted->job_id).state, axk::app::JobState::completed);
+    const auto replay = jobs.replay(submitted->job_id, "owner", 0U);
+    ASSERT_TRUE(replay);
+    std::vector<std::uint64_t> counts;
+    for (const auto &event : *replay) {
+        if (event.type == "progress" && event.progress)
+            counts.push_back(event.progress->completed);
+    }
+    EXPECT_EQ(counts, (std::vector<std::uint64_t>{4096U, 0U, 1U, 2U}));
+}
+
 TEST(JobManager, ConcurrentCancellationOfRunningWorkPublishesOneImmutableTerminalState) {
     std::atomic_bool entered{};
     auto registry = test_registry([&](const nlohmann::json &, const axk::app::OperationContext &context) {

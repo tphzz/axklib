@@ -270,7 +270,7 @@ Result<MediaContainer> open_media(const std::filesystem::path &path, const Cance
 }
 
 Result<MediaContainer> open_media(std::shared_ptr<const RandomAccessReader> reader, std::filesystem::path source_path,
-                                  const CancellationToken &cancellation) {
+                                  const CancellationToken &cancellation, ProgressSink *progress) {
     if (!reader) {
         return std::unexpected{detail::media_error(ErrorCode::invalid_argument, "media reader is required",
                                                    text::path_to_utf8(source_path), std::nullopt)};
@@ -333,6 +333,7 @@ Result<MediaContainer> open_media(std::shared_ptr<const RandomAccessReader> read
         return MediaContainer{std::move(*disk)};
     }
     options.cancellation = cancellation;
+    options.progress = progress;
     auto sfs = open_image(std::move(reader), std::move(source_path), options);
     if (!sfs)
         return std::unexpected{sfs.error()};

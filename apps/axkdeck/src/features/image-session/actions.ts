@@ -3,7 +3,10 @@ import type { ImageTransport, JobState, OpenedImage } from '../../lib/transport'
 import { userFacingMessage } from '../../lib/userFacingMessage';
 
 type SessionTransport = Pick<ImageTransport, 'openImage' | 'keepImageAlive' | 'refreshImage' | 'closeImage'>;
-export type ImageSessionPreparation = (candidate: OpenedImage) => Promise<void>;
+export type ImageSessionPreparation = (
+    candidate: OpenedImage,
+    onProgress?: (progress: NonNullable<JobState['progress']>) => void,
+) => Promise<void>;
 
 export interface ImageSessionSnapshot {
     sessionId: number | null;

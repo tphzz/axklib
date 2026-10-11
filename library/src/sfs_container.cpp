@@ -156,7 +156,7 @@ Result<Container> open_image(std::shared_ptr<const RandomAccessReader> image, st
             make_error(ErrorCode::invalid_argument, ErrorCategory::io, "image reader must not be null")};
     }
     if (options.progress)
-        options.progress->report({ProgressPhase::opening, 0, std::nullopt, text::path_to_utf8(source_path), {}});
+        options.progress->report({ProgressPhase::reading, 0, std::nullopt, "Reading filesystem metadata", {}});
     if (image->size() >= 0x220U) {
         const auto descriptor = sfs_detail::read_bytes(*image, 0x200U, 0x20U, options.cancellation);
         if (!descriptor)
@@ -218,8 +218,7 @@ Result<Container> open_image(std::shared_ptr<const RandomAccessReader> image, st
         }
         result.partitions_.push_back(*partition);
         if (options.progress) {
-            options.progress->report(
-                {ProgressPhase::reading, result.partitions_.size(), std::nullopt, result.partitions_.back().name, {}});
+            options.progress->report({ProgressPhase::reading, 0U, std::nullopt, "Reading filesystem metadata", {}});
         }
     }
     return result;
