@@ -2,10 +2,24 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <utility>
 
 #include "axklib/sdk.hpp"
 #include "axklib/sdk/devices.hpp"
 #include "axklib/sdk/version.hpp"
+
+namespace {
+bool device_host_exports(axk::operation_context &context) {
+    // An uninitialized host rejects every operation before accessing hardware.
+    // Exercise all out-of-line members to prove their shared SDK exports link.
+    axk::device_host host;
+    axk::device_host moved{std::move(host)};
+    host = std::move(moved);
+    return !host.list() && !host.connect({}, "raw") && !host.status({}) && !host.open_image({}, {}, context) &&
+           !host.authorize_writes({}, {}, false) && !host.apply({}, {}, {}, "{}", context) && !host.operations() &&
+           !host.recover({}, {}, {}, false) && !host.close({});
+}
+} // namespace
 
 int main() {
     axk::result<int> value{42};
@@ -15,6 +29,8 @@ int main() {
         return 1;
 
     axk::operation_context context;
+    if (!device_host_exports(context))
+        return 18;
     auto image = axk::image::open(AXK_TEST_FIXTURE, context);
     if (!image)
         return 2;

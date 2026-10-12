@@ -70,39 +70,39 @@ struct scsi2sd_xml_target {
 
 // Explicit device ownership. Construction and operation-status enumeration do
 // not enumerate, open, or recover physical media. Calls on one host are serialized.
-class AXK_SDK_API device_host final {
+class device_host final {
   public:
-    device_host();
-    ~device_host();
-    device_host(device_host &&) noexcept;
-    device_host &operator=(device_host &&) noexcept;
+    AXK_SDK_API device_host();
+    AXK_SDK_API ~device_host();
+    AXK_SDK_API device_host(device_host &&) noexcept;
+    AXK_SDK_API device_host &operator=(device_host &&) noexcept;
     device_host(const device_host &) = delete;
     device_host &operator=(const device_host &) = delete;
 
-    [[nodiscard]] static bool available() noexcept;
-    [[nodiscard]] static result<device_host> create(const std::string &state_directory,
-                                                    const std::string &helper_path = {});
-    [[nodiscard]] result<std::vector<device_candidate>> list();
+    [[nodiscard]] static AXK_SDK_API bool available() noexcept;
+    [[nodiscard]] static AXK_SDK_API result<device_host> create(const std::string &state_directory,
+                                                                const std::string &helper_path = {});
+    [[nodiscard]] AXK_SDK_API result<std::vector<device_candidate>> list();
     // Layout is raw, scsi2sd-v6, or scsi2sd-xml. XML mismatches are read-only.
-    [[nodiscard]] result<device_session> connect(const std::string &candidate_id, const std::string &layout,
-                                                 const std::string &xml = {});
-    [[nodiscard]] result<device_session> status(const std::string &session_id);
-    [[nodiscard]] result<image> open_image(const std::string &session_id, const std::string &target_id,
-                                           operation_context &context);
-    [[nodiscard]] result<void> authorize_writes(const std::string &session_id, const std::string &target_id,
-                                                bool exclusive_use_acknowledged);
+    [[nodiscard]] AXK_SDK_API result<device_session> connect(const std::string &candidate_id, const std::string &layout,
+                                                             const std::string &xml = {});
+    [[nodiscard]] AXK_SDK_API result<device_session> status(const std::string &session_id);
+    [[nodiscard]] AXK_SDK_API result<image> open_image(const std::string &session_id, const std::string &target_id,
+                                                       operation_context &context);
+    [[nodiscard]] AXK_SDK_API result<void> authorize_writes(const std::string &session_id, const std::string &target_id,
+                                                            bool exclusive_use_acknowledged);
     // Applies the existing alteration-manifest contract to an opened SFS target.
     // Inputs must be inline; partition edits and repair are intentionally excluded.
     // A caller-generated unique operation ID must be retained before invoking.
-    [[nodiscard]] result<device_operation> apply(const std::string &session_id, const std::string &target_id,
-                                                 const std::string &operation_id, const std::string &manifest_json,
-                                                 operation_context &context);
-    [[nodiscard]] result<std::vector<device_operation>> operations();
-    [[nodiscard]] result<void> recover(const std::string &operation_id, const std::string &session_id,
-                                       const std::string &target_id, bool exclusive_use_acknowledged);
+    [[nodiscard]] AXK_SDK_API result<device_operation>
+    apply(const std::string &session_id, const std::string &target_id, const std::string &operation_id,
+          const std::string &manifest_json, operation_context &context);
+    [[nodiscard]] AXK_SDK_API result<std::vector<device_operation>> operations();
+    [[nodiscard]] AXK_SDK_API result<void> recover(const std::string &operation_id, const std::string &session_id,
+                                                   const std::string &target_id, bool exclusive_use_acknowledged);
     // Destroy images/snapshots before closing their carrier. Recovery requires
     // an explicit reopen and never resumes an old reader or authorization.
-    [[nodiscard]] result<void> close(const std::string &session_id);
+    [[nodiscard]] AXK_SDK_API result<void> close(const std::string &session_id);
 
   private:
     struct impl;

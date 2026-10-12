@@ -26,3 +26,9 @@ def test_device_windows_sdk_headers_follow_windows_header(
         assert windows_position < source.index(f"#include <{header}>"), (
             f"{source_name}: windows.h must precede {header}"
         )
+
+
+def test_device_host_does_not_export_private_pimpl_storage() -> None:
+    header = (ROOT / "library/include/axklib/sdk/devices.hpp").read_text(encoding="utf-8")
+    assert "class device_host final {" in header
+    assert "class AXK_SDK_API device_host" not in header
