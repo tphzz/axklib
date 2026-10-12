@@ -930,7 +930,8 @@ def test_desktop_contract_and_rpm_inspection_are_cross_platform() -> None:
     assert 'dpkg-deb -f "$deb" Depends' in workflow_with_platform
     assert 'rpm -qp --requires "$rpm"' in workflow_with_platform
     assert "for dependency in libcxx llvm-libunwind dbus-libs 'udisks2 >= 2.7.3'; do" in workflow_with_platform
-    assert "for capability in libwebkit2gtk-4.1.so.0 libgtk-3.so.0 libdbus-1.so.3; do" in workflow_with_platform
+    assert "for capability in libwebkit2gtk-4.1.so.0 libgtk-3.so.0; do" in workflow_with_platform
+    assert "libdbus-1.so.3" not in workflow_with_platform
     assert "'dbus-1 >= 1.10'" in native_platform
     assert 'grep -F "${capability}()"' in workflow_with_platform
     assert "webkit2gtk4.1 gtk3 libcxx llvm-libunwind" not in workflow_with_platform
