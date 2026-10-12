@@ -324,6 +324,20 @@ TEST_F(ImageSessionTest, RejectsReadsAfterTheOpenedImageChangesExternally) {
     EXPECT_EQ(read.error().code, "image_source_changed");
 }
 
+TEST_F(ImageSessionTest, RejectsFileMutationAfterTheOpenedImageChangesExternally) {
+    axk::app::ImageSessionManager sessions{*sandbox_};
+    const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");
+    ASSERT_TRUE(opened) << opened.error().message;
+    const auto fixture = root_ / "fixture.hds";
+    const auto previous = std::filesystem::last_write_time(fixture);
+    patch_sample_cached_reference(fixture, 0x12345678U);
+    std::filesystem::last_write_time(fixture, previous + std::chrono::seconds{1});
+
+    const auto mutation = sessions.begin_mutation(opened->image_id, "owner-a", opened->revision);
+    ASSERT_FALSE(mutation);
+    EXPECT_EQ(mutation.error().code, "image_source_changed");
+}
+
 TEST_F(ImageSessionTest, VolumeCapacityRequiresOwnedCurrentPhysicalVolumeAndRejectsStaleCache) {
     axk::app::ImageSessionManager sessions{*sandbox_};
     const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");

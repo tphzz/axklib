@@ -3,10 +3,14 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -22,6 +26,7 @@
 #include "axklib/audio.hpp"
 #include "axklib/sfs.hpp"
 #include "axklib/writer.hpp"
+#include "device_read_metrics.hpp"
 
 namespace {
 using namespace axk::app;
@@ -34,6 +39,7 @@ struct Storage {
     std::uint64_t pcm_bytes_read{};
     std::size_t writes{};
     std::size_t upgrades{};
+    std::function<void(std::uint64_t, std::size_t)> before_read;
     bool fail_writes{};
     bool fail_flush_once{};
     bool disconnected{};
@@ -61,6 +67,8 @@ class FakeTransport final : public DeviceTransport {
         if (offset > size() || bytes.size() > size() - offset || storage_->disconnected)
             return std::unexpected(
                 axk::make_error(axk::ErrorCode::io_read_failed, axk::ErrorCategory::io, "test read failed"));
+        if (storage_->before_read)
+            storage_->before_read(offset, bytes.size());
         if (storage_->pcm_region) {
             const auto first = std::max(offset, storage_->pcm_region->first);
             const auto last = std::min(offset + bytes.size(), storage_->pcm_region->second);
@@ -305,6 +313,86 @@ TEST_F(DeviceSessions, SparseByteEditsPreserveCompleteSectorNeighborsAndDurableS
     EXPECT_EQ(operations->front().state, "committed");
     mutation->reset();
     EXPECT_FALSE(manager.begin_mutation(id, "disk", "owner", "operation-1"));
+}
+
+TEST_F(DeviceSessions, AdmissionAndJournalBoundariesEachVerifyMetadataOnce) {
+    DeviceSessionManager manager{directory, true, true, provider};
+    const auto id = open(manager);
+    read_and_authorize(manager, id);
+    auto mutation = manager.begin_mutation(id, "disk", "owner", "checkpoint-budget");
+    ASSERT_TRUE(mutation);
+    EXPECT_EQ(device_detail::device_read_metrics(mutation->get()).at("verificationPasses").get<std::uint64_t>(), 1U);
+    const std::vector<AlterationJournalPatch> patches{{4096U, {std::byte{0x42}}, {std::byte{0x11}}}};
+    bool admitted{};
+    ASSERT_TRUE(manager.apply(*mutation, patches, {}, {}, {}, [&](auto preview) -> Result<void> {
+        std::array<std::byte, 1U> byte{};
+        if (auto read = preview->read_exact_at(8192U, byte); !read)
+            return std::unexpected(Error{"test_read_failed", read.error().message});
+        admitted = true;
+        return {};
+    }));
+    EXPECT_TRUE(admitted);
+    const auto metrics = device_detail::device_read_metrics(mutation->get());
+    EXPECT_EQ(metrics.at("verificationPasses").get<std::uint64_t>(), 4U);
+    // The final pass must also verify the new sector observed by frozen admission.
+    EXPECT_EQ(metrics.at("verifiedBytes").get<std::uint64_t>(), 5U * 512U);
+    EXPECT_EQ(provider->storage->writes, 1U);
+}
+
+TEST_F(DeviceSessions, MetadataChangesAtEveryRetainedBoundaryPreventAllWrites) {
+    for (unsigned boundary = 0U; boundary < 4U; ++boundary) {
+        SCOPED_TRACE(boundary);
+        provider->storage = std::make_shared<Storage>();
+        DeviceSessionManager manager{directory / std::to_string(boundary), true, true, provider};
+        const auto id = open(manager);
+        read_and_authorize(manager, id);
+        if (boundary == 0U)
+            provider->storage->bytes[0U] = std::byte{0x99};
+        auto mutation = manager.begin_mutation(id, "disk", "owner", "changed-metadata");
+        if (boundary == 0U) {
+            EXPECT_FALSE(mutation);
+            EXPECT_EQ(provider->storage->writes, 0U);
+            continue;
+        }
+        ASSERT_TRUE(mutation);
+        bool injected{};
+        bool frozen_admitted{};
+        provider->storage->before_read = [&](std::uint64_t offset, std::size_t size) {
+            if (injected || offset != 4096U)
+                return;
+            bool published{};
+            if (boundary == 2U) {
+                for (const auto &entry : std::filesystem::recursive_directory_iterator{directory})
+                    published = published || entry.path().extension() == ".axkjournal";
+            }
+            if ((boundary == 1U && size == 1U) || published) {
+                provider->storage->bytes[0U] = std::byte{0x99};
+                injected = true;
+            }
+        };
+        const std::vector<AlterationJournalPatch> patches{{4096U, {std::byte{0x42}}, {std::byte{0x11}}}};
+        const auto applied = manager.apply(*mutation, patches, {}, {}, {}, [&](auto preview) -> Result<void> {
+            frozen_admitted = true;
+            std::array<std::byte, 1U> byte{};
+            if (auto read = preview->read_exact_at(8192U, byte); !read)
+                return std::unexpected(Error{"test_read_failed", read.error().message});
+            if (boundary == 3U) {
+                provider->storage->bytes[8192U] = std::byte{0x99};
+                injected = true;
+            }
+            return {};
+        });
+        provider->storage->before_read = {};
+        ASSERT_FALSE(applied);
+        EXPECT_TRUE(injected);
+        EXPECT_EQ(frozen_admitted, boundary == 3U);
+        EXPECT_EQ(provider->storage->writes, 0U);
+        EXPECT_EQ(provider->storage->bytes[4096U], std::byte{0x42});
+        const auto operations = manager.operations("owner");
+        ASSERT_TRUE(operations);
+        ASSERT_EQ(operations->size(), 1U);
+        EXPECT_EQ(operations->front().state, "no_write");
+    }
 }
 
 TEST_F(DeviceSessions, FailedRestorationRetainsJournalWithoutAutomaticDeviceRecovery) {
@@ -644,12 +732,20 @@ TEST_F(DeviceSessions, OpeningAndSampleRenameDoNotReadUnrelatedPcm) {
             {{"imageId", image->image_id}, {"expectedRevision", 1U}, {"manifest", {{"inline", manifest}}}}, context);
         ASSERT_TRUE(renamed) << renamed.error().message;
         const auto rename_bytes = provider->storage->bytes_read;
-        EXPECT_LE(rename_bytes, 20U * index_bytes + 128U * 1024U);
+        EXPECT_LE(rename_bytes, 9U * index_bytes + 128U * 1024U);
         EXPECT_EQ(provider->storage->pcm_bytes_read, 0U);
         ASSERT_FALSE(diagnostics.empty());
         EXPECT_EQ(diagnostics.back().at("phase").get<std::string>(), "total");
         EXPECT_GT(diagnostics.back().at("deviceIo").at("physicalReads").get<std::uint64_t>(), 0U);
         EXPECT_GT(diagnostics.back().at("deviceIo").at("cacheHits").get<std::uint64_t>(), 0U);
+        EXPECT_EQ(diagnostics.back().at("deviceIo").at("verificationPasses").get<std::uint64_t>(), 5U);
+        EXPECT_EQ(diagnostics.front().at("phase").get<std::string>(), "admission");
+        EXPECT_EQ(diagnostics.front().at("deviceIo").at("verificationPasses").get<std::uint64_t>(), 1U);
+        const auto commit = std::ranges::find_if(diagnostics, [](const auto &event) {
+            return event.at("phase").template get<std::string>() == "journal-commit";
+        });
+        ASSERT_NE(commit, diagnostics.end());
+        EXPECT_EQ(commit->at("deviceIo").at("verificationPasses").get<std::uint64_t>(), 4U);
         const auto samples = images.objects(image->image_id, "owner", 100U, {}, "SBNK");
         ASSERT_TRUE(samples);
         ASSERT_EQ(samples->items.size(), 1U);

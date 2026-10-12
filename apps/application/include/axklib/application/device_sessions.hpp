@@ -125,6 +125,8 @@ class DeviceSessionManager {
                                                 ProgressSink *progress = nullptr);
     [[nodiscard]] Result<OpenedDeviceSource> open_source(std::string_view session_id, std::string_view target_id,
                                                          std::string_view owner);
+    // Admission verifies metadata against fresh bytes and retains the exclusive
+    // connection lock for the returned target's lifetime.
     [[nodiscard]] Result<std::shared_ptr<MutationTarget>> begin_mutation(std::string_view session_id,
                                                                          std::string_view target_id,
                                                                          std::string_view owner,

@@ -149,7 +149,7 @@ if(BUILD_TESTING)
                                        tests/secure_random_test.cpp tests/uploads_test.cpp
                                        tests/write_operations_test.cpp)
   target_compile_features(axk_application_tests PRIVATE cxx_std_23)
-  target_sources(axk_application_tests PRIVATE tests/device_sessions_test.cpp)
+  target_sources(axk_application_tests PRIVATE tests/device_sessions_test.cpp tests/device_guard_reads_test.cpp)
   if(AXK_BUILD_DEVICES)
     target_sources(axk_application_tests PRIVATE tests/device_candidates_test.cpp)
     target_link_libraries(axk_application_tests PRIVATE axklib::devices)

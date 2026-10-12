@@ -157,7 +157,10 @@ axk::app::Result<axk::app::ImageSessionMutation> axk::app::ImageSessionManager::
         (*session)->path_lease.downgrade();
         return std::unexpected(target.error());
     }
-    if ((*target)->revision() != (*session)->source_revision || !(*target)->verify_unchanged()) {
+    // Device admission already verified fresh metadata under its retained lock.
+    // File targets still require their own unchanged-source check here.
+    if ((*target)->revision() != (*session)->source_revision ||
+        (source.kind != ImageSourceKind::device && !(*target)->verify_unchanged())) {
         (*session)->path_lease.downgrade();
         return std::unexpected(session_error("image_source_changed", "image source changed before mutation", true));
     }

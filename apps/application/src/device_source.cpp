@@ -73,6 +73,7 @@ axk::Result<void> read_target(const Connection &connection, const DeviceTargetDe
 Result<void> verify_guards(const Connection &connection, const DeviceTargetDescription &target, const Guards &guards,
                            std::span<const AlterationJournalPatch> excluded, const CancellationToken &cancellation,
                            ProgressSink *progress, std::string_view label) {
+    ++connection.reads.verification_passes;
     const auto sector_size = connection.device.transport->sector_size();
     std::vector<std::byte> buffer;
     std::uint64_t completed{};
@@ -94,6 +95,7 @@ Result<void> verify_guards(const Connection &connection, const DeviceTargetDescr
         if (overlaps) {
             completed += sector_size;
             ++at;
+            report();
             continue;
         }
         auto end = std::next(at);
@@ -107,6 +109,7 @@ Result<void> verify_guards(const Connection &connection, const DeviceTargetDescr
                    }))
             ++end;
         buffer.resize(static_cast<std::size_t>(std::prev(end)->first - offset + sector_size));
+        ++connection.reads.verification_reads;
         if (auto read = read_target(connection, target, offset, buffer); !read)
             return std::unexpected(Error{"device_changed", read.error().message});
         for (; at != end; ++at) {
@@ -114,6 +117,7 @@ Result<void> verify_guards(const Connection &connection, const DeviceTargetDescr
             if (*digest(sector) != at->second)
                 return std::unexpected(
                     Error{"device_changed", "device metadata changed; reopen and review the operation"});
+            connection.reads.verified_bytes += sector_size;
         }
         completed += buffer.size();
         report();
@@ -246,6 +250,10 @@ Json metrics(const Connection &connection, const ReadCounters &initial, const Me
             {"readTimeUs", (connection.reads.nanoseconds - initial.nanoseconds) / 1000U},
             {"cacheHits", cache.hits},
             {"cacheMisses", cache.misses},
+            {"verificationPasses", connection.reads.verification_passes - initial.verification_passes},
+            {"verificationReads", connection.reads.verification_reads - initial.verification_reads},
+            {"verifiedBytes", connection.reads.verified_bytes - initial.verified_bytes},
+            {"verificationGapBytes", connection.reads.verification_gap_bytes - initial.verification_gap_bytes},
             {"guardSectors", guards}};
 }
 } // namespace

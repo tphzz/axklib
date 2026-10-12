@@ -181,8 +181,8 @@ Result<void> DeviceSessionManager::apply(
     auto mutation = std::dynamic_pointer_cast<Mutation>(target);
     if (!mutation)
         return std::unexpected(Error{"device_mutation_invalid", "mutation does not belong to a device session"});
-    if (auto unchanged = target->verify_unchanged(); !unchanged)
-        return unchanged;
+    if (auto bound = target->verify_bound(); !bound)
+        return bound;
     // Patch originals are streamed into the complete durable journal and
     // compared against the target there. Only semantic planning/admission
     // reads consume the bounded metadata guard table.
@@ -194,8 +194,8 @@ Result<void> DeviceSessionManager::apply(
     auto aligned = align_patches(target, patches);
     if (!aligned)
         return std::unexpected(aligned.error());
-    if (auto unchanged = target->verify_unchanged(); !unchanged)
-        return unchanged;
+    // The journal's entry check verifies all guards after alignment and before
+    // publishing anything. Its later publication/admission checks remain fresh.
     Json entries = Json::array();
     for (const auto &[offset, hash] : mutation->guards)
         entries.push_back({{"offset", offset}, {"sha256", hash}});
