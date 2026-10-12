@@ -27,9 +27,10 @@
 #include <string_view>
 #include <utility>
 
+#include <windows.h>
+
 #include <objbase.h>
 #include <shellapi.h>
-#include <windows.h>
 
 namespace rawdisk {
 namespace {

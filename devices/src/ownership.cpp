@@ -9,8 +9,9 @@
 #include "detail.hpp"
 
 #if defined(_WIN32)
-#include <shlobj.h>
 #include <windows.h>
+
+#include <shlobj.h>
 #else
 #include <cerrno>
 #include <fcntl.h>

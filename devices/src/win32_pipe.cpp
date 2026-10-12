@@ -10,9 +10,10 @@
 #include <utility>
 #include <vector>
 
+#include <windows.h>
+
 #include <bcrypt.h>
 #include <sddl.h>
-#include <windows.h>
 
 namespace rawdisk::detail {
 namespace {

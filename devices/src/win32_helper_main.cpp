@@ -3,8 +3,9 @@
 // (or set ElevationOptions::helper_path), ideally installed under Program Files and signed.
 #include "rawdisk/block_device.hpp"
 
-#include <shellapi.h>
 #include <windows.h>
+
+#include <shellapi.h>
 
 int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
     // Elevated process: never load DLLs from the application directory or the current
