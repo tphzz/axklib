@@ -34,12 +34,48 @@ const object: SamplerObject = {
 };
 
 describe('ObjectRenameDialog', () => {
+    it.each(['refresh-failed', 'unconfirmed'] as const)(
+        'offers recovery instead of another rename after %s',
+        async (phase) => {
+            const onsubmit = vi.fn(),
+                onrecover = vi.fn(),
+                oncancel = vi.fn();
+            render(ObjectRenameDialog, {
+                props: {
+                    target: { kind: 'sample', object: { ...object, objectType: 'SBNK' }, name: 'Piano' },
+                    busy: false,
+                    phase,
+                    canDismiss: phase === 'refresh-failed',
+                    recovery: phase === 'refresh-failed' ? 'refresh' : 'check',
+                    error: 'Connection lost',
+                    onsubmit,
+                    onrecover,
+                    oncancel,
+                },
+            });
+            expect((screen.getByLabelText('Sample name') as HTMLInputElement).disabled).toBe(true);
+            expect(screen.queryByRole('button', { name: 'Rename' })).toBeNull();
+            await fireEvent.submit(screen.getByLabelText('Sample name').closest('form')!);
+            expect(onsubmit).not.toHaveBeenCalled();
+            await fireEvent.click(
+                screen.getByRole('button', { name: phase === 'refresh-failed' ? 'Refresh' : 'Check status' }),
+            );
+            expect(onrecover).toHaveBeenCalledOnce();
+            await fireEvent.keyDown(screen.getByLabelText('Sample name'), { key: 'Escape' });
+            expect(oncancel).toHaveBeenCalledTimes(phase === 'refresh-failed' ? 1 : 0);
+        },
+    );
+
     it('enforces the eight-character Program display-name limit', async () => {
         const onsubmit = vi.fn();
         render(ObjectRenameDialog, {
             props: {
                 target: { kind: 'program', object, name: 'Pgm 001', programNumber: 1 },
                 busy: false,
+                phase: 'idle',
+                canDismiss: true,
+                recovery: null,
+                onrecover: vi.fn(),
                 error: '',
                 oncancel: vi.fn(),
                 onsubmit,
@@ -61,6 +97,10 @@ describe('ObjectRenameDialog', () => {
             props: {
                 target: { kind: 'sample-bank', object: { ...object, objectType: 'SBAC' }, name: 'Bank' },
                 busy: true,
+                phase: 'submitting',
+                canDismiss: false,
+                recovery: null,
+                onrecover: vi.fn(),
                 error: 'Rename failed',
                 oncancel: vi.fn(),
                 onsubmit: vi.fn(),
@@ -79,6 +119,10 @@ describe('ObjectRenameDialog', () => {
             props: {
                 target: { kind: 'sequence', object: { ...object, objectType: 'SEQU' }, name: 'Demo Song' },
                 busy: false,
+                phase: 'idle',
+                canDismiss: true,
+                recovery: null,
+                onrecover: vi.fn(),
                 error: '',
                 oncancel: vi.fn(),
                 onsubmit: vi.fn(),
@@ -107,6 +151,10 @@ describe('ObjectRenameDialog', () => {
             props: {
                 target: { kind: 'sample', object: { ...object, objectType: 'SBNK' }, name: 'Sample' },
                 busy: false,
+                phase: 'idle',
+                canDismiss: true,
+                recovery: null,
+                onrecover: vi.fn(),
                 error: '',
                 oncancel: vi.fn(),
                 onsubmit: vi.fn(),

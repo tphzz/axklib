@@ -83,6 +83,10 @@
 {#if rename}<ObjectRenameDialog
         target={rename}
         busy={false}
+        phase="idle"
+        canDismiss
+        recovery={null}
+        onrecover={() => {}}
         error=""
         oncancel={() => (rename = null)}
         onsubmit={() => (rename = null)}

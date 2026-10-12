@@ -44,6 +44,7 @@
                 >Device
                 <select
                     bind:value={workflow.candidateId}
+                    class="dialog-field-control"
                     disabled={workflow.busy || !!workflow.connection}
                     data-dialog-initial-focus
                 >
@@ -58,7 +59,11 @@
             </label>
             <label class="field"
                 >Layout
-                <select bind:value={workflow.layout} disabled={workflow.busy || !!workflow.connection}>
+                <select
+                    class="dialog-field-control"
+                    bind:value={workflow.layout}
+                    disabled={workflow.busy || !!workflow.connection}
+                >
                     <option value="RAW">Single sampler disk</option>
                     <option value="SCSI2SD_V6">SCSI2SD V6 card configuration</option>
                     <option value="SCSI2SD_XML">SCSI2SD XML configuration</option>
@@ -105,7 +110,7 @@
                 </dl>
                 <label class="field"
                     >Target
-                    <select bind:value={workflow.targetId} disabled={workflow.busy}>
+                    <select class="dialog-field-control" bind:value={workflow.targetId} disabled={workflow.busy}>
                         <option value="">Select a target</option>
                         {#each workflow.connection.targets as target}
                             <option value={target.id}
@@ -140,7 +145,7 @@
                 </p>
                 <label class="field"
                     >Interrupted operation
-                    <select bind:value={workflow.recoveryId} disabled={workflow.busy}>
+                    <select class="dialog-field-control" bind:value={workflow.recoveryId} disabled={workflow.busy}>
                         <option value="">Select an interrupted operation</option>
                         {#each pending as operation}<option value={operation.operationId}
                                 >{operation.targetLabel} / {operation.serial} / {operation.state} / {operation.operationId}</option

@@ -5,10 +5,12 @@
 #include <chrono>
 #include <format>
 #include <limits>
+#include <optional>
 
 #include <hash-library/sha256.h>
 
 #include "axklib/file_publication.hpp"
+#include "device_io_timing.hpp"
 
 namespace axk::app::device_detail {
 
@@ -18,7 +20,10 @@ Result<std::string> digest(std::span<const std::byte> bytes) {
     return hash.getHash();
 }
 
-Result<void> save_json(const std::filesystem::path &path, const Json &value, bool create) {
+Result<void> save_json(const std::filesystem::path &path, const Json &value, bool create, ReadCounters *counters) {
+    std::optional<IoTiming> timing;
+    if (counters)
+        timing.emplace(counters->state_publications, counters->state_publication_nanoseconds);
     const auto text = value.dump();
     auto publication = axk::detail::TemporaryPublication::create(path, [&](const axk::detail::TemporaryFileSink &sink) {
         return sink(std::as_bytes(std::span{text.data(), text.size()}));
@@ -30,6 +35,11 @@ Result<void> save_json(const std::filesystem::path &path, const Json &value, boo
     if (!published || published->durability != PublicationDurability::confirmed)
         return std::unexpected(Error{"device_state_unavailable", "device operation state durability is unconfirmed"});
     return {};
+}
+
+Result<void> verify_bound(const Connection &connection) {
+    const IoTiming timing{connection.reads.binding_checks, connection.reads.binding_nanoseconds};
+    return connection.device.transport->verify_bound();
 }
 
 Result<Json> load_json(const std::filesystem::path &path) {
@@ -214,16 +224,23 @@ Result<void> Mutation::write_exact_at(std::uint64_t offset, std::span<const std:
         Json entries = Json::array();
         for (const auto &[at, hash] : guards)
             entries.push_back({{"offset", at}, {"sha256", hash}});
-        if (auto saved = save_json(directory / "guards.json", {{"sectors", std::move(entries)}}, false); !saved)
+        if (auto saved =
+                save_json(directory / "guards.json", {{"sectors", std::move(entries)}}, false, &connection->reads);
+            !saved)
             return saved;
         ++connection->revision;
     }
     cache_.clear();
     writing_ = true;
+    const IoTiming timing{connection->reads.writes, connection->reads.write_nanoseconds};
+    connection->reads.written_bytes += bytes.size();
     return connection->device.transport->write_exact_at(target.offset + offset, bytes);
 }
-Result<void> Mutation::flush() { return connection->device.transport->flush(); }
-Result<void> Mutation::verify_bound() const { return connection->device.transport->verify_bound(); }
+Result<void> Mutation::flush() {
+    const IoTiming timing{connection->reads.flushes, connection->reads.flush_nanoseconds};
+    return connection->device.transport->flush();
+}
+Result<void> Mutation::verify_bound() const { return device_detail::verify_bound(*connection); }
 Result<void> Mutation::verify_unchanged() const {
     if (auto checked = verify_bound(); !checked)
         return checked;
@@ -239,7 +256,7 @@ Result<void> Mutation::set_state(std::string_view state) const {
     if (!record)
         return std::unexpected(record.error());
     (*record)["state"] = state;
-    return save_json(directory / "operation.json", *record, false);
+    return save_json(directory / "operation.json", *record, false, &connection->reads);
 }
 
 namespace {
@@ -248,6 +265,19 @@ Json metrics(const Connection &connection, const ReadCounters &initial, const Me
     return {{"physicalReads", connection.reads.calls - initial.calls},
             {"physicalBytes", connection.reads.bytes - initial.bytes},
             {"readTimeUs", (connection.reads.nanoseconds - initial.nanoseconds) / 1000U},
+            {"bindingChecks", connection.reads.binding_checks - initial.binding_checks},
+            {"bindingTimeUs", (connection.reads.binding_nanoseconds - initial.binding_nanoseconds) / 1000U},
+            {"physicalWrites", connection.reads.writes - initial.writes},
+            {"writtenBytes", connection.reads.written_bytes - initial.written_bytes},
+            {"writeTimeUs", (connection.reads.write_nanoseconds - initial.write_nanoseconds) / 1000U},
+            {"flushes", connection.reads.flushes - initial.flushes},
+            {"flushTimeUs", (connection.reads.flush_nanoseconds - initial.flush_nanoseconds) / 1000U},
+            {"journalPublications", connection.reads.journal_publications - initial.journal_publications},
+            {"journalPublicationTimeUs",
+             (connection.reads.journal_publication_nanoseconds - initial.journal_publication_nanoseconds) / 1000U},
+            {"statePublications", connection.reads.state_publications - initial.state_publications},
+            {"statePublicationTimeUs",
+             (connection.reads.state_publication_nanoseconds - initial.state_publication_nanoseconds) / 1000U},
             {"cacheHits", cache.hits},
             {"cacheMisses", cache.misses},
             {"verificationPasses", connection.reads.verification_passes - initial.verification_passes},
@@ -271,6 +301,14 @@ Json device_read_metrics(const RandomAccessReader *reader) {
     if (const auto *mutation = dynamic_cast<const Mutation *>(reader))
         return mutation->read_metrics();
     return Json::object();
+}
+
+void record_device_journal_publication(const RandomAccessReader *reader, std::chrono::steady_clock::duration elapsed) {
+    if (const auto *mutation = dynamic_cast<const Mutation *>(reader)) {
+        ++mutation->connection->reads.journal_publications;
+        mutation->connection->reads.journal_publication_nanoseconds +=
+            static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(elapsed).count());
+    }
 }
 
 } // namespace axk::app::device_detail

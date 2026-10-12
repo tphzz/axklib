@@ -4,6 +4,9 @@ import { JobController } from '../jobs/actions';
 import { AxklibApiError } from '../../lib/httpErrors';
 import { CapacityWriteRejected } from '../../lib/httpCapacityGate';
 import type { JobState } from '../../lib/transport';
+import { diagnosticsEnabled, reportDiagnostic } from '../../lib/diagnostics';
+
+vi.mock('../../lib/diagnostics', () => ({ diagnosticsEnabled: vi.fn(() => false), reportDiagnostic: vi.fn() }));
 
 const queued: JobState = { jobId: 9, kind: 'test', status: 'queued' };
 const completed: JobState = { ...queued, status: 'completed' };
@@ -16,6 +19,41 @@ function setup() {
 }
 
 describe('volume action execution recovery', () => {
+    it('records job observation and workspace refresh separately only in debug mode', async () => {
+        const { execution } = setup();
+        let now = 0;
+        const clock = vi.spyOn(performance, 'now').mockImplementation(() => now);
+        vi.mocked(diagnosticsEnabled).mockReturnValue(true);
+        try {
+            await execution.run(
+                async () => {
+                    now = 12;
+                    return queued;
+                },
+                async () => {
+                    now = 23;
+                },
+                vi.fn(),
+                vi.fn(),
+            );
+            expect(reportDiagnostic).toHaveBeenCalledWith('image_mutation_frontend_phase', {
+                phase: 'job-wait',
+                jobId: 9,
+                durationMs: 12,
+                outcome: 'resolved',
+            });
+            expect(reportDiagnostic).toHaveBeenCalledWith('image_mutation_frontend_phase', {
+                phase: 'workspace-refresh',
+                jobId: 9,
+                durationMs: 11,
+                outcome: 'resolved',
+            });
+        } finally {
+            clock.mockRestore();
+            vi.mocked(diagnosticsEnabled).mockReturnValue(false);
+        }
+    });
+
     it.each([
         [new CapacityWriteRejected('Inspection failed'), 'idle'],
         [new AxklibApiError('refused', 'Invalid name', 422), 'idle'],

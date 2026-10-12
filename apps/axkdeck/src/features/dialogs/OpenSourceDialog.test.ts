@@ -55,6 +55,14 @@ function fixture() {
     return { transport, service };
 }
 describe('Open dialog', () => {
+    it('uses the shared dark field styling for every device and target selector', () => {
+        const { transport, service } = fixture();
+        const view = render(OpenSourceHarness, { transport, service });
+        const selects = [...view.container.querySelectorAll('select')];
+        expect(selects).toHaveLength(5);
+        for (const select of selects) expect(select.classList.contains('dialog-field-control')).toBe(true);
+    });
+
     it('offers write access immediately and authorizes it as part of Open', async () => {
         const { transport, service } = fixture();
         const oncancel = vi.fn();

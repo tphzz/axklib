@@ -2,16 +2,21 @@
     import Icon from './Icon.svelte';
     import type { ObjectRenameTarget } from '../types';
     import { modal } from '../modal';
+    import type { VolumeActionPhase } from '../../features/mutation/volumeActionExecution.svelte';
 
     interface Props {
         target: ObjectRenameTarget;
         busy: boolean;
+        phase: VolumeActionPhase;
+        canDismiss: boolean;
+        recovery: 'check' | 'refresh' | null;
+        onrecover: () => void;
         error: string;
         oncancel: () => void;
         onsubmit: (name: string) => void;
     }
 
-    let { target, busy, error, oncancel, onsubmit }: Props = $props();
+    let { target, busy, phase, canDismiss, recovery, onrecover, error, oncancel, onsubmit }: Props = $props();
     let value = $state('');
     let initialized = false;
 
@@ -31,7 +36,18 @@
     const nameValid = $derived(
         trimmedValue.length > 0 && trimmedValue.length <= maximumLength && /^[\x20-\x7e]+$/.test(trimmedValue),
     );
-    const canSubmit = $derived(!busy && nameValid && trimmedValue !== target.name);
+    const canSubmit = $derived(phase === 'idle' && nameValid && trimmedValue !== target.name);
+    const status = $derived(
+        phase === 'checking'
+            ? 'Checking image change'
+            : phase === 'refreshing'
+              ? 'Refreshing image'
+              : phase === 'checking-status'
+                ? 'Checking status'
+                : busy
+                  ? 'Renaming'
+                  : '',
+    );
 
     $effect(() => {
         if (initialized) return;
@@ -45,7 +61,7 @@
     }
 
     function cancel(): void {
-        if (!busy) oncancel();
+        if (canDismiss) oncancel();
     }
 </script>
 
@@ -60,7 +76,7 @@
         <form class="volume-action-form" onsubmit={submit}>
             <header class="dialog-header">
                 <h2>Rename {subject}</h2>
-                <button class="icon-button" type="button" aria-label="Close" disabled={busy} onclick={cancel}
+                <button class="icon-button" type="button" aria-label="Close" disabled={!canDismiss} onclick={cancel}
                     ><Icon name="close" size={15} /></button
                 >
             </header>
@@ -71,13 +87,13 @@
                         class="dialog-field-control"
                         bind:value
                         data-dialog-initial-focus="select"
-                        disabled={busy}
+                        disabled={phase !== 'idle'}
                         maxlength={maximumLength}
                         autocomplete="off"
                         aria-label={`${subject} name`}
                     />
                 </label>
-                {#if trimmedValue && !nameValid}
+                {#if phase === 'idle' && trimmedValue && !nameValid}
                     <p class="field-help field-help-error">
                         Use 1–{maximumLength} printable ASCII characters.
                     </p>
@@ -85,10 +101,18 @@
                 {#if error}<p class="dialog-error" role="alert">{error}</p>{/if}
             </div>
             <footer class="dialog-footer">
-                <span class="dialog-footer-status" role="status">{busy ? 'Renaming' : ''}</span>
+                <span class="dialog-footer-status" role="status">{status}</span>
                 <div class="dialog-footer-actions">
-                    <button class="secondary-button" type="button" disabled={busy} onclick={cancel}>Cancel</button>
-                    <button class="primary-button" type="submit" disabled={!canSubmit}>Rename</button>
+                    <button class="secondary-button" type="button" disabled={!canDismiss} onclick={cancel}
+                        >{phase === 'refresh-failed' ? 'Done' : 'Cancel'}</button
+                    >
+                    {#if recovery}
+                        <button class="primary-button" type="button" disabled={busy} onclick={onrecover}
+                            >{recovery === 'check' ? 'Check status' : 'Refresh'}</button
+                        >
+                    {:else}
+                        <button class="primary-button" type="submit" disabled={!canSubmit}>Rename</button>
+                    {/if}
                 </div>
             </footer>
         </form>

@@ -224,10 +224,14 @@ axk::app::Result<void> axk::app::bind_session_write_operations(OperationRegistry
                 {axk::ProgressPhase::publishing, 0U, 1U, "Committing image changes", std::nullopt});
         }
         const auto journal_started = Clock::now();
+        std::uint64_t post_write_reopen_us{};
         std::optional<PreparedImageSessionCommit> prepared_commit;
         const auto validate_commit = [&]() -> Result<void> {
+            const auto reopen_started = Clock::now();
             auto validation =
                 images.prepare_mutation_commit(image_id, context.owner_id, expected_revision, CancellationToken{});
+            post_write_reopen_us = static_cast<std::uint64_t>(
+                std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - reopen_started).count());
             if (!validation)
                 return std::unexpected(validation.error());
             prepared_commit.emplace(std::move(*validation));
@@ -265,6 +269,7 @@ axk::app::Result<void> axk::app::bind_session_write_operations(OperationRegistry
                    {{"imageId", image_id},
                     {"patchCount", patches.size()},
                     {"patchBytes", patch_bytes},
+                    {"postWriteReopenTimeUs", post_write_reopen_us},
                     {"cleanupPending", !journals.storage_ready()}});
 
         const auto refresh_started = Clock::now();

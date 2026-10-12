@@ -11,6 +11,7 @@
 #include <utility>
 
 #include "axklib/application/secure_random.hpp"
+#include "job_progress.hpp"
 #include "job_request_resources.hpp"
 #include "jobs_support.hpp"
 #include "jobs_test_access.hpp"
@@ -29,6 +30,7 @@ struct axk::app::JobManager::Impl {
         JobState state{JobState::queued};
         std::uint64_t latest_sequence{};
         std::optional<JobProgress> progress;
+        job_runtime_detail::ProgressPublication progress_publication;
         std::optional<nlohmann::json> result;
         std::optional<Error> error;
         std::deque<JobEvent> events;
@@ -224,7 +226,8 @@ struct axk::app::JobManager::Impl {
             JobProgress update{job_runtime_detail::progress_phase_name(progress.phase), progress.completed,
                                progress.total, progress.label};
             if (record->progress && record->progress->phase == update.phase &&
-                record->progress->total == update.total && record->progress->completed > update.completed) {
+                record->progress->message == update.message && record->progress->total == update.total &&
+                record->progress->completed > update.completed) {
                 return;
             }
             const auto current = now();
@@ -236,6 +239,8 @@ struct axk::app::JobManager::Impl {
                 record->phase_started_at = current;
             }
             record->progress = update;
+            if (!record->progress_publication.admit(update, current))
+                return;
             progress_events.fetch_add(1U, std::memory_order_relaxed);
             event = append_event_locked(*record, "progress", update);
         }

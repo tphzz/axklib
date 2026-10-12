@@ -199,7 +199,9 @@ Result<void> DeviceSessionManager::apply(
     Json entries = Json::array();
     for (const auto &[offset, hash] : mutation->guards)
         entries.push_back({{"offset", offset}, {"sha256", hash}});
-    if (auto saved = save_json(mutation->directory / "guards.json", {{"sectors", std::move(entries)}}, true); !saved)
+    if (auto saved = save_json(mutation->directory / "guards.json", {{"sectors", std::move(entries)}}, true,
+                               &mutation->connection->reads);
+        !saved)
         return saved;
     auto encoded = journal_io::encoded_size(target->journal_identity(), target->stable_identity(), *aligned);
     std::error_code error;
@@ -331,7 +333,7 @@ Result<void> DeviceSessionManager::recover(std::string_view operation_id, std::s
         excluded.push_back({patch.target_offset,
                             {*frozen, patch.original_file_offset, patch.size},
                             {*frozen, patch.replacement_file_offset, patch.size}});
-    if (auto verified = (*connection)->device.transport->verify_bound(); !verified)
+    if (auto verified = device_detail::verify_bound(**connection); !verified)
         return verified;
     if (auto verified = verify_guards(**connection, *description, *guards, excluded); !verified)
         return verified;

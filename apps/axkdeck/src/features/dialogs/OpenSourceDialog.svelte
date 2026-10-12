@@ -186,6 +186,7 @@
                         <div class="open-source-device">
                             <select
                                 id={`open-device-${tab.replaceAll(' ', '-')}`}
+                                class="dialog-field-control"
                                 aria-label="Device"
                                 value={tab === 'Device'
                                     ? workflow.candidateId
@@ -231,6 +232,7 @@
                             >SCSI target
                             <select
                                 aria-label="SCSI target"
+                                class="dialog-field-control"
                                 bind:value={workflow.v6TargetId}
                                 disabled={workflow.busy ||
                                     workflow.listing ||
@@ -255,6 +257,7 @@
                             >SCSI target
                             <select
                                 aria-label="SCSI target"
+                                class="dialog-field-control"
                                 bind:value={workflow.xmlTargetId}
                                 disabled={!workflow.xml ||
                                     workflow.busy ||

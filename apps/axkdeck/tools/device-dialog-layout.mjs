@@ -47,7 +47,12 @@ try {
             let footer = source ? dialog.locator('.open-source-panel:not([hidden]) footer') : dialog.locator('footer');
             let primary = footer.locator('button').last();
             if (source) {
-                assert.deepEqual(await dialog.getByRole('tab').allTextContents(), ['Image', 'Device', 'SCSI2SDv6', 'SCSI2SD XML']);
+                assert.deepEqual(await dialog.getByRole('tab').allTextContents(), [
+                    'Image',
+                    'Device',
+                    'SCSI2SDv6',
+                    'SCSI2SD XML',
+                ]);
                 assert.equal(await page.getByLabel('Fixture calls').textContent(), '');
                 const initial = await dialog.boundingBox();
                 await dialog.getByRole('tab', { name: 'Device', exact: true }).waitFor({ state: 'visible' });
@@ -56,7 +61,10 @@ try {
                 if (v6) await page.keyboard.press('ArrowRight');
                 assert.equal(
                     await dialog
-                        .getByRole('tab', { name: mode === 'xml' ? 'SCSI2SD XML' : v6 ? 'SCSI2SDv6' : 'Device', exact: true })
+                        .getByRole('tab', {
+                            name: mode === 'xml' ? 'SCSI2SD XML' : v6 ? 'SCSI2SDv6' : 'Device',
+                            exact: true,
+                        })
                         .getAttribute('aria-selected'),
                     'true',
                 );
@@ -86,7 +94,10 @@ try {
                     assert(await primary.isDisabled());
                     await device.selectOption('fixture');
                     if (mode === 'v6-invalid') {
-                        await dialog.getByRole('status').filter({ hasText: 'No SCSI2SDv6 configuration found' }).waitFor();
+                        await dialog
+                            .getByRole('status')
+                            .filter({ hasText: 'No SCSI2SDv6 configuration found' })
+                            .waitFor();
                         assert(await primary.isDisabled());
                         const target = dialog.getByRole('combobox', { name: 'SCSI target', exact: true });
                         assert(await target.isDisabled());
@@ -109,7 +120,13 @@ try {
                         if (v6) {
                             const details = dialog.getByRole('definition').filter({ hasText: /^5242880$/ });
                             assert.equal(await details.count(), 1, 'Target end is exclusive and expressed in bytes');
-                            assert.equal(await dialog.getByLabel('Configured target details').getByText('512 B', { exact: true }).count(), 1);
+                            assert.equal(
+                                await dialog
+                                    .getByLabel('Configured target details')
+                                    .getByText('512 B', { exact: true })
+                                    .count(),
+                                1,
+                            );
                         }
                     }
                     assert.equal(
@@ -177,6 +194,40 @@ try {
                 if (mode === 'recovery')
                     await dialog.getByLabel('Interrupted operation').selectOption('synthetic-operation-0');
             }
+            for (const select of await dialog.locator('select:visible').all()) {
+                const theme = await select.evaluate((node) => {
+                    const style = getComputedStyle(node);
+                    return {
+                        shared: node.classList.contains('dialog-field-control'),
+                        colorScheme: style.colorScheme,
+                        background: style.backgroundColor,
+                        borderStyle: style.borderStyle,
+                        fontSize: style.fontSize,
+                        height: node.getBoundingClientRect().height,
+                        expectedHeight: Number.parseFloat(style.getPropertyValue('--density-control')),
+                    };
+                });
+                assert(theme.shared, 'Native dropdowns use shared dialog styling');
+                assert.equal(theme.colorScheme, 'dark', 'Native option popups use the dark palette');
+                assert.notEqual(theme.background, 'rgb(255, 255, 255)');
+                assert.equal(theme.borderStyle, 'solid');
+                assert.equal(theme.fontSize, '11px');
+                assert.equal(theme.height, theme.expectedHeight);
+                if (await select.isEnabled()) {
+                    await select.focus();
+                    assert(
+                        await select.evaluate((node) => {
+                                const colorSwatch = document.createElement('span');
+                                colorSwatch.style.color = 'var(--color-accent)';
+                                node.parentElement.append(colorSwatch);
+                                const accent = getComputedStyle(colorSwatch).color;
+                                colorSwatch.remove();
+                            return document.activeElement === node && getComputedStyle(node).borderColor === accent;
+                        }),
+                        'Focused dropdowns use the shared accent border',
+                    );
+                }
+            }
             assert(await primary.isEnabled());
             const geometry = await footer.evaluate((node) => {
                 const dialog = node.closest('[role="dialog"]');
@@ -228,10 +279,10 @@ try {
                 assert.equal(
                     await page.getByLabel('Fixture calls').textContent(),
                     mode === 'readonly'
-                          ? 'list list open '
-                          : mode === 'denied'
-                            ? 'list list authorize close open '
-                            : 'list list authorize open ',
+                        ? 'list list open '
+                        : mode === 'denied'
+                          ? 'list list authorize close open '
+                          : 'list list authorize open ',
                 );
             } else {
                 await dialog.focus();

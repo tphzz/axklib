@@ -83,6 +83,7 @@ describe('device draft lifecycle', () => {
         expect(images.setStatus).toHaveBeenCalledWith(expect.stringContaining('held in memory'));
         await fireEvent.click(screen.getByRole('button', { name: 'Retained device drafts (1)' }));
         const select = screen.getByRole('combobox', { name: 'Draft' }) as HTMLSelectElement;
+        expect(select.classList.contains('dialog-field-control')).toBe(true);
         await fireEvent.change(select, { target: { value: select.options[1]!.value } });
         expect((screen.getByRole('button', { name: 'Export JSON' }) as HTMLButtonElement).disabled).toBe(false);
     });

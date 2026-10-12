@@ -3,6 +3,7 @@ import { CapacityWriteRejected } from '../../lib/httpCapacityGate';
 import type { ImageTransport, JobState } from '../../lib/transport';
 import { userFacingMessage } from '../../lib/userFacingMessage';
 import type { JobController } from '../jobs/actions';
+import { diagnosticsEnabled, reportDiagnostic } from '../../lib/diagnostics';
 
 export type VolumeActionPhase =
     'idle' | 'checking' | 'checking-status' | 'submitting' | 'refreshing' | 'unconfirmed' | 'refresh-failed';
@@ -57,18 +58,20 @@ export class VolumeActionExecution {
         this.finish = finish;
         this.onUpdate = onUpdate;
         try {
-            const result = await this.jobs.run(
-                async () => {
-                    const job = await start();
-                    if (generation === this.generation) this.jobId = job.jobId;
-                    return job;
-                },
-                onUpdate,
-                () => {
-                    if (generation !== this.generation) return;
-                    this.phase = 'submitting';
-                    onStarted();
-                },
+            const result = await this.measure('job-wait', () =>
+                this.jobs.run(
+                    async () => {
+                        const job = await start();
+                        if (generation === this.generation) this.jobId = job.jobId;
+                        return job;
+                    },
+                    onUpdate,
+                    () => {
+                        if (generation !== this.generation) return;
+                        this.phase = 'submitting';
+                        onStarted();
+                    },
+                ),
             );
             await this.accept(result, generation);
         } catch (error) {
@@ -94,7 +97,10 @@ export class VolumeActionExecution {
         this.phase = 'checking-status';
         this.error = '';
         try {
-            await this.accept(await this.transport.waitForJob(this.jobId, this.onUpdate), generation);
+            await this.accept(
+                await this.measure('status-check', () => this.transport.waitForJob(this.jobId!, this.onUpdate)),
+                generation,
+            );
         } catch (error) {
             if (generation === this.generation) this.unconfirmed(error);
         }
@@ -119,7 +125,7 @@ export class VolumeActionExecution {
         this.phase = 'refreshing';
         this.error = '';
         try {
-            await this.finish();
+            await this.measure('workspace-refresh', this.finish);
             if (generation === this.generation) this.reset();
         } catch (error) {
             if (generation !== this.generation) return;
@@ -131,5 +137,28 @@ export class VolumeActionExecution {
     private unconfirmed(error: unknown): void {
         this.phase = 'unconfirmed';
         this.error = `Image change could not be confirmed${this.jobId === null ? '; no job reference was received. Do not repeat the change' : ''}: ${userFacingMessage(error)}`;
+    }
+
+    private async measure<T>(phase: string, action: () => Promise<T>): Promise<T> {
+        if (!diagnosticsEnabled()) return action();
+        const started = performance.now();
+        let outcome = 'resolved';
+        try {
+            return await action();
+        } catch (error) {
+            outcome = 'rejected';
+            throw error;
+        } finally {
+            try {
+                reportDiagnostic('image_mutation_frontend_phase', {
+                    phase,
+                    jobId: this.jobId,
+                    durationMs: Math.round(performance.now() - started),
+                    outcome,
+                });
+            } catch {
+                /* Diagnostics must not change the outcome of a write. */
+            }
+        }
     }
 }

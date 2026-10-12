@@ -123,7 +123,7 @@
             <header class="dialog-header"><h2 id="retained-drafts-title">Retained device drafts</h2></header>
             <div class="retained-content">
                 <label
-                    >Draft<select bind:value={selected}
+                    >Draft<select class="dialog-field-control" bind:value={selected}
                         ><option value="">Select a retained draft</option>{#each records as item}<option value={item.id}
                                 >{item.name} / {item.device}</option
                             >{/each}</select

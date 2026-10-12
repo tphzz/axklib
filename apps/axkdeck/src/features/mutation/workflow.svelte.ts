@@ -37,7 +37,10 @@ interface MutationWorkflowDependencies {
     workspaceView: () => WorkspaceView;
     setWorkspaceView: (view: WorkspaceView) => void;
     clearSelection: () => void;
-    refreshSession: (preferred?: { partitionIndex: number; volumeName?: string }) => Promise<void>;
+    refreshSession: (
+        preferred?: { partitionIndex: number; volumeName?: string },
+        mode?: 'reload' | 'editor',
+    ) => Promise<void>;
     setStatus: (status: string) => void;
     reportTiming: (operation: string, started: number, itemCount: number) => void;
 }
@@ -61,6 +64,7 @@ export class MutationWorkflow {
     private placementRepairGeneration = 0;
     private readonly sampleBankAssignment: SampleBankAssignmentWorkflow;
     private readonly volumeExecution: VolumeActionExecution;
+    private readonly objectExecution: VolumeActionExecution;
     volumeAvailable = $state(false);
     partitionAvailable = $state(false);
     objectRenameAvailable = $state(false);
@@ -77,13 +81,10 @@ export class MutationWorkflow {
         error: string;
         message: string;
     } | null>(null);
-    objectRenameRequest = $state<{
-        target: ObjectRenameTarget;
-        busy: boolean;
-        error: string;
-    } | null>(null);
+    objectRenameRequest = $state<{ target: ObjectRenameTarget } | null>(null);
     constructor(private readonly dependencies: MutationWorkflowDependencies) {
         this.volumeExecution = new VolumeActionExecution(dependencies.transport, dependencies.jobs);
+        this.objectExecution = new VolumeActionExecution(dependencies.transport, dependencies.jobs);
         this.sampleBankAssignment = new SampleBankAssignmentWorkflow({
             ...dependencies,
             available: () => this.objectRenameAvailable,
@@ -111,6 +112,26 @@ export class MutationWorkflow {
     async recoverVolumeAction(): Promise<void> {
         await this.volumeExecution.recover();
         if (this.volumeActionError) this.dependencies.setStatus(this.volumeActionError);
+    }
+
+    get objectRenameBusy(): boolean {
+        return this.objectExecution.busy;
+    }
+    get objectRenameCanDismiss(): boolean {
+        return this.objectExecution.canDismiss;
+    }
+    get objectRenamePhase() {
+        return this.objectExecution.phase;
+    }
+    get objectRenameError(): string {
+        return this.objectExecution.error;
+    }
+    get objectRenameRecovery() {
+        return this.objectExecution.recovery;
+    }
+    async recoverObjectRename(): Promise<void> {
+        await this.objectExecution.recover();
+        if (this.objectRenameError) this.dependencies.setStatus(this.objectRenameError);
     }
 
     get sampleBankAssignmentRequest(): SampleBankAssignmentRequest | null {
@@ -171,11 +192,13 @@ export class MutationWorkflow {
     }
 
     async requestObjectRename(target: ObjectRenameTarget): Promise<void> {
-        if (!this.objectRenameAvailable || this.dependencies.sessionId() === null) return;
+        if (!this.objectRenameAvailable || this.dependencies.sessionId() === null || !this.objectRenameCanDismiss)
+            return;
         const session = this.dependencies.sessionId();
         if (this.dependencies.confirmEditorLeave && !(await this.dependencies.confirmEditorLeave())) return;
-        if (session !== this.dependencies.sessionId()) return;
-        this.objectRenameRequest = { target, busy: false, error: '' };
+        if (session !== this.dependencies.sessionId() || !this.objectRenameCanDismiss) return;
+        this.objectExecution.reset();
+        this.objectRenameRequest = { target };
     }
 
     requestSampleBankAssignment(samples: SampleStructureItem[]): void {
@@ -269,7 +292,10 @@ export class MutationWorkflow {
     }
 
     cancelObjectRename(): void {
-        if (!this.objectRenameRequest?.busy) this.objectRenameRequest = null;
+        if (this.objectRenameCanDismiss) {
+            this.objectRenameRequest = null;
+            this.objectExecution.reset();
+        }
     }
 
     reset(): void {
@@ -285,6 +311,7 @@ export class MutationWorkflow {
         ++this.placementRepairGeneration;
         this.placementRepairRequest = null;
         this.objectRenameRequest = null;
+        this.objectExecution.reset();
         this.sampleBankAssignment.reset();
     }
 
@@ -326,6 +353,8 @@ export class MutationWorkflow {
                 : null;
         const preferredVolumeName =
             requested.action === 'add-volume' || requested.action === 'rename-volume' ? name : undefined;
+        const preserveEditor =
+            requested.action === 'rename-volume' && primaryItem.id === this.dependencies.catalog.activeVolumeId;
 
         this.volumeInspectionError = '';
         const writingStatus =
@@ -353,7 +382,9 @@ export class MutationWorkflow {
             },
             async () => {
                 if (!this.isCurrentVolumeAction(generation)) return;
-                await this.dependencies.refreshSession({ partitionIndex, volumeName: preferredVolumeName });
+                const preferred = { partitionIndex, volumeName: preferredVolumeName };
+                if (preserveEditor) await this.dependencies.refreshSession(preferred, 'editor');
+                else await this.dependencies.refreshSession(preferred);
                 if (!this.isCurrentVolumeAction(generation)) return;
                 ++this.volumeActionGeneration;
                 this.volumeAction = null;
@@ -458,7 +489,7 @@ export class MutationWorkflow {
     async submitObjectRename(name: string): Promise<void> {
         const request = this.objectRenameRequest;
         const sessionId = this.dependencies.sessionId();
-        if (!request || request.busy || sessionId === null) return;
+        if (!request || this.objectExecution.locked || sessionId === null) return;
         const target = request.target;
         const selection = this.captureObjectSelection();
         const preferred = {
@@ -466,35 +497,33 @@ export class MutationWorkflow {
             volumeName: target.object.volumeName,
         };
         const started = performance.now();
-        this.objectRenameRequest = { ...request, busy: true, error: '' };
+        const current = () => this.objectRenameRequest === request && this.dependencies.sessionId() === sessionId;
         this.dependencies.setStatus(`Renaming ${target.name}`);
-        try {
-            await this.dependencies.audition.invalidateSession(sessionId);
-            const completed = await this.dependencies.jobs.run(
-                () => this.dependencies.transport.startObjectRename(sessionId, this.objectRenameMutation(target, name)),
-                (update) => {
-                    if (update.progress?.label) this.dependencies.setStatus(update.progress.label);
-                },
-            );
-            if (completed.status !== 'completed') {
-                throw new Error(completed.error ?? 'Object rename did not complete');
-            }
-            await this.dependencies.refreshSession(preferred);
-            this.restoreObjectSelection(selection, target.object.key);
-            this.objectRenameRequest = null;
-            this.dependencies.setStatus(`Renamed ${target.name} to ${name}`);
-            this.dependencies.reportTiming('rename-object', started, 1);
-        } catch (error) {
-            const message = userFacingMessage(error);
-            if (this.dependencies.sessionId() === sessionId) {
-                await this.dependencies.refreshSession(preferred).catch(() => undefined);
+        await this.objectExecution.run(
+            async () => {
+                await this.dependencies.audition.invalidateSession(sessionId);
+                return this.dependencies.transport.startObjectRename(
+                    sessionId,
+                    this.objectRenameMutation(target, name),
+                );
+            },
+            async () => {
+                if (!current()) return;
+                await this.dependencies.refreshSession(preferred, 'editor');
+                if (!current()) return;
                 this.restoreObjectSelection(selection, target.object.key);
-            }
-            if (this.objectRenameRequest?.target.object.key === target.object.key) {
-                this.objectRenameRequest = { ...this.objectRenameRequest, busy: false, error: message };
-            }
-            this.dependencies.setStatus(message);
-        }
+                this.objectRenameRequest = null;
+                this.dependencies.setStatus(`Renamed ${target.name} to ${name}`);
+                this.dependencies.reportTiming('rename-object', started, 1);
+            },
+            (update) => {
+                if (current() && update.progress?.label) this.dependencies.setStatus(update.progress.label);
+            },
+            () => {
+                if (current()) this.dependencies.setStatus(`Renaming ${target.name}`);
+            },
+        );
+        if (current() && this.objectRenameError) this.dependencies.setStatus(this.objectRenameError);
     }
 
     private captureObjectSelection(): ObjectSelectionSnapshot {

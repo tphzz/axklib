@@ -1,6 +1,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <cstdint>
 #include <filesystem>
 #include <mutex>
 #include <span>
@@ -686,9 +687,9 @@ TEST(JobManager, IgnoresRegressingProgressWithinAPhaseAndContainsSubscriberFailu
         if (context.progress == nullptr)
             return axk::app::Result<nlohmann::json>{
                 std::unexpected(axk::app::Error{"missing_progress", "job progress adapter is missing"})};
-        context.progress->report({axk::ProgressPhase::reading, 2U, 4U, "two", std::nullopt});
-        context.progress->report({axk::ProgressPhase::reading, 1U, 4U, "one", std::nullopt});
-        context.progress->report({axk::ProgressPhase::reading, 3U, 4U, "three", std::nullopt});
+        context.progress->report({axk::ProgressPhase::reading, 2U, 4U, "Reading", std::nullopt});
+        context.progress->report({axk::ProgressPhase::reading, 1U, 4U, "Reading", std::nullopt});
+        context.progress->report({axk::ProgressPhase::reading, 4U, 4U, "Reading", std::nullopt});
         context.progress->report({axk::ProgressPhase::writing, 0U, 1U, "writing", std::nullopt});
         return axk::app::Result<nlohmann::json>{nlohmann::json::object()};
     });
@@ -707,8 +708,99 @@ TEST(JobManager, IgnoresRegressingProgressWithinAPhaseAndContainsSubscriberFailu
         if (event.type == "progress" && event.progress && event.progress->phase == "reading")
             reading.push_back(event.progress->completed);
     }
-    EXPECT_EQ(reading, (std::vector<std::uint64_t>{2U, 3U}));
+    EXPECT_EQ(reading, (std::vector<std::uint64_t>{2U, 4U}));
     jobs.unsubscribe(throwing);
+}
+
+TEST(JobManager, CoalescesProgressBurstsKeepingLiveSnapshotsAndTerminalProgress) {
+    for (const auto cancel : {false, true}) {
+        std::atomic_bool ready{}, release{};
+        auto registry = test_registry(
+            [&](const nlohmann::json &, const axk::app::OperationContext &context) -> axk::app::Result<nlohmann::json> {
+                for (std::uint64_t count = 0U; count <= 2000U; ++count)
+                    context.progress->report({axk::ProgressPhase::reading, count, 4000U, "Reading metadata", {}});
+                ready = true;
+                while (!release && !context.cancellation.is_cancelled())
+                    std::this_thread::sleep_for(1ms);
+                if (context.cancellation.is_cancelled())
+                    return std::unexpected(axk::app::Error{"operation_cancelled", "cancelled"});
+                return nlohmann::json::object();
+            });
+        axk::app::JobManager jobs{registry, 1U,    1U,    4U,
+                                  64U,      2048U, 15min, [] { return axk::app::JobManager::Clock::time_point{}; }};
+        const auto submitted = jobs.submit(
+            "test.job", {},
+            {.owner_id = "owner", .request_id = "burst", .cancellation = {}, .progress = nullptr, .display_path = {}});
+        ASSERT_TRUE(submitted);
+        for (std::size_t attempt = 0; attempt < 2000U && !ready; ++attempt)
+            std::this_thread::sleep_for(1ms);
+        ASSERT_TRUE(ready);
+        const auto live = jobs.status(submitted->job_id, "owner");
+        ASSERT_TRUE(live);
+        ASSERT_TRUE(live->progress);
+        EXPECT_EQ(live->progress->completed, 2000U);
+        EXPECT_EQ(live->latest_sequence, 3U);
+        EXPECT_EQ(jobs.metrics().progress_events, 1U);
+        if (cancel)
+            ASSERT_TRUE(jobs.cancel(submitted->job_id, "owner"));
+        else
+            release = true;
+        const auto terminal = wait_terminal(jobs, submitted->job_id);
+        EXPECT_EQ(terminal.state, cancel ? axk::app::JobState::cancelled : axk::app::JobState::completed);
+        const auto replay = jobs.replay(submitted->job_id, "owner", 0U);
+        ASSERT_TRUE(replay);
+        for (std::size_t index = 0; index < replay->size(); ++index)
+            EXPECT_EQ((*replay)[index].sequence, index + 1U);
+        ASSERT_TRUE(replay->back().progress);
+        EXPECT_EQ(replay->back().progress->completed, 2000U);
+        EXPECT_EQ(replay->back().state, terminal.state);
+    }
+}
+
+TEST(JobManager, PublishesProgressAtTwentyHertzAndStageChangesWithoutDelay) {
+    std::atomic<std::int64_t> milliseconds{};
+    auto registry = test_registry([&](const nlohmann::json &, const axk::app::OperationContext &context) {
+        const auto report = [&](std::int64_t at, axk::ProgressPhase phase, std::uint64_t count, std::uint64_t total,
+                                std::string label) {
+            milliseconds = at;
+            context.progress->report({phase, count, total, std::move(label), {}});
+        };
+        report(0, axk::ProgressPhase::reading, 0U, 100U, "Reading metadata");
+        report(10, axk::ProgressPhase::reading, 1U, 100U, "Reading metadata");
+        report(49, axk::ProgressPhase::reading, 2U, 100U, "Reading metadata");
+        report(50, axk::ProgressPhase::reading, 3U, 100U, "Reading metadata");
+        report(51, axk::ProgressPhase::reading, 3U, 100U, "Reading metadata");
+        report(52, axk::ProgressPhase::reading, 4U, 100U, "Reading objects");
+        report(53, axk::ProgressPhase::reading, 0U, 100U, "Reading next volume");
+        report(54, axk::ProgressPhase::reading, 0U, 2U, "Reading next volume");
+        report(55, axk::ProgressPhase::reading, 1U, 2U, "Reading next volume");
+        report(56, axk::ProgressPhase::reading, 2U, 2U, "Reading next volume");
+        report(57, axk::ProgressPhase::publishing, 0U, 1U, "Committing");
+        report(58, axk::ProgressPhase::publishing, 1U, 1U, "Committed");
+        return axk::app::Result<nlohmann::json>{nlohmann::json::object()};
+    });
+    axk::app::JobManager jobs{registry,
+                              1U,
+                              1U,
+                              4U,
+                              64U,
+                              2048U,
+                              15min,
+                              [&] {
+                                  return axk::app::JobManager::Clock::time_point{} +
+                                         std::chrono::milliseconds{milliseconds.load()}; }};
+    const auto submitted = jobs.submit(
+        "test.job", {},
+        {.owner_id = "owner", .request_id = "throttle", .cancellation = {}, .progress = nullptr, .display_path = {}});
+    ASSERT_TRUE(submitted);
+    ASSERT_EQ(wait_terminal(jobs, submitted->job_id).state, axk::app::JobState::completed);
+    const auto replay = jobs.replay(submitted->job_id, "owner", 0U);
+    ASSERT_TRUE(replay);
+    std::vector<std::uint64_t> counts;
+    for (const auto &event : *replay)
+        if (event.type == "progress" && event.progress)
+            counts.push_back(event.progress->completed);
+    EXPECT_EQ(counts, (std::vector<std::uint64_t>{0U, 3U, 4U, 0U, 0U, 2U, 0U, 1U}));
 }
 
 TEST(JobManager, AllowsByteAndObjectCountersWithinTheSameReadingPhase) {
@@ -735,7 +827,7 @@ TEST(JobManager, AllowsByteAndObjectCountersWithinTheSameReadingPhase) {
         if (event.type == "progress" && event.progress)
             counts.push_back(event.progress->completed);
     }
-    EXPECT_EQ(counts, (std::vector<std::uint64_t>{4096U, 0U, 1U, 2U}));
+    EXPECT_EQ(counts, (std::vector<std::uint64_t>{4096U, 0U, 2U}));
 }
 
 TEST(JobManager, ConcurrentCancellationOfRunningWorkPublishesOneImmutableTerminalState) {

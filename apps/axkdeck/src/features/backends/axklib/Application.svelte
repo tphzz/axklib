@@ -172,7 +172,7 @@
         workspaceView: () => workspaceView,
         setWorkspaceView: (view) => (workspaceView = view),
         clearSelection: () => (packageExportSelection = emptyPackageExportSelection()),
-        refreshSession: (preferred) => imageSessionWorkflow.refresh(preferred),
+        refreshSession: (preferred, mode) => imageSessionWorkflow.refresh(preferred, mode),
         setStatus: (status) => imageSessionWorkflow.setStatus(status),
         reportTiming: reportMutationTiming,
     });

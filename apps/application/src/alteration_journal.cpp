@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <ranges>
 #include <string_view>
 #include <system_error>
@@ -22,6 +23,7 @@
 #include "axklib/application/secure_random.hpp"
 #include "axklib/file_publication.hpp"
 #include "axklib/filesystem_transaction.hpp"
+#include "device_read_metrics.hpp"
 #include "private_storage.hpp"
 
 namespace {
@@ -159,9 +161,12 @@ axk::app::Result<void> axk::app::AlterationJournalStore::apply(
         return std::unexpected(identifier.error());
     const auto path = directory_ / ("alteration-" + *identifier + ".axkjournal");
     const auto quarantine = [&] { storage_ready_.store(false, std::memory_order_relaxed); };
+    const auto publication_started = std::chrono::steady_clock::now();
     auto journal_publication =
         journal_io::publish(path, target->journal_identity(), target_identity, image_size_bytes, patches,
                             maximum_journal_bytes_, cancellation, maximum_patch_write_bytes_);
+    device_detail::record_device_journal_publication(target.get(),
+                                                     std::chrono::steady_clock::now() - publication_started);
     if (!journal_publication)
         return std::unexpected{journal_publication.error()};
     JournalQuarantineGuard journal_guard{storage_ready_};
@@ -342,8 +347,10 @@ axk::app::Result<void> axk::app::AlterationJournalStore::apply(
     }
     const auto marker = commit_marker_path(path);
     const auto &journal_checksum = journal_publication->file_checksum;
+    const auto marker_started = std::chrono::steady_clock::now();
     auto marker_publication =
         publish_file(marker, std::as_bytes(std::span{journal_checksum.data(), journal_checksum.size()}));
+    device_detail::record_device_journal_publication(target.get(), std::chrono::steady_clock::now() - marker_started);
     if (!marker_publication || marker_publication->durability != axk::PublicationDurability::confirmed) {
         if (auto recovered = rollback_and_remove(true); !recovered)
             return recovered;

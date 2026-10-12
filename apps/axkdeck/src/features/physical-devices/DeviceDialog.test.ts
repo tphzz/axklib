@@ -15,6 +15,14 @@ function fixture() {
     return { workflow, service };
 }
 describe('device dialog safety controls', () => {
+    it('uses the shared dark field styling for recovery selectors', () => {
+        const { workflow } = fixture();
+        const view = render(DeviceDialog, { workflow });
+        const selects = [...view.container.querySelectorAll('select')];
+        expect(selects.length).toBeGreaterThanOrEqual(2);
+        for (const select of selects) expect(select.classList.contains('dialog-field-control')).toBe(true);
+    });
+
     it('has no preselected device and exposes large carriers only for sliced layouts', async () => {
         const { workflow } = fixture();
         const view = render(DeviceDialog, { workflow });

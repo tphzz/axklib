@@ -26,7 +26,7 @@ Result<void> require_target(const device_detail::Connection &connection, const D
         target->offset % connection.device.transport->sector_size() != 0U ||
         target->size_bytes % connection.device.transport->sector_size() != 0U)
         return std::unexpected(Error{"device_layout_invalid", "device target geometry is invalid"});
-    return connection.device.transport->verify_bound();
+    return device_detail::verify_bound(connection);
 }
 
 } // namespace
@@ -113,7 +113,7 @@ Result<DeviceSessionSummary> DeviceSessionManager::status(std::string_view id, s
     if (!connection)
         return std::unexpected(connection.error());
     const std::scoped_lock lock{(*connection)->io};
-    if (!(*connection)->device.transport->verify_bound()) {
+    if (!device_detail::verify_bound(**connection)) {
         (*connection)->invalidated = true;
         (*connection)->authorized_target.clear();
     }
@@ -186,7 +186,7 @@ Result<OpenedDeviceSource> DeviceSessionManager::open_source(std::string_view id
             if (value->invalidated || value->revision != revision)
                 return std::unexpected(
                     Error{"device_disconnected", "device session is invalidated or its revision changed"});
-            auto checked = value->device.transport->verify_bound();
+            auto checked = device_detail::verify_bound(*value);
             if (!checked) {
                 value->invalidated = true;
                 value->authorized_target.clear();

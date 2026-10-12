@@ -12,6 +12,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -39,6 +40,7 @@ struct Storage {
     std::uint64_t pcm_bytes_read{};
     std::size_t writes{};
     std::size_t upgrades{};
+    std::chrono::milliseconds io_delay{};
     std::function<void(std::uint64_t, std::size_t)> before_read;
     bool fail_writes{};
     bool fail_flush_once{};
@@ -57,6 +59,7 @@ class FakeTransport final : public DeviceTransport {
         return {};
     }
     Result<void> verify_bound() const override {
+        std::this_thread::sleep_for(storage_->io_delay);
         if (storage_->disconnected)
             return std::unexpected(Error{"device_changed", "test device disconnected"});
         return {};
@@ -79,6 +82,7 @@ class FakeTransport final : public DeviceTransport {
         return {};
     }
     Result<void> write_exact_at(std::uint64_t offset, std::span<const std::byte> bytes) override {
+        std::this_thread::sleep_for(storage_->io_delay);
         ++storage_->writes;
         if (storage_->fail_writes)
             return std::unexpected(Error{"test_write_failed", "simulated write and restoration failure"});
@@ -88,6 +92,7 @@ class FakeTransport final : public DeviceTransport {
         return {};
     }
     Result<void> flush() override {
+        std::this_thread::sleep_for(storage_->io_delay);
         if (storage_->fail_flush_once) {
             storage_->fail_flush_once = false;
             return std::unexpected(Error{"test_flush_failed", "simulated commit flush failure"});
@@ -324,6 +329,7 @@ TEST_F(DeviceSessions, AdmissionAndJournalBoundariesEachVerifyMetadataOnce) {
     EXPECT_EQ(device_detail::device_read_metrics(mutation->get()).at("verificationPasses").get<std::uint64_t>(), 1U);
     const std::vector<AlterationJournalPatch> patches{{4096U, {std::byte{0x42}}, {std::byte{0x11}}}};
     bool admitted{};
+    provider->storage->io_delay = std::chrono::milliseconds{1};
     ASSERT_TRUE(manager.apply(*mutation, patches, {}, {}, {}, [&](auto preview) -> Result<void> {
         std::array<std::byte, 1U> byte{};
         if (auto read = preview->read_exact_at(8192U, byte); !read)
@@ -333,6 +339,18 @@ TEST_F(DeviceSessions, AdmissionAndJournalBoundariesEachVerifyMetadataOnce) {
     }));
     EXPECT_TRUE(admitted);
     const auto metrics = device_detail::device_read_metrics(mutation->get());
+    ASSERT_TRUE(metrics.contains("bindingChecks"));
+    EXPECT_GT(metrics.at("bindingChecks").get<std::uint64_t>(), 0U);
+    EXPECT_GE(metrics.at("bindingTimeUs").get<std::uint64_t>(), 1000U);
+    EXPECT_EQ(metrics.at("physicalWrites").get<std::uint64_t>(), 1U);
+    EXPECT_EQ(metrics.at("writtenBytes").get<std::uint64_t>(), 512U);
+    EXPECT_GE(metrics.at("writeTimeUs").get<std::uint64_t>(), 1000U);
+    EXPECT_EQ(metrics.at("flushes").get<std::uint64_t>(), 1U);
+    EXPECT_GE(metrics.at("flushTimeUs").get<std::uint64_t>(), 1000U);
+    EXPECT_EQ(metrics.at("journalPublications").get<std::uint64_t>(), 2U);
+    EXPECT_GT(metrics.at("journalPublicationTimeUs").get<std::uint64_t>(), 0U);
+    EXPECT_GE(metrics.at("statePublications").get<std::uint64_t>(), 3U);
+    EXPECT_GT(metrics.at("statePublicationTimeUs").get<std::uint64_t>(), 0U);
     EXPECT_EQ(metrics.at("verificationPasses").get<std::uint64_t>(), 4U);
     // The final pass must also verify the new sector observed by frozen admission.
     EXPECT_EQ(metrics.at("verifiedBytes").get<std::uint64_t>(), 5U * 512U);
@@ -745,6 +763,8 @@ TEST_F(DeviceSessions, OpeningAndSampleRenameDoNotReadUnrelatedPcm) {
             return event.at("phase").template get<std::string>() == "journal-commit";
         });
         ASSERT_NE(commit, diagnostics.end());
+        ASSERT_TRUE(commit->contains("postWriteReopenTimeUs"));
+        EXPECT_GT(commit->at("postWriteReopenTimeUs").get<std::uint64_t>(), 0U);
         EXPECT_EQ(commit->at("deviceIo").at("verificationPasses").get<std::uint64_t>(), 4U);
         const auto samples = images.objects(image->image_id, "owner", 100U, {}, "SBNK");
         ASSERT_TRUE(samples);

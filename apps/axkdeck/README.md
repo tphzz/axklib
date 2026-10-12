@@ -164,8 +164,10 @@ for the upstream symptoms and renderer tradeoffs.
 `AXKDECK_LOG_LEVEL` controls desktop logging at runtime. Supported values are
 `trace`, `debug`, `info`, `warn`, `error`, and `off`; the default is `info`.
 Detailed audio playback telemetry is generated only at `debug` or `trace`,
-including preparation, transfer, decoding, cache, and scheduling timings. For
-example:
+including preparation, transfer, decoding, cache, and scheduling timings.
+These levels also record image-mutation phases and frontend refresh timings.
+Device edits include read, binding-check, write, flush, journal-publication and
+recovery-state timings; safety checks remain enabled. For example:
 
 ```bash
 RUSTUP_TOOLCHAIN=1.85 AXKDECK_LOG_LEVEL=debug corepack pnpm desktop:dev

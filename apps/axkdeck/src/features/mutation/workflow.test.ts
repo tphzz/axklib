@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import type { ImageTransport, JobState, PlacementRepairInspection } from '../../lib/transport';
+import type { ImageTransport, JobState, PlacementRepairInspection, SamplerObject } from '../../lib/transport';
 import type { SampleStructureItem } from '../../lib/types';
 import { MutationWorkflow } from './workflow.svelte';
 import { JobController } from '../jobs/actions';
@@ -79,6 +79,117 @@ function placementInspection(overrides: Partial<PlacementRepairInspection> = {})
 }
 
 describe('MutationWorkflow', () => {
+    const renameObject: SamplerObject = {
+        key: 'sample-1',
+        objectType: 'SBNK',
+        name: 'Piano',
+        partitionIndex: 0,
+        partitionName: 'Partition 1',
+        volumeName: 'Samples',
+        categoryName: 'SBNK',
+        objectEncoding: 'current',
+        directoryEntryName: 'Piano.001',
+        sfsId: 1,
+        storedSizeBytes: 512,
+        sizeWithDependenciesBytes: null,
+        sampleRate: 44100,
+        rootKey: 60,
+        storedFrameCount: 1,
+        waveStartFrame: 0,
+        waveLengthFrames: 1,
+        storageState: 'COMPLETE',
+        sampleWidthBytes: 2,
+    };
+    function renameFixture(transport: Partial<ImageTransport> = {}) {
+        const catalog = {
+            selectedSampleId: renameObject.key,
+            selectedProgramId: '',
+            selectedSequenceId: '',
+            selectedBankId: '',
+            selectedBankMemberId: '',
+            selectedBankWaveDataId: '',
+            selectedSampleWaveDataId: '',
+            selectedWaveDataId: '',
+            inspectorObjectId: renameObject.key,
+            editorObjectIds: {
+                programs: '',
+                sequences: '',
+                'sample-banks': '',
+                samples: renameObject.key,
+                'wave-data': '',
+            },
+            objectsById: new Map([[renameObject.key, renameObject]]),
+        };
+        const startObjectRename = vi.fn().mockResolvedValue({ jobId: 9, status: 'queued', kind: 'rename' });
+        const fixture = workflowWith({ startObjectRename, ...transport }, catalog);
+        fixture.workflow.objectRenameAvailable = true;
+        return { ...fixture, catalog, startObjectRename };
+    }
+
+    it('refreshes object renames without clearing the active selection', async () => {
+        const { workflow, catalog, refreshSession, startObjectRename } = renameFixture();
+        refreshSession.mockImplementation(async () => {
+            expect(catalog.selectedSampleId).toBe(renameObject.key);
+            expect(catalog.editorObjectIds.samples).toBe(renameObject.key);
+        });
+        await workflow.requestObjectRename({ kind: 'sample', object: renameObject, name: 'Piano' });
+        await workflow.submitObjectRename('Grand');
+        expect(startObjectRename).toHaveBeenCalledOnce();
+        expect(refreshSession).toHaveBeenCalledExactlyOnceWith({ partitionIndex: 0, volumeName: 'Samples' }, 'editor');
+        expect(catalog.selectedSampleId).toBe(renameObject.key);
+        expect(workflow.objectRenameRequest).toBeNull();
+    });
+
+    it('recovers a saved object rename by refreshing, never by writing again', async () => {
+        const { workflow, refreshSession, startObjectRename } = renameFixture();
+        refreshSession.mockRejectedValueOnce(new Error('Refresh disconnected'));
+        await workflow.requestObjectRename({ kind: 'sample', object: renameObject, name: 'Piano' });
+        await workflow.submitObjectRename('Grand');
+        expect(workflow.objectRenameRecovery).toBe('refresh');
+        expect(workflow.objectRenameError).toContain('Image change saved');
+        expect(refreshSession).toHaveBeenCalledTimes(1);
+        await workflow.submitObjectRename('Grand');
+        expect(startObjectRename).toHaveBeenCalledOnce();
+        await workflow.recoverObjectRename();
+        expect(startObjectRename).toHaveBeenCalledOnce();
+        expect(refreshSession).toHaveBeenCalledTimes(2);
+        expect(workflow.objectRenameRequest).toBeNull();
+    });
+
+    it('checks an uncertain object rename using its acknowledged job', async () => {
+        const waitForJob = vi.fn().mockResolvedValue({ jobId: 9, status: 'completed', kind: 'rename' });
+        const { workflow, run, refreshSession, startObjectRename } = renameFixture({ waitForJob });
+        run.mockImplementationOnce(async (start: () => Promise<unknown>) => {
+            await start();
+            throw new Error('Connection lost');
+        });
+        await workflow.requestObjectRename({ kind: 'sample', object: renameObject, name: 'Piano' });
+        await workflow.submitObjectRename('Grand');
+        expect(workflow.objectRenameRecovery).toBe('check');
+        workflow.cancelObjectRename();
+        expect(workflow.objectRenameRequest).not.toBeNull();
+        await workflow.submitObjectRename('Grand');
+        await workflow.recoverObjectRename();
+        expect(waitForJob).toHaveBeenCalledWith(9, expect.any(Function));
+        expect(startObjectRename).toHaveBeenCalledOnce();
+        expect(refreshSession).toHaveBeenCalledOnce();
+    });
+
+    it.each([true, false])('preserves the editor only when renaming the active volume: %s', async (active) => {
+        const { workflow, refreshSession } = workflowWith(
+            { startVolumeMutations: vi.fn().mockResolvedValue({ jobId: 2, status: 'queued' }) },
+            { activeVolumeId: active ? volume.id : 'other-volume' },
+        );
+        await workflow.requestVolumeAction(volume, 'rename-volume');
+        await workflow.submitVolumeAction('Renamed');
+        if (active)
+            expect(refreshSession).toHaveBeenCalledExactlyOnceWith(
+                { partitionIndex: 0, volumeName: 'Renamed' },
+                'editor',
+            );
+        else expect(refreshSession).toHaveBeenCalledExactlyOnceWith({ partitionIndex: 0, volumeName: 'Renamed' });
+    });
+
     it.each(['volume action', 'volume deletion'] as const)(
         'waits for editor confirmation and leaves %s closed when cancelled',
         async (kind) => {

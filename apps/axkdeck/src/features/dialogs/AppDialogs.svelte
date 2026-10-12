@@ -235,8 +235,12 @@
     {#key mutation.objectRenameRequest.target.object.key}
         <ObjectRenameDialog
             target={mutation.objectRenameRequest.target}
-            busy={mutation.objectRenameRequest.busy}
-            error={mutation.objectRenameRequest.error}
+            busy={mutation.objectRenameBusy}
+            phase={mutation.objectRenamePhase}
+            canDismiss={mutation.objectRenameCanDismiss}
+            recovery={mutation.objectRenameRecovery}
+            error={mutation.objectRenameError}
+            onrecover={() => void mutation.recoverObjectRename()}
             oncancel={() => mutation.cancelObjectRename()}
             onsubmit={(name) => void mutation.submitObjectRename(name)}
         />
