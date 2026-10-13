@@ -31,8 +31,17 @@ bool ServerApplication::origin_allowed(const crow::request &request) const {
 void ServerApplication::audit(std::string_view id, std::string_view action, std::string_view outcome,
                               std::string_view principal_id, std::string_view resource_type,
                               std::string_view resource_id) const {
-    write_structured_log(
+    diagnostics_.submit_line(
         axk::server::structured_audit_log(id, action, outcome, principal_id, resource_type, resource_id));
+}
+
+std::function<void(const Json &)> ServerApplication::operation_diagnostic_sink() const {
+    return [this](const Json &event) noexcept {
+        try {
+            diagnostics_.submit(event);
+        } catch (...) {
+        }
+    };
 }
 
 std::optional<crow::response> ServerApplication::guard(const crow::request &request, std::string_view id) const {

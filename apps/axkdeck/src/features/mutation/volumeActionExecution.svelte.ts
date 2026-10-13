@@ -12,6 +12,7 @@ export class VolumeActionExecution {
     phase = $state<VolumeActionPhase>('idle');
     error = $state('');
     private jobId: number | null = null;
+    private serverJobId: string | undefined;
     private completed: JobState | null = null;
     private finish: (() => Promise<void>) | null = null;
     private onUpdate: (job: JobState) => void = () => {};
@@ -41,6 +42,7 @@ export class VolumeActionExecution {
         this.phase = 'idle';
         this.error = '';
         this.jobId = null;
+        this.serverJobId = undefined;
         this.completed = null;
         this.finish = null;
     }
@@ -62,7 +64,10 @@ export class VolumeActionExecution {
                 this.jobs.run(
                     async () => {
                         const job = await start();
-                        if (generation === this.generation) this.jobId = job.jobId;
+                        if (generation === this.generation) {
+                            this.jobId = job.jobId;
+                            this.serverJobId = job.serverJobId;
+                        }
                         return job;
                     },
                     onUpdate,
@@ -150,12 +155,17 @@ export class VolumeActionExecution {
             throw error;
         } finally {
             try {
-                reportDiagnostic('image_mutation_frontend_phase', {
-                    phase,
-                    jobId: this.jobId,
-                    durationMs: Math.round(performance.now() - started),
-                    outcome,
-                });
+                reportDiagnostic(
+                    'image_mutation_frontend_phase',
+                    {
+                        phase,
+                        jobId: this.serverJobId,
+                        clientJobId: this.jobId,
+                        durationMs: Math.round(performance.now() - started),
+                        outcome,
+                    },
+                    'debug',
+                );
             } catch {
                 /* Diagnostics must not change the outcome of a write. */
             }

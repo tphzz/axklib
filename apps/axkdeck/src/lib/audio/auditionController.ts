@@ -45,7 +45,7 @@ function newPlaybackId(): string {
 }
 
 function defaultDiagnosticSink({ event, level, ...fields }: AuditionDiagnosticEvent): void {
-    reportDiagnostic(event, fields, level);
+    reportDiagnostic(event, { ...fields, source: 'audio' }, level === 'info' ? 'debug' : level);
 }
 
 export class AuditionController {

@@ -56,8 +56,14 @@ pub fn write_snapshot(
     let result = (|| {
         let mut output = BufWriter::new(file);
         for entry in entries {
-            writeln!(output, "[{}] {}", entry.source.label(), entry.text)
-                .map_err(|e| format!("Write log export: {e}"))?;
+            writeln!(
+                output,
+                "[{}][{}] {}",
+                entry.origin.label(),
+                entry.source.label(),
+                entry.text
+            )
+            .map_err(|e| format!("Write log export: {e}"))?;
         }
         output
             .flush()

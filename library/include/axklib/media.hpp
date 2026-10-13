@@ -425,11 +425,12 @@ class AXK_API MediaContainer {
     MediaStorage storage_;
 };
 
-AXK_API Result<MediaContainer> open_media(const std::filesystem::path &path,
-                                          const CancellationToken &cancellation = {});
+class diagnostic_sink;
+AXK_API Result<MediaContainer> open_media(const std::filesystem::path &path, const CancellationToken &cancellation = {},
+                                          diagnostic_sink *diagnostics = nullptr);
 AXK_API Result<MediaContainer> open_media(std::shared_ptr<const RandomAccessReader> reader,
                                           std::filesystem::path source_path, const CancellationToken &cancellation = {},
-                                          ProgressSink *progress = nullptr);
+                                          ProgressSink *progress = nullptr, diagnostic_sink *diagnostics = nullptr);
 AXK_API Result<ObjectCatalog> build_object_catalog(const MediaContainer &container,
                                                    std::size_t maximum_object_bytes = 64U * 1024U * 1024U,
                                                    const CancellationToken &cancellation = {});
@@ -437,7 +438,8 @@ AXK_API Result<MediaInventory> build_media_inventory(const MediaContainer &conta
                                                      MediaObjectReadMode mode = MediaObjectReadMode::complete,
                                                      std::size_t maximum_object_bytes = 64U * 1024U * 1024U,
                                                      const CancellationToken &cancellation = {},
-                                                     ProgressSink *progress = nullptr);
+                                                     ProgressSink *progress = nullptr,
+                                                     diagnostic_sink *diagnostics = nullptr);
 AXK_API Result<MediaObject> load_media_object(const MediaContainer &container, const MediaObjectDescriptor &descriptor,
                                               std::size_t maximum_object_bytes = 64U * 1024U * 1024U,
                                               const CancellationToken &cancellation = {});

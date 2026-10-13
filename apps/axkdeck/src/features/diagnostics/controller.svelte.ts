@@ -1,4 +1,11 @@
-import { defaultLogFilter, type LogDriver, type LogFilter, type LogPage } from './contracts';
+import {
+    defaultLogFilter,
+    type LogLevel,
+    type CaptureState,
+    type LogDriver,
+    type LogFilter,
+    type LogPage,
+} from './contracts';
 
 type Navigation = { before?: number | null; after?: number | null };
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
@@ -15,15 +22,54 @@ export class LogController {
     newCount = $state(0);
     total = $state(0);
     historyChanges = $state(0);
+    capture = $state<CaptureState>({ level: 'info', localServer: 'unavailable', error: null });
+    captureBusy = $state(false);
+    captureError = $state('');
     renderRevision = $state(0);
     private active = false;
     private version = 0;
+    private captureVersion = 0;
     private knownThrough = 0;
     private reading: Promise<void> | null = null;
     private pending: Navigation | null = null;
     private timer: ReturnType<typeof setTimeout> | undefined;
 
     constructor(private readonly driver: LogDriver) {}
+
+    updateCapture(state: CaptureState): void {
+        this.captureVersion++;
+        this.capture = state;
+        this.captureError = state.error ?? '';
+        if (this.filter.level !== state.level) {
+            this.filter = { ...this.filter, level: state.level };
+            this.reload();
+        }
+    }
+
+    async readCapture(): Promise<void> {
+        const version = this.captureVersion;
+        try {
+            const state = await this.driver.capture();
+            if (version === this.captureVersion) this.updateCapture(state);
+        } catch (error) {
+            if (version === this.captureVersion) this.captureError = message(error);
+        }
+    }
+
+    async setLevel(level: LogLevel): Promise<void> {
+        if (this.captureBusy || this.actionBusy) return;
+        const version = ++this.captureVersion;
+        this.captureBusy = true;
+        try {
+            const state = await this.driver.setCapture(level);
+            if (version !== this.captureVersion && this.capture.level !== level) return;
+            this.updateCapture(state);
+        } catch (error) {
+            if (version === this.captureVersion) this.captureError = message(error);
+        } finally {
+            this.captureBusy = false;
+        }
+    }
 
     setActive(active: boolean): void {
         if (active === this.active) return;
@@ -36,7 +82,7 @@ export class LogController {
         }
     }
 
-    setFilter(change: Partial<LogFilter>): void {
+    setFilter(change: Partial<Omit<LogFilter, 'level'>>): void {
         this.filter = { ...this.filter, ...change };
         this.reload();
     }

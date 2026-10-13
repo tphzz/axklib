@@ -25,6 +25,7 @@ struct InfrastructureRoutes {
     RequestRoute capabilities;
     RequestRoute metrics;
     RequestRoute shutdown;
+    RequestRoute diagnostic_capture;
     RequestRoute roots;
     RequestRoute workspaces;
     RequestRoute workspace_reset;

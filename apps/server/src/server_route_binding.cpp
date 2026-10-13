@@ -19,34 +19,36 @@ namespace axk::server::detail {
 
 void ServerApplication::register_infrastructure_routes() {
     axk::server::detail::register_infrastructure_routes(
-        app_, {.health_ready = [this](const crow::request &request) { return health_ready_response(request); },
-               .capabilities = [this](const crow::request &request) { return capability_response(request); },
-               .metrics = [this](const crow::request &request) { return metrics_response(request); },
-               .shutdown = [this](const crow::request &request) { return shutdown_response(request); },
-               .roots = [this](const crow::request &request) { return roots_response(request); },
-               .workspaces =
-                   [this](const crow::request &request) {
-                       return request.method == crow::HTTPMethod::Get ? workspace_snapshot_response(request)
-                                                                      : workspace_create_response(request);
-                   },
-               .workspace_reset = [this](const crow::request &request) { return workspace_reset_response(request); },
-               .workspace_item =
-                   [this](const crow::request &request, const std::string &workspace_id) {
-                       return workspace_item_response(request, workspace_id);
-                   },
-               .host_directory_roots =
-                   [this](const crow::request &request) { return host_directory_roots_response(request); },
-               .host_directory_list =
-                   [this](const crow::request &request) { return host_directory_listing_response(request); },
-               .openapi = [this](const crow::request &request) { return openapi_response(request); },
-               .program_editor_catalog =
-                   [this](const crow::request &request) {
-                       const auto id = request_id(request);
-                       if (auto denied = guard(request, id))
-                           return std::move(*denied);
-                       static const auto catalog = axk::app::program_editor_catalog();
-                       return json_response(200, {{"data", catalog}}, id);
-                   }});
+        app_,
+        {.health_ready = [this](const crow::request &request) { return health_ready_response(request); },
+         .capabilities = [this](const crow::request &request) { return capability_response(request); },
+         .metrics = [this](const crow::request &request) { return metrics_response(request); },
+         .shutdown = [this](const crow::request &request) { return shutdown_response(request); },
+         .diagnostic_capture = [this](const crow::request &request) { return diagnostic_capture_response(request); },
+         .roots = [this](const crow::request &request) { return roots_response(request); },
+         .workspaces =
+             [this](const crow::request &request) {
+                 return request.method == crow::HTTPMethod::Get ? workspace_snapshot_response(request)
+                                                                : workspace_create_response(request);
+             },
+         .workspace_reset = [this](const crow::request &request) { return workspace_reset_response(request); },
+         .workspace_item =
+             [this](const crow::request &request, const std::string &workspace_id) {
+                 return workspace_item_response(request, workspace_id);
+             },
+         .host_directory_roots =
+             [this](const crow::request &request) { return host_directory_roots_response(request); },
+         .host_directory_list =
+             [this](const crow::request &request) { return host_directory_listing_response(request); },
+         .openapi = [this](const crow::request &request) { return openapi_response(request); },
+         .program_editor_catalog =
+             [this](const crow::request &request) {
+                 const auto id = request_id(request);
+                 if (auto denied = guard(request, id))
+                     return std::move(*denied);
+                 static const auto catalog = axk::app::program_editor_catalog();
+                 return json_response(200, {{"data", catalog}}, id);
+             }});
 
     axk::server::detail::register_file_routes(
         app_,

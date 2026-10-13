@@ -146,6 +146,11 @@ def exercise_constrained_server(server: Path, fixture: Path, root: Path) -> None
         baseline_fds = process_file_descriptors(running.pid)
         baseline_rss = process_resident_bytes(running.pid)
 
+        capture_path = "/api/v1/diagnostics/capture"
+        assert request(port, None, "GET", capture_path).status == 401
+        assert request(port, TOKEN_A, "GET", capture_path).status == 404
+        assert request(port, TOKEN_A, "PUT", capture_path, {"level": "TRACE"}).status == 404
+
         missing = request(port, None, "GET", "/api/v1/roots")
         invalid = request(port, "not-a-token", "GET", "/api/v1/roots")
         assert missing.status == invalid.status == 401
@@ -515,6 +520,20 @@ def exercise_sidecar_shutdown(server: Path, root: Path) -> None:
         assert running.process is not None
         metadata = wait_for_connection_file(connection_file, running.process)
         token = str(metadata["bearerToken"])
+        capture_path = "/api/v1/diagnostics/capture"
+        assert request(port, None, "GET", capture_path).status == 401
+        assert request(port, None, "PUT", capture_path, {"level": "TRACE"}).status == 401
+        assert request(port, token, "GET", capture_path).json()["data"] == {"level": "INFO", "leaseSeconds": 0}
+        for value in ("debug", "OFF", "WARN"):
+            assert request(port, token, "PUT", capture_path, {"level": value}).status == 400
+        assert request(port, token, "PUT", capture_path, {"level": "DEBUG", "obsolete": True}).status == 400
+        denied_origin = request(port, token, "PUT", capture_path, {"level": "TRACE"}, headers={"Origin": "https://untrusted.invalid"})
+        assert denied_origin.status == 403
+        for level, seconds in (("ERROR", 30), ("WARNING", 30), ("DEBUG", 30), ("TRACE", 30), ("INFO", 0)):
+            updated = request(port, token, "PUT", capture_path, {"level": level})
+            assert updated.status == 200, updated.content
+            assert updated.json()["data"] == {"level": level, "leaseSeconds": seconds}
+            assert request(port, token, "GET", capture_path).json()["data"] == updated.json()["data"]
         pending = create_upload(port, token, size=4)
         assert pending
         started = time.monotonic()

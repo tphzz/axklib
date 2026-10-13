@@ -1,6 +1,7 @@
 <script lang="ts">
     import LogViewer from '../features/diagnostics/LogViewer.svelte';
     import type { LogDriver, LogEntry, LogFilter, LogReadRequest } from '../features/diagnostics/contracts';
+    import { includesLevel } from '../features/diagnostics/contracts';
     let sequence = 0;
     const entries: LogEntry[] = [];
     const saves: (LogFilter | null)[] = [];
@@ -11,7 +12,8 @@
             const id = ++sequence;
             entries.push({
                 id,
-                source: id % 2 ? 'application' : 'localServer',
+                origin: id % 2 ? 'application' : 'localServer',
+                source: id % 2 ? 'frontend' : 'filesystem',
                 timestamp: 1790575200000 + id,
                 level: id % 3 === 0 ? 'warning' : 'info',
                 text: `Entry ${id}: ${id % 3 === 0 ? 'failure observed' : 'operation completed'}${id % 7 === 0 ? '\n    stack frame at operation handler' : ''}${id % 11 === 0 ? ' long message'.repeat(30) : ''}`,
@@ -22,13 +24,11 @@
     const driver: LogDriver = {
         async read(request) {
             reads.push(request);
-            const levels = ['trace', 'debug', 'info', 'warning', 'error'];
             const matches = entries.filter(
                 (entry) =>
                     (!request.filter.since || entry.id > request.filter.since) &&
-                    (!request.filter.source || entry.source === request.filter.source) &&
-                    (!request.filter.minimumLevel ||
-                        levels.indexOf(entry.level!) >= levels.indexOf(request.filter.minimumLevel)) &&
+                    request.filter.sources.includes(entry.source) &&
+                    includesLevel(request.filter.level, entry.level) &&
                     entry.text.toLowerCase().includes(request.filter.search.toLowerCase()),
             );
             const end = request.before
@@ -53,6 +53,12 @@
         async save(filter) {
             saves.push(filter);
             return null;
+        },
+        async capture() {
+            return { level: 'info', localServer: 'ready', error: null };
+        },
+        async setCapture(level) {
+            return { level, localServer: 'ready', error: null };
         },
     };
     Object.assign(window, {

@@ -4,6 +4,7 @@
 #include "axklib/application/image_sessions.hpp"
 #include "axklib/application/operation_registry.hpp"
 #include "axklib/application/volume_capacity.hpp"
+#include "operation_diagnostics.hpp"
 
 axk::app::Result<void> axk::app::bind_image_session_operations(OperationRegistry &registry,
                                                                ImageSessionManager &images) {
@@ -16,7 +17,9 @@ axk::app::Result<void> axk::app::bind_image_session_operations(OperationRegistry
             auto parsed_source = image_source_ref_from_json(*source);
             if (!parsed_source)
                 return std::unexpected(parsed_source.error());
-            auto opened = images.open(*parsed_source, context.owner_id, context.cancellation, context.progress);
+            OperationDiagnosticSink diagnostics{context};
+            auto opened =
+                images.open(*parsed_source, context.owner_id, context.cancellation, context.progress, &diagnostics);
             if (!opened)
                 return std::unexpected(opened.error());
             return image_session_summary_json(*opened);

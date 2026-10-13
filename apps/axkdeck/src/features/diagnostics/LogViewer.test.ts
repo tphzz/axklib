@@ -14,7 +14,14 @@ afterEach(() => {
 function fixture() {
     const page: LogPage = {
         entries: [
-            { id: 1, source: 'application', level: 'error', timestamp: 1790575200000, text: 'Failure\n  stack frame' },
+            {
+                id: 1,
+                origin: 'application',
+                source: 'application',
+                level: 'error',
+                timestamp: 1790575200000,
+                text: 'Failure\n  stack frame',
+            },
         ],
         total: 1,
         newCount: 0,
@@ -27,21 +34,53 @@ function fixture() {
         read: vi.fn().mockResolvedValue(page),
         clear: vi.fn().mockResolvedValue(4),
         save: vi.fn().mockResolvedValue(null),
+        capture: vi.fn().mockResolvedValue({ level: 'info', localServer: 'ready', error: null }),
+        setCapture: vi.fn().mockImplementation(async (level) => ({ level, localServer: 'ready', error: null })),
     };
     return { driver, page, view: render(LogViewer, { driver }) };
 }
 
 describe('Logs window', () => {
+    it('uses one cumulative Level control after Sources and keeps timestamp-first rows', async () => {
+        const { driver, view } = fixture();
+        await view.findByText('Failure', { exact: false });
+        const level = view.getByRole('combobox', { name: 'Level' });
+        expect([...level.querySelectorAll('option')].map((option) => option.textContent)).toEqual([
+            'Error',
+            'Warning',
+            'Info',
+            'Debug',
+            'Trace',
+        ]);
+        expect(view.queryByRole('button', { name: 'Levels' })).toBeNull();
+        expect(view.queryByLabelText('Capture')).toBeNull();
+        expect(
+            view.container
+                .querySelector('.log-toolbar')
+                ?.firstElementChild?.contains(view.getByRole('button', { name: 'Sources' })),
+        ).toBe(true);
+        expect(view.container.querySelector('.log-record')?.firstElementChild?.className).toBe('log-time');
+        await fireEvent.change(level, { target: { value: 'warning' } });
+        await waitFor(() => expect(driver.setCapture).toHaveBeenCalledWith('warning'));
+        await waitFor(() =>
+            expect(vi.mocked(driver.read).mock.lastCall?.[0].filter).toMatchObject({ level: 'warning' }),
+        );
+    });
+
     it('combines controls in the backend query and uses a non-destructive clear boundary', async () => {
         const { driver, view } = fixture();
         await view.findByText('Failure', { exact: false });
-        await fireEvent.change(view.getByLabelText('Minimum level'), { target: { value: 'warning' } });
-        await fireEvent.change(view.getByLabelText('Source'), { target: { value: 'localServer' } });
+        await fireEvent.change(view.getByRole('combobox', { name: 'Level' }), { target: { value: 'warning' } });
+        await waitFor(() => expect(vi.mocked(driver.read).mock.lastCall?.[0].filter.level).toBe('warning'));
+        await fireEvent.click(view.getByRole('button', { name: 'Sources' }));
+        await fireEvent.click(view.getByRole('menuitem', { name: 'None' }));
+        await fireEvent.click(view.getByRole('menuitemcheckbox', { name: 'Objects' }));
+        await fireEvent.keyDown(view.getByRole('menuitemcheckbox', { name: 'Objects' }), { key: 'Escape' });
         await fireEvent.input(view.getByLabelText('Search'), { target: { value: 'failure' } });
         await waitFor(() =>
             expect(vi.mocked(driver.read).mock.lastCall?.[0].filter).toMatchObject({
-                minimumLevel: 'warning',
-                source: 'localServer',
+                level: 'warning',
+                sources: ['objects'],
                 search: 'failure',
             }),
         );

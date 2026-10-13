@@ -12,6 +12,7 @@
 #include "alteration_internal.hpp"
 #include "alteration_manifest_internal.hpp"
 #include "axklib/capacity_admission_internal.hpp"
+#include "axklib/diagnostics.hpp"
 #include "axklib/package_archive.hpp"
 #include "axklib/package_relocation.hpp"
 
@@ -58,7 +59,8 @@ Result<TransactionState> prepare_alteration(std::shared_ptr<const RandomAccessRe
                                             const std::filesystem::path &source_path,
                                             const AlterationManifest &manifest, const CancellationToken &cancellation,
                                             ProgressSink *progress, std::string_view initial_message,
-                                            std::optional<std::string> progress_path) {
+                                            std::optional<std::string> progress_path, diagnostic_sink *diagnostics) {
+    DiagnosticTimer admission{diagnostics, diagnostic_source::filesystem, "alteration_phase", "transaction-admission"};
     if (auto valid = detail::validate_alteration_manifest(manifest); !valid)
         return std::unexpected{valid.error()};
     auto opened = open_transaction_state(std::move(source), source_path, cancellation, progress,
@@ -70,13 +72,17 @@ Result<TransactionState> prepare_alteration(std::shared_ptr<const RandomAccessRe
     if (!deletion_batch)
         return std::unexpected{deletion_batch.error()};
     state.approved_volume_deletion_batch = std::move(*deletion_batch);
+    admission.finish();
     if (progress) {
         progress->report(
             {ProgressPhase::allocating, 0U, manifest.operations.size(), std::string{initial_message}, progress_path});
     }
+    DiagnosticTimer operations{diagnostics, diagnostic_source::objects, "alteration_phase", "object-encoding"};
     for (std::size_t operation_index = 0; operation_index < manifest.operations.size(); ++operation_index) {
         const auto &typed_operation = manifest.operations[operation_index];
         const auto operation_type = operation_type_name(typed_operation.data);
+        DiagnosticTimer encoding{operation_index < 64U ? diagnostics : nullptr, diagnostic_source::objects,
+                                 "alteration_object", operation_type, diagnostic_level::trace};
         const OperationContext context{typed_operation.id, operation_type};
         const auto previously_reclaimed = state.resized_record_freed_clusters;
         state.object_payload_grew = false;
@@ -169,23 +175,26 @@ Result<TransactionState> prepare_alteration(std::shared_ptr<const RandomAccessRe
             return std::unexpected{remembered.error()};
         report->freed_clusters += state.resized_record_freed_clusters - previously_reclaimed;
         state.reports.push_back(std::move(*report));
+        encoding.finish("success",
+                        {{"operationIndex", operation_index}, {"operationCount", manifest.operations.size()}});
         if (progress) {
             progress->report({ProgressPhase::allocating, operation_index + 1U, manifest.operations.size(),
                               std::string{operation_type}, progress_path});
         }
     }
+    operations.finish("success", {{"operationCount", manifest.operations.size()}});
     return state;
 }
 
 Result<TransactionState> prepare_alteration(const std::filesystem::path &source_path,
                                             const AlterationManifest &manifest, const CancellationToken &cancellation,
                                             ProgressSink *progress, std::string_view initial_message,
-                                            std::optional<std::string> progress_path) {
+                                            std::optional<std::string> progress_path, diagnostic_sink *diagnostics) {
     auto source = FileReader::open(source_path);
     if (!source)
         return std::unexpected{source.error()};
     return prepare_alteration(*source, source_path, manifest, cancellation, progress, initial_message,
-                              std::move(progress_path));
+                              std::move(progress_path), diagnostics);
 }
 
 } // namespace alteration_internal
@@ -193,14 +202,18 @@ Result<TransactionState> prepare_alteration(const std::filesystem::path &source_
 Result<detail::PreparedAlteration>
 detail::prepare_hds_alteration(std::shared_ptr<const RandomAccessReader> source, std::filesystem::path source_path,
                                const AlterationManifest &manifest, const CancellationToken &cancellation,
-                               ProgressSink *progress, const VolumeCapacityPolicy &capacity_policy) {
+                               ProgressSink *progress, const VolumeCapacityPolicy &capacity_policy,
+                               diagnostic_sink *diagnostics) {
     auto prepared = prepare_alteration(std::move(source), source_path, manifest, cancellation, progress,
-                                       "planning alteration", text::path_to_utf8(source_path));
+                                       "planning alteration", text::path_to_utf8(source_path), diagnostics);
     if (!prepared)
         return std::unexpected{prepared.error()};
+    DiagnosticTimer patch_timer{diagnostics, diagnostic_source::filesystem, "alteration_phase", "patch-collection"};
     auto patches = collect_patches(*prepared, cancellation);
     if (!patches)
         return std::unexpected{patches.error()};
+    patch_timer.finish("success", {{"patchCount", patches->size()}});
+    DiagnosticTimer validation{diagnostics, diagnostic_source::filesystem, "alteration_phase", "plan-validation"};
     OpenOptions options;
     options.cancellation = cancellation;
     auto overlay = patched_reader(prepared->source, *patches);
@@ -215,6 +228,7 @@ detail::prepare_hds_alteration(std::shared_ptr<const RandomAccessReader> source,
     auto capacity = inspect_capacity_destinations(*actual, *destinations, capacity_policy, cancellation);
     if (!capacity)
         return std::unexpected{capacity.error()};
+    validation.finish();
     return PreparedAlteration{std::move(source_path), prepared->container.image_size_bytes(),
                               std::move(prepared->reports), std::move(*patches), std::move(*capacity)};
 }
@@ -326,14 +340,14 @@ Result<detail::PreparedPackageImport> detail::prepare_sfs_package_import_verifie
 
 Result<AlterationResult> alter_hds(const std::filesystem::path &source_path, const AlterationManifest &manifest,
                                    const std::filesystem::path &output_path, const CancellationToken &cancellation,
-                                   ProgressSink *progress, bool overwrite,
-                                   const VolumeCapacityPolicy &capacity_policy) {
+                                   ProgressSink *progress, bool overwrite, const VolumeCapacityPolicy &capacity_policy,
+                                   diagnostic_sink *diagnostics) {
     if (auto valid = detail::validate_alteration_manifest(manifest); !valid)
         return std::unexpected{valid.error()};
     if (auto distinct = require_distinct_source_and_output(source_path, output_path, "alteration"); !distinct)
         return std::unexpected{distinct.error()};
     auto prepared = prepare_alteration(source_path, manifest, cancellation, progress, "planning alteration",
-                                       text::path_to_utf8(output_path));
+                                       text::path_to_utf8(output_path), diagnostics);
     if (!prepared)
         return std::unexpected{prepared.error()};
     auto state = std::move(*prepared);
@@ -357,21 +371,24 @@ Result<AlterationResult> alter_hds(const std::filesystem::path &source_path, con
     const auto validator = [&](const std::filesystem::path &path) {
         return admit_capacity_candidate(path, destinations, capacity_policy, cancellation);
     };
+    DiagnosticTimer publication{diagnostics, diagnostic_source::filesystem, "alteration_phase", "publication"};
     auto applied = publish(state, output_path, cancellation, overwrite, validator, progress);
     if (!applied)
         return std::unexpected{applied.error()};
+    publication.finish();
     return AlterationResult{source_path, output_path, true, std::move(state.reports), std::move(*applied)};
 }
 
 Result<AlterationInspection> inspect_hds_alteration(const std::filesystem::path &source_path,
                                                     const AlterationManifest &manifest,
                                                     const CancellationToken &cancellation, ProgressSink *progress,
-                                                    const VolumeCapacityPolicy &capacity_policy) {
+                                                    const VolumeCapacityPolicy &capacity_policy,
+                                                    diagnostic_sink *diagnostics) {
     const auto source = FileReader::open(source_path);
     if (!source)
         return std::unexpected{source.error()};
-    auto prepared =
-        detail::prepare_hds_alteration(*source, source_path, manifest, cancellation, progress, capacity_policy);
+    auto prepared = detail::prepare_hds_alteration(*source, source_path, manifest, cancellation, progress,
+                                                   capacity_policy, diagnostics);
     if (!prepared)
         return std::unexpected{prepared.error()};
     return AlterationInspection{source_path, std::move(prepared->operations), std::move(prepared->capacity)};

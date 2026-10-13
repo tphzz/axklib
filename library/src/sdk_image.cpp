@@ -254,7 +254,7 @@ result<image> image::open(const std::string &utf8_path, operation_context &conte
         auto path = checked_path(utf8_path, "image path");
         if (!path)
             return path.error();
-        auto container = open_media(*path, context.impl_->cancellation.token());
+        auto container = open_media(*path, context.impl_->cancellation.token(), context.impl_.get());
         if (!container)
             return public_error(container.error());
         return image_factory::open(std::move(*container), context);
@@ -266,7 +266,7 @@ result<image> image_factory::open(MediaContainer container, operation_context &c
         if (!context.impl_)
             return invalid_argument("operation context is not initialized");
         auto inventory = build_media_inventory(container, MediaObjectReadMode::decoded_metadata, 64U * 1024U * 1024U,
-                                               context.impl_->cancellation.token());
+                                               context.impl_->cancellation.token(), nullptr, context.impl_.get());
         if (!inventory)
             return public_error(inventory.error());
         auto graph = build_relationship_graph(inventory->catalog);

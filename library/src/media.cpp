@@ -6,6 +6,7 @@
 #include <ranges>
 
 #include "axklib/bytes.hpp"
+#include "axklib/diagnostics.hpp"
 #include "axklib/utf8.hpp"
 #include "media_ex5_internal.hpp"
 #include "media_internal.hpp"
@@ -254,7 +255,8 @@ Result<std::vector<MediaObject>> MediaContainer::objects(MediaObjectReadMode mod
     return result;
 }
 
-Result<MediaContainer> open_media(const std::filesystem::path &path, const CancellationToken &cancellation) {
+Result<MediaContainer> open_media(const std::filesystem::path &path, const CancellationToken &cancellation,
+                                  diagnostic_sink *diagnostics) {
     std::error_code error;
     const auto status = std::filesystem::symlink_status(path, error);
     if (!error && std::filesystem::is_directory(status)) {
@@ -266,78 +268,85 @@ Result<MediaContainer> open_media(const std::filesystem::path &path, const Cance
     auto reader = FileReader::open(path);
     if (!reader)
         return std::unexpected{reader.error()};
-    return open_media(std::move(*reader), path, cancellation);
+    return open_media(std::move(*reader), path, cancellation, nullptr, diagnostics);
 }
 
 Result<MediaContainer> open_media(std::shared_ptr<const RandomAccessReader> reader, std::filesystem::path source_path,
-                                  const CancellationToken &cancellation, ProgressSink *progress) {
-    if (!reader) {
-        return std::unexpected{detail::media_error(ErrorCode::invalid_argument, "media reader is required",
-                                                   text::path_to_utf8(source_path), std::nullopt)};
-    }
-    const auto prefix_size = static_cast<std::size_t>(std::min<std::uint64_t>(reader->size(), 0x9000U));
-    auto prefix = detail::read_bytes(*reader, 0, prefix_size, cancellation);
-    if (!prefix)
-        return std::unexpected{prefix.error()};
-    if (detail::ex5_disk_signature(*prefix)) {
-        auto fat = FatImage::open(std::move(reader), text::path_to_utf8(source_path), cancellation);
-        if (!fat)
-            return std::unexpected{fat.error()};
-        return MediaContainer{std::move(*fat)};
-    }
-    if (detail::object_prefix(*prefix)) {
-        auto object = StandaloneObject::open(std::move(reader), text::path_to_utf8(source_path));
-        if (!object)
-            return std::unexpected{object.error()};
-        return MediaContainer{std::move(*object)};
-    }
-    if (prefix->size() >= 22U && detail::clean_ascii(std::span{*prefix}.subspan(12U, 10U)) == "A3k"
-                                                                                              "Dis"
-                                                                                              "kyPC") {
-        auto archive = A3kArchive::open(std::move(reader), text::path_to_utf8(source_path), cancellation);
-        if (!archive)
-            return std::unexpected{archive.error()};
-        return MediaContainer{std::move(*archive)};
-    }
-    if (prefix->size() >= 4U && (*prefix)[0] == std::byte{'P'} && (*prefix)[1] == std::byte{'K'} &&
-        (*prefix)[2] == std::byte{0x03} && (*prefix)[3] == std::byte{0x04}) {
-        auto set = FloppyDiskSet::open_archive(std::move(reader), text::path_to_utf8(source_path), cancellation);
-        if (!set)
-            return std::unexpected{set.error()};
-        return MediaContainer{std::move(*set)};
-    }
-    if (prefix->size() >= detail::iso_pvd_sector * detail::iso_sector_size + 6U &&
-        std::to_integer<std::uint8_t>((*prefix)[detail::iso_pvd_sector * detail::iso_sector_size]) == 1U &&
-        detail::clean_ascii(std::span{*prefix}.subspan(detail::iso_pvd_sector * detail::iso_sector_size + 1U, 5)) ==
-            "CD001") {
-        auto iso = IsoImage::open(std::move(reader), text::path_to_utf8(source_path), cancellation);
-        if (!iso)
-            return std::unexpected{iso.error()};
-        return MediaContainer{std::move(*iso)};
-    }
-    const auto sector_size = prefix->size() >= 512U ? detail::le16(*prefix, 0x0b) : 0U;
-    const auto cluster_sectors = prefix->size() >= 512U ? std::to_integer<unsigned>((*prefix)[0x0d]) : 0U;
-    if ((sector_size == 512U || sector_size == 1024U || sector_size == 2048U || sector_size == 4096U) &&
-        cluster_sectors != 0U && cluster_sectors <= 128U && (cluster_sectors & (cluster_sectors - 1U)) == 0U &&
-        detail::le16(*prefix, 0x0e) != 0U && ((*prefix)[0x10] == std::byte{1} || (*prefix)[0x10] == std::byte{2})) {
-        auto fat = FatImage::open(std::move(reader), text::path_to_utf8(source_path), cancellation);
-        if (!fat)
-            return std::unexpected{fat.error()};
-        return MediaContainer{std::move(*fat)};
-    }
-    OpenOptions options;
-    if (prefix->size() >= 512U && (*prefix)[510U] == std::byte{0x55} && (*prefix)[511U] == std::byte{0xaa}) {
-        auto disk = FatDiskImage::open(std::move(reader), text::path_to_utf8(source_path), cancellation);
-        if (!disk)
-            return std::unexpected{disk.error()};
-        return MediaContainer{std::move(*disk)};
-    }
-    options.cancellation = cancellation;
-    options.progress = progress;
-    auto sfs = open_image(std::move(reader), std::move(source_path), options);
-    if (!sfs)
-        return std::unexpected{sfs.error()};
-    return MediaContainer{std::move(*sfs)};
+                                  const CancellationToken &cancellation, ProgressSink *progress,
+                                  diagnostic_sink *diagnostics) {
+    DiagnosticTimer timer{diagnostics, diagnostic_source::filesystem, "media_open",
+                          "container-detection-and-filesystem"};
+    auto result = [&]() -> Result<MediaContainer> {
+        if (!reader) {
+            return std::unexpected{detail::media_error(ErrorCode::invalid_argument, "media reader is required",
+                                                       text::path_to_utf8(source_path), std::nullopt)};
+        }
+        const auto prefix_size = static_cast<std::size_t>(std::min<std::uint64_t>(reader->size(), 0x9000U));
+        auto prefix = detail::read_bytes(*reader, 0, prefix_size, cancellation);
+        if (!prefix)
+            return std::unexpected{prefix.error()};
+        if (detail::ex5_disk_signature(*prefix)) {
+            auto fat = FatImage::open(std::move(reader), text::path_to_utf8(source_path), cancellation);
+            if (!fat)
+                return std::unexpected{fat.error()};
+            return MediaContainer{std::move(*fat)};
+        }
+        if (detail::object_prefix(*prefix)) {
+            auto object = StandaloneObject::open(std::move(reader), text::path_to_utf8(source_path));
+            if (!object)
+                return std::unexpected{object.error()};
+            return MediaContainer{std::move(*object)};
+        }
+        if (prefix->size() >= 22U && detail::clean_ascii(std::span{*prefix}.subspan(12U, 10U)) == "A3k"
+                                                                                                  "Dis"
+                                                                                                  "kyPC") {
+            auto archive = A3kArchive::open(std::move(reader), text::path_to_utf8(source_path), cancellation);
+            if (!archive)
+                return std::unexpected{archive.error()};
+            return MediaContainer{std::move(*archive)};
+        }
+        if (prefix->size() >= 4U && (*prefix)[0] == std::byte{'P'} && (*prefix)[1] == std::byte{'K'} &&
+            (*prefix)[2] == std::byte{0x03} && (*prefix)[3] == std::byte{0x04}) {
+            auto set = FloppyDiskSet::open_archive(std::move(reader), text::path_to_utf8(source_path), cancellation);
+            if (!set)
+                return std::unexpected{set.error()};
+            return MediaContainer{std::move(*set)};
+        }
+        if (prefix->size() >= detail::iso_pvd_sector * detail::iso_sector_size + 6U &&
+            std::to_integer<std::uint8_t>((*prefix)[detail::iso_pvd_sector * detail::iso_sector_size]) == 1U &&
+            detail::clean_ascii(std::span{*prefix}.subspan(detail::iso_pvd_sector * detail::iso_sector_size + 1U, 5)) ==
+                "CD001") {
+            auto iso = IsoImage::open(std::move(reader), text::path_to_utf8(source_path), cancellation);
+            if (!iso)
+                return std::unexpected{iso.error()};
+            return MediaContainer{std::move(*iso)};
+        }
+        const auto sector_size = prefix->size() >= 512U ? detail::le16(*prefix, 0x0b) : 0U;
+        const auto cluster_sectors = prefix->size() >= 512U ? std::to_integer<unsigned>((*prefix)[0x0d]) : 0U;
+        if ((sector_size == 512U || sector_size == 1024U || sector_size == 2048U || sector_size == 4096U) &&
+            cluster_sectors != 0U && cluster_sectors <= 128U && (cluster_sectors & (cluster_sectors - 1U)) == 0U &&
+            detail::le16(*prefix, 0x0e) != 0U && ((*prefix)[0x10] == std::byte{1} || (*prefix)[0x10] == std::byte{2})) {
+            auto fat = FatImage::open(std::move(reader), text::path_to_utf8(source_path), cancellation);
+            if (!fat)
+                return std::unexpected{fat.error()};
+            return MediaContainer{std::move(*fat)};
+        }
+        OpenOptions options;
+        if (prefix->size() >= 512U && (*prefix)[510U] == std::byte{0x55} && (*prefix)[511U] == std::byte{0xaa}) {
+            auto disk = FatDiskImage::open(std::move(reader), text::path_to_utf8(source_path), cancellation);
+            if (!disk)
+                return std::unexpected{disk.error()};
+            return MediaContainer{std::move(*disk)};
+        }
+        options.cancellation = cancellation;
+        options.progress = progress;
+        auto sfs = open_image(std::move(reader), std::move(source_path), options);
+        if (!sfs)
+            return std::unexpected{sfs.error()};
+        return MediaContainer{std::move(*sfs)};
+    }();
+    timer.finish(result ? "success" : "failed");
+    return result;
 }
 
 } // namespace axk

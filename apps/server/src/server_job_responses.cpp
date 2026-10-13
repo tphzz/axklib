@@ -72,14 +72,17 @@ crow::response ServerApplication::operation_response(const crow::request &reques
         const auto supplied_key = request.get_header_value("Idempotency-Key");
         if (!supplied_key.empty())
             idempotency_key = supplied_key;
-        const auto submitted = jobs_.submit(selected, std::move(input),
-                                            {.owner_id = request_owner(request),
-                                             .request_id = id,
-                                             .cancellation = {},
-                                             .progress = nullptr,
-                                             .display_path = {},
-                                             .diagnostic = operation_diagnostic_sink()},
-                                            std::move(idempotency_key));
+        const auto submitted =
+            jobs_.submit(selected, std::move(input),
+                         {.owner_id = request_owner(request),
+                          .request_id = id,
+                          .cancellation = {},
+                          .progress = nullptr,
+                          .display_path = {},
+                          .diagnostic = operation_diagnostic_sink(),
+                          .mutation_id = {},
+                          .diagnostic_enabled = [this](diagnostic_level level) { return diagnostics_.enabled(level); }},
+                         std::move(idempotency_key));
         if (!submitted)
             return error_response(status_for_error(submitted.error()), submitted.error(), id);
         audit(id, "job_submit", "allowed", request_owner(request), "job", submitted->job_id);
@@ -90,12 +93,15 @@ crow::response ServerApplication::operation_response(const crow::request &reques
         response.set_header("Location", "/api/v1/jobs/" + submitted->job_id);
         return response;
     }
-    const axk::app::OperationContext context{.owner_id = request_owner(request),
-                                             .request_id = id,
-                                             .cancellation = {},
-                                             .progress = nullptr,
-                                             .display_path = {},
-                                             .diagnostic = operation_diagnostic_sink()};
+    const axk::app::OperationContext context{
+        .owner_id = request_owner(request),
+        .request_id = id,
+        .cancellation = {},
+        .progress = nullptr,
+        .display_path = {},
+        .diagnostic = operation_diagnostic_sink(),
+        .mutation_id = {},
+        .diagnostic_enabled = [this](diagnostic_level level) { return diagnostics_.enabled(level); }};
     const auto accesses = registry_.path_accesses(selected, input, context);
     if (!accesses)
         return error_response(status_for_error(accesses.error(), 400), accesses.error(), id);

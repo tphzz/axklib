@@ -484,7 +484,8 @@ class ImageSessionManager {
 
     [[nodiscard]] Result<ImageSessionSummary> open(const ImageSourceRef &source, std::string owner_id,
                                                    const CancellationToken &cancellation = {},
-                                                   ProgressSink *progress = nullptr);
+                                                   ProgressSink *progress = nullptr,
+                                                   diagnostic_sink *diagnostics = nullptr);
     [[nodiscard]] Result<ImageSessionSummary> attach_companions(std::string_view image_id, std::string_view owner_id,
                                                                 std::uint64_t expected_revision,
                                                                 const CompanionSelection &selection,
@@ -598,10 +599,9 @@ class ImageSessionManager {
     [[nodiscard]] Result<ImageSessionMutation>
     begin_mutation_access(std::string_view image_id, std::string_view owner_id, std::uint64_t expected_revision,
                           std::optional<PartitionIndex> filesystem_partition, std::string_view operation_id);
-    [[nodiscard]] Result<ImageSessionSummary>
-    open_with_companion_sources(const ImageSourceRef &source, std::string owner_id,
-                                const std::vector<ImageSourceRef> &companion_sources,
-                                const CancellationToken &cancellation, ProgressSink *progress);
+    [[nodiscard]] Result<ImageSessionSummary> open_with_companion_sources(
+        const ImageSourceRef &source, std::string owner_id, const std::vector<ImageSourceRef> &companion_sources,
+        const CancellationToken &cancellation, ProgressSink *progress, diagnostic_sink *diagnostics = nullptr);
     struct Implementation;
     std::unique_ptr<Implementation> implementation_;
 };

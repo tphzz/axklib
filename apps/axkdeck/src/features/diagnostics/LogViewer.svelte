@@ -4,20 +4,32 @@
     import Icon from '../../lib/components/Icon.svelte';
     import { LogController } from './controller.svelte';
     import { desktopLogs } from './desktop';
-    import type { LogDriver, LogLevel, LogSource } from './contracts';
+    import {
+        logSources,
+        logLevels,
+        type LogLevel,
+        type CaptureState,
+        type LogDriver,
+        type LogSource,
+    } from './contracts';
+    import LogMultiSelect from './LogMultiSelect.svelte';
     import './logs.css';
 
     let {
         driver = desktopLogs,
         subscribeVisibility,
+        subscribeCapture,
     }: {
         driver?: LogDriver;
         subscribeVisibility?: (callback: (visible: boolean) => void) => Promise<() => void>;
+        subscribeCapture?: (callback: (state: CaptureState) => void) => Promise<() => void>;
     } = $props();
     const logs = new LogController({
         read: (request) => driver.read(request),
         clear: () => driver.clear(),
         save: (filter) => driver.save(filter),
+        capture: () => driver.capture(),
+        setCapture: (level) => driver.setCapture(level),
     });
     let scroller: HTMLDivElement;
     let selectionText = $state('');
@@ -26,6 +38,12 @@
     let saveContainer: HTMLDivElement;
     let saveButton: HTMLButtonElement;
     let windowVisible = true;
+    function changeLevel(event: Event): void {
+        const select = event.currentTarget as HTMLSelectElement;
+        const level = select.value as LogLevel;
+        select.value = logs.filter.level;
+        void logs.setLevel(level);
+    }
     const time = (timestamp: number | null) => {
         const date = new Date(timestamp ?? NaN);
         return Number.isNaN(date.valueOf())
@@ -88,6 +106,7 @@
     onMount(() => {
         let disposed = false;
         let unsubscribe: (() => void) | undefined;
+        let stopCapture: (() => void) | undefined;
         const activate = () => logs.setActive(windowVisible && document.visibilityState !== 'hidden');
         const unselect = on(document, 'selectionchange', selection);
         const unvisible = on(document, 'visibilitychange', activate);
@@ -98,9 +117,20 @@
             if (!saveContainer?.contains(event.target as Node)) saveMenu = false;
         });
         activate();
+        void logs.readCapture();
+        if (subscribeCapture)
+            void subscribeCapture((state) => logs.updateCapture(state))
+                .then((stop) => {
+                    if (disposed) stop();
+                    else stopCapture = stop;
+                })
+                .catch((error) => {
+                    logs.captureError = String(error);
+                });
         if (subscribeVisibility)
             void subscribeVisibility((visible) => {
                 windowVisible = visible;
+                if (visible) void logs.readCapture();
                 activate();
             })
                 .then((stop) => {
@@ -119,6 +149,7 @@
             unoutside();
             unfocus();
             unsubscribe?.();
+            stopCapture?.();
         };
     });
     $effect(() => {
@@ -136,31 +167,23 @@
 <svelte:head><title>axkdeck - Logs</title></svelte:head>
 <main class="log-viewer" aria-label="Application logs">
     <div class="log-toolbar" aria-label="Log controls">
+        <LogMultiSelect
+            label="Sources"
+            options={logSources}
+            selected={logs.filter.sources}
+            disabled={logs.actionBusy}
+            onchange={(values) => logs.setFilter({ sources: values as LogSource[] })}
+        />
         <label
-            >Source<span class="log-select"
+            >Level<span class="log-select"
                 ><select
-                    value={logs.filter.source ?? ''}
-                    disabled={logs.actionBusy}
-                    onchange={(event) =>
-                        logs.setFilter({ source: (event.currentTarget.value || null) as LogSource | null })}
+                    value={logs.filter.level}
+                    disabled={logs.captureBusy || logs.actionBusy}
+                    onchange={changeLevel}
                 >
-                    <option value="">All</option><option value="application">Application</option><option
-                        value="localServer">Local server</option
-                    >
-                </select><span aria-hidden="true"><Icon name="chevron" size={12} /></span></span
-            ></label
-        >
-        <label
-            >Minimum level<span class="log-select"
-                ><select
-                    value={logs.filter.minimumLevel ?? ''}
-                    disabled={logs.actionBusy}
-                    onchange={(event) =>
-                        logs.setFilter({ minimumLevel: (event.currentTarget.value || null) as LogLevel | null })}
-                >
-                    <option value="">All</option><option value="debug">Debug and above</option><option value="info"
-                        >Info and above</option
-                    ><option value="warning">Warning and above</option><option value="error">Error</option>
+                    {#each logLevels as level}
+                        <option value={level}>{level[0].toUpperCase() + level.slice(1)}</option>
+                    {/each}
                 </select><span aria-hidden="true"><Icon name="chevron" size={12} /></span></span
             ></label
         >
@@ -174,15 +197,6 @@
             /></label
         >
         <div class="log-switches">
-            <button
-                type="button"
-                class="log-switch"
-                role="switch"
-                aria-checked={logs.filter.includeUnclassified}
-                disabled={logs.actionBusy}
-                onclick={() => logs.setFilter({ includeUnclassified: !logs.filter.includeUnclassified })}
-                ><span></span>Include unclassified</button
-            >
             <button
                 type="button"
                 class="log-switch"
@@ -304,22 +318,29 @@
         aria-label="Log entries"
     >
         {#each logs.page?.entries ?? [] as entry (entry.id)}
-            <div class="log-record" data-level={entry.level ?? 'unclassified'}>
-                <span class="log-time">{time(entry.timestamp)}</span>{' '}<span class="log-level"
-                    >{entry.level ?? 'unclassified'}</span
-                >{' '}<span class="log-source">{entry.source === 'application' ? 'Application' : 'Local server'}</span
+            <div class="log-record" data-level={entry.level}>
+                <span class="log-time">{time(entry.timestamp)}</span>{' '}<span class="log-level">{entry.level}</span
+                >{' '}<span class="log-source" title={entry.origin === 'localServer' ? 'Local server' : 'Application'}
+                    >{entry.source === 'http' ? 'HTTP' : entry.source[0].toUpperCase() + entry.source.slice(1)}</span
                 >{' '}<span class="log-text">{entry.text}</span>{'\n'}
             </div>
         {:else}<p class="log-empty">{logs.busy ? 'Loading logs...' : 'No matching log entries'}</p>{/each}
     </div>
     <footer class="log-footer">
         <span
-            class:failure={!!(logs.error || clipboardError)}
+            class:failure={!!(logs.error || clipboardError || logs.captureError)}
             role="status"
-            title={logs.error || clipboardError || logs.status}
+            title={logs.error || clipboardError || logs.captureError || logs.status}
             >{logs.error ||
                 clipboardError ||
+                logs.captureError ||
                 (logs.actionBusy ? 'Working...' : logs.status || (logs.follow ? 'Live' : 'Follow paused'))}</span
+        >
+        <span
+            >{logs.captureBusy ? 'Updating level...' : `Level: ${logs.capture.level}`}{logs.capture.localServer !==
+            'ready'
+                ? ` (local server ${logs.capture.localServer})`
+                : ''}</span
         >
         {#if logs.historyChanges}<span title="Some retained log files were rotated out or replaced"
                 >History changed</span

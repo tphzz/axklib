@@ -30,6 +30,7 @@
 #include "axklib/server/request_validation.hpp"
 #include "axklib/server/telemetry.hpp"
 #include "axklib/server/workspaces.hpp"
+#include "diagnostic_log.hpp"
 #include "transport.hpp"
 
 namespace axk::server::detail {
@@ -132,6 +133,8 @@ class ServerApplication {
     crow::response health_ready_response(const crow::request &request);
     crow::response metrics_response(const crow::request &request);
     crow::response shutdown_response(const crow::request &request);
+    crow::response diagnostic_capture_response(const crow::request &request);
+    std::function<void(const Json &)> operation_diagnostic_sink() const;
     crow::response openapi_response(const crow::request &request);
 
     void register_infrastructure_routes();
@@ -139,6 +142,7 @@ class ServerApplication {
     void register_operation_routes();
 
     Config config_;
+    mutable DiagnosticLog diagnostics_;
     WorkspaceStore workspaces_;
     app::Sandbox sandbox_;
     app::PathReservationCoordinator path_reservations_;

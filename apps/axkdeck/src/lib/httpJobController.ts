@@ -25,6 +25,7 @@ export class HttpJobController {
         const error = job.error as { code?: string; message?: string; context?: unknown } | undefined;
         const mapped: JobState = {
             jobId,
+            serverJobId: job.jobId,
             kind: job.operationId,
             status: job.state.toLocaleLowerCase() as JobState['status'],
             progress: progress
@@ -219,6 +220,7 @@ export class HttpJobController {
         const progress = event.progress;
         const mapped: JobState = {
             jobId,
+            serverJobId: event.jobId,
             kind: event.operationId,
             status: event.state.toLocaleLowerCase() as JobState['status'],
             progress: progress

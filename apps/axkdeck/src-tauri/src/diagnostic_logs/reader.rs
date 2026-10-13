@@ -92,7 +92,14 @@ impl FileLog {
                 .to_owned();
             let id = self.pending_id.take().unwrap();
             self.pending.clear();
-            if !starts_record(self.source, &text) {
+            // Only indented continuations belong to an already declared record.
+            if !starts_record(self.source, &text)
+                && text.starts_with([' ', '\t'])
+                && self
+                    .entries
+                    .last()
+                    .is_some_and(|previous| starts_record(self.source, &previous.text))
+            {
                 if let Some(previous) = self.entries.last_mut() {
                     if previous.text.len() + text.len() + 1 > MAX_RECORD_BYTES {
                         return Err(

@@ -11,6 +11,7 @@
 #include <string>
 #include <thread>
 #include <type_traits>
+#include <vector>
 
 #include <gtest/gtest.h>
 
@@ -75,6 +76,39 @@ TEST(Sdk, PublicFacadeOwnsVersionResultAndMoveOnlySessions) {
     axk::result<void> void_failure{failure.error()};
     EXPECT_FALSE(void_failure);
     EXPECT_THROW(void_failure.value(), axk::bad_result_access);
+}
+
+TEST(Sdk, OptionalDiagnosticsAreTypedFilteredAndCannotFailTheOperation) {
+    class Sink final : public axk::diagnostic_sink {
+      public:
+        bool active{true};
+        bool fail{};
+        std::vector<axk::diagnostic_event> events;
+        bool enabled(axk::diagnostic_level level) const noexcept override {
+            return active && level <= axk::diagnostic_level::debug;
+        }
+        void report(const axk::diagnostic_event &event) override {
+            if (fail)
+                throw std::runtime_error{"diagnostic failure"};
+            events.push_back(event);
+        }
+    } sink;
+    axk::operation_context context;
+    context.set_diagnostic_sink(&sink);
+    ASSERT_TRUE(axk::image::open(fixture_path().string(), context));
+    ASSERT_FALSE(sink.events.empty());
+    EXPECT_EQ(sink.events.front().source, axk::diagnostic_source::filesystem);
+    EXPECT_EQ(sink.events.front().level, axk::diagnostic_level::debug);
+    EXPECT_EQ(sink.events.front().outcome, "success");
+    sink.events.clear();
+    sink.active = false;
+    ASSERT_TRUE(axk::image::open(fixture_path().string(), context));
+    EXPECT_TRUE(sink.events.empty());
+    sink.active = true;
+    sink.fail = true;
+    ASSERT_TRUE(axk::image::open(fixture_path().string(), context));
+    context.set_diagnostic_sink(nullptr);
+    ASSERT_TRUE(axk::image::open(fixture_path().string(), context));
 }
 
 TEST(Sdk, OpensPagesValidatesPreviewsAndOwnsPcm) {

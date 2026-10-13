@@ -287,13 +287,16 @@ crow::response ServerApplication::directory_listing_response(const crow::request
                            {"kind", axk::app::directory_entry_kind_name(entry.kind)},
                            {"size", entry.size ? Json(*entry.size) : Json{}}});
     }
-    if (auto diagnostic = operation_diagnostic_sink()) {
-        diagnostic({{"event", "filesystem_directory_list"},
-                    {"durationMs",
-                     std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started)
-                         .count()},
-                    {"entryCount", listing->entries.size()},
-                    {"truncated", listing->truncated}});
+    if (diagnostics_.enabled(diagnostic_level::debug)) {
+        diagnostics_.submit({{"event", "filesystem_directory_list"},
+                             {"level", "debug"},
+                             {"source", "filesystem"},
+                             {"requestId", id},
+                             {"durationMs", std::chrono::duration_cast<std::chrono::milliseconds>(
+                                                std::chrono::steady_clock::now() - started)
+                                                .count()},
+                             {"entryCount", listing->entries.size()},
+                             {"truncated", listing->truncated}});
     }
     return json_response(
         200,
@@ -325,14 +328,17 @@ crow::response ServerApplication::media_source_inspection_response(const crow::r
     const auto inspection = sandbox_.inspect_media_source(directory);
     if (!inspection)
         return error_response(422, inspection.error(), id);
-    if (auto diagnostic = operation_diagnostic_sink()) {
-        diagnostic({{"event", "filesystem_media_source_inspect"},
-                    {"durationMs",
-                     std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started)
-                         .count()},
-                    {"entriesVisited", inspection->entries_visited},
-                    {"prefixesRead", inspection->prefixes_read},
-                    {"recognized", inspection->kind.has_value()}});
+    if (diagnostics_.enabled(diagnostic_level::debug)) {
+        diagnostics_.submit({{"event", "filesystem_media_source_inspect"},
+                             {"level", "debug"},
+                             {"source", "filesystem"},
+                             {"requestId", id},
+                             {"durationMs", std::chrono::duration_cast<std::chrono::milliseconds>(
+                                                std::chrono::steady_clock::now() - started)
+                                                .count()},
+                             {"entriesVisited", inspection->entries_visited},
+                             {"prefixesRead", inspection->prefixes_read},
+                             {"recognized", inspection->kind.has_value()}});
     }
     return json_response(
         200,

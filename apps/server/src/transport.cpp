@@ -1,4 +1,5 @@
 #include "transport.hpp"
+#include "diagnostic_log.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -22,12 +23,6 @@ bool valid_request_id(std::string_view value) {
 }
 
 } // namespace
-
-void write_structured_log(std::string line) {
-    static std::mutex mutex;
-    const std::scoped_lock lock{mutex};
-    std::clog << line << '\n';
-}
 
 std::string request_id(const crow::request &request) {
     const auto supplied = request.get_header_value("X-Request-Id");
@@ -86,8 +81,12 @@ void RequestTelemetryMiddleware::after_handle(crow::request &request, crow::resp
         id = request_id(request);
         response.set_header("X-Request-Id", id);
     }
-    write_structured_log(
-        structured_request_log(id, crow::method_name(request.method), request.url, response.code, duration));
+    const auto level = response.code >= 500   ? diagnostic_level::error
+                       : response.code >= 400 ? diagnostic_level::warning
+                                              : diagnostic_level::debug;
+    if (diagnostics != nullptr && diagnostics->enabled(level) && request.url != "/api/v1/diagnostics/capture")
+        diagnostics->submit_line(
+            structured_request_log(id, crow::method_name(request.method), request.url, response.code, duration));
 }
 
 } // namespace axk::server::detail

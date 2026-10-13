@@ -11,7 +11,7 @@ Operations that can fail return axklib-owned `axk::result<T>` or
 
 | Type | Main responsibility |
 | --- | --- |
-| `operation_context` | Cancellation and optional progress reporting |
+| `operation_context` | Cancellation, progress and optional typed diagnostics |
 | `image` | Open media, inventory content, validate, preview, and export |
 | `snapshot` | Immutable paged inventory independent of the source handle |
 | `build_plan` | Validate and apply a fresh HDS, FAT12, or ISO9660 manifest |
@@ -42,6 +42,15 @@ in-flight callback to return, after which the former sink may be destroyed.
 Snapshot reads are concurrent; `image`, `build_plan`, `transaction`,
 `portable_package`, `package_import_plan`, and context mutation require external
 serialization. Mutation plans are bound to their creating thread when applied.
+
+`set_diagnostic_sink()` borrows an optional `diagnostic_sink` independently from
+progress reporting. Opening media and planning/applying HDS alterations emit
+typed filesystem/object phase durations and aggregate counters at Debug; Trace
+adds up to 64 per-operation records per alteration. The library does not select
+console verbosity, serialize JSON or read logging environment variables. The
+sink's `enabled()` controls generation. Keep it alive until the operation returns
+or detach it with `set_diagnostic_sink(nullptr)`. Callbacks must be prompt and
+must not re-enter the context; reporting exceptions are contained and ignored.
 
 `portable_package::open()` performs bounded archive and manifest inspection. It
 does not read or hash payload bodies. `portable_package::verify()` performs the

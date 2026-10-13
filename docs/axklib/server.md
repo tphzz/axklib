@@ -1026,10 +1026,31 @@ than silently ignored. Metrics expose cleanup health, failed deletion count,
 orphan file/byte counts, and reserved upload bytes alongside bounded aggregate
 request counters. They contain no request or payload data.
 
-Request logs are one JSON object per line. They contain only the request ID,
-HTTP method, URL path without its query, response status, and elapsed time.
+Request logs are one JSON object per line, with explicit severity and subsystem.
+Successful HTTP requests are Debug, 4xx responses Warning and 5xx responses Error.
+They contain the request ID, HTTP method, URL path without its query, response
+status, and elapsed time.
 Authorization headers, request bodies, sandbox paths supplied through query
 parameters, and payload content are never logged.
+
+Operations report Info completion summaries with request/job IDs and outcome.
+Debug adds filesystem/object phases, journal and device I/O counters, and session
+refresh timings. Trace adds bounded per-operation activity. The asynchronous
+writer queues at most 1,024 records or 4 MiB, limits each record to 64 KiB, and
+reports dropped records without blocking a mutation on console output.
+
+`AXKLIB_SERVER_LOG_LEVEL` selects standalone console verbosity (default Info).
+An authenticated local sidecar also supports `GET`/`PUT /api/v1/diagnostics/capture`
+with `{"level":"INFO"}` or `ERROR`, `WARNING`, `DEBUG`, `TRACE`. Thresholds are
+cumulative: Warning includes Error, Info includes both, and Debug/Trace add detail.
+Non-Info settings expire back to Info after 30 seconds unless renewed; the desktop
+renews every 10 seconds while Logs remains open. Capture and console thresholds are independent. This endpoint
+returns 404 outside sidecar mode and does not provide remote log retrieval.
+
+Runtime log events must declare a valid level. Malformed output produces an
+`invalid_log_record` Error with bounded original text and a truncation flag; its
+original severity is never inferred. Startup failures and desktop-owner exit
+notifications also carry explicit levels.
 
 ## API Contract
 

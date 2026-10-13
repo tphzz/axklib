@@ -6,6 +6,26 @@
   },
   "servers": [{"url": "/api/v1"}],
   "paths": {
+    "/diagnostics/capture": {
+      "get": {
+        "operationId": "diagnostics.capture.get",
+        "description": "Read runtime capture for the authenticated local sidecar only.",
+        "responses": {
+          "200": {"description": "Current capture", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/DiagnosticCaptureResponse"}}}},
+          "404": {"description": "Unavailable outside sidecar mode"}
+        }
+      },
+      "put": {
+        "operationId": "diagnostics.capture.set",
+        "description": "Set cumulative runtime capture. Non-Info levels reset to Info after 30 seconds unless renewed. Console filtering is unchanged.",
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/DiagnosticCaptureRequest"}}}},
+        "responses": {
+          "200": {"description": "Confirmed capture", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/DiagnosticCaptureResponse"}}}},
+          "400": {"description": "Invalid capture request"},
+          "404": {"description": "Unavailable outside sidecar mode"}
+        }
+      }
+    },
     "/system/version": {
       "get": {
         "operationId": "system.version",
@@ -669,6 +689,17 @@
       "bearerAuth": {"type": "http", "scheme": "bearer"}
     },
     "schemas": {
+      "DiagnosticCaptureRequest": {
+        "type": "object", "additionalProperties": false, "required": ["level"],
+        "properties": {"level": {"type": "string", "enum": ["ERROR", "WARNING", "INFO", "DEBUG", "TRACE"]}}
+      },
+      "DiagnosticCaptureResponse": {
+        "type": "object", "additionalProperties": false, "required": ["data"],
+        "properties": {"data": {"type": "object", "additionalProperties": false, "required": ["level", "leaseSeconds"], "properties": {
+          "level": {"type": "string", "enum": ["ERROR", "WARNING", "INFO", "DEBUG", "TRACE"]},
+          "leaseSeconds": {"type": "integer", "enum": [0, 30]}
+        }}}
+      },
       "ImageFilesystemAttribute": {
         "type": "object",
         "additionalProperties": false,

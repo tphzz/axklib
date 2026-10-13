@@ -225,7 +225,8 @@ class ScopedConnectionFile {
 
 ServerApplication::ServerApplication(axk::server::Config config, axk::app::OperationRegistry registry,
                                      axk::server::WorkspaceStore workspaces)
-    : config_(std::move(config)), workspaces_(std::move(workspaces)), sandbox_(workspaces_.sandbox()),
+    : config_(std::move(config)), diagnostics_(!config_.connection_file.empty()), workspaces_(std::move(workspaces)),
+      sandbox_(workspaces_.sandbox()),
       uploads_(upload_directory(), config_.maximum_upload_total_bytes, config_.maximum_upload_bytes,
                config_.maximum_uploads, config_.maximum_upload_chunk_bytes,
                std::chrono::seconds{config_.upload_retention_seconds}),
@@ -257,6 +258,8 @@ ServerApplication::ServerApplication(axk::server::Config config, axk::app::Opera
                         [this](const axk::app::JobEvent &event) { broadcast(event); }) {
     app_.template get_middleware<CorsMiddleware>().allowed_origins = config_.allowed_origins;
     app_.template get_middleware<RequestTelemetryMiddleware>().telemetry = &request_telemetry_;
+    app_.template get_middleware<RequestTelemetryMiddleware>().diagnostics = &diagnostics_;
+    app_.loglevel(crow::LogLevel::Warning);
     const auto journal_recovery = alteration_journals_.recover(sandbox_);
     state_storage_ready_ = uploads_.storage_ready() && download_archives_.storage_ready() &&
                            alteration_journals_.storage_ready() && journal_recovery &&
@@ -343,7 +346,10 @@ axk::app::Result<int> ServerApplication::run() {
                     shutdown_requested_.store(true, std::memory_order_release);
                 }
                 if (!axk::server::process_is_running(config_.parent_process_id)) {
-                    std::clog << "axklib-server: owning desktop process exited; stopping\n";
+                    diagnostics_.submit({{"event", "desktop_owner_exited"},
+                                         {"source", "application"},
+                                         {"level", "info"},
+                                         {"message", "owning desktop process exited; stopping"}});
                     app_.stop();
                     break;
                 }

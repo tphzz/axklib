@@ -3,7 +3,9 @@ import { LogController } from './controller.svelte';
 import type { LogDriver, LogPage } from './contracts';
 
 const page = (id = 1): LogPage => ({
-    entries: [{ id, source: 'application', level: 'info', timestamp: null, text: `message ${id}` }],
+    entries: [
+        { id, origin: 'application', source: 'application', level: 'info', timestamp: null, text: `message ${id}` },
+    ],
     olderCursor: null,
     newerCursor: null,
     total: 1,
@@ -17,6 +19,8 @@ function fixture() {
         read: vi.fn().mockResolvedValue(page()),
         clear: vi.fn().mockResolvedValue(8),
         save: vi.fn().mockResolvedValue(null),
+        capture: vi.fn().mockResolvedValue({ level: 'info', localServer: 'ready', error: null }),
+        setCapture: vi.fn(),
     };
     const controller = new LogController(driver);
     return { driver, controller };
@@ -71,12 +75,13 @@ describe('Log viewer controller', () => {
         const { driver, controller } = fixture();
         controller.setActive(true);
         await settle();
-        controller.setFilter({ minimumLevel: 'warning', search: 'problem' });
+        controller.updateCapture({ level: 'warning', localServer: 'ready', error: null });
+        controller.setFilter({ search: 'problem' });
         await settle();
         await controller.clear();
         await settle();
         expect(controller.filter.since).toBe(8);
-        expect(controller.filter.minimumLevel).toBe('warning');
+        expect(controller.filter.level).toBe('warning');
         await controller.save(false);
         expect(driver.save).toHaveBeenLastCalledWith(controller.filter);
         await controller.save(true);

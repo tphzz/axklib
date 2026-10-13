@@ -18,12 +18,16 @@ struct image_factory {
     static result<image> open(MediaContainer container, operation_context &context);
 };
 
-struct AXK_SDK_HIDDEN operation_context::impl final : ProgressSink {
+struct AXK_SDK_HIDDEN operation_context::impl final : ProgressSink, diagnostic_sink {
     CancellationSource cancellation;
     std::mutex mutex;
     progress_sink *destination{};
+    diagnostic_sink *diagnostics{};
+    mutable std::mutex diagnostic_mutex;
 
     void report(const Progress &progress) noexcept override;
+    bool enabled(diagnostic_level level) const noexcept override;
+    void report(const diagnostic_event &event) override;
 };
 
 namespace sdk_internal {

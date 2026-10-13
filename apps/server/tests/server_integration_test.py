@@ -1103,6 +1103,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
             ],
             stdout=server_log,
             stderr=subprocess.STDOUT,
+            env={**os.environ, "AXKLIB_SERVER_LOG_LEVEL": "debug"},
         )
         shutdown_requested = False
         try:
@@ -3596,9 +3597,31 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 for line in server_output.splitlines()
                 if line.startswith('{"durationMs"') and '"event":"http_request"' in line
             ]
+            structured_logs = [json.loads(line) for line in server_output.splitlines() if line.startswith("{")]
+            assert all(entry.get("level") in {"error", "warning", "info", "debug", "trace"} for entry in structured_logs)
+            assert not any(entry.get("event") == "invalid_log_record" for entry in structured_logs)
+            for event in ("filesystem_directory_list", "filesystem_media_source_inspect"):
+                diagnostics = [entry for entry in structured_logs if entry.get("event") == event]
+                assert diagnostics, event
+                assert all(
+                    entry["level"] == "debug"
+                    and entry["source"] == "filesystem"
+                    and entry["requestId"]
+                    for entry in diagnostics
+                ), diagnostics
             assert request_logs
             assert any(
                 entry["path"] == "/api/v1/system/metrics" for entry in request_logs
+            )
+            assert all(entry["source"] == "http" for entry in request_logs)
+            assert all(
+                entry["level"]
+                == (
+                    "error" if entry["status"] >= 500
+                    else "warning" if entry["status"] >= 400
+                    else "debug"
+                )
+                for entry in request_logs
             )
             assert all("?" not in entry["path"] for entry in request_logs)
             preflight_logs = [
@@ -3625,6 +3648,25 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
             assert any(
                 entry["action"] == "file_download" and entry["outcome"] == "allowed"
                 for entry in audit_logs
+            )
+            submitted_jobs = {
+                entry["resourceId"]
+                for entry in audit_logs
+                if entry["action"] == "job_submit"
+            }
+            phase_logs = [
+                json.loads(line)
+                for line in server_output.splitlines()
+                if line.startswith("{") and (
+                    '"event":"image_open_phase"' in line
+                    or '"event":"media_inventory"' in line
+                )
+            ]
+            assert any(entry["source"] == "filesystem" for entry in phase_logs)
+            assert any(entry["source"] == "objects" for entry in phase_logs)
+            assert all(
+                entry["level"] == "debug" and entry["jobId"] in submitted_jobs
+                for entry in phase_logs
             )
             assert TOKEN not in server_output
             assert str(root_path) not in server_output

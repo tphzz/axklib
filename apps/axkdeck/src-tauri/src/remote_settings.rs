@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Condvar, Mutex, TryLockError};
 use url::{Host, Url};
 
 use crate::server_sidecar::{FrontendConnection, ServerSidecar};
@@ -114,6 +114,20 @@ impl ServerConnectionState {
 
     pub fn connection(&self) -> Result<Option<FrontendConnection>, String> {
         self.with_manager(ServerConnectionManager::connection)
+    }
+
+    pub fn try_connection(&self) -> Result<Option<FrontendConnection>, String> {
+        let manager = match self.inner.manager.try_lock() {
+            Ok(manager) => manager,
+            Err(TryLockError::WouldBlock) => return Ok(None),
+            Err(TryLockError::Poisoned(_)) => {
+                return Err("Server connection state is unavailable".into());
+            }
+        };
+        // Capture renewal must not wait for credential lookup, startup or shutdown.
+        Ok(manager
+            .as_ref()
+            .and_then(|manager| manager.connection.clone()))
     }
 
     pub fn settings(&self) -> RemoteServerSettingsView {
@@ -454,6 +468,14 @@ mod tests {
         let mut whitespace = settings("https://sampler.example.test");
         whitespace.bearer_token = "0123456789abcdef 0123456789abcdef".to_owned();
         assert!(validate_remote_settings(whitespace).is_err());
+    }
+
+    #[test]
+    fn capture_connection_snapshot_never_waits_for_a_busy_manager() {
+        let state = ServerConnectionState::pending();
+        assert!(state.try_connection().unwrap().is_none());
+        let _manager = state.inner.manager.lock().unwrap();
+        assert!(state.try_connection().unwrap().is_none());
     }
 
     #[test]

@@ -1,6 +1,9 @@
 mod a_series_preferences;
 mod allocation_inspector;
 mod desktop_preferences;
+mod diagnostic_capture;
+mod diagnostic_format;
+mod diagnostic_level;
 mod diagnostic_logs;
 mod directory_tar;
 #[cfg(test)]
@@ -118,7 +121,8 @@ fn configured_log_level() -> log::LevelFilter {
             "trace" | "debug" | "info" | "warn" | "error" | "off"
         )
     }) {
-        eprintln!("invalid AXKDECK_LOG_LEVEL; using info");
+        let message = r#"{"event":"invalid_console_level","source":"application","level":"warning","message":"invalid AXKDECK_LOG_LEVEL; using info"}"#;
+        eprintln!("{message}");
     }
     level
 }
@@ -360,11 +364,6 @@ fn open_developer_tools(window: WebviewWindow) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn diagnostic_log_level() -> &'static str {
-    log_level_name(configured_log_level())
-}
-
-#[tauri::command]
 async fn desktop_build_info(window: WebviewWindow) -> DesktopBuildInfo {
     let mut build = current_build_info();
     build.webview_version = webview_runtime::version(&window).await;
@@ -447,14 +446,17 @@ pub fn run() {
     let log_targets = vec![
         Target::new(TargetKind::LogDir {
             file_name: Some("axkdeck".to_owned()),
-        }),
-        #[cfg(debug_assertions)]
-        Target::new(TargetKind::Stdout),
+        })
+        .filter(|metadata| diagnostic_capture::retained_enabled(metadata.level())),
+        Target::new(TargetKind::Stdout).filter(move |metadata| metadata.level() <= log_level),
     ];
     startup.record(StartupMilestone::LogPluginBuildStarted);
     let log_plugin = tauri_plugin_log::Builder::new()
         .targets(log_targets)
-        .level(log_level)
+        .level(log::LevelFilter::Trace)
+        .filter(move |metadata| {
+            metadata.level() <= std::cmp::max(log_level, diagnostic_capture::retained_filter())
+        })
         .max_file_size(LOG_FILE_SIZE)
         .rotation_strategy(RotationStrategy::KeepSome(RETAINED_LOG_FILES))
         .build();
@@ -472,6 +474,7 @@ pub fn run() {
         .manage(native_drag::state())
         .manage(editor_exit::EditorExitGuard::default())
         .manage(startup.clone())
+        .manage(diagnostic_capture::CaptureRuntime::default())
         .setup(move |app| {
             setup_startup.enable_logging();
             setup_startup.record(StartupMilestone::TauriSetupStarted);
@@ -507,6 +510,7 @@ pub fn run() {
                 setup_startup.clone(),
             );
             app.manage(connections);
+            app.state::<diagnostic_capture::CaptureRuntime>().start(app.handle().clone())?;
             let build = current_build_info();
             log::info!(
                 "axkdeck desktop shell initialized: version={} source={}",
@@ -561,7 +565,9 @@ pub fn run() {
             native_drag::start_native_files_drag,
             native_directory::native_drop_coordinates_are_logical,
             open_developer_tools,
-            diagnostic_log_level,
+            diagnostic_capture::diagnostic_log_level,
+            diagnostic_capture::diagnostic_capture_state,
+            diagnostic_capture::set_diagnostic_capture,
             desktop_build_info,
             desktop_interface_scale_mode,
             set_desktop_interface_scale_mode,
@@ -577,5 +583,10 @@ pub fn run() {
     builder
         .build(tauri::generate_context!())
         .expect("failed to build axkdeck")
-        .run(editor_exit::handle_exit);
+        .run(|app, event| {
+            if matches!(event, tauri::RunEvent::Exit) {
+                app.state::<diagnostic_capture::CaptureRuntime>().stop();
+            }
+            editor_exit::handle_exit(app, event);
+        });
 }

@@ -16,6 +16,7 @@
 #include "axklib/sample_bank_overrides.hpp"
 #include "axklib/sample_storage.hpp"
 #include "axklib/sampler_model.hpp"
+#include "axklib/sdk/diagnostics.hpp"
 #include "axklib/sequence.hpp"
 #include "axklib/tx16w.hpp"
 #include "axklib/types.hpp"
@@ -374,11 +375,11 @@ AXK_AUDIO_API Result<AlterationManifest> load_alteration_manifest(const std::fil
 AXK_AUDIO_API Result<AlterationResult>
 alter_hds(const std::filesystem::path &source_path, const AlterationManifest &manifest,
           const std::filesystem::path &output_path, const CancellationToken &cancellation = {},
-          ProgressSink *progress = nullptr, bool overwrite = false, const VolumeCapacityPolicy &capacity_policy = {});
-AXK_AUDIO_API Result<AlterationInspection> inspect_hds_alteration(const std::filesystem::path &source_path,
-                                                                  const AlterationManifest &manifest,
-                                                                  const CancellationToken &cancellation = {},
-                                                                  ProgressSink *progress = nullptr,
-                                                                  const VolumeCapacityPolicy &capacity_policy = {});
+          ProgressSink *progress = nullptr, bool overwrite = false, const VolumeCapacityPolicy &capacity_policy = {},
+          diagnostic_sink *diagnostics = nullptr);
+AXK_AUDIO_API Result<AlterationInspection>
+inspect_hds_alteration(const std::filesystem::path &source_path, const AlterationManifest &manifest,
+                       const CancellationToken &cancellation = {}, ProgressSink *progress = nullptr,
+                       const VolumeCapacityPolicy &capacity_policy = {}, diagnostic_sink *diagnostics = nullptr);
 
 } // namespace axk

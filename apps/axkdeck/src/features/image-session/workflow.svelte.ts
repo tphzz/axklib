@@ -15,7 +15,7 @@ import type { ObjectSelectionMode } from '../../lib/objectSelection';
 import { emptyVolumeSelection, updateVolumeSelection, type VolumeSelectionState } from '../../lib/volumeSelection';
 import { AxklibApiError } from '../../lib/httpErrors';
 import { userFacingMessage } from '../../lib/userFacingMessage';
-import { reportDiagnostic } from '../../lib/diagnostics';
+import { ImageOpenDiagnostics } from './diagnostics';
 import type { AuditionWorkflow } from '../audition/workflow.svelte';
 import type { CatalogWorkflow } from '../catalog/workflow.svelte';
 import type { DeletionWorkflow } from '../deletion/workflow.svelte';
@@ -122,6 +122,7 @@ export class ImageSessionWorkflow {
     private openProgressTimer: ReturnType<typeof setTimeout> | null = null;
     private openProgressActive = false;
     private openStartedAt = 0;
+    private readonly diagnostics = new ImageOpenDiagnostics();
     private leaseMaintenanceActive = false;
     private leaseTimer: number | null = null;
     private readonly renewVisibleLease = (): void => {
@@ -240,15 +241,13 @@ export class ImageSessionWorkflow {
             this.openProgressCancellable = false;
             this.openProgressCancelling = false;
             this.openProgressLabel = 'Preparing workspace';
-            reportDiagnostic('image_open_server_completed', {
-                requestId,
+            this.diagnostics.report('image_open_server_completed', {
                 sessionId: opened.sessionId,
                 elapsedMs: this.openElapsedMs(),
             });
             this.lastOpenedImageFile = location.kind === 'server-file' ? location.reference : null;
             await this.applyOpenedImage(opened, preferred);
-            reportDiagnostic('image_open_workspace_ready', {
-                requestId,
+            this.diagnostics.report('image_open_workspace_ready', {
                 sessionId: opened.sessionId,
                 elapsedMs: this.openElapsedMs(),
             });
@@ -256,12 +255,17 @@ export class ImageSessionWorkflow {
             if (requestId !== this.nextOpenRequestId - 1) return;
             if (error instanceof DOMException && error.name === 'AbortError') {
                 this.status = 'Image opening cancelled';
-                reportDiagnostic('image_open_cancelled', { requestId, elapsedMs: this.openElapsedMs() });
+                this.diagnostics.report('image_open_cancelled', {
+                    elapsedMs: this.openElapsedMs(),
+                });
             } else {
                 this.status = userFacingMessage(error);
-                reportDiagnostic(
+                this.diagnostics.report(
                     'image_open_failed',
-                    { requestId, elapsedMs: this.openElapsedMs(), message: userFacingMessage(error) },
+                    {
+                        elapsedMs: this.openElapsedMs(),
+                        message: userFacingMessage(error),
+                    },
                     'error',
                 );
             }
@@ -274,7 +278,7 @@ export class ImageSessionWorkflow {
         if (!this.openProgressCancellable || this.openProgressCancelling) return;
         this.openProgressCancelling = true;
         this.openProgressLabel = 'Cancelling image open';
-        reportDiagnostic('image_open_cancel_requested', { elapsedMs: this.openElapsedMs() });
+        this.diagnostics.report('image_open_cancel_requested', { elapsedMs: this.openElapsedMs() });
         this.controller.cancelOpen();
     }
 
@@ -453,6 +457,7 @@ export class ImageSessionWorkflow {
     private beginOpenProgress(requestId: number, location: ImageLocation): void {
         this.clearOpenProgressTimer();
         this.openStartedAt = performance.now();
+        this.diagnostics.begin(requestId);
         this.openProgressVisible = false;
         this.openProgressActive = true;
         this.openProgressLabel = 'Opening image source';
@@ -463,8 +468,7 @@ export class ImageSessionWorkflow {
         this.openProgressTimer = setTimeout(() => {
             if (requestId === this.nextOpenRequestId - 1 && this.openProgressActive) this.openProgressVisible = true;
         }, imageOpenProgressDelayMs);
-        reportDiagnostic('image_open_requested', {
-            requestId,
+        this.diagnostics.report('image_open_requested', {
             sourceKind: location.kind,
             displayName: location.displayName,
         });
@@ -482,16 +486,7 @@ export class ImageSessionWorkflow {
             this.openProgressTotal = job.progress.total;
         }
         this.openProgressCancelling = job.status === 'cancelling';
-        reportDiagnostic('image_open_progress', {
-            requestId,
-            jobId: job.jobId,
-            status: job.status,
-            phase: job.progress?.phase,
-            completed: job.progress?.completed,
-            total: job.progress?.total,
-            label: job.progress?.label,
-            elapsedMs: this.openElapsedMs(),
-        });
+        this.diagnostics.progress(job, this.openElapsedMs());
     }
 
     private finishOpenProgress(): void {

@@ -1,4 +1,5 @@
 #include "axklib/application/jobs.hpp"
+#include "operation_diagnostics.hpp"
 
 #include <algorithm>
 #include <atomic>
@@ -299,14 +300,8 @@ struct axk::app::JobManager::Impl {
             context.cancellation = record->cancellation.token();
             context.progress = &progress;
 
-            Result<nlohmann::json> result =
-                std::unexpected(job_runtime_detail::job_error("operation_failed", "operation failed"));
-            try {
-                result = registry.invoke(record->operation_id, record->request, context);
-            } catch (...) {
-                result = std::unexpected(
-                    job_runtime_detail::job_error("operation_exception", "operation raised an unexpected exception"));
-            }
+            auto result = invoke_diagnostic_job(registry, record->operation_id, record->request, std::move(context),
+                                                record->job_id);
             if (result) {
                 transition(record, JobState::completed, "completed", std::optional<nlohmann::json>{std::move(*result)});
             } else if (result.error().code == "operation_cancelled" || result.error().code == "cancelled") {

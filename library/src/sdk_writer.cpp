@@ -108,8 +108,8 @@ result<plan_summary> alteration::inspect(const std::string &utf8_source_path, co
         auto manifest = load_alteration_manifest(*manifest_path);
         if (!manifest)
             return public_error(manifest.error());
-        auto inspection =
-            inspect_hds_alteration(*source, *manifest, context.impl_->cancellation.token(), context.impl_.get());
+        auto inspection = inspect_hds_alteration(*source, *manifest, context.impl_->cancellation.token(),
+                                                 context.impl_.get(), {}, context.impl_.get());
         if (!inspection)
             return public_error(inspection.error());
         return plan_summary{0U, inspection->operations.size(), 0U, !inspection->operations.empty()};
@@ -137,7 +137,7 @@ result<void> alteration::apply(const std::string &utf8_source_path, const std::s
         if (!options.overwrite && std::filesystem::exists(*output))
             return error{error_code::io_open_failed, error_category::io, "output image already exists", {}};
         auto altered = alter_hds(*source, *manifest, *output, context.impl_->cancellation.token(), context.impl_.get(),
-                                 options.overwrite);
+                                 options.overwrite, {}, context.impl_.get());
         if (!altered)
             return public_error(altered.error());
         return {};

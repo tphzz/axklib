@@ -8,7 +8,7 @@ import { diagnosticsEnabled, reportDiagnostic } from '../../lib/diagnostics';
 
 vi.mock('../../lib/diagnostics', () => ({ diagnosticsEnabled: vi.fn(() => false), reportDiagnostic: vi.fn() }));
 
-const queued: JobState = { jobId: 9, kind: 'test', status: 'queued' };
+const queued: JobState = { jobId: 9, serverJobId: 'job-real-server-id', kind: 'test', status: 'queued' };
 const completed: JobState = { ...queued, status: 'completed' };
 
 function setup() {
@@ -36,18 +36,28 @@ describe('volume action execution recovery', () => {
                 vi.fn(),
                 vi.fn(),
             );
-            expect(reportDiagnostic).toHaveBeenCalledWith('image_mutation_frontend_phase', {
-                phase: 'job-wait',
-                jobId: 9,
-                durationMs: 12,
-                outcome: 'resolved',
-            });
-            expect(reportDiagnostic).toHaveBeenCalledWith('image_mutation_frontend_phase', {
-                phase: 'workspace-refresh',
-                jobId: 9,
-                durationMs: 11,
-                outcome: 'resolved',
-            });
+            expect(reportDiagnostic).toHaveBeenCalledWith(
+                'image_mutation_frontend_phase',
+                {
+                    phase: 'job-wait',
+                    jobId: 'job-real-server-id',
+                    clientJobId: 9,
+                    durationMs: 12,
+                    outcome: 'resolved',
+                },
+                'debug',
+            );
+            expect(reportDiagnostic).toHaveBeenCalledWith(
+                'image_mutation_frontend_phase',
+                {
+                    phase: 'workspace-refresh',
+                    jobId: 'job-real-server-id',
+                    clientJobId: 9,
+                    durationMs: 11,
+                    outcome: 'resolved',
+                },
+                'debug',
+            );
         } finally {
             clock.mockRestore();
             vi.mocked(diagnosticsEnabled).mockReturnValue(false);

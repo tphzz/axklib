@@ -17,21 +17,6 @@
 
 namespace axk::server::detail {
 
-std::function<void(const Json &)> operation_diagnostic_sink() {
-    static const bool enabled = [] {
-        const auto level = axk::server::detail::environment_variable("AXKLIB_SERVER_LOG_LEVEL");
-        if (!level)
-            return false;
-        auto normalized = *level;
-        std::ranges::transform(normalized, normalized.begin(),
-                               [](unsigned char character) { return static_cast<char>(std::tolower(character)); });
-        return normalized == "debug" || normalized == "trace";
-    }();
-    if (!enabled)
-        return {};
-    return [](const Json &event) { write_structured_log(event.dump()); };
-}
-
 std::string readiness_check_name() {
     std::random_device source;
     constexpr std::string_view digits{"0123456789abcdef"};

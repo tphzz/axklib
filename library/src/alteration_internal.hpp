@@ -349,10 +349,12 @@ Result<TransactionState> prepare_alteration(std::shared_ptr<const RandomAccessRe
                                             const std::filesystem::path &source_path,
                                             const AlterationManifest &manifest, const CancellationToken &cancellation,
                                             ProgressSink *progress, std::string_view initial_message,
-                                            std::optional<std::string> progress_path = std::nullopt);
+                                            std::optional<std::string> progress_path = std::nullopt,
+                                            diagnostic_sink *diagnostics = nullptr);
 Result<TransactionState> prepare_alteration(const std::filesystem::path &source_path,
                                             const AlterationManifest &manifest, const CancellationToken &cancellation,
                                             ProgressSink *progress, std::string_view initial_message,
-                                            std::optional<std::string> progress_path = std::nullopt);
+                                            std::optional<std::string> progress_path = std::nullopt,
+                                            diagnostic_sink *diagnostics = nullptr);
 
 } // namespace axk::alteration_internal

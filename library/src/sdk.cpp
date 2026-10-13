@@ -162,6 +162,26 @@ void operation_context::impl::report(const Progress &progress) noexcept {
 
 progress_sink::~progress_sink() = default;
 
+bool operation_context::impl::enabled(diagnostic_level level) const noexcept {
+    const std::scoped_lock lock{diagnostic_mutex};
+    return diagnostics != nullptr && diagnostics->enabled(level);
+}
+void operation_context::impl::report(const diagnostic_event &event) {
+    const std::scoped_lock lock{diagnostic_mutex};
+    if (diagnostics != nullptr) {
+        try {
+            diagnostics->report(event);
+        } catch (...) {
+        }
+    }
+}
+void operation_context::set_diagnostic_sink(diagnostic_sink *sink) noexcept {
+    if (!impl_)
+        return;
+    const std::scoped_lock lock{impl_->diagnostic_mutex};
+    impl_->diagnostics = sink;
+}
+
 operation_context::operation_context() : impl_(std::make_unique<impl>()) {}
 operation_context::~operation_context() = default;
 operation_context::operation_context(operation_context &&) noexcept = default;

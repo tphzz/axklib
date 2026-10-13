@@ -10,6 +10,8 @@ void register_infrastructure_routes(ServerCrowApp &app, InfrastructureRoutes rou
     app.route_dynamic("/api/v1/system/capabilities")(std::move(routes.capabilities));
     app.route_dynamic("/api/v1/system/metrics")(std::move(routes.metrics));
     app.route_dynamic("/api/v1/system/shutdown").methods(crow::HTTPMethod::Post)(std::move(routes.shutdown));
+    app.route_dynamic("/api/v1/diagnostics/capture")
+        .methods(crow::HTTPMethod::Get, crow::HTTPMethod::Put)(std::move(routes.diagnostic_capture));
     app.route_dynamic("/api/v1/roots")(std::move(routes.roots));
     app.route_dynamic("/api/v1/workspaces")
         .methods(crow::HTTPMethod::Get, crow::HTTPMethod::Post)(std::move(routes.workspaces));

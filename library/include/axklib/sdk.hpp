@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "axklib/sdk/build_info.hpp"
+#include "axklib/sdk/diagnostics.hpp"
 #include "axklib/sdk/export.hpp"
 #include "axklib/sdk/result.hpp"
 
@@ -45,6 +46,7 @@ class AXK_SDK_API operation_context final {
     void cancel() noexcept;
     void reset_cancel() noexcept;
     void set_progress_sink(progress_sink *sink) noexcept;
+    void set_diagnostic_sink(diagnostic_sink *sink) noexcept;
 
   private:
     struct impl;

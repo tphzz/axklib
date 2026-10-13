@@ -1,3 +1,5 @@
+#include "diagnostic_log.hpp"
+#include <exception>
 #include <iostream>
 
 #include "axklib/server/config.hpp"
@@ -8,7 +10,7 @@ int main(int argc, char **argv) {
     try {
         const auto command_line = axk::server::parse_command_line(argc, argv);
         if (!command_line) {
-            std::cerr << "error: " << command_line.error().message << '\n';
+            axk::server::detail::write_startup_error(command_line.error().code, command_line.error().message);
             return 2;
         }
         if (command_line->print_help) {
@@ -22,15 +24,15 @@ int main(int argc, char **argv) {
         }
         const auto result = axk::server::run(command_line->config);
         if (!result) {
-            std::cerr << "error: " << result.error().code << ": " << result.error().message << '\n';
+            axk::server::detail::write_startup_error(result.error().code, result.error().message);
             return 2;
         }
         return *result;
     } catch (const std::exception &error) {
-        std::cerr << "error: server_start_failed: unhandled server failure: " << error.what() << '\n';
+        axk::server::detail::write_startup_error("server_start_failed", error.what());
         return 2;
     } catch (...) {
-        std::cerr << "error: server_start_failed: unhandled server failure\n";
+        axk::server::detail::write_startup_error("server_start_failed", "unhandled server failure");
         return 2;
     }
 }

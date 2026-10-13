@@ -9,6 +9,7 @@
 #include "axklib/alteration.hpp"
 #include "axklib/io.hpp"
 #include "axklib/package.hpp"
+#include "axklib/sdk/diagnostics.hpp"
 #include "axklib/volume_capacity.hpp"
 
 namespace axk::detail {
@@ -41,7 +42,8 @@ struct PreparedPackageImport {
 [[nodiscard]] Result<PreparedAlteration>
 prepare_hds_alteration(std::shared_ptr<const RandomAccessReader> source, std::filesystem::path source_path,
                        const AlterationManifest &manifest, const CancellationToken &cancellation = {},
-                       ProgressSink *progress = nullptr, const VolumeCapacityPolicy &capacity_policy = {});
+                       ProgressSink *progress = nullptr, const VolumeCapacityPolicy &capacity_policy = {},
+                       diagnostic_sink *diagnostics = nullptr);
 
 [[nodiscard]] Result<PreparedPackageImport>
 prepare_sfs_package_import(std::shared_ptr<const RandomAccessReader> source, std::filesystem::path source_path,

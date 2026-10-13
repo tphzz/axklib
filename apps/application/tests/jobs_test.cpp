@@ -67,6 +67,49 @@ axk::app::JobSnapshot wait_terminal(axk::app::JobManager &jobs, std::string_view
     return {};
 }
 
+TEST(JobManager, DiagnosticsCarryServerJobAndRequestIdentityWithoutAffectingResults) {
+    auto registry = test_registry([](const nlohmann::json &, const axk::app::OperationContext &context) {
+        context.diagnostic({{"event", "library_phase"}, {"source", "objects"}, {"level", "debug"}});
+        return axk::app::Result<nlohmann::json>{nlohmann::json{{"ok", true}}};
+    });
+    std::mutex mutex;
+    std::vector<nlohmann::json> events;
+    axk::app::JobManager jobs{registry, 1U, 1U, 4U, 8U};
+    axk::app::OperationContext context{};
+    context.owner_id = "owner";
+    context.request_id = "correlated-request";
+    context.diagnostic = [&](const auto &event) {
+        const std::scoped_lock lock{mutex};
+        events.push_back(event);
+    };
+    auto submitted = jobs.submit("test.job", {}, context);
+    ASSERT_TRUE(submitted);
+    EXPECT_EQ(wait_terminal(jobs, submitted->job_id).state, axk::app::JobState::completed);
+    const std::scoped_lock lock{mutex};
+    ASSERT_EQ(events.size(), 2U);
+    for (const auto &event : events) {
+        EXPECT_EQ(event.at("jobId").get<std::string>(), submitted->job_id);
+        EXPECT_EQ(event.at("requestId"), "correlated-request");
+        EXPECT_EQ(event.at("operation"), "test.job");
+    }
+    EXPECT_EQ(events.back().at("event"), "operation_completed");
+    EXPECT_EQ(events.back().at("level"), "info");
+}
+
+TEST(JobManager, DiagnosticWriterFailureCannotFailTheJob) {
+    auto registry = test_registry([](const nlohmann::json &, const axk::app::OperationContext &context) {
+        context.diagnostic({{"event", "phase"}, {"level", "debug"}});
+        return axk::app::Result<nlohmann::json>{nlohmann::json{{"ok", true}}};
+    });
+    axk::app::OperationContext context{};
+    context.owner_id = "owner";
+    context.diagnostic = [](const auto &) { throw std::runtime_error{"log unavailable"}; };
+    axk::app::JobManager jobs{registry, 1U, 1U, 4U, 8U};
+    const auto submitted = jobs.submit("test.job", {}, context);
+    ASSERT_TRUE(submitted);
+    EXPECT_EQ(wait_terminal(jobs, submitted->job_id).state, axk::app::JobState::completed);
+}
+
 TEST(JobManager, CompletesOperationsAndRetainsOrderedReplay) {
     auto registry = test_registry([](const nlohmann::json &request, const axk::app::OperationContext &context) {
         if (context.progress != nullptr)

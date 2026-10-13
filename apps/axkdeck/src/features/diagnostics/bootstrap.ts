@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { mount, tick } from 'svelte';
 import LogViewer from './LogViewer.svelte';
+import type { CaptureState } from './contracts';
 import { installDiagnostics, reportDiagnostic } from '../../lib/diagnostics';
 import { createInterfaceScaleController, type InterfaceScaleMode } from '../../lib/interfaceScale';
 import { createTauriInterfaceScaleAdapter, showCurrentTauriWindow } from '../../lib/tauriInterfaceScale';
@@ -37,6 +38,8 @@ export async function startLogsView(target: HTMLElement, isDesktop: boolean): Pr
         mount(LogViewer, {
             target,
             props: {
+                subscribeCapture: (callback) =>
+                    listen<CaptureState>('diagnostic-capture-changed', (event) => callback(event.payload)),
                 subscribeVisibility: (callback) =>
                     listen<boolean>('logs-visibility', (event) => callback(event.payload)),
             },

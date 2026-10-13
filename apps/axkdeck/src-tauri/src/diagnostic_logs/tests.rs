@@ -1,13 +1,123 @@
 use super::pages::{ReadRequest, read_page};
 use super::reader::{LogReader, log_source};
 use super::records::Filter;
-use super::records::{Level, Source, parse_entry};
+use super::records::{Source, parse_entry};
+use crate::diagnostic_level::Level;
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(0);
+
+#[test]
+fn missing_severity_is_a_logging_contract_error_with_bounded_original_text() {
+    let text = "1790575200000 [stderr] plain output [INFO] filename";
+    let entry = parse_entry(1, Source::LocalServer, text.into());
+    assert_eq!(entry.level, Level::Error);
+    assert!(entry.text.contains("invalid_log_record"));
+    assert!(entry.text.contains(text));
+    let long = parse_entry(
+        2,
+        Source::LocalServer,
+        format!("1790575200000 [stderr] {}", "x".repeat(20_000)),
+    );
+    assert!(long.text.len() < 5_000);
+    assert!(long.text.contains("\"truncated\":true"));
+}
+
+#[test]
+fn structured_library_events_keep_origin_and_exact_subsystem_and_severity() {
+    use super::records::Subsystem;
+    let entry = parse_entry(1, Source::LocalServer,
+        "1790575200000 [stderr] {\"level\":\"debug\",\"source\":\"objects\",\"event\":\"object_encode\"}".into());
+    assert_eq!(entry.origin, Source::LocalServer);
+    assert_eq!(entry.source, Subsystem::Objects);
+    assert_eq!(entry.level, Level::Debug);
+    let filter = Filter {
+        sources: vec![Subsystem::Objects],
+        level: Level::Debug,
+        ..Filter::all()
+    };
+    assert!(filter.matches(&entry));
+    assert!(
+        !Filter {
+            level: Level::Info,
+            ..filter.clone()
+        }
+        .matches(&entry)
+    );
+    assert!(
+        !Filter {
+            sources: vec![],
+            ..filter
+        }
+        .matches(&entry)
+    );
+}
+
+#[test]
+fn undeclared_lines_do_not_borrow_the_preceding_records_level() {
+    let root = Fixture::new();
+    root.write(
+        "axkdeck.log",
+        format!("{}undeclared output\n", line("valid")).as_bytes(),
+    );
+    let mut reader = LogReader::new(root.0.clone());
+    reader.refresh().unwrap();
+    let records = reader.matching(&Filter::all());
+    assert_eq!(records.len(), 2);
+    assert_eq!(records[0].level, Level::Info);
+    assert_eq!(records[1].level, Level::Error);
+    assert!(records[1].text.contains("invalid_log_record"));
+    assert!(records[1].text.contains("undeclared output"));
+}
+
+#[test]
+fn conflicting_declared_levels_are_not_silently_reclassified() {
+    let text = "[2026-09-28][06:00:00][test][INFO] {\"level\":\"debug\",\"event\":\"conflict\"}";
+    let entry = parse_entry(1, Source::Application, text.into());
+    assert_eq!(entry.level, Level::Error);
+    let value: serde_json::Value = serde_json::from_str(&entry.text).unwrap();
+    assert_eq!(value["event"], "invalid_log_record");
+    assert_eq!(value["originalText"], text);
+}
+
+#[test]
+fn filter_contract_is_scalar_and_each_level_adds_to_the_previous() {
+    let levels = [
+        Level::Error,
+        Level::Warning,
+        Level::Info,
+        Level::Debug,
+        Level::Trace,
+    ];
+    for (index, limit) in levels.iter().enumerate() {
+        let filter = Filter {
+            level: *limit,
+            ..Filter::all()
+        };
+        let count = levels
+            .iter()
+            .filter(|level| {
+                let entry = parse_entry(
+                    1,
+                    Source::LocalServer,
+                    format!("1790575200000 [stderr] {{\"level\":\"{}\"}}", level.name()),
+                );
+                filter.matches(&entry)
+            })
+            .count();
+        assert_eq!(count, index + 1);
+    }
+    for filter in [
+        r#"{"sources":[],"levels":["info"],"search":"","since":null}"#,
+        r#"{"sources":[],"level":"unclassified","search":"","since":null}"#,
+        r#"{"sources":[],"level":null,"search":"","since":null}"#,
+    ] {
+        assert!(serde_json::from_str::<Filter>(filter).is_err());
+    }
+}
 
 struct Fixture(PathBuf);
 impl Fixture {
@@ -66,14 +176,14 @@ fn combines_retained_sources_and_filters_without_treating_stderr_as_errors() {
     reader.refresh().unwrap();
     assert_eq!(reader.matching(&Filter::all()).len(), 3);
     let filter = Filter {
-        minimum_level: Some(Level::Warning),
+        level: Level::Warning,
         ..Filter::all()
     };
     assert_eq!(reader.matching(&filter).len(), 1);
     assert_eq!(
         reader
             .matching(&Filter {
-                include_unclassified: false,
+                sources: vec![],
                 ..filter
             })
             .len(),
@@ -83,7 +193,7 @@ fn combines_retained_sources_and_filters_without_treating_stderr_as_errors() {
         reader
             .matching(&Filter {
                 search: "PREVIOUS".into(),
-                source: Some(Source::Application),
+                sources: vec![super::records::Subsystem::Application],
                 ..Filter::all()
             })
             .len(),
@@ -132,7 +242,7 @@ fn continuation_lines_keep_parent_severity_and_invalid_utf8_remains_visible() {
     reader.refresh().unwrap();
     let records = reader.matching(&Filter::all());
     assert_eq!(records.len(), 1);
-    assert_eq!(records[0].level, Some(Level::Error));
+    assert_eq!(records[0].level, Level::Error);
     assert!(records[0].text.contains("\n  stack\u{fffd}"));
 }
 
@@ -290,7 +400,10 @@ fn rotation_during_refresh(timestamp_changes: bool) {
 #[test]
 fn modification_time_changes_preserve_cleared_entries_and_pending_record_ids() {
     let root = Fixture::new();
-    root.write("axkdeck.log", format!("{}partial", line("old")).as_bytes());
+    root.write(
+        "axkdeck.log",
+        format!("{}  partial", line("old")).as_bytes(),
+    );
     root.set_modified("axkdeck.log", 1790575200);
     let mut reader = LogReader::new(root.0.clone());
     reader.refresh().unwrap();
@@ -411,7 +524,7 @@ fn retries_when_rotation_removes_an_enumerated_file_before_open() {
 fn malformed_large_timestamp_does_not_drop_original_record() {
     let text = "9223372036854775807 [stderr] bad timestamp";
     let entry = parse_entry(1, Source::LocalServer, text.into());
-    assert_eq!(entry.text, text);
+    assert!(entry.text.contains(text));
     assert_eq!(entry.timestamp, Some(i64::MAX));
 }
 
@@ -529,8 +642,8 @@ fn application_records_preserve_text_and_decode_explicit_level_and_utc_time() {
     let text = "[2026-09-28][06:00:00][webview:writeLog][WARN] failure\n  at handler";
     let record = parse_entry(3, Source::Application, text.to_owned());
     assert_eq!(record.id, 3);
-    assert_eq!(record.source, Source::Application);
-    assert_eq!(record.level, Some(Level::Warning));
+    assert_eq!(record.origin, Source::Application);
+    assert_eq!(record.level, Level::Warning);
     assert_eq!(record.timestamp, Some(1_790_575_200_000));
     assert_eq!(record.text, text);
 }
@@ -542,14 +655,15 @@ fn stderr_is_not_error_severity() {
         Source::LocalServer,
         "1790575200000 [stderr] (2026-09-28 06:00:00) [INFO    ] Request: /api/v1/jobs".into(),
     );
-    assert_eq!(info.level, Some(Level::Info));
+    assert_eq!(info.level, Level::Info);
     assert_eq!(info.timestamp, Some(1_790_575_200_000));
     let unknown = parse_entry(
         2,
         Source::LocalServer,
         "1790575200001 [stderr] {\"event\":\"http_request\",\"status\":500}".into(),
     );
-    assert_eq!(unknown.level, None);
+    assert_eq!(unknown.level, Level::Error);
+    assert!(unknown.text.contains("invalid_log_record"));
 }
 
 #[test]
@@ -559,11 +673,12 @@ fn structured_severity_is_recognized_without_scanning_message_text() {
         Source::LocalServer,
         "1790575200000 [stdout] {\"level\":\"error\",\"message\":\"failed\"}".into(),
     );
-    assert_eq!(error.level, Some(Level::Error));
+    assert_eq!(error.level, Level::Error);
     let unknown = parse_entry(
         2,
         Source::LocalServer,
         "1790575200000 [stderr] user filename [ERROR]".into(),
     );
-    assert_eq!(unknown.level, None);
+    assert_eq!(unknown.level, Level::Error);
+    assert!(unknown.text.contains("invalid_log_record"));
 }

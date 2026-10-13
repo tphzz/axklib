@@ -101,6 +101,7 @@ add_library(
   src/archive_download_budget.cpp
   src/authentication.cpp
   src/config.cpp
+  src/diagnostic_log.cpp
   src/download_reader.cpp
   src/event_delivery_budget.cpp
   src/event_dispatcher.cpp
@@ -241,6 +242,7 @@ if(BUILD_TESTING)
     tests/server_contract_test.cpp
     tests/state_lease_test.cpp
     tests/telemetry_test.cpp
+    tests/diagnostic_log_test.cpp
     tests/workspaces_test.cpp
   )
   target_compile_features(axk_server_tests PRIVATE cxx_std_23)

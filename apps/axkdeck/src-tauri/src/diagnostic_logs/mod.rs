@@ -43,6 +43,8 @@ pub async fn open_diagnostic_logs(app: AppHandle, window: WebviewWindow) -> Resu
         existing
             .emit("logs-visibility", true)
             .map_err(|e| e.to_string())?;
+        app.state::<crate::diagnostic_capture::CaptureRuntime>()
+            .opened();
         return Ok(());
     }
     WebviewWindowBuilder::new(
@@ -57,6 +59,8 @@ pub async fn open_diagnostic_logs(app: AppHandle, window: WebviewWindow) -> Resu
     .center()
     .build()
     .map_err(|e| e.to_string())?;
+    app.state::<crate::diagnostic_capture::CaptureRuntime>()
+        .opened();
     Ok(())
 }
 
@@ -64,10 +68,19 @@ pub fn window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
     if window.label() == WINDOW_LABEL {
         if let tauri::WindowEvent::CloseRequested { api, .. } = event {
             api.prevent_close();
+            window
+                .app_handle()
+                .state::<crate::diagnostic_capture::CaptureRuntime>()
+                .close(window.app_handle());
             let _ = window.emit("logs-visibility", false);
             if let Err(error) = window.hide() {
                 log::warn!("Could not hide Logs window: {error}");
             }
+        } else if matches!(event, tauri::WindowEvent::Destroyed) {
+            window
+                .app_handle()
+                .state::<crate::diagnostic_capture::CaptureRuntime>()
+                .close(window.app_handle());
         }
     } else if window.label() == "main" && matches!(event, tauri::WindowEvent::Destroyed) {
         if let Some(logs) = window.app_handle().get_webview_window(WINDOW_LABEL) {

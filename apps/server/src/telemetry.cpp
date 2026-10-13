@@ -35,6 +35,10 @@ std::string axk::server::structured_request_log(std::string_view request_id, std
     const auto query = path.find('?');
     const auto bounded_path = path.substr(0U, std::min(query, std::size_t{256U}));
     return nlohmann::json{{"event", "http_request"},
+                          {"level", status >= 500   ? "error"
+                                    : status >= 400 ? "warning"
+                                                    : "debug"},
+                          {"source", "http"},
                           {"requestId", request_id.substr(0U, 96U)},
                           {"method", method.substr(0U, 16U)},
                           {"path", bounded_path},
@@ -47,6 +51,8 @@ std::string axk::server::structured_audit_log(std::string_view request_id, std::
                                               std::string_view outcome, std::string_view principal_id,
                                               std::string_view resource_type, std::string_view resource_id) {
     auto document = nlohmann::json{{"event", "security_audit"},
+                                   {"level", outcome == "allowed" ? "info" : "warning"},
+                                   {"source", "jobs"},
                                    {"requestId", request_id.substr(0U, 96U)},
                                    {"action", action.substr(0U, 64U)},
                                    {"outcome", outcome.substr(0U, 16U)}};

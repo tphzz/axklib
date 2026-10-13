@@ -26,7 +26,6 @@ struct ByteRange {
     std::uint64_t length{};
 };
 
-std::function<void(const Json &)> operation_diagnostic_sink();
 bool writable_directory(const std::filesystem::path &directory);
 bool cleanup_complete(const std::filesystem::path &directory);
 

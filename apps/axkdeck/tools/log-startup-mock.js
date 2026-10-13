@@ -9,8 +9,8 @@
     let nextId = 0;
     let visible = false;
     const entries = scenario === 'empty' ? [] : [
-        { id: 1, source: 'application', timestamp: 1800000000000, level: 'info', text: 'Startup application record' },
-        { id: 2, source: 'localServer', timestamp: 1800000000001, level: 'warning', text: 'Startup local server record' },
+        { id: 1, origin: 'application', source: 'application', timestamp: 1800000000000, level: 'info', text: 'Startup application record' },
+        { id: 2, origin: 'localServer', source: 'filesystem', timestamp: 1800000000001, level: 'warning', text: 'Startup local server record' },
     ];
     const state = window.logStartup = {
         calls: [],
@@ -52,6 +52,8 @@
                     if (scenario === 'preference-error') throw new Error('Display preference unavailable');
                     return 'auto';
                 case 'diagnostic_log_level': return 'info';
+                case 'diagnostic_capture_state': return { level: 'info', localServer: 'ready', error: null };
+                case 'set_diagnostic_capture': return { level: args.level, localServer: 'ready', error: null };
                 case 'plugin:log|log': return;
                 case 'plugin:window|current_monitor': return null;
                 case 'plugin:window|scale_factor': return 1;

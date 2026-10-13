@@ -44,6 +44,7 @@
 
 #include "content_digest.hpp"
 #include "device_read_metrics.hpp"
+#include "operation_diagnostics.hpp"
 
 #include "write_operations_internal.hpp"
 
@@ -59,6 +60,7 @@ axk::app::Result<void> axk::app::bind_session_write_operations(OperationRegistry
     if (auto bound = registry.bind(
             "images.alter.inspect",
             [&sandbox, &uploads, &images](const Json &input, const OperationContext &context) -> Result<Json> {
+                OperationDiagnosticSink diagnostics{context};
                 const auto policy = capacity_policy(input);
                 if (!policy)
                     return std::unexpected{policy.error()};
@@ -82,7 +84,7 @@ axk::app::Result<void> axk::app::bind_session_write_operations(OperationRegistry
                     return std::unexpected{fingerprints.error()};
                 auto prepared = axk::detail::prepare_hds_alteration(
                     session->reader, std::filesystem::path{session->source.relative_path}, *manifest,
-                    context.cancellation, context.progress, *policy);
+                    context.cancellation, context.progress, *policy, &diagnostics);
                 if (!prepared)
                     return std::unexpected{core_error(prepared.error())};
                 if (const auto verified = verify_fingerprints(*fingerprints, context.cancellation); !verified)
@@ -101,32 +103,39 @@ axk::app::Result<void> axk::app::bind_session_write_operations(OperationRegistry
         return bound;
     const auto alter_session = [&sandbox, &uploads, &images,
                                 &journals](const Json &input, const OperationContext &context) -> Result<Json> {
+        OperationDiagnosticSink diagnostics{context};
         const auto operation_started = Clock::now();
         const RandomAccessReader *measured_reader{};
         Json previous_reads = Json::object();
         const auto diagnostic = [&](std::string_view phase, Clock::time_point started,
                                     const Json &details = Json::object()) {
-            if (!context.diagnostic)
+            if (!diagnostics.enabled(diagnostic_level::debug))
                 return;
-            auto event = details;
-            event["event"] = "image_mutation_phase";
-            event["requestId"] = context.request_id;
-            event["phase"] = phase;
-            event["durationMs"] = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - started).count();
-            event["strategy"] = "journaled-in-place";
-            auto reads = measured_reader ? device_detail::device_read_metrics(measured_reader) : previous_reads;
-            if (!reads.empty()) {
-                auto delta = reads;
-                if (phase != "total") {
-                    for (auto &[key, value] : delta.items()) {
-                        if (key != "guardSectors")
-                            value = value.get<std::uint64_t>() - previous_reads.value(key, std::uint64_t{});
+            try {
+                auto event = details;
+                event["level"] = "debug";
+                event["source"] = "filesystem";
+                event["event"] = "image_mutation_phase";
+                event["requestId"] = context.request_id;
+                event["phase"] = phase;
+                event["durationMs"] =
+                    std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - started).count();
+                event["strategy"] = "journaled-in-place";
+                auto reads = measured_reader ? device_detail::device_read_metrics(measured_reader) : previous_reads;
+                if (!reads.empty()) {
+                    auto delta = reads;
+                    if (phase != "total") {
+                        for (auto &[key, value] : delta.items()) {
+                            if (key != "guardSectors")
+                                value = value.get<std::uint64_t>() - previous_reads.value(key, std::uint64_t{});
+                        }
                     }
+                    event["deviceIo"] = std::move(delta);
+                    previous_reads = std::move(reads);
                 }
-                event["deviceIo"] = std::move(delta);
-                previous_reads = std::move(reads);
+                context.diagnostic(event);
+            } catch (...) {
             }
-            context.diagnostic(event);
         };
 
         std::string image_id;
@@ -187,9 +196,9 @@ axk::app::Result<void> axk::app::bind_session_write_operations(OperationRegistry
                     {"inputCount", fingerprints->size()}});
 
         const auto planning_started = Clock::now();
-        auto prepared =
-            axk::detail::prepare_hds_alteration(mutation->target, std::filesystem::path{mutation->source.relative_path},
-                                                *manifest, context.cancellation, context.progress, *policy);
+        auto prepared = axk::detail::prepare_hds_alteration(
+            mutation->target, std::filesystem::path{mutation->source.relative_path}, *manifest, context.cancellation,
+            context.progress, *policy, &diagnostics);
         if (!prepared)
             return std::unexpected(core_error(prepared.error(), mutation->source.relative_path));
         if (const auto admitted = enforce_volume_capacity_admission(prepared->capacity, *policy); !admitted)

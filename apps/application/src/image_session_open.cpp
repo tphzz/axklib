@@ -11,6 +11,7 @@
 
 #include "axklib/application/program_formats.hpp"
 #include "axklib/application/sample_formats.hpp"
+#include "axklib/diagnostics.hpp"
 #include "axklib/package_closure.hpp"
 
 namespace {
@@ -85,13 +86,16 @@ exact_dependency_size(const axk::ObjectSnapshot &root, const axk::RelationshipGr
 
 axk::app::Result<axk::app::ImageSessionSummary>
 axk::app::ImageSessionManager::open(const ImageSourceRef &source, std::string owner_id,
-                                    const CancellationToken &cancellation, ProgressSink *progress) {
-    return open_with_companion_sources(source, std::move(owner_id), {}, cancellation, progress);
+                                    const CancellationToken &cancellation, ProgressSink *progress,
+                                    diagnostic_sink *diagnostics) {
+    return open_with_companion_sources(source, std::move(owner_id), {}, cancellation, progress, diagnostics);
 }
 
 axk::app::Result<axk::app::ImageSessionSummary> axk::app::ImageSessionManager::open_with_companion_sources(
     const ImageSourceRef &source, std::string owner_id, const std::vector<ImageSourceRef> &companion_sources,
-    const CancellationToken &cancellation, ProgressSink *progress) {
+    const CancellationToken &cancellation, ProgressSink *progress, diagnostic_sink *diagnostics) {
+    axk::DiagnosticTimer admission_timer{diagnostics, diagnostic_source::filesystem, "image_open_phase",
+                                         "source-admission"};
     if (owner_id.empty())
         return std::unexpected(session_error("invalid_owner", "image session owner is required"));
     if (auto reported =
@@ -124,7 +128,7 @@ axk::app::Result<axk::app::ImageSessionSummary> axk::app::ImageSessionManager::o
             return std::unexpected(file.error());
         source_revision = file->revision;
         auto opened_media =
-            axk::open_media(file->reader, std::filesystem::path{file->filename}, cancellation, progress);
+            axk::open_media(file->reader, std::filesystem::path{file->filename}, cancellation, progress, diagnostics);
         if (!opened_media)
             return std::unexpected(core_error(opened_media.error(), source));
         source_reader = file->reader;
@@ -159,7 +163,7 @@ axk::app::Result<axk::app::ImageSessionSummary> axk::app::ImageSessionManager::o
         source_revision = opened->revision;
         verify_source_unchanged = std::move(opened->verify_unchanged);
         seal_device = std::move(opened->seal);
-        auto opened_media = axk::open_media(source_reader, "device.hds", cancellation, progress);
+        auto opened_media = axk::open_media(source_reader, "device.hds", cancellation, progress, diagnostics);
         if (!opened_media)
             return std::unexpected(core_error(opened_media.error(), source));
         if (opened_media->kind() != MediaKind::sfs && opened_media->kind() != MediaKind::iso9660)
@@ -187,20 +191,30 @@ axk::app::Result<axk::app::ImageSessionSummary> axk::app::ImageSessionManager::o
     const auto inventory_mode = media->kind() == axk::MediaKind::fat12_floppy_set
                                     ? axk::MediaObjectReadMode::complete
                                     : axk::MediaObjectReadMode::decoded_metadata;
-    auto inventory = axk::build_media_inventory(*media, inventory_mode, 64U * 1024U * 1024U, cancellation, progress);
+    admission_timer.finish();
+    auto inventory =
+        axk::build_media_inventory(*media, inventory_mode, 64U * 1024U * 1024U, cancellation, progress, diagnostics);
     if (!inventory)
         return std::unexpected(core_error(inventory.error(), source));
     if (seal_device) {
+        axk::DiagnosticTimer seal_timer{diagnostics, diagnostic_source::devices, "image_open_phase",
+                                        "device-guard-seal"};
         if (auto sealed = seal_device(cancellation, progress); !sealed)
             return std::unexpected(sealed.error());
+        seal_timer.finish();
     }
     if (auto reported = report_image_open_progress(progress, cancellation, ProgressPhase::resolving, 2U,
                                                    "Resolving sampler objects");
         !reported) {
         return std::unexpected(reported.error());
     }
+    axk::DiagnosticTimer graph_timer{diagnostics, diagnostic_source::objects, "image_open_phase", "relationships"};
     auto graph = axk::build_relationship_graph(inventory->catalog);
+    graph_timer.finish();
+    axk::DiagnosticTimer tree_timer{diagnostics, diagnostic_source::objects, "image_open_phase", "content-tree"};
     auto tree = axk::build_content_tree(*media, inventory->catalog, graph);
+    tree_timer.finish();
+    axk::DiagnosticTimer indexes_timer{diagnostics, diagnostic_source::objects, "image_open_phase", "session-indexes"};
     std::unordered_map<std::uint8_t, std::string> partition_names;
     std::unordered_map<std::uint8_t, ImagePartitionCapacity> partition_capacities;
     if (const auto *sfs = std::get_if<axk::Container>(&media->storage())) {
@@ -485,7 +499,10 @@ axk::app::Result<axk::app::ImageSessionSummary> axk::app::ImageSessionManager::o
         session->validation.push_back(
             {std::move(code), std::move(severity), std::move(message), std::move(sampler_path), std::move(object_id)});
     };
+    indexes_timer.finish();
+    axk::DiagnosticTimer validation_timer{diagnostics, diagnostic_source::objects, "image_open_phase", "validation"};
     const auto validation = axk::validate_semantics(*media, *inventory, graph);
+    validation_timer.finish();
     for (const auto &issue : validation.issues) {
         std::string severity;
         switch (issue.severity) {
@@ -507,10 +524,13 @@ axk::app::Result<axk::app::ImageSessionSummary> axk::app::ImageSessionManager::o
         session->snapshots_by_id.emplace(identifier, std::move(object));
     }
     session->media.emplace(std::move(*media));
+    axk::DiagnosticTimer verification{diagnostics, diagnostic_source::devices, "image_open_phase",
+                                      "source-verification"};
     if (const auto unchanged = session->verify_source_unchanged(); !unchanged) {
         return std::unexpected(
             session_error("image_source_changed", "image source changed while the session was opened", true));
     }
+    verification.finish();
 
     if (auto reported = report_image_open_progress(progress, cancellation, ProgressPhase::publishing, 4U,
                                                    "Publishing image session");
@@ -518,6 +538,8 @@ axk::app::Result<axk::app::ImageSessionSummary> axk::app::ImageSessionManager::o
         return std::unexpected(reported.error());
     }
 
+    axk::DiagnosticTimer publication_timer{diagnostics, diagnostic_source::filesystem, "image_open_phase",
+                                           "publication"};
     do {
         auto image_id = random_identifier("image-");
         if (!image_id)
@@ -536,6 +558,7 @@ axk::app::Result<axk::app::ImageSessionSummary> axk::app::ImageSessionManager::o
                           .label = "Image session ready",
                           .output_path = std::nullopt});
     }
+    publication_timer.finish();
     return summary;
 }
 

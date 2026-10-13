@@ -161,9 +161,10 @@ for the upstream symptoms and renderer tradeoffs.
 
 #### Logging
 
-`AXKDECK_LOG_LEVEL` controls desktop logging at runtime. Supported values are
+`AXKDECK_LOG_LEVEL` controls desktop console output, not Logs-window capture. Supported values are
 `trace`, `debug`, `info`, `warn`, `error`, and `off`; the default is `info`.
-Detailed audio playback telemetry is generated only at `debug` or `trace`,
+Choose **Level: Debug** or **Trace** in Logs to collect detailed diagnostics without restarting.
+Detailed audio playback telemetry is generated at `debug` or `trace`,
 including preparation, transfer, decoding, cache, and scheduling timings.
 These levels also record image-mutation phases and frontend refresh timings.
 Device edits include read, binding-check, write, flush, journal-publication and
@@ -497,13 +498,28 @@ families retain their existing format rules.
 Open **Logs...** at the right of the status bar to view retained Application and
 Local server logs in a separate, resizable window. The same entry is available
 on the startup screen if the server cannot connect. Opening Logs again focuses
-the existing window; closing it preserves its view until axkdeck exits.
+the existing window; closing it preserves sources, search and retained history until axkdeck exits.
 
-Use Source, Minimum level and Search together to narrow the view. The level
-selector is a display filter, not a change to capture verbosity: Debug records
-are only available if they were originally logged. Unclassified records remain
-visible by default and can be excluded. Server stderr alone is not an error
-severity. Search is literal and case-insensitive; times are displayed in UTC.
+**Level** controls both capture and display, independently from console environment variables.
+It defaults to **Info** and is cumulative:
+
+| Level | Included levels |
+| --- | --- |
+| Error | Error |
+| Warning | Error, Warning |
+| Info | Error, Warning, Info |
+| Debug | Error, Warning, Info, Debug |
+| Trace | Error, Warning, Info, Debug, Trace |
+
+Debug adds phase timings and device I/O counters; Trace adds bounded per-operation activity.
+Lowering Level hides retained detail without deleting it. Closing Logs resets Level to Info;
+minimizing or changing focus does not. Non-Info local-server settings use a renewable
+30-second lease. Remote-server capture is not supported.
+
+**Sources** is the leftmost toolbar control and selects exact subsystems, initially all.
+Every record must declare a valid level. Malformed output is reported as an explicit
+logging-contract Error with up to 4 KiB of escaped original text, not an inferred severity.
+Search is literal and case-insensitive; times are UTC.
 
 **Clear view** hides everything read so far, including from **Save view...**,
 without deleting or truncating log files. Reproduce the problem, then copy a
@@ -537,7 +553,8 @@ stored separately as `axkdeck.log` and `axklib-server.log`. Each log rotates at
 - `${XDG_DATA_HOME:-~/.local/share}/app.axkdeck.desktop/logs` on Linux; and
 - `~/Library/Logs/app.axkdeck.desktop` on macOS.
 
-Development runs also mirror `axklib-server` stdout and stderr to the terminal.
+Console output follows `AXKDECK_LOG_LEVEL`; standalone servers use
+`AXKLIB_SERVER_LOG_LEVEL`. Neither setting restricts Logs-window capture.
 Workspace setup failures remain visible in the Workspaces dialog and include
 the server request ID when one is available.
 
@@ -549,8 +566,8 @@ lookup, local-server startup, WebView navigation, frontend initialization, mount
 and first-painted-frame timings. Outcomes are categorical and the event never
 contains filesystem paths, server URLs, credentials, user names, host names, or
 raw errors. Set `AXKDECK_LOG_LEVEL=debug` to additionally record each fixed
-`desktop_startup_milestone` as it occurs. Explicit `warn`, `error`, and `off`
-settings continue to suppress the informational summary.
+`desktop_startup_milestone` to the console as it occurs. Explicit `warn`, `error`, and
+`off` settings suppress the console summary, not retained Info capture.
 
 The built-in timeline begins when Rust enters axkdeck. Use Windows Performance
 Recorder (WPR) when the delay may precede that point or involve process startup,

@@ -11,7 +11,7 @@
 
 namespace axk::server::detail {
 
-void write_structured_log(std::string line);
+class DiagnosticLog;
 
 [[nodiscard]] std::string request_id(const crow::request &request);
 
@@ -31,6 +31,7 @@ struct RequestTelemetryMiddleware {
     };
 
     RequestTelemetry *telemetry{};
+    DiagnosticLog *diagnostics{};
 
     void before_handle(crow::request &, crow::response &, context &request_context) const;
     void after_handle(crow::request &request, crow::response &response, context &request_context) const;

@@ -10,7 +10,7 @@ import { objectEditorAdapter } from './registry';
 import { AxklibApiError } from '../../lib/httpErrors';
 import { CapacityWriteRejected } from '../../lib/httpCapacityGate';
 import { userFacingMessage } from '../../lib/userFacingMessage';
-import { reportDiagnostic } from '../../lib/diagnostics';
+import { measureDiagnostic, reportDiagnostic } from '../../lib/diagnostics';
 import type { ImageTransport, ObjectDetail, JobState } from '../../lib/transport';
 import type { ObjectStorageFormat, ObjectFormatConversionRequest } from '../../lib/objectEditing';
 import { conversionFormat, conversionRequest, sameConversionIdentity } from './formatConversion';
@@ -27,6 +27,7 @@ export class ObjectEditorDocument {
     phase = $state<'editable' | 'saving' | 'unconfirmed' | 'refresh-failed'>('editable');
     inputErrors = $state<Record<string, string>>({});
     jobId: number | null = null;
+    serverJobId: string | undefined;
     writeKind: 'save' | 'conversion' = 'save';
     conversionTarget: ObjectStorageFormat | null = null;
     constructor(
@@ -196,7 +197,9 @@ export class ObjectEditorWorkflow {
             generation = this.generation;
         const request = (this.checks.get(document) ?? 0) + 1;
         this.checks.set(document, request);
-        const current = await this.dependencies.transport.objectDetail(document.sessionId, document.detail!.object.id);
+        const current = await this.measure(document, 'preflight', () =>
+            this.dependencies.transport.objectDetail(document.sessionId, document.detail!.object.id),
+        );
         if (
             generation !== this.generation ||
             request !== this.checks.get(document) ||
@@ -386,9 +389,19 @@ export class ObjectEditorWorkflow {
         try {
             document.status =
                 document.writeKind === 'conversion' ? `Converting ${document.noun}` : `Saving ${document.noun}`;
-            const job = await start();
-            document.jobId = job.jobId;
-            await this.accept(document, await this.dependencies.transport.waitForJob(job.jobId, () => undefined));
+            document.serverJobId = undefined;
+            const job = await this.measure(document, 'submit', async () => {
+                const value = await start();
+                document.jobId = value.jobId;
+                document.serverJobId = value.serverJobId;
+                return value;
+            });
+            await this.accept(
+                document,
+                await this.measure(document, 'job-wait', () =>
+                    this.dependencies.transport.waitForJob(job.jobId, () => undefined),
+                ),
+            );
         } catch (error) {
             if (
                 document.jobId === null &&
@@ -460,7 +473,8 @@ export class ObjectEditorWorkflow {
             {
                 sessionId: document.sessionId,
                 objectId: document.detail?.object.id,
-                jobId: document.jobId,
+                jobId: document.serverJobId,
+                clientJobId: document.jobId,
                 operation: document.writeKind,
                 target: document.conversionTarget,
                 stage,
@@ -471,17 +485,30 @@ export class ObjectEditorWorkflow {
             'warn',
         );
     }
+    private measure<T>(document: ObjectEditorDocument, phase: string, action: () => Promise<T>): Promise<T> {
+        return measureDiagnostic(
+            'object_editor_phase',
+            phase,
+            () => ({
+                sessionId: document.sessionId,
+                objectId: document.detail?.object.id,
+                jobId: phase === 'preflight' ? undefined : document.serverJobId,
+                clientJobId: phase === 'preflight' ? undefined : document.jobId,
+                operation: document.writeKind,
+            }),
+            action,
+        );
+    }
     private async finish(document: ObjectEditorDocument): Promise<void> {
         document.phase = 'saving';
         const completed = document.writeKind === 'conversion' ? `${document.noun} converted` : `${document.noun} saved`;
         document.status = `${completed}; refreshing workspace`;
         let stage = 'workspace refresh';
         try {
-            await this.dependencies.refresh();
+            await this.measure(document, 'workspace-refresh', () => this.dependencies.refresh());
             stage = 'object verification';
-            const detail = await this.dependencies.transport.objectDetail(
-                document.sessionId,
-                document.detail!.object.id,
+            const detail = await this.measure(document, 'object-verification', () =>
+                this.dependencies.transport.objectDetail(document.sessionId, document.detail!.object.id),
             );
             const adapter = objectEditorAdapter(detail);
             if (!adapter && !detail.formatConversion) throw new Error('Saved object is not available');

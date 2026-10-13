@@ -325,6 +325,7 @@ export interface PlanSummary {
 
 export interface JobState {
     jobId: number;
+    serverJobId?: string;
     kind: string;
     status: 'queued' | 'running' | 'cancelling' | 'cancelled' | 'failed' | 'completed';
     progress?: { phase: number; completed: number; total?: number; label: string; outputPath?: string };

@@ -22,14 +22,20 @@ Result<Json> store_session_import_plan(const std::shared_ptr<SessionPackageOpera
     if (!capacity)
         return std::unexpected{capacity.error()};
     const auto diagnostic = [&](std::string_view phase, Clock::time_point started, const Json &details) {
-        if (!context.diagnostic)
-            return;
-        auto event = details;
-        event["event"] = "package_import_plan_phase";
-        event["requestId"] = context.request_id;
-        event["phase"] = phase;
-        event["durationMs"] = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - started).count();
-        context.diagnostic(event);
+        try {
+            if (!context.diagnostic ||
+                (context.diagnostic_enabled && !context.diagnostic_enabled(diagnostic_level::debug)))
+                return;
+            auto event = details;
+            event["level"] = "debug";
+            event["source"] = "filesystem";
+            event["event"] = "package_import_plan_phase";
+            event["requestId"] = context.request_id;
+            event["phase"] = phase;
+            event["durationMs"] = std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - started).count();
+            context.diagnostic(event);
+        } catch (...) {
+        }
     };
     std::size_t package_object_count{};
     for (const auto &package : package_set->packages)

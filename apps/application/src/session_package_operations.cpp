@@ -42,15 +42,21 @@ axk::app::Result<void> axk::app::bind_session_package_operations(OperationRegist
                 const auto operation_started = Clock::now();
                 const auto diagnostic = [&](std::string_view phase, Clock::time_point started,
                                             const Json &details = Json::object()) {
-                    if (!context.diagnostic)
-                        return;
-                    auto event = details;
-                    event["event"] = "package_import_plan_phase";
-                    event["requestId"] = context.request_id;
-                    event["phase"] = phase;
-                    event["durationMs"] =
-                        std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - started).count();
-                    context.diagnostic(event);
+                    try {
+                        if (!context.diagnostic ||
+                            (context.diagnostic_enabled && !context.diagnostic_enabled(diagnostic_level::debug)))
+                            return;
+                        auto event = details;
+                        event["level"] = "debug";
+                        event["source"] = "filesystem";
+                        event["event"] = "package_import_plan_phase";
+                        event["requestId"] = context.request_id;
+                        event["phase"] = phase;
+                        event["durationMs"] =
+                            std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - started).count();
+                        context.diagnostic(event);
+                    } catch (...) {
+                    }
                 };
 
                 const auto admission_started = Clock::now();

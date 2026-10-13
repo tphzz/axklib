@@ -1,6 +1,6 @@
 use std::ffi::OsString;
 use std::fs::{File, OpenOptions};
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -314,8 +314,10 @@ impl Drop for ServerSidecar {
                     if signalled.is_ok() || requested.is_ok() {
                         break;
                     }
-                    eprintln!(
-                        "axkdeck: graceful shutdown not acknowledged; retaining sidecar ownership and retrying"
+                    log::warn!(
+                        "{}",
+                        serde_json::json!({"event":"sidecar_shutdown_pending", "source":"application",
+                        "level":"warning", "message":"graceful shutdown not acknowledged; retaining sidecar ownership and retrying"})
                     );
                     std::thread::sleep(Duration::from_secs(1));
                 }
@@ -451,24 +453,31 @@ where
     R: Read + Send + 'static,
 {
     std::thread::spawn(move || {
-        for result in BufReader::new(reader).lines() {
-            let line = match result {
-                Ok(line) => line,
-                Err(error) => {
-                    eprintln!("read axklib-server {stream}: {error}");
-                    break;
-                }
-            };
-            #[cfg(debug_assertions)]
-            if log::log_enabled!(log::Level::Debug) {
+        let result = crate::diagnostic_format::read_server_records(reader, |level, line| {
+            if level.filter() <= crate::configured_log_level() {
                 eprintln!("axklib-server[{stream}]: {line}");
             }
+            if level.filter() > crate::diagnostic_capture::retained_filter() {
+                return true;
+            }
             if let Ok(mut writer) = writer.lock() {
-                if let Err(error) = writer.write_line(stream, &line) {
-                    eprintln!("{error}");
-                    break;
+                if let Err(error) = writer.write_line(stream, line) {
+                    log::error!(
+                        "{}",
+                        serde_json::json!({"event":"server_log_write_failed", "source":"application",
+                        "level":"error", "stream":stream, "message":error.to_string()})
+                    );
+                    return false;
                 }
             }
+            true
+        });
+        if let Err(error) = result {
+            log::error!(
+                "{}",
+                serde_json::json!({"event":"server_log_read_failed", "source":"application",
+                "level":"error", "stream":stream, "message":error.to_string()})
+            );
         }
     })
 }

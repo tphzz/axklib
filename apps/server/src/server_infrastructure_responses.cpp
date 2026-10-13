@@ -98,6 +98,35 @@ crow::response ServerApplication::shutdown_response(const crow::request &request
     return json_response(202, {{"data", {{"accepted", true}}}}, id);
 }
 
+crow::response ServerApplication::diagnostic_capture_response(const crow::request &request) {
+    const auto id = request_id(request);
+    if (auto denied = guard(request, id))
+        return std::move(*denied);
+    if (config_.connection_file.empty())
+        return error_response(404, {"route_not_found", "capture control is available only for the local sidecar"}, id);
+    if (request.method == crow::HTTPMethod::Put) {
+        const auto input = parse_validated_json_body(request, "DiagnosticCaptureRequest");
+        if (!input)
+            return error_response(400, input.error(), id);
+        const auto value = input->at("level").get<std::string>();
+        diagnostics_.set_capture(value == "ERROR"     ? diagnostic_level::error
+                                 : value == "WARNING" ? diagnostic_level::warning
+                                 : value == "TRACE"   ? diagnostic_level::trace
+                                 : value == "DEBUG"   ? diagnostic_level::debug
+                                                      : diagnostic_level::info);
+    }
+    const auto level = diagnostics_.capture();
+    return json_response(200,
+                         {{"data",
+                           {{"level", level == diagnostic_level::error     ? "ERROR"
+                                      : level == diagnostic_level::warning ? "WARNING"
+                                      : level == diagnostic_level::trace   ? "TRACE"
+                                      : level == diagnostic_level::debug   ? "DEBUG"
+                                                                           : "INFO"},
+                            {"leaseSeconds", level == diagnostic_level::info ? 0 : 30}}}},
+                         id);
+}
+
 crow::response ServerApplication::openapi_response(const crow::request &request) {
     const auto id = request_id(request);
     if (auto denied = guard(request, id))

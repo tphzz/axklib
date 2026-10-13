@@ -2,7 +2,7 @@ import type { ImageTransport, JobState, ObjectDetail } from '../../lib/transport
 import type { ObjectParameterEdit } from '../../lib/objectEditing';
 import { AxklibApiError } from '../../lib/httpErrors';
 import { CapacityWriteRejected } from '../../lib/httpCapacityGate';
-import { reportDiagnostic } from '../../lib/diagnostics';
+import { measureDiagnostic, reportDiagnostic } from '../../lib/diagnostics';
 import { userFacingMessage } from '../../lib/userFacingMessage';
 import { mappingMembers } from '../devices/a-series/bank/mappingMembers';
 import type { ObjectEditorDocument } from './workflow.svelte';
@@ -22,6 +22,7 @@ interface Transaction {
     bank: ObjectEditorDocument;
     members: ObjectEditorDocument[];
     jobId: number | null;
+    serverJobId?: string;
     recovering: boolean;
 }
 
@@ -58,6 +59,7 @@ export class MemberEdits {
             document.phase = phase;
             document.status = status;
             document.jobId = transaction.jobId;
+            document.serverJobId = transaction.serverJobId;
         }
     }
     private release(transaction: Transaction, status: string): void {
@@ -111,13 +113,22 @@ export class MemberEdits {
         if (this.active !== transaction) return;
         this.state(transaction, 'saving', `Saving ${transaction.members.length} members`);
         try {
-            const job = await this.dependencies.transport.startObjectParameterEdit(bank.sessionId, {
-                expectedRevision: revision,
-                operations,
+            const job = await this.measure(transaction, 'submit', async () => {
+                const value = await this.dependencies.transport.startObjectParameterEdit(bank.sessionId, {
+                    expectedRevision: revision,
+                    operations,
+                });
+                transaction.serverJobId = value.serverJobId;
+                return value;
             });
             transaction.jobId = job.jobId;
             this.state(transaction, 'saving', 'Saving members');
-            await this.accept(transaction, await this.dependencies.transport.waitForJob(job.jobId, () => {}));
+            await this.accept(
+                transaction,
+                await this.measure(transaction, 'job-wait', () =>
+                    this.dependencies.transport.waitForJob(job.jobId, () => {}),
+                ),
+            );
         } catch (error) {
             if (
                 transaction.jobId === null &&
@@ -165,16 +176,29 @@ export class MemberEdits {
             this.release(transaction, `Save failed: ${job.error ?? 'The operation did not complete'}`);
         else this.state(transaction, 'unconfirmed', 'Member save is still pending');
     }
+    private measure<T>(transaction: Transaction, phase: string, action: () => Promise<T>): Promise<T> {
+        return measureDiagnostic(
+            'object_editor_phase',
+            phase,
+            () => ({
+                sessionId: transaction.bank.sessionId,
+                objectId: transaction.bank.detail?.object.id,
+                jobId: transaction.serverJobId,
+                clientJobId: transaction.jobId,
+                memberCount: transaction.members.length,
+            }),
+            action,
+        );
+    }
     private async finish(transaction: Transaction): Promise<void> {
         this.state(transaction, 'saving', 'Members saved; refreshing workspace');
         try {
-            await this.dependencies.refresh();
+            await this.measure(transaction, 'workspace-refresh', () => this.dependencies.refresh());
             const documents = [transaction.bank, ...transaction.members];
             const details: ObjectDetail[] = [];
             for (const document of documents) {
-                const detail = await this.dependencies.transport.objectDetail(
-                    document.sessionId,
-                    document.detail!.object.id,
+                const detail = await this.measure(transaction, 'object-verification', () =>
+                    this.dependencies.transport.objectDetail(document.sessionId, document.detail!.object.id),
                 );
                 if (
                     !objectEditorAdapter(detail) ||
@@ -232,7 +256,8 @@ export class MemberEdits {
             {
                 sessionId: transaction.bank.sessionId,
                 objectId: transaction.bank.detail?.object.id,
-                jobId: transaction.jobId,
+                jobId: transaction.serverJobId,
+                clientJobId: transaction.jobId,
                 memberCount: transaction.members.length,
                 stage,
                 message: userFacingMessage(error),

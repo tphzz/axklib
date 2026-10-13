@@ -12,6 +12,7 @@
 #include "axklib/application/contracts.hpp"
 #include "axklib/application/path_reservations.hpp"
 #include "axklib/io.hpp"
+#include "axklib/sdk/diagnostics.hpp"
 
 namespace axk::app {
 
@@ -41,6 +42,7 @@ struct OperationContext {
     std::function<std::string(const FileRef &)> display_path;
     std::function<void(const nlohmann::json &)> diagnostic{};
     std::string mutation_id{};
+    std::function<bool(diagnostic_level)> diagnostic_enabled{};
 };
 
 struct OperationEntry {

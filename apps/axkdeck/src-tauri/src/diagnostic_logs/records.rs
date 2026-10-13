@@ -1,3 +1,5 @@
+use crate::diagnostic_format::{invalid_log_record, server_level};
+use crate::diagnostic_level::Level;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -16,48 +18,109 @@ impl Source {
     }
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
-#[serde(rename_all = "lowercase")]
-pub enum Level {
-    Trace,
-    Debug,
-    Info,
-    Warning,
-    Error,
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Subsystem {
+    Application,
+    Frontend,
+    Http,
+    Jobs,
+    Filesystem,
+    Objects,
+    Devices,
+    Audio,
+    Other,
+}
+
+impl Subsystem {
+    pub const ALL: [Self; 9] = [
+        Self::Application,
+        Self::Frontend,
+        Self::Http,
+        Self::Jobs,
+        Self::Filesystem,
+        Self::Objects,
+        Self::Devices,
+        Self::Audio,
+        Self::Other,
+    ];
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Application => "Application",
+            Self::Frontend => "Frontend",
+            Self::Http => "HTTP",
+            Self::Jobs => "Jobs",
+            Self::Filesystem => "Filesystem",
+            Self::Objects => "Objects",
+            Self::Devices => "Devices",
+            Self::Audio => "Audio",
+            Self::Other => "Other",
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Entry {
     pub id: u64,
-    pub source: Source,
+    pub origin: Source,
+    pub source: Subsystem,
     pub timestamp: Option<i64>,
-    pub level: Option<Level>,
+    pub level: Level,
     pub text: String,
 }
 
 pub fn parse_entry(id: u64, source: Source, text: String) -> Entry {
-    let (timestamp, level) = match source {
+    let (timestamp, mut level) = match source {
         Source::Application => application_header(&text).unwrap_or((None, None)),
         Source::LocalServer => server_header(&text).unwrap_or((None, None)),
     };
+    let body = match source {
+        Source::Application => {
+            let mut rest = text.as_str();
+            for _ in 0..4 {
+                rest = bracket(rest).map_or("", |(_, rest)| rest);
+            }
+            rest.trim_start()
+        }
+        Source::LocalServer => text
+            .split_once(' ')
+            .and_then(|(_, rest)| bracket(rest))
+            .map_or("", |(_, body)| body.trim_start()),
+    };
+    let structured = serde_json::from_str::<serde_json::Value>(body).ok();
+    if source == Source::Application {
+        if let Some(declared) = structured.as_ref().and_then(|value| value.get("level")) {
+            if declared.as_str().and_then(Level::declared) != level {
+                level = None;
+            }
+        }
+    }
+    let Some(level) = level else {
+        return Entry {
+            id,
+            origin: source,
+            source: Subsystem::Other,
+            timestamp,
+            level: Level::Error,
+            text: invalid_log_record(&text, "missing, invalid or conflicting declared level"),
+        };
+    };
+    let subsystem = structured
+        .as_ref()
+        .and_then(|value| value.get("source"))
+        .and_then(|value| serde_json::from_value(value.clone()).ok())
+        .unwrap_or(match source {
+            Source::Application => Subsystem::Application,
+            Source::LocalServer => Subsystem::Other,
+        });
     Entry {
         id,
-        source,
+        origin: source,
+        source: subsystem,
         timestamp,
         level,
         text,
-    }
-}
-
-fn level(value: &str) -> Option<Level> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "trace" => Some(Level::Trace),
-        "debug" => Some(Level::Debug),
-        "info" => Some(Level::Info),
-        "warn" | "warning" => Some(Level::Warning),
-        "error" | "critical" => Some(Level::Error),
-        _ => None,
     }
 }
 
@@ -74,7 +137,7 @@ fn application_header(text: &str) -> Option<(Option<i64>, Option<Level>)> {
     let timestamp = time::PrimitiveDateTime::parse(&format!("{date} {clock}"), &format)
         .ok()
         .map(|value| value.assume_utc().unix_timestamp() * 1000);
-    Some((timestamp, level(severity)))
+    Some((timestamp, Level::header(severity)))
 }
 
 fn server_header(text: &str) -> Option<(Option<i64>, Option<Level>)> {
@@ -85,20 +148,7 @@ fn server_header(text: &str) -> Option<(Option<i64>, Option<Level>)> {
         return None;
     }
     let body = body.trim_start();
-    let severity = if let Some((_, rest)) = body.strip_prefix('(').and_then(|v| v.split_once(") "))
-    {
-        bracket(rest).and_then(|(value, _)| level(value))
-    } else {
-        serde_json::from_str::<serde_json::Value>(body)
-            .ok()
-            .and_then(|value| {
-                value
-                    .get("level")
-                    .or_else(|| value.get("severity"))
-                    .and_then(|v| v.as_str())
-                    .and_then(level)
-            })
-    };
+    let severity = server_level(body).ok();
     Some((Some(timestamp), severity))
 }
 
@@ -109,20 +159,30 @@ pub fn starts_record(source: Source, text: &str) -> bool {
     }
 }
 
-#[derive(Clone, Debug, Default, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct Filter {
-    pub source: Option<Source>,
-    pub minimum_level: Option<Level>,
+    pub sources: Vec<Subsystem>,
+    pub level: Level,
     pub search: String,
-    pub include_unclassified: bool,
     pub since: Option<u64>,
+}
+
+impl Default for Filter {
+    fn default() -> Self {
+        Self {
+            sources: Subsystem::ALL.to_vec(),
+            level: Level::Info,
+            search: String::new(),
+            since: None,
+        }
+    }
 }
 
 impl Filter {
     pub fn all() -> Self {
         Self {
-            include_unclassified: true,
+            level: Level::Trace,
             ..Self::default()
         }
     }
@@ -135,12 +195,9 @@ impl Filter {
     }
 
     pub fn matches(&self, entry: &Entry) -> bool {
-        self.source.is_none_or(|source| source == entry.source)
+        self.sources.contains(&entry.source)
             && self.since.is_none_or(|since| entry.id > since)
-            && match entry.level {
-                Some(level) => self.minimum_level.is_none_or(|minimum| level >= minimum),
-                None => self.include_unclassified,
-            }
+            && entry.level <= self.level
             && (self.search.is_empty()
                 || entry
                     .text

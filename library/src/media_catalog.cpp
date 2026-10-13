@@ -1,3 +1,4 @@
+#include "axklib/diagnostics.hpp"
 #include "axklib/media.hpp"
 
 #include <algorithm>
@@ -87,7 +88,8 @@ Result<ObjectCatalog> build_object_catalog(const MediaContainer &container, std:
 
 Result<MediaInventory> build_media_inventory(const MediaContainer &container, MediaObjectReadMode mode,
                                              std::size_t maximum_object_bytes, const CancellationToken &cancellation,
-                                             ProgressSink *progress) {
+                                             ProgressSink *progress, diagnostic_sink *diagnostics) {
+    DiagnosticTimer timer{diagnostics, diagnostic_source::objects, "media_inventory", "read-and-decode"};
     if (const auto *sfs = std::get_if<Container>(&container.storage())) {
         const bool retain_raw_payloads = mode == MediaObjectReadMode::complete;
         auto catalog = detail::build_object_catalog(*sfs, maximum_object_bytes, cancellation, mode, progress);
@@ -105,6 +107,7 @@ Result<MediaInventory> build_media_inventory(const MediaContainer &container, Me
             const auto stored_size = stored == stored_sizes.end() ? object.raw_payload.size() : stored->second;
             objects.push_back(describe_catalog_object(object, stored_size));
         }
+        timer.finish("success", {{"objectCount", objects.size()}});
         return MediaInventory{std::move(objects), std::move(*catalog), retain_raw_payloads};
     }
 
@@ -117,6 +120,7 @@ Result<MediaInventory> build_media_inventory(const MediaContainer &container, Me
         objects.push_back(describe_media_object(object));
     const bool raw_payloads_complete =
         mode == MediaObjectReadMode::complete || container.kind() == MediaKind::standalone_object;
+    timer.finish("success", {{"objectCount", objects.size()}});
     return MediaInventory{std::move(objects), detail::catalog_from_media_objects(std::move(*loaded)),
                           raw_payloads_complete};
 }

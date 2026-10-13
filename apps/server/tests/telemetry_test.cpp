@@ -34,7 +34,9 @@ TEST(ServerTelemetry, StructuredLogContainsOnlyBoundedTransportMetadata) {
     EXPECT_EQ(parsed.at("path"), "/api/v1/files/metadata");
     EXPECT_EQ(parsed.at("status"), 422);
     EXPECT_EQ(parsed.at("durationMs"), 9);
-    EXPECT_EQ(parsed.size(), 6U);
+    EXPECT_EQ(parsed.at("level"), "warning");
+    EXPECT_EQ(parsed.at("source"), "http");
+    EXPECT_EQ(parsed.size(), 8U);
     EXPECT_EQ(line.find("Authorization"), std::string::npos);
     EXPECT_EQ(line.find("relativePath"), std::string::npos);
     EXPECT_EQ(line.find('?'), std::string::npos);
@@ -52,7 +54,8 @@ TEST(ServerTelemetry, StructuredAuditLogContainsOnlyAllowlistedIdentifiers) {
     EXPECT_EQ(parsed.at("principalId"), "desktop");
     EXPECT_EQ(parsed.at("resourceType"), "upload");
     EXPECT_EQ(parsed.at("resourceId"), "0123456789abcdef");
-    EXPECT_EQ(parsed.size(), 7U);
+    EXPECT_EQ(parsed.at("level"), "info");
+    EXPECT_EQ(parsed.size(), 9U);
     EXPECT_EQ(line.find("Authorization"), std::string::npos);
     EXPECT_EQ(line.find("relativePath"), std::string::npos);
     EXPECT_EQ(line.find("private-root/"), std::string::npos);

@@ -248,6 +248,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    '/diagnostics/capture': {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Read runtime capture for the authenticated local sidecar only. */
+        get: operations['diagnostics.capture.get'];
+        /** @description Set cumulative runtime capture. Non-Info levels reset to Info after 30 seconds unless renewed. Console filtering is unchanged. */
+        put: operations['diagnostics.capture.set'];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     '/download-archives/{archiveId}/content': {
         parameters: {
             query?: never;
@@ -2641,6 +2659,18 @@ export interface components {
             readOnly: boolean;
             sectorSize: number;
             sizeBytes: number;
+        };
+        DiagnosticCaptureRequest: {
+            /** @enum {string} */
+            level: 'ERROR' | 'WARNING' | 'INFO' | 'DEBUG' | 'TRACE';
+        };
+        DiagnosticCaptureResponse: {
+            data: {
+                /** @enum {integer} */
+                leaseSeconds: 0 | 30;
+                /** @enum {string} */
+                level: 'ERROR' | 'WARNING' | 'INFO' | 'DEBUG' | 'TRACE';
+            };
         };
         DirectoryArchiveRequest: {
             directory: components['schemas']['DirectoryRef'];
@@ -7272,6 +7302,102 @@ export interface operations {
             };
             /** @description Contained internal failure */
             500: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+        };
+    };
+    'diagnostics.capture.get': {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current capture */
+            200: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['DiagnosticCaptureResponse'];
+                };
+            };
+            /** @description Unavailable outside sidecar mode */
+            404: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Request could not be completed */
+            default: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+        };
+    };
+    'diagnostics.capture.set': {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                'application/json': components['schemas']['DiagnosticCaptureRequest'];
+            };
+        };
+        responses: {
+            /** @description Confirmed capture */
+            200: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['DiagnosticCaptureResponse'];
+                };
+            };
+            /** @description Invalid capture request */
+            400: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Unavailable outside sidecar mode */
+            404: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Request could not be completed */
+            default: {
                 headers: {
                     'X-Request-Id': components['headers']['XRequestId'];
                     [name: string]: unknown;
