@@ -22,8 +22,11 @@ struct RouteKey {
 void register_operation_routes(ServerCrowApp &app, const app::OperationRegistry &registry,
                                OperationRouteHandler handler) {
     std::map<RouteKey, std::vector<std::string>> routes;
-    for (const auto &entry : registry.entries())
-        routes[{entry.descriptor.method, entry.descriptor.route}].push_back(entry.descriptor.id);
+    for (const auto &entry : registry.entries()) {
+        // Resource routes bind their path identity in their own controller.
+        if (entry.descriptor.route.find('{') == std::string::npos)
+            routes[{entry.descriptor.method, entry.descriptor.route}].push_back(entry.descriptor.id);
+    }
 
     for (auto &[key, registered_ids] : routes) {
         auto &route = app.route_dynamic(key.route);

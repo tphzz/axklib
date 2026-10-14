@@ -46,6 +46,7 @@
 #include "content_digest.hpp"
 #include "device_read_metrics.hpp"
 #include "operation_diagnostics.hpp"
+#include "prepared_session_commit.hpp"
 
 #include "write_operations_internal.hpp"
 
@@ -230,64 +231,24 @@ axk::app::Result<void> axk::app::bind_session_write_operations(OperationRegistry
         }
         diagnostic("input-verification", verification_started, {{"imageId", image_id}});
 
-        if (context.progress) {
-            context.progress->report(
-                {axk::ProgressPhase::publishing, 0U, 1U, "Committing image changes", std::nullopt});
-        }
         const auto journal_started = Clock::now();
-        std::uint64_t post_write_reopen_us{};
-        std::optional<PreparedImageSessionCommit> prepared_commit;
-        const auto validate_commit = [&]() -> Result<void> {
-            const auto reopen_started = Clock::now();
-            auto validation =
-                images.prepare_mutation_commit(image_id, context.owner_id, expected_revision, CancellationToken{});
-            post_write_reopen_us = static_cast<std::uint64_t>(
-                std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - reopen_started).count());
-            if (!validation)
-                return std::unexpected(validation.error());
-            prepared_commit.emplace(std::move(*validation));
-            return {};
-        };
-        const auto admit_frozen = [&](std::shared_ptr<const RandomAccessReader> frozen) -> Result<void> {
-            auto current =
-                inspect_frozen_capacity(std::move(frozen), prepared->capacity, *policy, context.cancellation);
-            if (!current)
-                return std::unexpected{current.error()};
-            if (const auto admitted = enforce_volume_capacity_admission(*current, *policy); !admitted)
-                return std::unexpected{core_error(admitted.error(), mutation->source.relative_path)};
-            return {};
-        };
-        guard.invalidate_session = true;
-        bool rollback_verified{};
-        if (auto applied = images.apply_mutation(
-                journals, *mutation, patches, context.cancellation, validate_commit, [&] { rollback_verified = true; },
-                admit_frozen);
-            !applied) {
-            guard.invalidate_session = !journals.storage_ready() || applied.error().code == "device_recovery_required";
-            if (rollback_verified && !guard.invalidate_session) {
-                if (auto restored = images.refresh_rolled_back_mutation(image_id, context.owner_id, expected_revision);
-                    !restored) {
-                    guard.invalidate_session = true;
-                    return std::unexpected(restored.error());
-                }
-            }
-            return std::unexpected(applied.error());
-        }
-        if (!prepared_commit)
-            return std::unexpected(
-                operation_error("image_operation_failed", "image mutation validation did not complete"));
-        diagnostic("journal-commit", journal_started,
-                   {{"imageId", image_id},
-                    {"patchCount", patches.size()},
-                    {"patchBytes", patch_bytes},
-                    {"postWriteReopenTimeUs", post_write_reopen_us},
-                    {"cleanupPending", !journals.storage_ready()}});
-
-        const auto refresh_started = Clock::now();
-        mutation->target.reset();
-        measured_reader = nullptr;
-        auto summary = images.finalize_mutation_commit(std::move(*prepared_commit));
-        mutation_finished = true;
+        auto refresh_started = journal_started;
+        mutation_finished = true; // The common executor now owns abort and rollback.
+        auto committed =
+            commit_prepared_session(images, journals, *mutation, patches, prepared->capacity, *policy, context, {},
+                                    [&](const SessionCommitObservation &observation) {
+                                        diagnostic("journal-commit", journal_started,
+                                                   {{"imageId", image_id},
+                                                    {"patchCount", patches.size()},
+                                                    {"patchBytes", patch_bytes},
+                                                    {"postWriteReopenTimeUs", observation.post_write_reopen_us},
+                                                    {"cleanupPending", observation.cleanup_pending}});
+                                        refresh_started = Clock::now();
+                                        measured_reader = nullptr;
+                                    });
+        if (!committed)
+            return std::unexpected(committed.error());
+        auto summary = std::move(*committed);
         const auto selected_document =
             std::ranges::find(summary.documents, input.at("documentId").get<std::string>(), &ImageDocumentSummary::id);
         // Removing the last native volume can legitimately leave a Files-only source.

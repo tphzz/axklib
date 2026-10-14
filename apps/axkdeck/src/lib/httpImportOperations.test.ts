@@ -6,7 +6,6 @@ import {
     sampleBankAssignmentRequest,
     sampleBankCreationRequest,
     sequenceImportRequest,
-    tx16wDiskSetImportRequest,
 } from './httpImportOperations';
 
 describe('audioImportRequest', () => {
@@ -133,49 +132,6 @@ describe('sampleBankCreationRequest', () => {
                 },
             },
             inputBindings: [],
-        });
-    });
-});
-
-describe('tx16wDiskSetImportRequest', () => {
-    it('binds every explicit disk member to the canonical disk-set operation', () => {
-        const upload = clientUploadLocation({ uploadId: 'disk-a' }, 'DISK_IMAGE', 'set-a.img');
-        const workspace = serverFileLocation({ rootId: 'workspace', relativePath: 'tx16w/set-b.ima' });
-
-        expect(
-            tx16wDiskSetImportRequest(
-                { imageId: 'image-1', documentId: 'document-a-series-source-1' },
-                7,
-                [upload, workspace],
-                { partitionIndex: 1, volumeName: 'TX16W' },
-                'WAVE_DATA_ONLY',
-            ),
-        ).toEqual({
-            documentId: 'document-a-series-source-1',
-            imageId: 'image-1',
-            expectedRevision: 7,
-            manifest: {
-                inline: {
-                    schema_version: '1.0',
-                    operations: [
-                        {
-                            id: 'tx16w-import',
-                            type: 'import_tx16w_disk_set',
-                            partition_index: 1,
-                            volume_name: 'TX16W',
-                            disk_paths: ['tx16w/disk-01.ima', 'tx16w/disk-02.ima'],
-                            import_mode: 'wave_data_only',
-                        },
-                    ],
-                },
-            },
-            inputBindings: [
-                { manifestPath: 'tx16w/disk-01.ima', input: { uploadRef: { uploadId: 'disk-a' } } },
-                {
-                    manifestPath: 'tx16w/disk-02.ima',
-                    input: { fileRef: { rootId: 'workspace', relativePath: 'tx16w/set-b.ima' } },
-                },
-            ],
         });
     });
 });

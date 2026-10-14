@@ -8,7 +8,6 @@
 #include <variant>
 #include <vector>
 
-#include "axklib/conversion/tx16w_to_a_series/source.hpp"
 #include "axklib/io.hpp"
 #include "axklib/program_assignment_parameters.hpp"
 #include "axklib/program_parameters.hpp"
@@ -262,13 +261,6 @@ struct RepairObjectPlacementsOperation {
     std::vector<SfsId> object_sfs_ids;
 };
 
-struct ImportTx16wDiskSetOperation {
-    PartitionSelector partition;
-    std::string volume_name;
-    std::vector<std::filesystem::path> disk_paths;
-    tx16w::ImportMode import_mode{tx16w::ImportMode::hierarchy};
-};
-
 struct ProgramAssignmentEdit {
     std::optional<std::size_t> retain_ordinal;
     std::optional<ProgramAssignmentSpec> assignment;
@@ -300,11 +292,11 @@ using AlterationOperationData =
                  AssignSampleBankMembersOperation, RenameSampleBankOperation, DeleteProgramOperation,
                  InsertProgramOperation, RenameProgramOperation, DeleteSequenceOperation, InsertSequenceOperation,
                  RenameSequenceOperation, RenameVolumeOperation, RenamePartitionOperation,
-                 RepairObjectPlacementsOperation, ImportTx16wDiskSetOperation, ClearProgramAssignmentsOperation,
-                 UpdateProgramParametersOperation, UpdateSampleBankParametersOperation,
-                 UpdateWaveDataParametersOperation, ReplaceProgramAssignmentsOperation, RetargetSampleWaveDataOperation,
-                 DuplicateSampleOperation, ConvertSampleFormatOperation, ConvertSampleBankFormatOperation,
-                 UpdateSampleBankOverridesOperation, ConvertProgramFormatOperation>;
+                 RepairObjectPlacementsOperation, ClearProgramAssignmentsOperation, UpdateProgramParametersOperation,
+                 UpdateSampleBankParametersOperation, UpdateWaveDataParametersOperation,
+                 ReplaceProgramAssignmentsOperation, RetargetSampleWaveDataOperation, DuplicateSampleOperation,
+                 ConvertSampleFormatOperation, ConvertSampleBankFormatOperation, UpdateSampleBankOverridesOperation,
+                 ConvertProgramFormatOperation>;
 
 struct AlterationOperation {
     std::string id;

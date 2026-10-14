@@ -1,11 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ClientUploadSource } from '../../lib/clientUploadSource';
 import { clientUploadLocation, serverFileLocation } from '../../lib/storageLocations';
-import type { AudioImportTarget, ImageTransport, Tx16wImportInspection } from '../../lib/transport';
+import type { AudioImportTarget, ImageTransport } from '../../lib/transport';
 import type { DiskTreeItem, WorkspaceView } from '../../lib/types';
 import type { JobController } from '../jobs/actions';
 import { collectTx16wVolumeOptions, Tx16wImportWorkflow } from './tx16wWorkflow.svelte';
-import { inspectFitsCapacity } from '../../test/samplerCapacityFixture';
+import type { ConversionPlan } from '../../lib/conversions';
+import type { PickerController } from '../dialogs/picker';
+import { fitsCapacity, inspectFitsCapacity } from '../../test/samplerCapacityFixture';
 
 const target = { partitionIndex: 0, volumeName: 'Imported' };
 const diskSource: ClientUploadSource = {
@@ -15,22 +17,24 @@ const diskSource: ClientUploadSource = {
     readChunk: vi.fn(),
 };
 
-function inspection(): Tx16wImportInspection {
+function inspection(): ConversionPlan {
     return {
-        schemaVersion: '1.0',
-        sourceMembers: ['library.ima'],
-        importMode: 'HIERARCHY',
-        profile: 'YAMAHA_NATIVE',
-        target,
-        valid: true,
-        counts: { programs: 1, sampleBanks: 1, samples: 1, waveData: 1 },
-        objects: {
-            programs: [],
-            sampleBanks: [],
-            samples: [],
-            waveData: [],
+        planId: 'conversion-1',
+        state: 'READY',
+        expiresAt: Date.now() + 900000,
+        jobId: null,
+        report: {
+            profileId: 'yamaha.tx16w-to-a-series',
+            fidelity: 'BEST',
+            executable: true,
+            actionCount: 1,
+            issueCount: 0,
+            offset: 0,
+            actions: [{ kind: 'wave', name: 'WAVE', action: 'create', sourceObject: 'wave-1', details: [] }],
+            issues: [],
+            capacity: fitsCapacity,
+            destination: { imageId: 'image-1', documentId: 'doc-1', expectedRevision: 1 },
         },
-        notices: [],
     };
 }
 
@@ -58,12 +62,12 @@ function sourceTree(): DiskTreeItem[] {
 describe('Tx16wImportWorkflow', () => {
     it('waits for a target when no volume is selected, then uploads and inspects', async () => {
         const upload = clientUploadLocation({ uploadId: 'upload-1' }, 'DISK_IMAGE', 'library.ima');
-        const inspectTx16wDiskSet = vi.fn().mockResolvedValue(inspection());
+        const prepareConversion = vi.fn().mockResolvedValue(inspection());
         const uploadClientFile = vi.fn().mockResolvedValue(upload);
         const workflow = createWorkflow(
             {
                 uploadClientFile,
-                inspectTx16wDiskSet,
+                prepareConversion,
                 releaseClientUpload: vi.fn().mockResolvedValue(undefined),
             },
             { id: 'partition-0', name: 'Samples', kind: 'partition', partitionIndex: 0, childCount: 1 },
@@ -82,23 +86,31 @@ describe('Tx16wImportWorkflow', () => {
             expect.any(Function),
             expect.any(AbortSignal),
         );
-        expect(inspectTx16wDiskSet).toHaveBeenCalledWith(12, [upload], target, 'HIERARCHY');
+        expect(prepareConversion).toHaveBeenCalledWith(
+            expect.objectContaining({
+                destinationSessionId: 12,
+                source: { kind: 'SOURCES', sources: [upload] },
+                selection: target,
+                options: { mode: 'HIERARCHY' },
+            }),
+            expect.any(AbortSignal),
+        );
         expect(workflow.request?.status).toBe('ready');
-        expect(workflow.request?.inspection?.valid).toBe(true);
+        expect(workflow.request?.plan?.report?.executable).toBe(true);
     });
 
     it('commits the inspected disk as one mutation job and releases its upload', async () => {
         const upload = clientUploadLocation({ uploadId: 'upload-2' }, 'DISK_IMAGE', 'library.ima');
         const releaseClientUpload = vi.fn().mockResolvedValue(undefined);
-        const startTx16wDiskSetImport = vi.fn().mockResolvedValue({ jobId: 22, status: 'queued' });
+        const executeConversion = vi.fn().mockResolvedValue({ jobId: 22, status: 'queued' });
         const refreshSession = vi.fn().mockResolvedValue(undefined);
         const invalidateSession = vi.fn().mockResolvedValue(undefined);
         const selectWorkspace = vi.fn();
         const workflow = createWorkflow(
             {
                 uploadClientFile: vi.fn().mockResolvedValue(upload),
-                inspectTx16wDiskSet: vi.fn().mockResolvedValue(inspection()),
-                startTx16wDiskSetImport,
+                prepareConversion: vi.fn().mockResolvedValue(inspection()),
+                executeConversion,
                 releaseClientUpload,
             },
             sourceTree()[0].children![0],
@@ -109,9 +121,7 @@ describe('Tx16wImportWorkflow', () => {
         await workflow.commit();
 
         expect(invalidateSession).toHaveBeenCalledWith(12);
-        expect(startTx16wDiskSetImport).toHaveBeenCalledWith(12, [upload], target, 'HIERARCHY', {
-            target: 'A3000',
-        });
+        expect(executeConversion).toHaveBeenCalledWith(expect.objectContaining({ planId: 'conversion-1' }), []);
         expect(selectWorkspace).toHaveBeenCalledWith('programs');
         expect(refreshSession).toHaveBeenCalledWith(target);
         expect(releaseClientUpload).toHaveBeenCalledWith(upload);
@@ -124,11 +134,11 @@ describe('Tx16wImportWorkflow', () => {
             clientUploadLocation({ uploadId: 'upload-a' }, 'DISK_IMAGE', diskSource.name),
             clientUploadLocation({ uploadId: 'upload-b' }, 'DISK_IMAGE', secondSource.name),
         ];
-        const inspectTx16wDiskSet = vi.fn().mockResolvedValue(inspection());
+        const prepareConversion = vi.fn().mockResolvedValue(inspection());
         const workflow = createWorkflow(
             {
                 uploadClientFile: vi.fn().mockResolvedValueOnce(uploads[0]).mockResolvedValueOnce(uploads[1]),
-                inspectTx16wDiskSet,
+                prepareConversion,
                 releaseClientUpload: vi.fn().mockResolvedValue(undefined),
             },
             sourceTree()[0].children![0],
@@ -137,7 +147,13 @@ describe('Tx16wImportWorkflow', () => {
         await workflow.requestDroppedFiles([diskSource, secondSource]);
         await workflow.selectImportMode('WAVE_DATA_ONLY');
 
-        expect(inspectTx16wDiskSet).toHaveBeenLastCalledWith(12, uploads, target, 'WAVE_DATA_ONLY');
+        expect(prepareConversion).toHaveBeenLastCalledWith(
+            expect.objectContaining({
+                source: { kind: 'SOURCES', sources: uploads },
+                options: { mode: 'WAVE_DATA_ONLY' },
+            }),
+            expect.any(AbortSignal),
+        );
         expect(workflow.request?.members.map((member) => member.sourceName)).toEqual(['library.ima', 'library_2.ima']);
     });
 
@@ -153,8 +169,8 @@ describe('Tx16wImportWorkflow', () => {
         const workflow = createWorkflow(
             {
                 uploadClientFile: vi.fn().mockResolvedValue(upload),
-                inspectTx16wDiskSet: vi.fn().mockResolvedValue(inspection()),
-                startTx16wDiskSetImport: vi.fn().mockResolvedValue({ jobId: 22, status: 'queued' }),
+                prepareConversion: vi.fn().mockResolvedValue(inspection()),
+                executeConversion: vi.fn().mockResolvedValue({ jobId: 22, status: 'queued' }),
                 releaseClientUpload,
             },
             sourceTree()[0].children![0],
@@ -169,23 +185,23 @@ describe('Tx16wImportWorkflow', () => {
     });
 
     it('clears a selected target without retaining a stale import destination', async () => {
-        const inspectTx16wDiskSet = vi.fn().mockResolvedValue(inspection());
-        const workflow = createWorkflow({ inspectTx16wDiskSet }, sourceTree()[0].children![0]);
+        const prepareConversion = vi.fn().mockResolvedValue(inspection());
+        const workflow = createWorkflow({ prepareConversion }, sourceTree()[0].children![0]);
         await workflow.requestDroppedFiles([serverFileLocation({ rootId: 'workspace', relativePath: 'library.img' })]);
         await workflow.selectTarget(null);
         expect(workflow.request?.target).toBeNull();
-        expect(workflow.request?.inspection).toBeNull();
+        expect(workflow.request?.plan).toBeNull();
         expect(workflow.request?.status).toBe('waiting-target');
-        expect(inspectTx16wDiskSet).toHaveBeenCalledTimes(1);
+        expect(prepareConversion).toHaveBeenCalledTimes(1);
     });
 
     it('recovers a committed refresh failure without another TX16W mutation', async () => {
-        const startTx16wDiskSetImport = vi.fn().mockResolvedValue({ jobId: 22, status: 'queued' });
+        const executeConversion = vi.fn().mockResolvedValue({ jobId: 22, status: 'queued' });
         const refreshSession = vi.fn().mockRejectedValueOnce(new Error('Offline')).mockResolvedValue(undefined);
         const workflow = createWorkflow(
             {
-                inspectTx16wDiskSet: vi.fn().mockResolvedValue(inspection()),
-                startTx16wDiskSetImport,
+                prepareConversion: vi.fn().mockResolvedValue(inspection()),
+                executeConversion,
             },
             sourceTree()[0].children![0],
             { refreshSession },
@@ -197,7 +213,7 @@ describe('Tx16wImportWorkflow', () => {
         await workflow.commit();
         await workflow.recoverCompletion();
         expect(workflow.request).toBeNull();
-        expect(startTx16wDiskSetImport).toHaveBeenCalledTimes(1);
+        expect(executeConversion).toHaveBeenCalledTimes(1);
         expect(refreshSession).toHaveBeenCalledTimes(2);
     });
 
@@ -207,8 +223,8 @@ describe('Tx16wImportWorkflow', () => {
         const workflow = createWorkflow(
             {
                 uploadClientFile: vi.fn().mockResolvedValue(upload),
-                inspectTx16wDiskSet: vi.fn().mockResolvedValue(inspection()),
-                startTx16wDiskSetImport: vi.fn().mockResolvedValue({ jobId: 23, status: 'queued' }),
+                prepareConversion: vi.fn().mockResolvedValue(inspection()),
+                executeConversion: vi.fn().mockResolvedValue({ jobId: 23, status: 'queued' }),
                 releaseClientUpload: vi.fn().mockResolvedValue(undefined),
             },
             sourceTree()[0].children![0],
@@ -230,6 +246,109 @@ describe('Tx16wImportWorkflow', () => {
         expect(workflow.completion.canCheck).toBe(true);
     });
 
+    it('retries failed upload cleanup through Refresh without another write', async () => {
+        const upload = clientUploadLocation({ uploadId: 'cleanup-failed' }, 'DISK_IMAGE', 'library.ima');
+        const releaseClientUpload = vi
+            .fn()
+            .mockRejectedValueOnce(new Error('Cleanup offline'))
+            .mockResolvedValue(undefined);
+        const executeConversion = vi.fn().mockResolvedValue({ jobId: 22, status: 'queued' });
+        const workflow = createWorkflow(
+            {
+                uploadClientFile: vi.fn().mockResolvedValue(upload),
+                prepareConversion: vi.fn().mockResolvedValue(inspection()),
+                executeConversion,
+                releaseClientUpload,
+            },
+            sourceTree()[0].children![0],
+        );
+        await workflow.requestDroppedFiles([diskSource]);
+        await workflow.commit();
+        expect(workflow.completion.phase).toBe('refresh-failed');
+        expect(workflow.request?.members[0].upload).toEqual(upload);
+        await workflow.commit();
+        await workflow.recoverCompletion();
+        expect(workflow.request).toBeNull();
+        expect(executeConversion).toHaveBeenCalledTimes(1);
+        expect(releaseClientUpload).toHaveBeenCalledTimes(2);
+    });
+
+    it('converts an open native document through an owned target session and closes only that target', async () => {
+        const prepareConversion = vi.fn().mockResolvedValue(inspection());
+        const opened = {
+            sessionId: 99,
+            documentId: 'a-series',
+            documents: [{ id: 'a-series', formatId: 'yamaha.a-series' }],
+            volumeMutationsAvailable: true,
+            tree: sourceTree(),
+        };
+        const closeImage = vi.fn().mockResolvedValue(undefined);
+        const refreshImage = vi.fn().mockResolvedValue(opened);
+        const refreshSession = vi.fn();
+        const invalidateSession = vi.fn();
+        const workflow = createWorkflow(
+            {
+                openImage: vi.fn().mockResolvedValue(opened),
+                closeImage,
+                refreshImage,
+                prepareConversion,
+                executeConversion: vi.fn().mockResolvedValue({ jobId: 22, status: 'queued' }),
+            },
+            sourceTree()[0],
+            {
+                refreshSession,
+                invalidateSession,
+                picker: {
+                    chooseLocation: vi
+                        .fn()
+                        .mockResolvedValue(serverFileLocation({ rootId: 'root', relativePath: 'target.hds' })),
+                } as unknown as PickerController,
+            },
+        );
+        await workflow.requestNativeDocument(12, 'tx16w', 7);
+        expect(workflow.volumeOptions()).toHaveLength(1);
+        await workflow.selectTarget(target);
+        expect(prepareConversion).toHaveBeenCalledWith(
+            expect.objectContaining({
+                destinationSessionId: 99,
+                source: { kind: 'DOCUMENT', sessionId: 12, documentId: 'tx16w', expectedRevision: 7 },
+            }),
+            expect.any(AbortSignal),
+        );
+        await workflow.commit();
+        expect(refreshImage).toHaveBeenCalledWith(99);
+        expect(closeImage).toHaveBeenCalledWith(99);
+        expect(closeImage).not.toHaveBeenCalledWith(12);
+        expect(refreshSession).not.toHaveBeenCalled();
+        expect(invalidateSession).not.toHaveBeenCalled();
+        expect(workflow.request).toBeNull();
+    });
+
+    it('recovers an execution identity after a lost response without submitting again', async () => {
+        const executeConversion = vi.fn().mockRejectedValue(new TypeError('Connection lost'));
+        const conversionExecution = vi.fn().mockResolvedValue({ jobId: 77, status: 'running' });
+        const waitForJob = vi.fn().mockResolvedValue({ jobId: 77, status: 'completed' });
+        const workflow = createWorkflow(
+            {
+                prepareConversion: vi.fn().mockResolvedValue(inspection()),
+                executeConversion,
+                conversionExecution,
+                waitForJob,
+            },
+            sourceTree()[0].children![0],
+        );
+        await workflow.requestDroppedFiles([serverFileLocation({ rootId: 'root', relativePath: 'source.ima' })]);
+        await workflow.commit();
+        expect(workflow.completion.phase).toBe('unconfirmed');
+        await workflow.close();
+        expect(workflow.request).not.toBeNull();
+        await workflow.recoverCompletion();
+        expect(conversionExecution).toHaveBeenCalledWith('conversion-1');
+        expect(waitForJob).toHaveBeenCalledWith(77, expect.any(Function));
+        expect(executeConversion).toHaveBeenCalledTimes(1);
+        expect(workflow.request).toBeNull();
+    });
+
     it('exposes every nested volume as a target without introducing A-series data into the parser model', () => {
         expect(collectTx16wVolumeOptions(sourceTree())).toEqual([
             {
@@ -239,6 +358,65 @@ describe('Tx16wImportWorkflow', () => {
                 target,
             },
         ]);
+    });
+
+    it('requires explicit loss acknowledgement and releases a plan when fidelity changes', async () => {
+        const prepared = inspection();
+        prepared.report!.issueCount = 1;
+        prepared.report!.issues = [
+            {
+                id: 'loss',
+                code: 'rate',
+                impact: 'LOSS',
+                message: 'Resampled',
+                sourceObject: 'wave-1',
+                sourceParameter: 'rate',
+                targetObject: 'WAVE',
+                targetParameter: 'rate',
+            },
+        ];
+        const executeConversion = vi.fn().mockResolvedValue({ jobId: 22, status: 'queued' });
+        const releaseConversion = vi.fn().mockResolvedValue(undefined);
+        const prepareConversion = vi.fn().mockResolvedValue(prepared);
+        const workflow = createWorkflow(
+            { prepareConversion, executeConversion, releaseConversion },
+            sourceTree()[0].children![0],
+        );
+        await workflow.requestDroppedFiles([serverFileLocation({ rootId: 'root', relativePath: 'disk.ima' })]);
+        await workflow.commit();
+        expect(executeConversion).not.toHaveBeenCalled();
+        await workflow.selectFidelity('STRICT');
+        expect(releaseConversion).toHaveBeenCalledWith('conversion-1');
+        expect(prepareConversion).toHaveBeenLastCalledWith(
+            expect.objectContaining({ fidelity: 'STRICT' }),
+            expect.any(AbortSignal),
+        );
+    });
+
+    it('closes a destination opened after disposal without replacing the source workspace', async () => {
+        let resolve!: (opened: unknown) => void;
+        const closeImage = vi.fn().mockResolvedValue(undefined);
+        const openImage = vi.fn(
+            () =>
+                new Promise((done) => {
+                    resolve = done;
+                }),
+        );
+        const workflow = createWorkflow({ openImage, closeImage } as Partial<ImageTransport>, sourceTree()[0], {
+            picker: {
+                chooseLocation: vi
+                    .fn()
+                    .mockResolvedValue(serverFileLocation({ rootId: 'root', relativePath: 'target.hds' })),
+            } as unknown as PickerController,
+        });
+        const pending = workflow.requestNativeDocument(12, 'tx16w', 7);
+        await vi.waitFor(() => expect(openImage).toHaveBeenCalled());
+        await workflow.dispose();
+        resolve({ sessionId: 99 });
+        await pending;
+        expect(closeImage).toHaveBeenCalledWith(99);
+        expect(closeImage).not.toHaveBeenCalledWith(12);
+        expect(workflow.request).toBeNull();
     });
 });
 
@@ -250,11 +428,17 @@ function createWorkflow(
         invalidateSession?: (sessionId: number) => Promise<void>;
         selectWorkspace?: (view: WorkspaceView) => void;
         runJob?: (start: () => Promise<unknown>) => Promise<unknown>;
+        picker?: PickerController;
     } = {},
 ): Tx16wImportWorkflow {
-    const transport = { inspectImportCapacity: vi.fn(inspectFitsCapacity), ...operations } as ImageTransport;
+    const transport = {
+        releaseConversion: vi.fn().mockResolvedValue(undefined),
+        inspectImportCapacity: vi.fn(inspectFitsCapacity),
+        ...operations,
+    } as ImageTransport;
     return new Tx16wImportWorkflow({
         transport,
+        picker: overrides.picker,
         jobs: {
             run: vi.fn(
                 overrides.runJob ??

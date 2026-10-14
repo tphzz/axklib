@@ -101,6 +101,13 @@ crow::response error_response(int status, const axk::app::Error &error, std::str
 }
 
 int status_for_error(const axk::app::Error &error, int fallback) {
+    if (error.code == "conversion_plan_unavailable")
+        return 404;
+    if (error.code == "conversion_limit_exceeded")
+        return 429;
+    if (error.code == "conversion_plan_stale" || error.code == "conversion_already_submitted" ||
+        error.code == "conversion_review_required")
+        return 409;
     if (error.code == "upload_storage_unavailable" || error.code == "archive_storage_unavailable")
         return 503;
     if (error.code == "request_too_large" || error.code == "json_structure_too_large")

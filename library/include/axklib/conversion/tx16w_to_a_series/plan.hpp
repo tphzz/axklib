@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <span>
 #include <string>
 #include <vector>
@@ -9,7 +10,7 @@
 #include "axklib/conversion/tx16w_to_a_series/source.hpp"
 #include "axklib/error.hpp"
 #include "axklib/export.hpp"
-#include "axklib/writer.hpp"
+#include "axklib/formats/a_series/authoring/specs.hpp"
 
 namespace axk::tx16w::a_series {
 
@@ -40,6 +41,7 @@ struct ImportPlan {
     std::vector<SampleBankSpec> sample_banks;
     std::vector<ProgramSpec> programs;
     std::vector<MappingNotice> notices;
+    std::map<std::string, std::string> source_objects;
 };
 
 struct TargetInventory {

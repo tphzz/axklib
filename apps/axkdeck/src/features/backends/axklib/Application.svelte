@@ -98,7 +98,7 @@
         picker: pickerController,
         isDesktop,
         sessionId: () => imageSessionWorkflow.sessionId,
-        imageLocation: () => imageSessionWorkflow.location,
+        imageLocation: () => imageSessionWorkflow.activeLocation,
         setStatus: (status) => imageSessionWorkflow.setStatus(status),
         requestCompanionDisks: (retry) => imageSessionWorkflow.requestCompanionDisks(retry),
     });
@@ -116,7 +116,7 @@
         picker: pickerController,
         isDesktop,
         sessionId: () => imageSessionWorkflow.sessionId,
-        imageLocation: () => imageSessionWorkflow.location,
+        imageLocation: () => imageSessionWorkflow.activeLocation,
         setStatus: (status) => imageSessionWorkflow.setStatus(status),
         closeDialog: () => imageSessionWorkflow.closeIntegrity(),
     });
@@ -254,7 +254,7 @@
         jobs: jobController,
         picker: pickerController,
         sessionId: () => imageSessionWorkflow.sessionId,
-        imageLocation: () => imageSessionWorkflow.location,
+        imageLocation: () => imageSessionWorkflow.activeLocation,
         imageFormat: () => imageSessionWorkflow.imageFormat,
         mutationsAvailable: () => mutationWorkflow.volumeAvailable,
         selectedSource: () => imageSessionWorkflow.selectedSource,
@@ -277,7 +277,7 @@
         jobs: jobController,
         picker: pickerController,
         sessionId: () => imageSessionWorkflow.sessionId,
-        imageLocation: () => imageSessionWorkflow.location,
+        imageLocation: () => imageSessionWorkflow.activeLocation,
         imageFormat: () => imageSessionWorkflow.imageFormat,
         mutationsAvailable: () => mutationWorkflow.volumeAvailable,
         selectedSource: () => imageSessionWorkflow.importDestinationSource(),
@@ -298,10 +298,11 @@
         reportTiming: reportMutationTiming,
     });
     const tx16wImportWorkflow = new Tx16wImportWorkflow({
+        picker: pickerController,
         transport,
         jobs: jobController,
         sessionId: () => imageSessionWorkflow.sessionId,
-        imageLocation: () => imageSessionWorkflow.location,
+        imageLocation: () => imageSessionWorkflow.activeLocation,
         mutationsAvailable: () => imageSessionWorkflow.packageImportAvailable,
         selectedSource: () => imageSessionWorkflow.selectedSource,
         sourceItems: () => imageSessionWorkflow.sourceItems,
@@ -390,7 +391,7 @@
         void packageImportWorkflow.dispose();
         void floppyImportWorkflow.dispose();
         void packageBatchImportWorkflow.close();
-        void tx16wImportWorkflow.close();
+        void tx16wImportWorkflow.dispose();
         void jobController.dispose();
         void imageSessionWorkflow
             .dispose()
@@ -562,7 +563,7 @@
         {workspaceTabs}
         {workspaceView}
         bind:inspectorOpen
-        imageLocation={imageSessionWorkflow.location}
+        imageLocation={imageSessionWorkflow.activeLocation}
         sourceItems={imageSessionWorkflow.sourceItems}
         selectedSource={imageSessionWorkflow.selectedSource}
         selectedVolumeIds={imageSessionWorkflow.volumeSelection.items.map((item) => item.id)}
@@ -575,6 +576,14 @@
         sequenceImport={sequenceImportWorkflow}
         importAudio={() => directComputerWorkflow.importAudio(audioImportWorkflow, audioFileInput)}
         importMidi={() => directComputerWorkflow.importMidi(sequenceImportWorkflow, sequenceFileInput)}
+        convertDocument={() => {
+            if (imageSessionWorkflow.sessionId !== null && imageSessionWorkflow.documentId)
+                void tx16wImportWorkflow.requestNativeDocument(
+                    imageSessionWorkflow.sessionId,
+                    imageSessionWorkflow.documentId,
+                    imageSessionWorkflow.revision ?? 0,
+                );
+        }}
         {programs}
         {sampleBanks}
         {samples}

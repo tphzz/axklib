@@ -6,13 +6,21 @@ export class ViewMemory {
     private states = new Map<string, unknown>();
 
     forDocument(session: number | null, document: string | null): RememberView {
+        return this.forScope(session, `document:${document ?? 'none'}`);
+    }
+
+    forSource(session: number | null, source: string | null): RememberView {
+        return this.forScope(session, `source:${source ?? 'none'}`);
+    }
+
+    private forScope(session: number | null, scope: string): RememberView {
         if (session !== this.session) {
             this.session = session;
             this.states.clear();
         }
         const states = this.states;
         return <T>(key: string, initial: () => T): T => {
-            const scoped = `${document ?? 'files'}:${key}`;
+            const scoped = `${scope}:${key}`;
             if (!states.has(scoped)) states.set(scoped, initial());
             return states.get(scoped) as T;
         };

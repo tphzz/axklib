@@ -17,6 +17,7 @@
     import { restoreRememberedFile, storageEntryIsVisible } from '../storagePickerRestoration';
     import Icon from './Icon.svelte';
     import StoragePickerFooter from './StoragePickerFooter.svelte';
+    import StoragePickerLocation from './StoragePickerLocation.svelte';
 
     import type { PickerMode } from '../../features/dialogs/picker';
     interface Props {
@@ -26,7 +27,10 @@
         extensions?: string[];
         suggestedName?: string;
         multiple?: boolean;
-        selectionAction?: 'select' | 'add';
+        sourceSelection?: {
+            references: readonly DirectoryRef[];
+            ontoggle: (location: FileLocation | DirectoryLocation) => void;
+        };
         initialDirectory?: DirectoryRef | null;
         initialFile?: FileRef | null;
         requireWritableDirectory?: boolean;
@@ -45,7 +49,7 @@
         extensions = [],
         suggestedName = '',
         multiple = false,
-        selectionAction = 'select',
+        sourceSelection,
         initialDirectory = null,
         initialFile = null,
         requireWritableDirectory = true,
@@ -69,40 +73,27 @@
     let entryActionBusy = $state(false);
     let entryActionError = $state('');
     let listElement = $state<HTMLDivElement | null>(null);
-    let breadcrumbElement = $state<HTMLOListElement | null>(null);
     let activeOptionIndex = $state(-1);
     let selectedFilePaths = $state<string[]>([]);
     let openingCurrentFolder = $state(false);
 
     const normalizedExtensions = $derived(extensions.map((extension) => extension.toLocaleLowerCase()));
     const visibleEntries = $derived(entries.filter(entryIsVisible));
-    const selectedFilePathSet = $derived(new Set(selectedFilePaths));
+    const selectedFilePathSet = $derived(
+        new Set(
+            sourceSelection
+                ? sourceSelection.references
+                      .filter((reference) => reference.rootId === activeRoot?.id)
+                      .map((reference) => reference.relativePath)
+                : selectedFilePaths,
+        ),
+    );
+    const multiselect = $derived(multiple || !!sourceSelection);
     const activeOptionId = $derived(
         activeOptionIndex >= 0
             ? `storage-picker-option-${activeRoot ? 'entry' : 'root'}-${activeOptionIndex}`
             : undefined,
     );
-    const breadcrumbs = $derived.by(() => {
-        if (!activeRoot || !directory) {
-            return [{ label: 'Workspaces', reference: null }];
-        }
-
-        const currentDirectory = directory;
-        const parts = currentDirectory.relativePath.split('/').filter(Boolean);
-        return [
-            {
-                label: activeRoot.displayName,
-                reference: { rootId: activeRoot.id, relativePath: '' },
-            },
-            ...parts.map((label, index) => ({
-                label,
-                reference: {
-                    rootId: currentDirectory.rootId,
-                    relativePath: parts.slice(0, index + 1).join('/'),
-                },
-            })),
-        ];
-    });
 
     onMount(async () => {
         outputName = suggestedName;
@@ -154,12 +145,6 @@
         option?.scrollIntoView?.({ block: 'nearest' });
     }
 
-    async function revealCurrentBreadcrumb(): Promise<void> {
-        await tick();
-        const current = breadcrumbElement?.querySelector<HTMLElement>('[aria-current="location"]');
-        current?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
-    }
-
     function setActiveOption(index: number): void {
         if (!enabledOptionIndices().includes(index)) return;
         activeOptionIndex = index;
@@ -201,11 +186,12 @@
             entries = listing.entries;
             nextCursor = listing.nextCursor;
             selectedFilePaths =
-                multiple && restored.activeOptionIndex !== null && rememberedFile ? [rememberedFile.relativePath] : [];
+                !sourceSelection && multiple && restored.activeOptionIndex !== null && rememberedFile
+                    ? [rememberedFile.relativePath]
+                    : [];
             activeOptionIndex = restored.activeOptionIndex ?? (listing.entries.some(entryIsVisible) ? 0 : -1);
             ondirectorychange?.(listing.directory);
             void revealActiveOption();
-            void revealCurrentBreadcrumb();
             return true;
         } catch (reason) {
             error = userFacingMessage(reason);
@@ -239,6 +225,10 @@
         const reference = { rootId: activeRoot.id, relativePath: entry.relativePath };
         if (entry.kind === 'DIRECTORY') {
             await openDirectory(reference, activeRoot);
+            return;
+        }
+        if (sourceSelection) {
+            sourceSelection.ontoggle(serverFileLocation(reference, `${activeRoot.displayName}/${entry.relativePath}`));
             return;
         }
         if (multiple) {
@@ -304,7 +294,6 @@
         selectFirstOption();
         ondirectorychange?.(null);
         void revealActiveOption();
-        void revealCurrentBreadcrumb();
     }
 
     async function goUp(): Promise<void> {
@@ -325,7 +314,7 @@
 
     function selectCurrentDirectory(): void {
         if (!activeRoot || !directory) return;
-        onselect(
+        (sourceSelection?.ontoggle ?? onselect)(
             serverDirectoryLocation(
                 directory,
                 directory.relativePath ? `${activeRoot.displayName}/${directory.relativePath}` : activeRoot.displayName,
@@ -335,10 +324,6 @@
 
     async function openCurrentMediaSource(): Promise<void> {
         if (!activeRoot || !directory || loading || openingCurrentFolder) return;
-        if (selectionAction === 'add') {
-            selectCurrentDirectory();
-            return;
-        }
         openingCurrentFolder = true;
         error = '';
         try {
@@ -441,185 +426,148 @@
     }
 </script>
 
-<nav class="storage-picker-location" aria-label="Storage location">
-    <button
-        class="icon-button"
-        type="button"
-        aria-label="Go to all workspaces"
-        title="All workspaces"
-        disabled={!activeRoot || loading}
-        onclick={goHome}
-    >
-        <Icon name="home" size={15} />
-    </button>
-    <button
-        class="icon-button"
-        type="button"
-        aria-label="Parent directory"
-        disabled={!activeRoot || !directory || loading}
-        onclick={() => void goUp()}
-    >
-        <Icon name="chevron" size={14} class="storage-picker-parent-icon" />
-    </button>
-    <ol class="storage-picker-breadcrumbs" bind:this={breadcrumbElement}>
-        {#each breadcrumbs as breadcrumb, index (`${breadcrumb.reference?.rootId ?? 'home'}:${breadcrumb.reference?.relativePath ?? ''}`)}
-            <li class="storage-picker-breadcrumb-item">
-                {#if index > 0}
-                    <Icon name="chevron" size={11} class="storage-picker-breadcrumb-separator" />
-                {/if}
-                {#if index === breadcrumbs.length - 1}
-                    <span class="storage-picker-breadcrumb-current" aria-current="location" title={breadcrumb.label}>
-                        {breadcrumb.label}
-                    </span>
-                {:else}
-                    <button
-                        class="storage-picker-breadcrumb"
-                        type="button"
-                        disabled={loading}
-                        title={breadcrumb.label}
-                        onclick={() => void openBreadcrumb(breadcrumb.reference)}
-                    >
-                        {breadcrumb.label}
-                    </button>
-                {/if}
-            </li>
-        {/each}
-    </ol>
-    <div class="storage-picker-location-actions">
-        {#if activeRoot?.writable && directory && (mode === 'directory' || mode === 'save-file' || mode === 'save-directory')}
-            <button
-                class="secondary-button storage-picker-directory-action"
-                type="button"
-                disabled={loading}
-                onclick={beginCreateDirectory}
-            >
-                <Icon name="folder-plus" size={14} />
-                New folder
-            </button>
-        {/if}
-    </div>
-</nav>
+<StoragePickerLocation
+    root={activeRoot}
+    {directory}
+    {loading}
+    folderSelected={!!directory && selectedFilePathSet.has(directory.relativePath)}
+    onhome={goHome}
+    onup={() => void goUp()}
+    onbreadcrumb={(reference) => void openBreadcrumb(reference)}
+    oncreate={activeRoot?.writable && (mode === 'directory' || mode === 'save-file' || mode === 'save-directory')
+        ? beginCreateDirectory
+        : undefined}
+    ontogglefolder={sourceSelection ? selectCurrentDirectory : undefined}
+/>
 
-<div
-    bind:this={listElement}
-    class="storage-picker-list"
-    role="listbox"
-    aria-label="Storage entries"
-    aria-multiselectable={multiple || undefined}
-    aria-activedescendant={activeOptionId}
-    aria-busy={loading}
-    tabindex="0"
-    data-dialog-initial-focus={active ? '' : undefined}
-    onkeydown={handleListKeydown}
->
-    {#if !activeRoot}
-        {#each roots as root, index (root.id)}
-            <button
-                id={`storage-picker-option-root-${index}`}
-                class:storage-picker-row-active={activeOptionIndex === index}
-                class="storage-picker-row"
-                type="button"
-                role="option"
-                aria-selected={activeOptionIndex === index}
-                aria-disabled={loading || rootIsDisabled(root)}
-                data-picker-index={index}
-                tabindex="-1"
-                disabled={loading || rootIsDisabled(root)}
-                onclick={() => {
-                    setActiveOption(index);
-                    void openRoot(root);
-                }}
-            >
-                <Icon name="folder" size={16} />
-                <span
-                    ><strong>{root.displayName}</strong><small
-                        >{root.writable ? 'Writable location' : 'Read-only location'}</small
-                    ></span
+<div class="storage-picker-results" class:source-selection={!!sourceSelection}>
+    <div
+        bind:this={listElement}
+        class="storage-picker-list"
+        role="listbox"
+        aria-label="Storage entries"
+        aria-multiselectable={multiselect || undefined}
+        aria-activedescendant={activeOptionId}
+        aria-busy={loading}
+        tabindex="0"
+        data-dialog-initial-focus={active ? '' : undefined}
+        onkeydown={handleListKeydown}
+    >
+        {#if !activeRoot}
+            {#each roots as root, index (root.id)}
+                <button
+                    id={`storage-picker-option-root-${index}`}
+                    class:storage-picker-row-active={activeOptionIndex === index}
+                    class="storage-picker-row"
+                    type="button"
+                    role="option"
+                    aria-selected={activeOptionIndex === index}
+                    aria-disabled={loading || rootIsDisabled(root)}
+                    data-picker-index={index}
+                    tabindex="-1"
+                    disabled={loading || rootIsDisabled(root)}
+                    onclick={() => {
+                        setActiveOption(index);
+                        void openRoot(root);
+                    }}
                 >
-                <Icon name="chevron" size={14} />
-            </button>
-        {:else}
-            <div class="storage-location-empty">
-                <p>No storage locations are configured.</p>
-                {#if onmanagelocations}
-                    <button class="primary-button" type="button" onclick={onmanagelocations}
-                        >Manage storage locations</button
-                    >
-                {/if}
-            </div>
-        {/each}
-    {:else}
-        {#each visibleEntries as entry, index (`${entry.kind}:${entry.relativePath}`)}
-            <button
-                id={`storage-picker-option-entry-${index}`}
-                class:storage-picker-file-row={entry.kind === 'FILE'}
-                class:storage-picker-row-active={activeOptionIndex === index}
-                class="storage-picker-row"
-                type="button"
-                role="option"
-                aria-selected={multiple && entry.kind === 'FILE'
-                    ? selectedFilePathSet.has(entry.relativePath)
-                    : activeOptionIndex === index}
-                aria-disabled={loading}
-                data-picker-index={index}
-                tabindex="-1"
-                disabled={loading}
-                onclick={() => {
-                    setActiveOption(index);
-                    void activate(entry);
-                }}
-            >
-                {#if entry.kind === 'DIRECTORY'}
                     <Icon name="folder" size={16} />
-                {:else if multiple}
                     <span
-                        class:storage-picker-selection-checked={selectedFilePathSet.has(entry.relativePath)}
-                        class="storage-picker-selection"
+                        ><strong>{root.displayName}</strong><small
+                            >{root.writable ? 'Writable location' : 'Read-only location'}</small
+                        ></span
                     >
-                        {#if selectedFilePathSet.has(entry.relativePath)}<Icon name="check" size={12} />{/if}
-                    </span>
-                {/if}
-                <span>
-                    <strong>{entry.name}</strong>
-                    <small>
-                        {#if entry.kind === 'DIRECTORY'}
-                            Folder
-                        {:else if mode === 'media-source'}
-                            Disk image · {entry.size ?? 0} bytes
-                        {:else}
-                            {entry.size ?? 0} bytes
-                        {/if}
-                    </small>
-                </span>
-                {#if entry.kind === 'DIRECTORY'}
                     <Icon name="chevron" size={14} />
-                {/if}
-            </button>
-        {/each}
-        {#if visibleEntries.length === 0 && !loading}<p class="empty-copy">No matching entries</p>{/if}
+                </button>
+            {:else}
+                <div class="storage-location-empty">
+                    <p>No storage locations are configured.</p>
+                    {#if onmanagelocations}
+                        <button class="primary-button" type="button" onclick={onmanagelocations}
+                            >Manage storage locations</button
+                        >
+                    {/if}
+                </div>
+            {/each}
+        {:else}
+            {#each visibleEntries as entry, index (`${entry.kind}:${entry.relativePath}`)}
+                <button
+                    id={`storage-picker-option-entry-${index}`}
+                    class:storage-picker-file-row={entry.kind === 'FILE'}
+                    class:storage-picker-row-active={activeOptionIndex === index}
+                    class="storage-picker-row"
+                    type="button"
+                    role="option"
+                    aria-selected={multiselect && entry.kind === 'FILE'
+                        ? selectedFilePathSet.has(entry.relativePath)
+                        : activeOptionIndex === index}
+                    aria-disabled={loading}
+                    data-picker-index={index}
+                    tabindex="-1"
+                    disabled={loading}
+                    onclick={() => {
+                        setActiveOption(index);
+                        void activate(entry);
+                    }}
+                >
+                    {#if entry.kind === 'DIRECTORY'}
+                        <Icon name="folder" size={16} />
+                    {:else if multiselect}
+                        <span
+                            class:storage-picker-selection-checked={selectedFilePathSet.has(entry.relativePath)}
+                            class="storage-picker-selection"
+                        >
+                            {#if selectedFilePathSet.has(entry.relativePath)}<Icon name="check" size={12} />{/if}
+                        </span>
+                    {/if}
+                    <span>
+                        <strong>{entry.name}</strong>
+                        <small>
+                            {#if entry.kind === 'DIRECTORY'}
+                                Folder
+                            {:else if mode === 'media-source'}
+                                Disk image · {entry.size ?? 0} bytes
+                            {:else}
+                                {entry.size ?? 0} bytes
+                            {/if}
+                        </small>
+                    </span>
+                    {#if entry.kind === 'DIRECTORY'}
+                        <Icon name="chevron" size={14} />
+                    {/if}
+                </button>
+            {/each}
+            {#if visibleEntries.length === 0 && !loading}<p class="empty-copy">No matching entries</p>{/if}
+        {/if}
+        {#if loading}<p class="empty-copy">Loading</p>{/if}
+    </div>
+    {#if sourceSelection && nextCursor}
+        <button class="secondary-button load-more" type="button" disabled={loading} onclick={() => void loadMore()}
+            >Load more</button
+        >
     {/if}
-    {#if loading}<p class="empty-copy">Loading</p>{/if}
 </div>
 
 {#if error}<p class="storage-picker-error" role="alert">{error}</p>{/if}
 
-<StoragePickerFooter
-    {selectionAction}
-    {mode}
-    hasDirectory={!!directory}
-    hasMore={!!nextCursor}
-    {multiple}
-    {loading}
-    opening={openingCurrentFolder}
-    selectedCount={selectedFilePaths.length}
-    bind:outputName
-    onloadmore={() => void loadMore()}
-    onoutput={selectOutput}
-    ondirectory={selectCurrentDirectory}
-    onmedia={() => void openCurrentMediaSource()}
-    onfiles={selectFiles}
-    {oncancel}
-/>
+{#if !sourceSelection}
+    <StoragePickerFooter
+        {mode}
+        hasDirectory={!!directory}
+        hasMore={!!nextCursor}
+        {multiple}
+        {loading}
+        opening={openingCurrentFolder}
+        selectedCount={selectedFilePaths.length}
+        bind:outputName
+        onloadmore={() => void loadMore()}
+        onoutput={selectOutput}
+        ondirectory={selectCurrentDirectory}
+        onmedia={() => void openCurrentMediaSource()}
+        onfiles={selectFiles}
+        {oncancel}
+    />
+{/if}
 
 {#if creatingDirectory}
     <div class="dialog-backdrop dialog-backdrop-raised" role="presentation">
@@ -668,3 +616,23 @@
         </div>
     </div>
 {/if}
+
+<style>
+    .storage-picker-results {
+        display: contents;
+    }
+    .source-selection {
+        display: block;
+        flex: 1;
+        min-height: 0;
+        overflow: auto;
+        scrollbar-gutter: stable;
+    }
+    .source-selection .storage-picker-list {
+        overflow: visible;
+        scrollbar-gutter: auto;
+    }
+    .load-more {
+        margin: 4px 14px 8px;
+    }
+</style>

@@ -3,7 +3,6 @@ import type {
     AudioImportItem,
     AudioImportOptions,
     VolumeImportDestination,
-    AudioImportTarget,
     SampleBankCreation,
     SampleBankAssignment,
     SequenceImportItem,
@@ -11,8 +10,6 @@ import type {
     JobState,
     AudioSourceInfo,
     MidiInspection,
-    Tx16wImportInspection,
-    Tx16wImportMode,
     AudioImportCapabilities,
 } from './transport';
 import type { InputFileLocation } from './storageLocations';
@@ -62,20 +59,12 @@ export class HttpImportOperations {
                         input.items,
                         input.systemExclusivePolicy,
                     )
-                  : input.kind === 'TX16W'
-                    ? tx16wDiskSetImportRequest(
-                          documentTarget(session),
-                          session.revision,
-                          input.sources,
-                          input.target,
-                          input.importMode,
-                      )
-                    : {
-                          imageId: session.remoteId,
-                          expectedRevision: input.expectedRevision,
-                          acknowledgeDeviceRelationships: true,
-                          edits: input.edits.map(filesystemEditWire),
-                      };
+                  : {
+                        imageId: session.remoteId,
+                        expectedRevision: input.expectedRevision,
+                        acknowledgeDeviceRelationships: true,
+                        edits: input.edits.map(filesystemEditWire),
+                    };
         const result = await this.client.invoke<{ capacity: CapacityAdmission }>(
             input.kind === 'FILES' ? 'images.filesystem.edit.inspect' : 'images.alter.inspect',
             { ...request, capacityPolicy: policy },
@@ -108,24 +97,6 @@ export class HttpImportOperations {
     async inspectMidi(source: InputFileLocation): Promise<MidiInspection> {
         const result = await this.client.invoke<MidiInspection>('midi.inspect', { source: serverInput(source) });
         if (this.jobs.isJob(result)) throw new Error('midi.inspect unexpectedly returned a job');
-        return result;
-    }
-
-    async inspectTx16wDiskSet(
-        sessionId: number,
-        sources: InputFileLocation[],
-        target: AudioImportTarget,
-        importMode: Tx16wImportMode,
-    ): Promise<Tx16wImportInspection> {
-        const session = this.imageSessions.get(sessionId);
-        const result = await this.client.invoke<Tx16wImportInspection>('images.tx16w.inspect', {
-            ...documentTarget(session),
-            expectedRevision: session.revision,
-            sources: sources.map(serverInput),
-            target,
-            importMode,
-        });
-        if (this.jobs.isJob(result)) throw new Error('images.tx16w.inspect unexpectedly returned a job');
         return result;
     }
 
@@ -167,48 +138,9 @@ export class HttpImportOperations {
         );
     }
 
-    startTx16wDiskSetImport(
-        sessionId: number,
-        sources: InputFileLocation[],
-        target: AudioImportTarget,
-        importMode: Tx16wImportMode,
-        policy?: CapacityPolicy,
-    ): Promise<JobState> {
-        const session = this.imageSessions.get(sessionId);
-        return this.start(
-            tx16wDiskSetImportRequest(documentTarget(session), session.revision, sources, target, importMode),
-            policy,
-        );
-    }
-
     private async start(request: ImportAlterationRequest, policy?: CapacityPolicy): Promise<JobState> {
         return this.imageSessions.mutations.start({ ...request, ...(policy ? { capacityPolicy: policy } : {}) });
     }
-}
-
-export function tx16wDiskSetImportRequest(
-    document: ReturnType<typeof documentTarget>,
-    expectedRevision: number,
-    sources: InputFileLocation[],
-    target: AudioImportTarget,
-    importMode: Tx16wImportMode,
-): ImportAlterationRequest {
-    const logicalPaths = sources.map((_, index) => `tx16w/disk-${String(index + 1).padStart(2, '0')}.ima`);
-    return request(
-        document,
-        expectedRevision,
-        [
-            {
-                id: 'tx16w-import',
-                type: 'import_tx16w_disk_set',
-                partition_index: target.partitionIndex,
-                volume_name: target.volumeName,
-                disk_paths: logicalPaths,
-                import_mode: importMode === 'HIERARCHY' ? 'hierarchy' : 'wave_data_only',
-            },
-        ],
-        sources.map((source, index) => ({ manifestPath: logicalPaths[index], input: serverInput(source) })),
-    );
 }
 
 function request(

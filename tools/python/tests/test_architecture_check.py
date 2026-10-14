@@ -49,7 +49,7 @@ def test_native_format_cannot_include_writer_transport_or_another_format(tmp_pat
     source.write_text(
         '#include "axklib/writer.hpp"\n'
         '#include "axklib/formats/a_series/document.hpp"\n'
-        '#include <nlohmann/json.hpp>\n'
+        "#include <nlohmann/json.hpp>\n"
         '#include "../../writer.hpp"\n',
         encoding="utf-8",
     )
@@ -76,7 +76,7 @@ def test_a_series_owner_cannot_depend_on_conversion_or_transport(tmp_path: Path)
     source.write_text(
         '#include "axklib/media.hpp"\n'
         '#include "axklib/conversion/tx16w_to_a_series/converter.hpp"\n'
-        '#include <nlohmann/json.hpp>\n',
+        "#include <nlohmann/json.hpp>\n",
         encoding="utf-8",
     )
     issues = architecture_check.check_repository(tmp_path, write_policy(tmp_path))
@@ -95,6 +95,39 @@ def test_shared_session_infrastructure_cannot_include_format_state(tmp_path: Pat
     )
     issues = architecture_check.check_repository(tmp_path, write_policy(tmp_path))
     assert sum(issue.code == "module_dependency_forbidden" for issue in issues) == 2
+
+
+def test_destination_authoring_cannot_include_source_formats_or_conversion(tmp_path: Path) -> None:
+    write_lines(tmp_path / "src/unit.cpp", 1)
+    source = tmp_path / "library/src/formats/a_series/authoring/prepare.cpp"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        '#include "axklib/formats/a_series/authoring/bundle.hpp"\n'
+        '#include "axklib/formats/tx16w/document.hpp"\n'
+        '#include "axklib/conversion/plan.hpp"\n'
+        "#include <nlohmann/json.hpp>\n",
+        encoding="utf-8",
+    )
+    issues = architecture_check.check_repository(tmp_path, write_policy(tmp_path))
+    assert sum(issue.code == "module_dependency_forbidden" for issue in issues) == 3
+
+
+def test_common_conversion_contract_cannot_include_profiles_formats_or_sessions(
+    tmp_path: Path,
+) -> None:
+    write_lines(tmp_path / "src/unit.cpp", 1)
+    source = tmp_path / "library/include/axklib/conversion/plan.hpp"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        '#include "axklib/native/document.hpp"\n'
+        "#include <nlohmann/json.hpp>\n#include <vector>\n"
+        '#include "axklib/formats/tx16w/document.hpp"\n'
+        '#include "axklib/conversion/tx16w_to_a_series/profile.hpp"\n'
+        '#include "axklib/application/image_sessions.hpp"\n',
+        encoding="utf-8",
+    )
+    issues = architecture_check.check_repository(tmp_path, write_policy(tmp_path))
+    assert sum(issue.code == "module_dependency_forbidden" for issue in issues) == 3
 
 
 def test_accepts_file_at_limit_and_matching_legacy_file(tmp_path: Path) -> None:

@@ -48,7 +48,13 @@ void ServerApplication::register_infrastructure_routes() {
                      return std::move(*denied);
                  static const auto catalog = axk::app::program_editor_catalog();
                  return json_response(200, {{"data", catalog}}, id);
-             }});
+             },
+         .conversion_profiles =
+             [this](const crow::request &request) { return conversion_response(request, {}, false); },
+         .conversion_plan = [this](const crow::request &request,
+                                   std::string id) { return conversion_response(request, id, false); },
+         .conversion_execution = [this](const crow::request &request,
+                                        std::string id) { return conversion_response(request, id, true); }});
 
     axk::server::detail::register_file_routes(
         app_,

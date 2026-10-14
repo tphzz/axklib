@@ -580,6 +580,8 @@
         volumeOptions={tx16wImport.volumeOptions()}
         ontarget={(target) => void tx16wImport.selectTarget(target)}
         onmode={(mode) => void tx16wImport.selectImportMode(mode)}
+        onfidelity={(fidelity) => void tx16wImport.selectFidelity(fidelity)}
+        onprepare={() => void tx16wImport.reprepare()}
         onadd={(files) => void tx16wImport.addFiles(files)}
         onremove={(memberId) => void tx16wImport.removeMember(memberId)}
         onconfirm={() => void tx16wImport.commit()}

@@ -79,8 +79,8 @@ export class HttpImageSessionReads {
         return this.imageSessions.open(sources, options);
     }
 
-    selectDocument(sessionId: number, documentId: string | null) {
-        return this.imageSessions.selectDocument(sessionId, documentId);
+    selectDocument(sessionId: number, documentId: string | null | undefined, sourceMemberId?: string) {
+        return this.imageSessions.selectDocument(sessionId, documentId, sourceMemberId);
     }
     resolveDocuments(sessionId: number, selectedFormats: string[]) {
         return this.imageSessions.resolveDocuments(sessionId, selectedFormats);

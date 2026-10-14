@@ -2,7 +2,6 @@
     import type { PickerMode } from '../../features/dialogs/picker';
     let {
         mode,
-        selectionAction = 'select',
         hasDirectory,
         hasMore,
         multiple,
@@ -18,7 +17,6 @@
         oncancel,
     }: {
         mode: PickerMode;
-        selectionAction?: 'select' | 'add';
         hasDirectory: boolean;
         hasMore: boolean;
         multiple: boolean;
@@ -48,22 +46,9 @@
         />
     {/if}
     <div class="dialog-footer-actions">
-        {#if selectionAction === 'select'}<button class="secondary-button" type="button" onclick={oncancel}
-                >Cancel</button
-            >{/if}
+        <button class="secondary-button" type="button" onclick={oncancel}>Cancel</button>
         {#if hasDirectory}
-            {#if selectionAction === 'add'}
-                <button
-                    class="secondary-button"
-                    type="button"
-                    disabled={loading}
-                    onclick={selectedCount ? onfiles : ondirectory}
-                >
-                    {selectedCount
-                        ? `Add ${selectedCount} ${selectedCount === 1 ? 'file' : 'files'}`
-                        : 'Add current folder'}
-                </button>
-            {:else if mode === 'save-file' || mode === 'save-directory'}
+            {#if mode === 'save-file' || mode === 'save-directory'}
                 <button class="primary-button" type="button" onclick={onoutput}>Select output</button>
             {:else if mode === 'directory'}
                 <button class="primary-button" type="button" onclick={ondirectory}>Select directory</button>

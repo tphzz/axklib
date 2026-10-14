@@ -27,11 +27,37 @@ function summary() {
 }
 
 describe('native document HTTP sessions', () => {
-    it('requires explicit selection when multiple documents exist and rejects unknown selections', () => {
-        expect(documentSession(summary()).documentId).toBeNull();
+    it('selects the first image and its document, retaining image identity when its document disappears', () => {
+        expect(documentSession(summary()).documentId).toBe(summary().documents[0].id);
+        expect(documentSession(summary()).activeSourceMemberId).toBe('source-1');
         expect(() => documentSession(summary(), 'missing')).toThrow('no longer available');
         const selected = documentSession(summary(), 'second');
-        expect(refreshedDocumentSession({ ...summary(), revision: 2, documents: [] }, selected).documentId).toBeNull();
+        const refreshed = refreshedDocumentSession({ ...summary(), revision: 2, documents: [] }, selected);
+        expect(refreshed.documentId).toBeNull();
+        expect(refreshed.activeSourceMemberId).toBe('source-2');
+    });
+
+    it('does not borrow another image document or guess between native interpretations', () => {
+        const initial = summary();
+        expect(documentSession({ ...initial, documents: [initial.documents[1]] }).documentId).toBeNull();
+        const ambiguous = { ...initial, documents: [...initial.documents, { ...initial.documents[0], id: 'other' }] };
+        expect(documentSession(ambiguous).documentId).toBeNull();
+        expect(() => documentSession(initial, 'second', 'source-1')).toThrow('selected image');
+        expect(() => documentSession(initial, undefined, 'missing')).toThrow('no longer available');
+    });
+
+    it('keeps a shared native document when switching physical members and falls back if a member is removed', () => {
+        const initial = summary();
+        const shared = {
+            ...initial,
+            documents: [{ ...initial.documents[0], sourceMemberIds: ['source-1', 'source-2'] }],
+        };
+        const selected = documentSession(shared, undefined, 'source-2');
+        expect(selected.documentId).toBe(initial.documents[0].id);
+        expect(selected.activeSourceMemberId).toBe('source-2');
+        const refreshed = refreshedDocumentSession({ ...shared, sources: [shared.sources[0]] }, selected);
+        expect(refreshed.activeSourceMemberId).toBe('source-1');
+        expect(refreshed.documentId).toBe(selected.documentId);
     });
 
     it('labels the selected member and refreshes to Files if a commit removes its document', async () => {

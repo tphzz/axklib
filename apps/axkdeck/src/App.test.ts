@@ -103,9 +103,8 @@ async function chooseNestedImage(reuseDirectory = false, waitForDocument = true)
     }
     const entry = await within(picker).findByRole('option', { name: /nested\.hds/ });
     if (entry.getAttribute('aria-selected') !== 'true') await fireEvent.click(entry);
-    await fireEvent.click(within(picker).getByRole('button', { name: 'Add 1 file' }));
     await fireEvent.click(within(picker).getByRole('button', { name: 'Open' }));
-    if (waitForDocument) await screen.findByRole('combobox', { name: 'Native document' });
+    if (waitForDocument) await screen.findByRole('combobox', { name: 'Image' });
 }
 
 async function openSampleSelectionFixture(props: AppProps = {}) {
@@ -277,6 +276,15 @@ describe('App panel layout', () => {
         ]);
         mocks.openImage.mockReset().mockResolvedValue({
             ...nativeWorkspaceFixture(),
+            sources: [
+                {
+                    ...nativeWorkspaceFixture().sources[0],
+                    source: {
+                        kind: 'FILE',
+                        file: { rootId: 'workspace', relativePath: 'images/nested.hds' },
+                    },
+                },
+            ],
             sessionId: 17,
             format: 'sfs',
             revision: 1,
@@ -1192,7 +1200,6 @@ describe('App panel layout', () => {
         const picker = await screen.findByRole('dialog', { name: 'Open' });
         await fireEvent.click(await within(picker).findByText('Yamaha'));
         await fireEvent.click(await within(picker).findByText('disk01.ima'));
-        await fireEvent.click(within(picker).getByRole('button', { name: 'Add 1 file' }));
         await fireEvent.click(within(picker).getByRole('button', { name: 'Open' }));
         await vi.waitFor(() => expect(mocks.openImage).toHaveBeenCalledOnce());
         await mocks.openImage.mock.results[0].value;
@@ -1350,7 +1357,8 @@ describe('App panel layout', () => {
         const list = within(picker).getByRole('listbox', { name: 'Storage entries' });
         const remembered = await within(picker).findByRole('option', { name: /nested\.hds/ });
         expect(list.getAttribute('aria-activedescendant')).toBe(remembered.id);
-        expect(remembered.getAttribute('aria-selected')).toBe('true');
+        expect(remembered.getAttribute('aria-selected')).toBe('false');
+        expect(within(picker).getByRole('button', { name: 'Open' })).toHaveProperty('disabled', true);
     });
 
     it('preserves the active image when opening a replacement fails', async () => {
@@ -1392,7 +1400,6 @@ describe('App panel layout', () => {
         const replacementPicker = await screen.findByRole('dialog', { name: 'Open' });
         await fireEvent.click(await within(replacementPicker).findByRole('option', { name: /nested\.hds/ }));
         await fireEvent.click(await within(replacementPicker).findByText('earlier.hds'));
-        await fireEvent.click(within(replacementPicker).getByRole('button', { name: 'Add 1 file' }));
         await fireEvent.click(within(replacementPicker).getByRole('button', { name: 'Open' }));
         await vi.waitFor(() => expect(screen.getByText('Replacement is invalid')).toBeTruthy());
         await fireEvent.click(screen.getByRole('button', { name: 'Eject image' }));

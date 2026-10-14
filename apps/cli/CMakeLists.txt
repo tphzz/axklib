@@ -46,6 +46,7 @@ add_library(
   STATIC
   app.cpp
   command_line.cpp
+  conversion_command.cpp
   local_operation_projection.cpp
   local_operations.cpp
   commands/analysis.cpp
@@ -70,7 +71,7 @@ target_include_directories(
 target_link_libraries(
   axk_cli_adapter
   PUBLIC axklib::core axklib::application
-  PRIVATE axklib::audio CLI11::CLI11 nlohmann_json::nlohmann_json
+  PRIVATE axklib::audio axklib::conversion_files CLI11::CLI11 nlohmann_json::nlohmann_json
 )
 axk_set_project_warnings(axk_cli_adapter)
 axk_enable_sanitizers(axk_cli_adapter)
@@ -97,7 +98,7 @@ axk_enable_coverage(axklib_cli)
 if(BUILD_TESTING)
   find_package(GTest CONFIG REQUIRED)
   include(GoogleTest)
-  add_executable(axk_cli_tests tests/cli_parser_test.cpp tests/cli_schema_test.cpp schema/objects_v1.cpp)
+  add_executable(axk_cli_tests tests/cli_parser_test.cpp tests/cli_schema_test.cpp tests/conversion_test.cpp schema/objects_v1.cpp)
   target_compile_features(axk_cli_tests PRIVATE cxx_std_23)
   target_compile_definitions(axk_cli_tests PRIVATE AXK_SOURCE_ROOT="${AXK_REPOSITORY_ROOT}")
   target_include_directories(axk_cli_tests PRIVATE "${AXK_REPOSITORY_ROOT}/library/internal")

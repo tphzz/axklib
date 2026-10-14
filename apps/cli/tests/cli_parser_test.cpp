@@ -217,7 +217,7 @@ TEST(Cli11Adapter, ExposesOnlyMaintainedCommandInventory) {
     EXPECT_EQ(axk::cli::run(static_cast<int>(help.size()), help.data()), 0);
     const auto output = testing::internal::GetCapturedStdout();
     for (const auto command : {"info", "inventory", "validate", "relationships", "coverage", "create", "alter",
-                               "orphans", "objects", "corpus", "extract", "package"})
+                               "orphans", "objects", "corpus", "extract", "package", "convert"})
         EXPECT_NE(output.find(command), std::string::npos) << command;
     for (const auto command : {"create-hds", "object-json", "tree", "extract-wav", "export", "preview"}) {
         EXPECT_EQ(output.find(command), std::string::npos) << command;

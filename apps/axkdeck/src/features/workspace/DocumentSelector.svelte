@@ -74,7 +74,7 @@
     }
 </script>
 
-{#if documents.length}
+{#if documents.length > 1}
     <select
         class="document-select dialog-field-control"
         aria-label="Native document"
@@ -82,7 +82,7 @@
         disabled={disabled || pending}
         onchange={(event) => void select(event.currentTarget)}
     >
-        <option value="">Files only</option>
+        <option value="" disabled>Choose native format</option>
         {#each documents as document (document.id)}
             <option value={document.id}
                 >{document.name} / {document.profile}{document.completeness === 'INCOMPLETE'

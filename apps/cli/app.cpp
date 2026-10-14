@@ -15,6 +15,7 @@
 #include <CLI/CLI.hpp>
 
 #include "commands/handlers.hpp"
+#include "conversion_command.hpp"
 #include "requests.hpp"
 #include "writer_commands.hpp"
 
@@ -286,6 +287,8 @@ int axk::cli::run(int argc, char **argv) {
 
     WriterCommandState writer_commands;
     register_writer_commands(app, writer_commands);
+    ConversionCommand conversion_command;
+    register_conversion_command(app, conversion_command);
 
     if (const auto mismatch = validate_cli_operation_catalogue(app, registry)) {
         std::cerr << "error: " << *mismatch << '\n';
@@ -301,6 +304,8 @@ int axk::cli::run(int argc, char **argv) {
     if (*info) {
         return run_info_request(info_request);
     }
+    if (*conversion_command.command)
+        return run_conversion(conversion_command);
     if (*objects)
         return run_objects_request(objects_request);
     if (*relationships)

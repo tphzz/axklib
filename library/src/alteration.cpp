@@ -154,8 +154,6 @@ Result<TransactionState> prepare_alteration(std::shared_ptr<const RandomAccessRe
                     return rename_volume(state, context, operation, cancellation);
                 else if constexpr (std::same_as<T, RepairObjectPlacementsOperation>)
                     return repair_object_placements(state, context, operation, cancellation);
-                else if constexpr (std::same_as<T, ImportTx16wDiskSetOperation>)
-                    return import_tx16w_disk_set(state, context, operation, cancellation);
                 else
                     return rename_partition(state, context, operation, cancellation);
             },
@@ -208,29 +206,37 @@ detail::prepare_hds_alteration(std::shared_ptr<const RandomAccessReader> source,
                                        "planning alteration", text::path_to_utf8(source_path), diagnostics);
     if (!prepared)
         return std::unexpected{prepared.error()};
+    return finish_preparation(std::move(*prepared), std::move(source_path), capacity_policy, cancellation, diagnostics);
+}
+
+Result<detail::PreparedAlteration> alteration_internal::finish_preparation(TransactionState state,
+                                                                           std::filesystem::path source_path,
+                                                                           const VolumeCapacityPolicy &capacity_policy,
+                                                                           const CancellationToken &cancellation,
+                                                                           diagnostic_sink *diagnostics) {
     DiagnosticTimer patch_timer{diagnostics, diagnostic_source::filesystem, "alteration_phase", "patch-collection"};
-    auto patches = collect_patches(*prepared, cancellation);
+    auto patches = collect_patches(state, cancellation);
     if (!patches)
         return std::unexpected{patches.error()};
     patch_timer.finish("success", {{"patchCount", patches->size()}});
     DiagnosticTimer validation{diagnostics, diagnostic_source::filesystem, "alteration_phase", "plan-validation"};
     OpenOptions options;
     options.cancellation = cancellation;
-    auto overlay = patched_reader(prepared->source, *patches);
+    auto overlay = patched_reader(state.source, *patches);
     auto actual = open_image(overlay, source_path, options);
     if (!actual)
         return std::unexpected{actual.error()};
-    if (auto placements = validate_post_write_placements(*prepared, *actual, cancellation); !placements)
+    if (auto placements = validate_post_write_placements(state, *actual, cancellation); !placements)
         return std::unexpected{placements.error()};
-    const auto destinations = capacity_destinations(*prepared, *actual);
+    const auto destinations = capacity_destinations(state, *actual);
     if (!destinations)
         return std::unexpected{destinations.error()};
-    auto capacity = inspect_capacity_destinations(*actual, *destinations, capacity_policy, cancellation);
+    auto capacity = detail::inspect_capacity_destinations(*actual, *destinations, capacity_policy, cancellation);
     if (!capacity)
         return std::unexpected{capacity.error()};
     validation.finish();
-    return PreparedAlteration{std::move(source_path), prepared->container.image_size_bytes(),
-                              std::move(prepared->reports), std::move(*patches), std::move(*capacity)};
+    return detail::PreparedAlteration{std::move(source_path), state.container.image_size_bytes(),
+                                      std::move(state.reports), std::move(*patches), std::move(*capacity)};
 }
 
 namespace {

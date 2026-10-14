@@ -121,6 +121,7 @@ add_library(
   src/server_image_filesystem.cpp
   src/server_infrastructure_responses.cpp
   src/server_job_responses.cpp
+  src/server_conversion_responses.cpp
   src/server_lifecycle.cpp
   src/server_route_binding.cpp
   src/server_support.cpp
@@ -285,6 +286,11 @@ if(BUILD_TESTING)
             --fixture "${AXK_REPOSITORY_ROOT}/tests/fixtures/images/sampler-authored/HD00_512_single_sbnk_authored.hds"
   )
   axk_configure_server_process_test(Server.SampleEditIntegration 45 server)
+  add_test(NAME Server.ConversionIntegration
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/server_conversion_test.py"
+            --server "$<TARGET_FILE:axklib_server>"
+            --fixture "${AXK_REPOSITORY_ROOT}/tests/fixtures/images/sampler-authored/HD00_512_single_sbnk_authored.hds")
+  axk_configure_server_process_test(Server.ConversionIntegration 45 server)
   add_test(
     NAME Server.ResilienceIntegration
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/server_resilience_test.py"

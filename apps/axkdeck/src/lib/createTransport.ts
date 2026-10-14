@@ -143,9 +143,12 @@ class UnavailableTransport implements ImageTransport {
     inspectMidi(): Promise<never> {
         return this.unavailable();
     }
-    inspectTx16wDiskSet(): Promise<never> {
-        return this.unavailable();
-    }
+    conversionProfiles = (): Promise<never> => this.unavailable();
+    prepareConversion = (): Promise<never> => this.unavailable();
+    conversionPlan = (): Promise<never> => this.unavailable();
+    releaseConversion = (): Promise<never> => this.unavailable();
+    executeConversion = (): Promise<never> => this.unavailable();
+    conversionExecution = (): Promise<never> => this.unavailable();
 
     startAudioImport(): Promise<never> {
         return this.unavailable();
@@ -157,9 +160,6 @@ class UnavailableTransport implements ImageTransport {
         return this.unavailable();
     }
     startSequenceImport(): Promise<never> {
-        return this.unavailable();
-    }
-    startTx16wDiskSetImport(): Promise<never> {
         return this.unavailable();
     }
     downloadFile(): Promise<ClientDownload> {

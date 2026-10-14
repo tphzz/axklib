@@ -164,9 +164,9 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                 *type != "rename_sbac" && *type != "rename_program" && *type != "delete_sequence" &&
                 *type != "insert_sequence" && *type != "rename_sequence" && *type != "rename_volume" &&
                 *type != "rename_partition" && *type != "repair_object_placements" &&
-                *type != "import_tx16w_disk_set" && *type != "clear_program_assignments" &&
-                *type != "update_program_parameters" && *type != "update_wave_data_parameters" &&
-                *type != "replace_program_assignments" && *type != "retarget_sample_wave_data") {
+                *type != "clear_program_assignments" && *type != "update_program_parameters" &&
+                *type != "update_wave_data_parameters" && *type != "replace_program_assignments" &&
+                *type != "retarget_sample_wave_data") {
                 return std::unexpected{transaction_error("operation type is not implemented by "
                                                          "the native transaction engine")};
             }
@@ -202,40 +202,6 @@ Result<AlterationManifest> parse_alteration_manifest(std::string_view json,
                 if (!parsed)
                     return std::unexpected{parsed.error()};
                 data = std::move(*parsed);
-            } else if (*type == "import_tx16w_disk_set") {
-                if (auto valid = exact_fields(
-                        row, {"id", "type", "partition_index", "volume_name", "disk_paths", "import_mode"}, context);
-                    !valid)
-                    return std::unexpected{valid.error()};
-                auto volume = required_text(row, "volume_name", context);
-                if (!volume)
-                    return std::unexpected{volume.error()};
-                if (!row["disk_paths"].is_array() || row["disk_paths"].empty())
-                    return std::unexpected{transaction_error(context + ".disk_paths must not be empty")};
-                std::vector<std::filesystem::path> disk_paths;
-                disk_paths.reserve(row["disk_paths"].size());
-                for (std::size_t path_index = 0U; path_index < row["disk_paths"].size(); ++path_index) {
-                    if (!row["disk_paths"][path_index].is_string())
-                        return std::unexpected{transaction_error(context + ".disk_paths entries must be strings")};
-                    auto disk_path = axk::text::path_from_utf8(row["disk_paths"][path_index].get<std::string>());
-                    if (!disk_path)
-                        return std::unexpected{transaction_error(context + ".disk_paths entry is not UTF-8")};
-                    if (disk_path->is_relative())
-                        *disk_path = base_directory / *disk_path;
-                    disk_paths.push_back(std::move(*disk_path));
-                }
-                auto mode = required_text(row, "import_mode", context);
-                if (!mode)
-                    return std::unexpected{mode.error()};
-                axk::tx16w::ImportMode import_mode;
-                if (*mode == "hierarchy")
-                    import_mode = axk::tx16w::ImportMode::hierarchy;
-                else if (*mode == "wave_data_only")
-                    import_mode = axk::tx16w::ImportMode::wave_data_only;
-                else
-                    return std::unexpected{transaction_error(context + ".import_mode is invalid")};
-                data = ImportTx16wDiskSetOperation{std::move(selector), std::move(*volume), std::move(disk_paths),
-                                                   import_mode};
             } else if (*type == "delete_volume") {
                 if (auto valid = exact_fields(row, {"id", "type", "partition_index", "volume_name"}, context); !valid)
                     return std::unexpected{valid.error()};

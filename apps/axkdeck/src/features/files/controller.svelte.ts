@@ -54,7 +54,14 @@ export class FilesController {
     private disposed = false;
     private relocation: FilesRelocation | undefined;
 
-    constructor(private readonly access: FilesystemAccess) {}
+    constructor(
+        private readonly access: FilesystemAccess,
+        private readonly scope?: { sourceMemberId: string; filesystemName: string },
+    ) {}
+
+    private contains(entry: FilesystemEntry): boolean {
+        return !this.scope || entry.sourceMemberId === this.scope.sourceMemberId;
+    }
 
     get root(): FilesystemEntry | null {
         return this.roots.find((root) => root.id === this.rootId) ?? null;
@@ -212,19 +219,23 @@ export class FilesController {
             if (!this.current(generation)) return;
             context = relocateContext(context, first.revision);
             this.relocation = undefined;
-            const roots = [...first.items];
-            while (roots.length < first.totalCount) {
-                const page = await this.access.inspect({ offset: roots.length, limit: 200 });
+            const inventory = [...first.items];
+            while (inventory.length < first.totalCount) {
+                const page = await this.access.inspect({ offset: inventory.length, limit: 200 });
                 if (!this.current(generation)) return;
                 if (!page.items.length) throw new Error('Filesystem root listing stopped before completion');
-                roots.push(...page.items);
+                if (page.revision !== first.revision) throw new Error('The image changed during filesystem listing');
+                inventory.push(...page.items);
             }
+            const roots = inventory.filter((entry) => this.contains(entry));
             this.roots = roots;
             this.available = first.available;
             this.deviceView = first.deviceView;
-            this.filesystemName = first.filesystemName;
+            this.filesystemName = this.scope?.filesystemName ?? first.filesystemName;
             this.revision = first.revision;
-            this.rootCapabilities = first.rootCapabilities;
+            this.rootCapabilities = first.rootCapabilities.filter((capability) =>
+                roots.some((root) => root.id === capability.rootId),
+            );
             this.states = Object.fromEntries(
                 roots.map((root) => {
                     const saved = context.states[root.id];
@@ -443,7 +454,8 @@ export class FilesController {
     async lookup(query: FilesystemQuery): Promise<FilesystemEntry | null> {
         const generation = this.generation;
         const page = await this.access.inspect({ ...query, limit: 2 });
-        return this.current(generation) && page.totalCount === 1 ? (page.items[0] ?? null) : null;
+        const entry = page.items[0];
+        return this.current(generation) && page.totalCount === 1 && entry && this.contains(entry) ? entry : null;
     }
 
     private async restoreEntry(saved: FilesystemEntry): Promise<FilesystemEntry | null> {
@@ -470,6 +482,7 @@ export class FilesController {
     }
 
     async reveal(entry: FilesystemEntry): Promise<boolean> {
+        if (!this.contains(entry) || !this.roots.some((root) => root.id === entry.rootId)) return false;
         const generation = this.generation;
         await this.chooseRoot(entry.rootId);
         if (!this.current(generation)) return false;

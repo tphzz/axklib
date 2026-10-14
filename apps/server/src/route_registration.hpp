@@ -35,6 +35,9 @@ struct InfrastructureRoutes {
     RequestRoute host_directory_list;
     RequestRoute openapi;
     RequestRoute program_editor_catalog;
+    RequestRoute conversion_profiles;
+    ItemRoute conversion_plan;
+    ItemRoute conversion_execution;
 };
 
 void register_infrastructure_routes(ServerCrowApp &app, InfrastructureRoutes routes);

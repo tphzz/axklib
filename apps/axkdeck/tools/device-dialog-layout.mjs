@@ -82,8 +82,7 @@ try {
                     await dialog.getByRole('tab', { name: 'Image', exact: true }).click();
                     await dialog.getByRole('option', { name: /Yamaha images/ }).click();
                     await dialog.getByRole('option', { name: /^Disk1\.hds/ }).click();
-                    await dialog.getByRole('button', { name: 'Add 1 file', exact: true }).click();
-                    const rows = dialog.getByRole('listbox');
+                    const rows = dialog.locator('.storage-picker-results.source-selection');
                     assert(await rows.evaluate((node) => node.scrollHeight > node.clientHeight));
                     await rows.evaluate((node) => {
                         node.scrollTop = node.scrollHeight;

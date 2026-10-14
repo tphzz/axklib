@@ -1,7 +1,11 @@
 import type { OpenedImage } from '../lib/transport';
 
-export function nativeWorkspaceFixture(): Pick<OpenedImage, 'sources' | 'documents' | 'documentId' | 'discovery'> {
+export function nativeWorkspaceFixture(): Pick<
+    OpenedImage,
+    'sources' | 'documents' | 'documentId' | 'discovery' | 'activeSourceMemberId'
+> {
     return {
+        activeSourceMemberId: 'source-1',
         sources: [
             {
                 id: 'source-1',

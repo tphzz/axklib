@@ -90,6 +90,38 @@ function connectWorkflow(
 }
 
 describe('document-scoped navigation', () => {
+    it('guards image switches, preserves shared-document state and leaves the selection unchanged on failure', async () => {
+        const first = opened(7);
+        first.sources.push({
+            ...first.sources[0],
+            id: 'source-2',
+            source: { kind: 'FILE', file: { rootId: 'root', relativePath: 'second.hds' } },
+        });
+        first.documents[0].sourceMemberIds.push('source-2');
+        const selectDocument = vi.fn(async () => ({ ...first, activeSourceMemberId: 'source-2' }));
+        const transport = { openImage: vi.fn(async () => first), selectDocument };
+        const workflow = new ImageSessionWorkflow(transport as unknown as ImageTransport, {} as PickerController);
+        const loadVolume = vi.fn(async () => undefined);
+        const resetDocumentState = vi.fn();
+        connectWorkflow(workflow, loadVolume, { resetDocumentState });
+        await workflow.open([location]);
+        workflow.confirmEditorLeave = async () => false;
+        await workflow.selectDocument(undefined, 'source-2');
+        expect(selectDocument).not.toHaveBeenCalled();
+        expect(workflow.activeSourceMemberId).toBe('source-1');
+        workflow.confirmEditorLeave = async () => true;
+        selectDocument.mockRejectedValueOnce(new Error('Read failed'));
+        await workflow.selectDocument(undefined, 'source-2');
+        expect(workflow.activeSourceMemberId).toBe('source-1');
+        expect(workflow.status).toBe('Read failed');
+        await workflow.selectDocument(undefined, 'source-2');
+        expect(workflow.activeSourceMemberId).toBe('source-2');
+        expect(workflow.activeLocation?.displayName).toBe('second.hds');
+        expect(workflow.documentId).toBe(first.documentId);
+        expect(resetDocumentState).not.toHaveBeenCalled();
+        expect(loadVolume).toHaveBeenCalledOnce();
+    });
+
     it('retains separate adapter state and blocks switches during operation recovery', async () => {
         const selectDocument = vi.fn(async (_session: number, documentId: string | null) => ({
             ...opened(7),

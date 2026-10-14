@@ -37,10 +37,12 @@ export interface WorkspaceProps {
     documents: OpenedImage['documents'];
     documentId: string | null;
     sources: OpenedImage['sources'];
+    activeSourceMemberId: string | null;
     discovery: OpenedImage['discovery'];
     switchingDocument: boolean;
     documentSwitchBlocked?: boolean;
-    selectDocument: (documentId: string | null) => Promise<void>;
+    selectDocument: (documentId: string | null, sourceMemberId?: string) => Promise<void>;
+    selectImage: (sourceMemberId: string) => Promise<void>;
     resolveDocuments: (formats: string[]) => Promise<void>;
     filesMutations?: (sessionId: number) => FilesystemMutationDriver;
     filesExports?: (sessionId: number) => FilesystemExportActions;
@@ -63,6 +65,7 @@ export interface WorkspaceProps {
     sequenceImport: SequenceImportWorkflow;
     importAudio: () => void;
     importMidi: () => void;
+    convertDocument?: () => void;
     programs: Program[];
     sampleBanks: SampleStructureItem[];
     samples: SampleStructureItem[];

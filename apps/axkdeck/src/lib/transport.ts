@@ -1,6 +1,7 @@
 import type { DiskTreeItem } from './types';
 import type { ObjectEditingTransport } from './objectEditing';
 import type { ImportMutationTransport } from './importCapacity';
+import type { ConversionTransport } from './conversions';
 import type { HardDiskCreationProfile, HardDiskCreationProfileId } from './hardDiskCreation';
 export type * from './hardDiskCreation';
 import type { FilesystemTransport } from './filesystem';
@@ -36,6 +37,7 @@ export interface ValidationSummary {
 
 export interface OpenedImage {
     sessionId: number;
+    activeSourceMemberId: string;
     revision: number;
     sources: components['schemas']['ImageSourceMember'][];
     documents: NativeDocumentSummary[];
@@ -464,8 +466,7 @@ export interface SequenceImportItem {
 }
 
 export type MidiInspection = components['schemas']['MidiInspection'];
-export type Tx16wImportInspection = components['schemas']['ImageSessionTx16wImportInspection'];
-export type Tx16wImportMode = Tx16wImportInspection['importMode'];
+export type Tx16wImportMode = 'HIERARCHY' | 'WAVE_DATA_ONLY';
 export type SequenceSystemExclusivePolicy = 'exclude' | 'preserve';
 
 export type ConnectionMode = 'local' | 'remote' | 'unavailable';
@@ -482,7 +483,8 @@ export interface ImageTransport
         Su700Transport,
         FloppyTransport,
         ObjectEditingTransport,
-        ImportMutationTransport {
+        ImportMutationTransport,
+        ConversionTransport {
     readonly storageMode: 'server' | 'unavailable';
     readonly connectionMode: ConnectionMode;
     readonly supportsClientUploads: boolean;
@@ -494,7 +496,11 @@ export interface ImageTransport
     renameSandboxEntry(entry: FileRef, name: string): Promise<void>;
     deleteSandboxEntry(entry: FileRef): Promise<void>;
     openImage(sources: ImageLocation[], options?: ImageOpenOptions): Promise<OpenedImage>;
-    selectDocument(sessionId: number, documentId: string | null): Promise<OpenedImage>;
+    selectDocument(
+        sessionId: number,
+        documentId: string | null | undefined,
+        sourceMemberId?: string,
+    ): Promise<OpenedImage>;
     resolveDocuments(sessionId: number, selectedFormats: string[]): Promise<OpenedImage>;
     nativeContent(sessionId: number): Promise<components['schemas']['ImageContentItem'][]>;
     nativeObjects(sessionId: number): Promise<components['schemas']['ImageObjectItem'][]>;
@@ -569,12 +575,6 @@ export interface ImageTransport
     audioImportCapabilities(): Promise<AudioImportCapabilities>;
     inspectAudio(source: InputFileLocation, targetSampleRate?: number): Promise<AudioSourceInfo>;
     inspectMidi(source: InputFileLocation): Promise<MidiInspection>;
-    inspectTx16wDiskSet(
-        sessionId: number,
-        sources: InputFileLocation[],
-        target: AudioImportTarget,
-        importMode: Tx16wImportMode,
-    ): Promise<Tx16wImportInspection>;
     downloadFile(source: FileLocation): Promise<ClientDownload>;
     downloadDirectory(source: DirectoryLocation): Promise<ClientDownload>;
     inspectPackage(source: InputFileLocation, verify: boolean): Promise<PackageInspection>;

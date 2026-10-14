@@ -254,9 +254,21 @@ export class HttpImageSessions {
             this.sessions.set(sessionId, refreshedDocumentSession(summary, session));
     }
 
-    async selectDocument(sessionId: number, documentId: string | null): Promise<OpenedImage> {
+    async selectDocument(
+        sessionId: number,
+        documentId: string | null | undefined,
+        sourceMemberId?: string,
+    ): Promise<OpenedImage> {
         const previous = this.get(sessionId);
-        const next = documentSession(previous.summary, documentId);
+        const member =
+            sourceMemberId ??
+            (!documentId ||
+            previous.summary.documents
+                .find((item) => item.id === documentId)
+                ?.sourceMemberIds.includes(previous.activeSourceMemberId)
+                ? previous.activeSourceMemberId
+                : undefined);
+        const next = documentSession(previous.summary, documentId, member);
         this.sessions.set(sessionId, next);
         try {
             return await this.openedImage(sessionId, previous.summary);
@@ -277,7 +289,7 @@ export class HttpImageSessions {
             },
         );
         this.assertCurrent(sessionId, session);
-        this.sessions.set(sessionId, documentSession(summary));
+        this.sessions.set(sessionId, refreshedDocumentSession(summary, session));
         return this.openedImage(sessionId, summary);
     }
 
@@ -292,7 +304,7 @@ export class HttpImageSessions {
             selection: wireSelection,
         });
         this.assertCurrent(sessionId, session);
-        this.sessions.set(sessionId, documentSession(summary, session.documentId));
+        this.sessions.set(sessionId, refreshedDocumentSession(summary, session));
         return this.openedImage(sessionId, summary);
     }
 
@@ -645,7 +657,7 @@ export class HttpImageSessions {
     private async openedImage(sessionId: number, summary: ApiImageSummary): Promise<OpenedImage> {
         const session = this.get(sessionId);
         const document = selectedDocument(session);
-        const source = summary.sources.find((member) => document?.sourceMemberIds.includes(member.id));
+        const source = summary.sources.find((member) => member.id === session.activeSourceMemberId);
         const hierarchy =
             document?.formatId === 'yamaha.a-series'
                 ? await aSeriesHierarchy(
@@ -657,6 +669,7 @@ export class HttpImageSessions {
         this.assertCurrent(sessionId, session);
         return {
             sessionId,
+            activeSourceMemberId: session.activeSourceMemberId,
             revision: summary.revision,
             sources: summary.sources,
             documents: summary.documents,

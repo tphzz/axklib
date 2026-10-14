@@ -253,9 +253,12 @@ ServerApplication::ServerApplication(axk::server::Config config, axk::app::Opera
                                 config_.maximum_queued_jobs, config_.replay_events_per_job,
                                 config_.maximum_retained_jobs, std::chrono::seconds{config_.job_retention_seconds},
                                 [] { return axk::app::JobManager::Clock::now(); }, &uploads_, &path_reservations_),
+      conversions_(sandbox_, uploads_, images_, alteration_journals_, jobs_),
       event_tickets_(std::chrono::seconds{config_.event_ticket_ttl_seconds}, config_.maximum_event_tickets),
       event_dispatcher_(config_.maximum_websocket_delivery_events,
                         [this](const axk::app::JobEvent &event) { broadcast(event); }) {
+    if (auto bound = conversions_.bind(registry_); !bound)
+        throw std::logic_error(bound.error().message);
     app_.template get_middleware<CorsMiddleware>().allowed_origins = config_.allowed_origins;
     app_.template get_middleware<RequestTelemetryMiddleware>().telemetry = &request_telemetry_;
     app_.template get_middleware<RequestTelemetryMiddleware>().diagnostics = &diagnostics_;

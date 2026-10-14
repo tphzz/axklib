@@ -139,9 +139,10 @@ std::optional<std::uint8_t> next_program_slot(const std::set<std::uint8_t> &occu
 Result<ImportPlan> plan_import(const Inspection &inspection, const TargetInventory &target, ImportMode mode) {
     ImportPlan plan;
     for (const auto &source_notice : inspection.notices) {
-        const auto disposition = source_notice.disposition == ParseNoticeDisposition::defaulted
-                                     ? MappingDisposition::defaulted
-                                     : MappingDisposition::omitted;
+        const auto disposition =
+            source_notice.disposition == ParseNoticeDisposition::blocked     ? MappingDisposition::blocked
+            : source_notice.disposition == ParseNoticeDisposition::defaulted ? MappingDisposition::defaulted
+                                                                             : MappingDisposition::omitted;
         notice(plan, disposition, source_notice.source_object, source_notice.source_parameter, {}, {},
                source_notice.message);
     }
@@ -164,6 +165,10 @@ Result<ImportPlan> plan_import(const Inspection &inspection, const TargetInvento
     std::set<std::uint8_t> occupied(target.occupied_program_slots.begin(), target.occupied_program_slots.end());
     if (std::ranges::any_of(occupied, [](std::uint8_t slot) { return slot == 0U || slot > 128U; }))
         return std::unexpected{mapping_error("occupied A-series Program slots must be between 1 and 128")};
+    const auto wave_id = [&](std::size_t index) {
+        return inspection.wave_object_ids.empty() ? inspection.waves.at(index).name
+                                                  : inspection.wave_object_ids.at(index);
+    };
 
     if (mode == ImportMode::wave_data_only) {
         for (std::size_t index = 0U; index < inspection.waves.size(); ++index) {
@@ -172,8 +177,8 @@ Result<ImportPlan> plan_import(const Inspection &inspection, const TargetInvento
             const auto loop = translate_loop(wave, rate);
             plan.wave_data.push_back({unique_name(wave_stem(wave.name), 16U, wave_names), index, rate, 60U,
                                       loop.start_frame, loop.length_frames, loop.mode});
-            notice(plan, MappingDisposition::defaulted, wave.name, "root_key", plan.wave_data.back().name, "root_key",
-                   "Wave Data-only import defaults the A-series root key to C3 (60)");
+            notice(plan, MappingDisposition::defaulted, wave_id(index), "root_key", plan.wave_data.back().name,
+                   "root_key", "Wave Data-only import defaults the A-series root key to C3 (60)");
         }
         return plan;
     }
@@ -190,11 +195,25 @@ Result<ImportPlan> plan_import(const Inspection &inspection, const TargetInvento
         }
     }
 
-    for (const auto &setup : inspection.setups) {
+    for (std::size_t setup_index = 0U; setup_index < inspection.setups.size(); ++setup_index) {
+        const auto &setup = inspection.setups[setup_index];
+        const auto identity = [&](const auto &object, auto field) {
+            if (inspection.setup_object_ids.empty())
+                return object.name;
+            return (inspection.setup_object_ids.at(setup_index).*field).at(object.slot);
+        };
         SetupMaps maps;
         for (const auto &timbre : setup.timbres)
             maps.timbres.emplace(timbre.slot, &timbre);
         for (const auto &reference : setup.waves) {
+            if (!inspection.resolved_setup_waves.empty()) {
+                const auto &resolved = inspection.resolved_setup_waves.at(setup_index);
+                if (const auto found = resolved.find(reference.slot); found != resolved.end()) {
+                    maps.waves.emplace(reference.slot, found->second);
+                    maps.wave_names.emplace(reference.slot, reference.name);
+                }
+                continue;
+            }
             const auto found = source_waves.find(wave_symbol(reference.name));
             if (found == source_waves.end()) {
                 const auto compressed = compressed_wave_symbols.contains(wave_symbol(reference.name));
@@ -225,34 +244,38 @@ Result<ImportPlan> plan_import(const Inspection &inspection, const TargetInvento
         }
 
         for (const auto &voice : setup.voices) {
+            const auto voice_id = identity(voice, &Inspection::SetupIdentities::voices);
             SampleBankSpec bank;
             bank.name = unique_name(voice.name, 16U, bank_names);
             for (const auto &region : voice.regions) {
                 const auto timbre = maps.timbres.find(region.timbre_slot);
                 if (timbre == maps.timbres.end()) {
-                    notice(plan, MappingDisposition::omitted, voice.name, "timbre_slot", bank.name, "Sample",
+                    notice(plan, MappingDisposition::omitted, voice_id, "timbre_slot", bank.name, "Sample",
                            "Voice region references a missing TX16W Timbre slot");
                     continue;
                 }
                 const auto source_wave = maps.waves.find(timbre->second->wave_slot);
                 if (source_wave == maps.waves.end()) {
-                    notice(plan, MappingDisposition::omitted, timbre->second->name, "wave_slot", bank.name, "Wave Data",
-                           "Timbre references an unavailable TX16W Wave slot");
+                    notice(plan, MappingDisposition::omitted,
+                           identity(*timbre->second, &Inspection::SetupIdentities::timbres), "wave_slot", bank.name,
+                           "Wave Data", "Timbre references an unavailable TX16W Wave slot");
                     continue;
                 }
                 const auto root = midi_key(timbre->second->root_key_number);
                 const auto low = midi_key(region.low_key_number);
                 const auto high = midi_key(region.high_key_number);
                 if (!root || !low || !high) {
-                    notice(plan, MappingDisposition::omitted, timbre->second->name, "key_number", bank.name,
+                    notice(plan, MappingDisposition::omitted,
+                           identity(*timbre->second, &Inspection::SetupIdentities::timbres), "key_number", bank.name,
                            "key range", "TX16W key number is outside the proven native 16..143 range");
                     continue;
                 }
                 const auto &wave = inspection.waves[source_wave->second];
                 const auto wave_name = maps.wave_names.find(timbre->second->wave_slot);
                 if (wave_name == maps.wave_names.end()) {
-                    notice(plan, MappingDisposition::omitted, timbre->second->name, "wave_slot", bank.name, "Wave Data",
-                           "Timbre references an unnamed TX16W Wave slot");
+                    notice(plan, MappingDisposition::omitted,
+                           identity(*timbre->second, &Inspection::SetupIdentities::timbres), "wave_slot", bank.name,
+                           "Wave Data", "Timbre references an unnamed TX16W Wave slot");
                     continue;
                 }
                 const auto wave_key = uppercase(wave_name->second);
@@ -266,20 +289,24 @@ Result<ImportPlan> plan_import(const Inspection &inspection, const TargetInvento
                         {name, source_wave->second, rate, *root, loop.start_frame, loop.length_frames, loop.mode});
                     wave_plan = std::prev(plan.wave_data.end());
                     if (rate != wave.sample_rate) {
-                        notice(plan, MappingDisposition::approximated, wave.name, "sample_rate", name, "sample_rate",
-                               "TX16W sample rate is resampled to the nearest A-series rate");
+                        notice(plan, MappingDisposition::approximated, wave_id(source_wave->second), "sample_rate",
+                               name, "sample_rate", "TX16W sample rate is resampled to the nearest A-series rate");
                     }
                     if (wave.looped && wave.repeat_frames == 0U) {
-                        notice(plan, MappingDisposition::defaulted, wave.name, "repeat_frames", name, "loop mode",
+                        notice(plan, MappingDisposition::defaulted, wave_id(source_wave->second), "repeat_frames", name,
+                               "loop mode",
                                "TX16W loop flag has no repeat region; A-series playback defaults to one-shot");
                     }
                 } else if (wave_plan->root_key != *root) {
-                    notice(plan, MappingDisposition::approximated, wave.name, "root_key", wave_plan->name, "root_key",
+                    notice(plan, MappingDisposition::approximated, wave_id(source_wave->second), "root_key",
+                           wave_plan->name, "root_key",
                            "Shared Wave Data retains its first translated root key; each Sample "
                            "retains its own translated root key");
                 }
                 SampleSpec sample;
                 sample.name = unique_name(timbre->second->name, 16U, sample_names);
+                plan.source_objects.emplace("sample:" + sample.name,
+                                            identity(*timbre->second, &Inspection::SetupIdentities::timbres));
                 sample.waveform_id = wave_plan->name;
                 sample.target_sample_rate = wave_plan->target_sample_rate;
                 sample.parameters.root_key = *root;
@@ -290,34 +317,38 @@ Result<ImportPlan> plan_import(const Inspection &inspection, const TargetInvento
                 sample.parameters.loop_length_frames = wave_plan->loop_length_frames;
                 bank.member_samples.push_back(sample.name);
                 plan.samples.push_back(std::move(sample));
-                notice(plan, MappingDisposition::approximated, timbre->second->name, "key_number",
+                notice(plan, MappingDisposition::approximated,
+                       identity(*timbre->second, &Inspection::SetupIdentities::timbres), "key_number",
                        plan.samples.back().name, "MIDI key", "TX16W native key numbers are translated by -16");
                 if (region.fade != 0U) {
-                    notice(plan, MappingDisposition::omitted, voice.name, "fade", plan.samples.back().name,
+                    notice(plan, MappingDisposition::omitted, voice_id, "fade", plan.samples.back().name,
                            "key crossfade", "TX16W Voice Fade is preserved in the preview but is not authored");
                 }
                 if (region.native_timbre_selector_flags != 0U) {
-                    notice(plan, MappingDisposition::omitted, voice.name, "timbre_selector_flags",
+                    notice(plan, MappingDisposition::omitted, voice_id, "timbre_selector_flags",
                            plan.samples.back().name, "Sample assignment",
                            "TX16W native Timbre selector flags are preserved in the source model but are not authored");
                 }
             }
             if (!bank.member_samples.empty()) {
                 maps.banks.emplace(voice.slot, bank.name);
+                plan.source_objects.emplace("sample-bank:" + bank.name, voice_id);
                 plan.sample_banks.push_back(std::move(bank));
             }
         }
 
         for (const auto &performance : setup.performances) {
+            const auto performance_id = identity(performance, &Inspection::SetupIdentities::performances);
             const auto number = next_program_slot(occupied);
             if (!number) {
-                notice(plan, MappingDisposition::blocked, performance.name, "performance", {}, "Program slot",
+                notice(plan, MappingDisposition::blocked, performance_id, "performance", {}, "Program slot",
                        "No free A-series Program slot remains");
                 continue;
             }
             ProgramSpec program;
             program.number = *number;
             program.name = unique_name(performance.name, 8U, program_names);
+            plan.source_objects.emplace("program:" + program.name, performance_id);
             std::set<std::uint8_t> assigned_voices;
             for (const auto &source_assignment : performance.voices) {
                 if (!assigned_voices.emplace(source_assignment.voice_slot).second)
@@ -334,20 +365,20 @@ Result<ImportPlan> plan_import(const Inspection &inspection, const TargetInvento
                     assignment.parameters.receive = ProgramReceiveChannel{
                         MidiPort::a, static_cast<std::uint8_t>(source_assignment.receive_channel + 1U)};
                 } else {
-                    notice(plan, MappingDisposition::omitted, performance.name, "receive_channel", program.name,
+                    notice(plan, MappingDisposition::omitted, performance_id, "receive_channel", program.name,
                            "receive channel", "TX16W receive channel is outside its native 0..16 range");
                     continue;
                 }
                 program.assignments.push_back(std::move(assignment));
             }
             if (program.assignments.size() > maximum_program_assignments) {
-                notice(plan, MappingDisposition::blocked, performance.name, "voice_assignments", program.name,
+                notice(plan, MappingDisposition::blocked, performance_id, "voice_assignments", program.name,
                        "Program assignments", "TX16W Performance exceeds its native 16-Voice assignment capacity");
                 continue;
             }
             if (!program.assignments.empty()) {
                 occupied.insert(*number);
-                notice(plan, MappingDisposition::omitted, performance.name, "performance_voice_controls", program.name,
+                notice(plan, MappingDisposition::omitted, performance_id, "performance_voice_controls", program.name,
                        "Program assignment controls",
                        "TX16W per-Voice volume, detune, transpose, output, and alternative-group controls are "
                        "reported but are not authored by the current A-series adapter");
@@ -356,12 +387,13 @@ Result<ImportPlan> plan_import(const Inspection &inspection, const TargetInvento
         }
         if (setup.performances.empty()) {
             for (const auto &voice : setup.voices) {
+                const auto voice_id = identity(voice, &Inspection::SetupIdentities::voices);
                 const auto bank = maps.banks.find(voice.slot);
                 if (bank == maps.banks.end())
                     continue;
                 const auto number = next_program_slot(occupied);
                 if (!number) {
-                    notice(plan, MappingDisposition::blocked, voice.name, "missing_performance", {}, "Program slot",
+                    notice(plan, MappingDisposition::blocked, voice_id, "missing_performance", {}, "Program slot",
                            "No free A-series Program slot remains");
                     continue;
                 }
@@ -369,8 +401,9 @@ Result<ImportPlan> plan_import(const Inspection &inspection, const TargetInvento
                 program.number = *number;
                 occupied.insert(*number);
                 program.name = unique_name(voice.name, 8U, program_names);
+                plan.source_objects.emplace("program:" + program.name, voice_id);
                 program.assignments.push_back({"SBAC", bank->second, {.receive = ProgramReceiveInherit{}}});
-                notice(plan, MappingDisposition::defaulted, voice.name, "missing_performance", program.name, "Program",
+                notice(plan, MappingDisposition::defaulted, voice_id, "missing_performance", program.name, "Program",
                        "No TX16W Performance was present; an audition Program was created from the Voice");
                 plan.programs.push_back(std::move(program));
             }

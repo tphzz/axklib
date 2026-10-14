@@ -1,5 +1,6 @@
 #include "axklib/application/operation_registry.hpp"
 #include "operation_registry_capacity.hpp"
+#include "operation_registry_conversions.hpp"
 #include "operation_registry_devices.hpp"
 #include "operation_registry_filesystem.hpp"
 #include "operation_registry_floppy.hpp"
@@ -129,17 +130,6 @@ const std::array descriptors{
                         {},
                         "MidiInspectionRequest",
                         "MidiInspection",
-                        OperationClass::read,
-                        false,
-                        false},
-    OperationDescriptor{"images.tx16w.inspect",
-                        {},
-                        HttpMethod::post,
-                        "/api/v1/image-session-tx16w-import-inspections",
-                        ExecutionMode::request,
-                        {},
-                        "ImageSessionTx16wImportInspectionRequest",
-                        "ImageSessionTx16wImportInspection",
                         OperationClass::read,
                         false,
                         false},
@@ -661,6 +651,10 @@ bool axk::app::OperationRegistry::is_implemented(std::string_view operation_id) 
 axk::app::OperationRegistry axk::app::make_operation_registry() {
     OperationRegistry registry;
     for (const auto &descriptor : descriptors) {
+        if (!registry.declare(descriptor))
+            std::terminate();
+    }
+    for (const auto &descriptor : conversion_descriptors()) {
         if (!registry.declare(descriptor))
             std::terminate();
     }

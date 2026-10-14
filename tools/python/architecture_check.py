@@ -35,6 +35,17 @@ def _native_module_dependencies(root: Path) -> list[ArchitectureIssue]:
             "axklib/diagnostics.hpp",
         ),
         "formats/tx16w": (*common, "axklib/formats/tx16w/", "axklib/native/"),
+        "formats/a_series/authoring": (
+            *common,
+            "axklib/formats/a_series/authoring/",
+            "axklib/program_assignment_parameters.hpp",
+            "axklib/program_parameters.hpp",
+            "axklib/sample_parameters.hpp",
+            "axklib/sample_storage.hpp",
+            "axklib/sampler_model.hpp",
+            "axklib/writer.hpp",
+            "axklib/alteration_transaction.hpp",
+        ),
     }
     issues: list[ArchitectureIssue] = []
     include = re.compile(r'^\s*#\s*include\s*([<"])([^>"\n]+)[>"]', re.MULTILINE)
@@ -45,17 +56,36 @@ def _native_module_dependencies(root: Path) -> list[ArchitectureIssue]:
                 if not path.is_file() or path.suffix not in {".cpp", ".hpp", ".h", ".cc"}:
                     continue
                 relative = path.relative_to(root).as_posix()
+                if any(
+                    nested.startswith(module + "/") and path.is_relative_to(root / prefix / nested)
+                    for nested in rules
+                ):
+                    continue
                 for match in include.finditer(path.read_text(encoding="utf-8")):
                     delimiter, dependency = match.groups()
                     if delimiter == "<" and "/" not in dependency and "\\" not in dependency:
                         continue
                     # This adapter is the narrow bridge to the existing FAT implementation.
-                    if relative == "library/src/filesystems/fat/view.cpp" and dependency == "axklib/media.hpp":
+                    if (
+                        relative == "library/src/filesystems/fat/view.cpp"
+                        and dependency == "axklib/media.hpp"
+                    ):
                         continue
-                    if any(
-                        dependency.startswith(item) if item.endswith("/") else dependency == item
-                        for item in allowed
-                    ) and ".." not in PurePosixPath(dependency).parts:
+                    # Destination authoring bridges prepared native objects to the SFS transaction engine.
+                    if (
+                        relative == "library/src/formats/a_series/authoring/prepare.cpp"
+                        and dependency == "../../../alteration_internal.hpp"
+                    ):
+                        continue
+                    if (
+                        any(
+                            dependency.startswith(item)
+                            if item.endswith("/")
+                            else dependency == item
+                            for item in allowed
+                        )
+                        and ".." not in PurePosixPath(dependency).parts
+                    ):
                         continue
                     issues.append(
                         ArchitectureIssue(
@@ -93,6 +123,37 @@ def _session_module_dependencies(root: Path) -> list[ArchitectureIssue]:
                         f"shared session infrastructure must not depend on {dependency}",
                     )
                 )
+    return issues
+
+
+def _conversion_module_dependencies(root: Path) -> list[ArchitectureIssue]:
+    allowed = {
+        "axklib/conversion/plan.hpp",
+        "axklib/native/document.hpp",
+        "axklib/volume_capacity.hpp",
+        "nlohmann/json.hpp",
+    }
+    includes = re.compile(r'^\s*#\s*include\s*([<"])([^>"\n]+)[>"]', re.MULTILINE)
+    issues: list[ArchitectureIssue] = []
+    for filename in (
+        "library/include/axklib/conversion/plan.hpp",
+        "library/src/conversion/plan.cpp",
+    ):
+        path = root / filename
+        if not path.is_file():
+            continue
+        for delimiter, dependency in includes.findall(path.read_text(encoding="utf-8")):
+            if dependency in allowed or (
+                delimiter == "<" and "/" not in dependency and "\\" not in dependency
+            ):
+                continue
+            issues.append(
+                ArchitectureIssue(
+                    "module_dependency_forbidden",
+                    filename,
+                    f"common conversion contract must not depend on {dependency}",
+                )
+            )
     return issues
 
 
@@ -222,18 +283,14 @@ def check_repository(root: Path, policy_path: Path) -> list[ArchitectureIssue]:
                 )
             )
 
-    production = _discover_production_files(
-        root, policy["sourceRoots"], exclusions, issues
-    )
+    production = _discover_production_files(root, policy["sourceRoots"], exclusions, issues)
     maximum = policy["maximumLines"]
     raw_legacy = policy["legacyFiles"]
     legacy: dict[str, int] = {}
     for raw_path, raw_count in raw_legacy.items():
         relative = _relative_path(raw_path, "legacyFiles key")
         if not isinstance(raw_count, int) or isinstance(raw_count, bool) or raw_count <= maximum:
-            raise ValueError(
-                f"legacyFiles[{relative.as_posix()!r}] must exceed maximumLines"
-            )
+            raise ValueError(f"legacyFiles[{relative.as_posix()!r}] must exceed maximumLines")
         legacy[relative.as_posix()] = raw_count
 
     counts = {path: physical_line_count(file) for path, file in production.items()}
@@ -297,7 +354,12 @@ def check_repository(root: Path, policy_path: Path) -> list[ArchitectureIssue]:
                     f"Lower the recorded count from {recorded} to the current {current}",
                 )
             )
-    return [*issues, *_native_module_dependencies(root), *_session_module_dependencies(root)]
+    return [
+        *issues,
+        *_native_module_dependencies(root),
+        *_session_module_dependencies(root),
+        *_conversion_module_dependencies(root),
+    ]
 
 
 def main() -> int:

@@ -55,6 +55,7 @@ class AXK_SDK_API operation_context final {
     friend class build_plan;
     friend class portable_package;
     friend class package_import_plan;
+    friend class conversion_plan;
     friend class alteration;
     friend class device_host;
     friend struct image_factory;

@@ -1,6 +1,7 @@
 <script lang="ts">
     import OpenSourceDialog from '../features/dialogs/OpenSourceDialog.svelte';
     import DocumentSelector from '../features/workspace/DocumentSelector.svelte';
+    import ImageSelector from '../features/workspace/ImageSelector.svelte';
     import Tx16wPresentation from '../features/devices/tx16w/Presentation.svelte';
     import WorkspaceShell from '../features/workspace/WorkspaceShell.svelte';
     import FilesInspector from '../features/files/FilesInspector.svelte';
@@ -28,8 +29,10 @@
     let opening = $state(true);
     let selections = $state<ImageLocation[]>([]);
     let documentId = $state<string | null>(tx16wDocument.id);
+    let activeSourceMemberId = $state('source-2');
     let mode = $state<'device' | 'files'>('device');
     let reveal = $state('');
+    let conversions = $state(0);
     const remember = $derived(memory.forDocument(1, documentId));
     async function select(id: string | null) {
         documentId = id;
@@ -40,8 +43,18 @@
 {#snippet imageActions()}<button class="secondary-button" type="button" onclick={() => (opening = true)}>Open</button
     >{/snippet}
 {#snippet selector()}
+    <ImageSelector
+        {sources}
+        selected={activeSourceMemberId}
+        disabled={false}
+        onerror={() => undefined}
+        onselect={async (id) => {
+            activeSourceMemberId = id;
+            await select(documents.find((document) => document.sourceMemberIds.includes(id))?.id ?? null);
+        }}
+    />
     <DocumentSelector
-        {documents}
+        documents={documents.filter((document) => document.sourceMemberIds.includes(activeSourceMemberId))}
         selected={documentId}
         disabled={false}
         onselect={select}
@@ -115,6 +128,7 @@
             sessionId={1}
             revision={1}
             document={tx16wDocument}
+            onconvert={() => conversions++}
             onrevealFiles={(id) => {
                 reveal = id;
                 mode = 'files';
@@ -129,6 +143,7 @@
     {/if}
 {/key}
 <output hidden aria-label="Revealed object">{reveal}</output>
+<output hidden aria-label="Conversion requests">{conversions}</output>
 {#if opening}
     <OpenSourceDialog
         {transport}

@@ -38,6 +38,26 @@ const access: FilesystemAccess = {
 };
 
 describe('FilesController', () => {
+    it('scopes the complete paginated root inventory and rejects cross-image reveals', async () => {
+        const other = { ...root, id: 'other', rootId: 'other', sourceMemberId: 'source-2' };
+        const source: FilesystemAccess = {
+            inspect: async (query = {}) => {
+                if (query.entryId) return page([other]);
+                if (query.parentId) return page([file]);
+                return { ...page(query.offset ? [root] : [other]), totalCount: 2 };
+            },
+        };
+        const files = new FilesController(source, { sourceMemberId: 'source-1', filesystemName: 'sfs' });
+        await files.initialize();
+        expect(files.roots).toEqual([root]);
+        expect(files.rootId).toBe('disk');
+        expect(files.filesystemName).toBe('sfs');
+        expect(files.rows.map((row) => row.entry)).toEqual([file]);
+        expect(await files.lookup({ entryId: 'other' })).toBeNull();
+        expect(await files.reveal(other)).toBe(false);
+        expect(files.rootId).toBe('disk');
+    });
+
     it('preserves expanded folders after importing into a new revision without selecting the destination', async () => {
         const folder = entry('folder', 'disk', 'directory');
         const child = { ...file, parentId: folder.id, ancestorIds: ['disk', folder.id], path: '/folder/file' };

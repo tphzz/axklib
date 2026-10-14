@@ -10,10 +10,10 @@
 namespace {
 
 bool session_operation(std::string_view id) {
-    return id.starts_with("devices.") || id == "images.volume_capacity.inspect" || id == "images.alter.inspect" ||
-           id == "images.filesystem.edit.inspect" || id.ends_with(".prepare") || id == "auditions.prepare" ||
-           id == "files.archive" || id == "images.open" || id == "images.alter" || id == "images.deletion.inspect" ||
-           id == "images.deletion.orphans.inspect" || id == "images.delete" ||
+    return id.starts_with("devices.") || id.starts_with("conversions.") || id == "images.volume_capacity.inspect" ||
+           id == "images.alter.inspect" || id == "images.filesystem.edit.inspect" || id.ends_with(".prepare") ||
+           id == "auditions.prepare" || id == "files.archive" || id == "images.open" || id == "images.alter" ||
+           id == "images.deletion.inspect" || id == "images.deletion.orphans.inspect" || id == "images.delete" ||
            id == "images.programs.generate.inspect" || id == "images.programs.generate" ||
            id == "images.program_assignments.cleanup.inspect" || id == "images.program_assignments.cleanup" ||
            id == "images.volume_deletion.inspect" || id == "images.placement.inspect" ||
@@ -22,7 +22,7 @@ bool session_operation(std::string_view id) {
            id == "images.package_import" || id == "images.package_export" || id == "images.audio_export.inspect" ||
            id == "images.audio_export" || id == "images.volume_package_export.inspect" ||
            id == "images.volume_package_export" || id == "images.volume_floppy_export.inspect" ||
-           id == "images.volume_floppy_export" || id == "images.sequence_export" || id == "images.tx16w.inspect" ||
+           id == "images.volume_floppy_export" || id == "images.sequence_export" ||
            id == "images.media_conversion.inspect" || id == "images.media_conversion" ||
            id == "images.extent_layout.repair" || id == "images.filesystem.edit" ||
            id == "images.filesystem.export.inspect" || id == "images.filesystem.export" ||

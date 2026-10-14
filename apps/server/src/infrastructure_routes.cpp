@@ -24,6 +24,11 @@ void register_infrastructure_routes(ServerCrowApp &app, InfrastructureRoutes rou
         .methods(crow::HTTPMethod::Post)(std::move(routes.host_directory_list));
     app.route_dynamic("/api/v1/openapi.json")(std::move(routes.openapi));
     app.route_dynamic("/api/v1/program-editor-catalog")(std::move(routes.program_editor_catalog));
+    app.route_dynamic("/api/v1/conversion-profiles")(std::move(routes.conversion_profiles));
+    app.route_dynamic("/api/v1/conversion-plans/<string>")
+        .methods(crow::HTTPMethod::Get, crow::HTTPMethod::Delete)(std::move(routes.conversion_plan));
+    app.route_dynamic("/api/v1/conversion-plans/<string>/executions")
+        .methods(crow::HTTPMethod::Post)(std::move(routes.conversion_execution));
 }
 
 } // namespace axk::server::detail

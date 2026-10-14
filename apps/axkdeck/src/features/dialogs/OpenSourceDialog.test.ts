@@ -55,6 +55,21 @@ function fixture() {
     return { transport, service };
 }
 describe('Open dialog', () => {
+    it('retains immediate image source membership when switching Open tabs', async () => {
+        const { transport, service } = fixture();
+        const view = render(OpenSourceHarness, { transport, service });
+        await fireEvent.click(await view.findByRole('option', { name: /Yamaha images/ }));
+        await fireEvent.click(await view.findByRole('option', { name: /Disk02.hds/ }));
+        await fireEvent.click(view.getByRole('tab', { name: 'Device' }));
+        await fireEvent.click(view.getByRole('tab', { name: 'Image' }));
+        expect(view.getByRole('option', { name: /Disk02.hds/ }).getAttribute('aria-selected')).toBe('true');
+        const sources = within(view.getByRole('region', { name: 'Source set' }));
+        expect(sources.getAllByRole('button')).toHaveLength(1);
+        await fireEvent.click(sources.getByRole('button', { name: /Remove .*Disk02.hds/ }));
+        expect(view.getByRole('option', { name: /Disk02.hds/ }).getAttribute('aria-selected')).toBe('false');
+        expect(view.getByRole('button', { name: 'Open' })).toHaveProperty('disabled', true);
+    });
+
     it('uses the shared dark field styling for every device and target selector', () => {
         const { transport, service } = fixture();
         const view = render(OpenSourceHarness, { transport, service });

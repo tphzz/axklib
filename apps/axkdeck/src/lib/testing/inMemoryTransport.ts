@@ -61,8 +61,6 @@ import type {
     SequenceImportItem,
     SequenceSystemExclusivePolicy,
     MidiInspection,
-    Tx16wImportInspection,
-    Tx16wImportMode,
     VolumeMutation,
     VolumeDeletionInspection,
     VolumeCapacityInspection,
@@ -136,8 +134,12 @@ export interface InMemoryImageTransportOptions {
 }
 
 export class InMemoryImageTransport implements ImageTransport {
-    selectDocument(sessionId: number, documentId: string | null): Promise<OpenedImage> {
-        return this.invoke('selectDocument', [sessionId, documentId]);
+    selectDocument(
+        sessionId: number,
+        documentId: string | null | undefined,
+        sourceMemberId?: string,
+    ): Promise<OpenedImage> {
+        return this.invoke('selectDocument', [sessionId, documentId, sourceMemberId]);
     }
     resolveDocuments(sessionId: number, selectedFormats: string[]): Promise<OpenedImage> {
         return this.invoke('resolveDocuments', [sessionId, selectedFormats]);
@@ -540,14 +542,12 @@ export class InMemoryImageTransport implements ImageTransport {
         return this.invoke('inspectMidi', [source]);
     }
 
-    inspectTx16wDiskSet(
-        sessionId: number,
-        sources: InputFileLocation[],
-        target: AudioImportTarget,
-        importMode: Tx16wImportMode,
-    ): Promise<Tx16wImportInspection> {
-        return this.invoke('inspectTx16wDiskSet', [sessionId, sources, target, importMode]);
-    }
+    conversionProfiles: ImageTransport['conversionProfiles'] = (...args) => this.invoke('conversionProfiles', args);
+    prepareConversion: ImageTransport['prepareConversion'] = (...args) => this.invoke('prepareConversion', args);
+    conversionPlan: ImageTransport['conversionPlan'] = (...args) => this.invoke('conversionPlan', args);
+    releaseConversion: ImageTransport['releaseConversion'] = (...args) => this.invoke('releaseConversion', args);
+    executeConversion: ImageTransport['executeConversion'] = (...args) => this.invoke('executeConversion', args);
+    conversionExecution: ImageTransport['conversionExecution'] = (...args) => this.invoke('conversionExecution', args);
 
     startAudioImport(
         sessionId: number,
@@ -575,16 +575,6 @@ export class InMemoryImageTransport implements ImageTransport {
         policy?: import('../importCapacity').CapacityPolicy,
     ): Promise<JobState> {
         return this.invoke('startSequenceImport', [sessionId, target, items, systemExclusivePolicy, policy]);
-    }
-
-    startTx16wDiskSetImport(
-        sessionId: number,
-        sources: InputFileLocation[],
-        target: AudioImportTarget,
-        importMode: Tx16wImportMode,
-        policy?: import('../importCapacity').CapacityPolicy,
-    ): Promise<JobState> {
-        return this.invoke('startTx16wDiskSetImport', [sessionId, sources, target, importMode, policy]);
     }
 
     startImageSequenceExport(

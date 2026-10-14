@@ -18,6 +18,7 @@
 #include "axklib/application/filesystem.hpp"
 #include "axklib/application/image_documents.hpp"
 #include "axklib/application/image_filesystem.hpp"
+#include "axklib/application/native_document_snapshot.hpp"
 #include "axklib/application/path_reservations.hpp"
 #include "axklib/deletion.hpp"
 #include "axklib/export.hpp"
@@ -449,6 +450,8 @@ template <typename Item> struct ImagePage {
 
 class ImageSessionManager {
   public:
+    [[nodiscard]] Result<NativeDocumentSnapshot>
+    native_snapshot(const ImageDocumentRef &target, std::string_view owner_id, std::uint64_t expected_revision);
     using Clock = std::function<std::chrono::steady_clock::time_point()>;
 
     ImageSessionManager(const Sandbox &sandbox, std::size_t maximum_sessions = 32U,

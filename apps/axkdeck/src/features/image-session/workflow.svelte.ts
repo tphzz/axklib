@@ -1,4 +1,5 @@
 import { DocumentSelection } from './documentSelection';
+import { loadIntegrityIssues } from './integrity';
 import { collectVolumes, findPartition, findSourceItem, noImageSource } from './sourceTree';
 import { imageLocation } from '../../lib/httpImageSources';
 import { serverDirectoryLocation, locationKey } from '../../lib/storageLocations';
@@ -48,6 +49,7 @@ export class ImageSessionWorkflow {
     documents = $state<OpenedImage['documents']>([]);
     documentId = $state<string | null>(null);
     sources = $state<OpenedImage['sources']>([]);
+    activeSourceMemberId = $state<string | null>(null);
     discovery = $state<OpenedImage['discovery']>({ selectionRequired: false, candidates: [] });
     switchingDocument = $state(false);
     private documentSelection = new DocumentSelection();
@@ -136,10 +138,16 @@ export class ImageSessionWorkflow {
         this.status = status;
     }
 
+    get activeLocation(): ImageLocation | null {
+        const member = this.sources.find((source) => source.id === this.activeSourceMemberId);
+        if (!member) return null;
+        return member.source.kind === 'DEVICE' ? this.location : imageLocation(member.source);
+    }
+
     async showIntegrity(): Promise<void> {
         if (this.sessionId === null) return;
         this.integrityDialogOpen = true;
-        await this.loadIntegrityIssues(this.sessionId);
+        await loadIntegrityIssues(this, this.transport, this.sessionId);
     }
 
     closeIntegrity(): void {
@@ -316,12 +324,12 @@ export class ImageSessionWorkflow {
         if (selected) await this.open(selected);
     }
 
-    selectDocument(documentId: string | null): Promise<void> {
+    selectDocument(documentId: string | null | undefined, sourceMemberId?: string): Promise<void> {
         return this.documentSelection.change(
             this,
             this.requireCollaborators(),
             this.transport,
-            { documentId },
+            { documentId, sourceMemberId },
             (opened, preferred) => this.applyOpenedImage(opened, preferred),
         );
     }
@@ -366,10 +374,10 @@ export class ImageSessionWorkflow {
                 parentDialog: 'companion-disks',
                 initialDirectory:
                     this.lastCompanionDirectory ??
-                    (this.location && this.location.kind !== 'device'
+                    (this.activeLocation && this.activeLocation.kind !== 'device'
                         ? {
-                              rootId: this.location.reference.rootId,
-                              relativePath: this.location.reference.relativePath.replace(/\/?[^/]+\/?$/, ''),
+                              rootId: this.activeLocation.reference.rootId,
+                              relativePath: this.activeLocation.reference.relativePath.replace(/\/?[^/]+\/?$/, ''),
                           }
                         : null),
                 ondirectorychange: (directory) => (this.lastCompanionDirectory = directory),
@@ -575,7 +583,7 @@ export class ImageSessionWorkflow {
     }
 
     private async showAutomaticIntegrityIssues(opened: OpenedImage): Promise<void> {
-        await this.loadIntegrityIssues(opened.sessionId, opened.revision);
+        await loadIntegrityIssues(this, this.transport, opened.sessionId, opened.revision);
         if (this.sessionId !== opened.sessionId || this.revision !== opened.revision || this.integrityError) return;
         const capacityWarnings = new Set<string>();
         for (const issue of this.integrityIssues) {
@@ -590,35 +598,6 @@ export class ImageSessionWorkflow {
         if (automaticKey === this.lastAutomaticIntegrityKey) return;
         this.lastAutomaticIntegrityKey = automaticKey;
         this.integrityDialogOpen = true;
-    }
-
-    private async loadIntegrityIssues(sessionId: number, revision = this.revision): Promise<void> {
-        const documentId = this.documentId;
-        this.integrityLoading = true;
-        this.integrityError = '';
-        try {
-            const native = documentId ? await this.transport.validationIssues(sessionId) : [];
-            const issues = [
-                ...native,
-                ...this.sources.flatMap((source) =>
-                    source.diagnostics.map((issue) => ({
-                        code: issue.code,
-                        severity: issue.severity,
-                        message: issue.message,
-                        samplerPath: issue.path,
-                        objectId: null,
-                    })),
-                ),
-            ];
-            if (this.sessionId === sessionId && this.revision === revision && this.documentId === documentId)
-                this.integrityIssues = issues;
-        } catch (error) {
-            if (this.sessionId === sessionId && this.revision === revision && this.documentId === documentId)
-                this.integrityError = userFacingMessage(error);
-        } finally {
-            if (this.sessionId === sessionId && this.revision === revision && this.documentId === documentId)
-                this.integrityLoading = false;
-        }
     }
 
     private async retryCompanionAction(retry: CompanionRetry): Promise<void> {
@@ -656,6 +635,7 @@ export class ImageSessionWorkflow {
         this.documents = [];
         this.documentId = null;
         this.sources = [];
+        this.activeSourceMemberId = null;
         this.documentSelection.clear();
         this.floppySet = null;
         this.integrityDialogOpen = false;

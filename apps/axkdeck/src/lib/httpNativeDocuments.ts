@@ -16,19 +16,29 @@ export function documentPath(session: SessionState): string {
     return `/images/${encodeURIComponent(target.imageId)}/documents/${encodeURIComponent(target.documentId)}`;
 }
 
-export function documentSession(summary: ApiImageSummary, selected?: string | null): SessionState {
+export function documentSession(
+    summary: ApiImageSummary,
+    selected?: string | null,
+    sourceMemberId?: string,
+): SessionState {
     const sources = summary.sources.map((member) => imageLocation(member.source));
     if (!sources.length) throw new Error('Workspace has no admitted sources');
-    const documentId =
-        selected === undefined ? (summary.documents.length === 1 ? summary.documents[0].id : null) : selected;
-    if (documentId && !summary.documents.some((document) => document.id === documentId))
-        throw new Error('Selected native document is no longer available');
+    const document = summary.documents.find((item) => item.id === selected);
+    if (selected && !document) throw new Error('Selected native document is no longer available');
+    const activeSourceMemberId = sourceMemberId ?? document?.sourceMemberIds[0] ?? summary.sources[0].id;
+    const index = summary.sources.findIndex((member) => member.id === activeSourceMemberId);
+    if (index < 0) throw new Error('Selected image is no longer available');
+    const documents = summary.documents.filter((item) => item.sourceMemberIds.includes(activeSourceMemberId));
+    if (document && !documents.includes(document))
+        throw new Error('Native document does not belong to the selected image');
+    const documentId = selected === undefined ? (documents.length === 1 ? documents[0].id : null) : selected;
     return {
         remoteId: summary.imageId,
         revision: summary.revision,
         sources,
-        source: sources[0],
+        source: sources[index],
         summary,
+        activeSourceMemberId,
         documentId,
         contentCursors: new Map(),
         contentItems: new Map(),
@@ -38,8 +48,13 @@ export function documentSession(summary: ApiImageSummary, selected?: string | nu
 }
 
 export function refreshedDocumentSession(summary: ApiImageSummary, previous: SessionState): SessionState {
-    const selected = summary.documents.some((document) => document.id === previous.documentId)
+    const sourceMemberId = summary.sources.some((member) => member.id === previous.activeSourceMemberId)
+        ? previous.activeSourceMemberId
+        : summary.sources[0]?.id;
+    const selected = summary.documents.some(
+        (document) => document.id === previous.documentId && document.sourceMemberIds.includes(sourceMemberId),
+    )
         ? previous.documentId
-        : null;
-    return documentSession(summary, selected);
+        : undefined;
+    return documentSession(summary, selected, sourceMemberId);
 }

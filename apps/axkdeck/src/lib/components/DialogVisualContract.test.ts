@@ -108,14 +108,14 @@ describe('dialog visual contract', () => {
 
     it('keeps dense dialog table headings and metadata on the compact scale', () => {
         const programs = source('src/lib/components/ProgramGenerationDialog.svelte');
-        const tx16w = source('src/lib/components/Tx16wImportDialog.svelte');
+        const conversion = source('src/lib/components/ConversionReport.svelte');
         const companions = source('src/lib/components/CompanionDiskDialog.svelte');
 
         expect(programs).toMatch(
             /\.program-generation-header\s*\{[^}]*font-size:\s*var\(--dialog-table-header-font-size\)/s,
         );
-        expect(tx16w).toMatch(/\.import-mode legend\s*\{[^}]*font-size:\s*var\(--dialog-label-font-size\)/s);
-        expect(tx16w).toMatch(/\.mapping-notice\s*\{[^}]*font-size:\s*var\(--dialog-body-font-size\)/s);
+        expect(conversion).toMatch(/th\s*\{[^}]*font-size:\s*var\(--dialog-label-font-size\)/s);
+        expect(conversion).toMatch(/\.conversion-report\s*\{[^}]*font-size:\s*var\(--dialog-body-font-size\)/s);
         expect(companions).toMatch(
             /\.companion-disk-content h3\s*\{[^}]*font-size:\s*var\(--dialog-section-font-size\)/s,
         );

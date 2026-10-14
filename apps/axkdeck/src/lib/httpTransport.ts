@@ -58,8 +58,6 @@ import type {
     SequenceImportItem,
     SequenceSystemExclusivePolicy,
     MidiInspection,
-    Tx16wImportInspection,
-    Tx16wImportMode,
     VolumeDeletionInspection,
     VolumeCapacityInspection,
     VolumeDeletionTarget,
@@ -83,6 +81,8 @@ import { downloadServerFile, readDirectoryArchive } from './httpDownloads';
 import { HttpPackageTransport } from './httpPackageTransport';
 import { HttpImageSessions } from './httpImageSessions';
 import { HttpImportOperations } from './httpImportOperations';
+import { HttpConversions } from './httpConversions';
+import type { ConversionTransport } from './conversions';
 import { HttpCapacityGate, type CapacityReviewHandler } from './httpCapacityGate';
 import { HttpJobController } from './httpJobController';
 import { createHttpDeviceConnection, type HttpDevices } from './httpDevices';
@@ -115,6 +115,17 @@ export class HttpImageTransport extends HttpPackageTransport implements ImageTra
     private readonly client: AxklibHttpApiClient;
     private readonly jobs: HttpJobController;
     private readonly imports: HttpImportOperations;
+    private readonly conversions: HttpConversions;
+    conversionProfiles: ConversionTransport['conversionProfiles'] = () => this.conversions.conversionProfiles();
+    prepareConversion: ConversionTransport['prepareConversion'] = (...args) =>
+        this.conversions.prepareConversion(...args);
+    conversionPlan: ConversionTransport['conversionPlan'] = (...args) => this.conversions.conversionPlan(...args);
+    releaseConversion: ConversionTransport['releaseConversion'] = (...args) =>
+        this.conversions.releaseConversion(...args);
+    executeConversion: ConversionTransport['executeConversion'] = (...args) =>
+        this.conversions.executeConversion(...args);
+    conversionExecution: ConversionTransport['conversionExecution'] = (...args) =>
+        this.conversions.conversionExecution(...args);
     private readonly createPlans = new Map<string, ApiWritePlan>();
     programEditorCatalog = () => loadProgramEditorCatalog(this.client);
 
@@ -125,6 +136,7 @@ export class HttpImageTransport extends HttpPackageTransport implements ImageTra
         this.client = client;
         this.jobs = jobs;
         this.imports = new HttpImportOperations(this.client, this.jobs, this.imageSessions);
+        this.conversions = new HttpConversions(client, jobs, imageSessions);
         this.connectionMode = connection.mode;
         this.devices = devices;
     }
@@ -177,14 +189,6 @@ export class HttpImageTransport extends HttpPackageTransport implements ImageTra
     inspectMidi(source: InputFileLocation): Promise<MidiInspection> {
         return this.imports.inspectMidi(source);
     }
-    async inspectTx16wDiskSet(
-        sessionId: number,
-        sources: InputFileLocation[],
-        target: AudioImportTarget,
-        importMode: Tx16wImportMode,
-    ): Promise<Tx16wImportInspection> {
-        return this.imports.inspectTx16wDiskSet(sessionId, sources, target, importMode);
-    }
     startAudioImport(
         sessionId: number,
         target: VolumeImportDestination,
@@ -211,15 +215,6 @@ export class HttpImageTransport extends HttpPackageTransport implements ImageTra
         return this.imports.startSequenceImport(sessionId, target, items, systemExclusivePolicy, policy);
     }
 
-    startTx16wDiskSetImport(
-        sessionId: number,
-        sources: InputFileLocation[],
-        target: AudioImportTarget,
-        importMode: Tx16wImportMode,
-        policy?: import('./importCapacity').CapacityPolicy,
-    ): Promise<JobState> {
-        return this.imports.startTx16wDiskSetImport(sessionId, sources, target, importMode, policy);
-    }
     async downloadFile(location: FileLocation): Promise<ClientDownload> {
         const source = serverFile(location);
         return downloadServerFile(this.client, source.reference, source.displayName);

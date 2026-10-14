@@ -21,3 +21,4 @@ SUBCOMMANDS:
   validate                    validate container and sampler organization
   create                      create a fresh sampler container
   alter                       alter an existing sampler container
+  convert                     prepare, review and optionally publish a directional conversion

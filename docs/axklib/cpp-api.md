@@ -18,6 +18,7 @@ Operations that can fail return axklib-owned `axk::result<T>` or
 | `transaction` | Plan and apply an ordered alteration manifest |
 | `portable_package` | Export, inspect, and fully verify portable object packages |
 | `package_import_plan` | Plan and atomically apply a package import to a separate image |
+| `conversion_plan` | Prepare, review and publish a retained directional conversion to a new image |
 | `build_info` | Process-lifetime Git source and package identity for the loaded SDK |
 | `error` / `result<T>` | Owned failure and success values |
 
@@ -42,6 +43,12 @@ in-flight callback to return, after which the former sink may be destroyed.
 Snapshot reads are concurrent; `image`, `build_plan`, `transaction`,
 `portable_package`, `package_import_plan`, and context mutation require external
 serialization. Mutation plans are bound to their creating thread when applied.
+
+`axklib/sdk/conversion.hpp` exposes `conversion_profiles_json()` and the move-only
+`conversion_plan`. Preparation materializes one immutable result; application
+requires its loss/uncertainty acknowledgement IDs and never repeats conversion.
+The first profile is TX16W to A-series. See [Directional Conversion](conversion.md)
+for explicit sources, destination bindings, expiry and one-attempt semantics.
 
 `set_diagnostic_sink()` borrows an optional `diagnostic_sink` independently from
 progress reporting. Opening media and planning/applying HDS alterations emit

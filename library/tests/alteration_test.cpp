@@ -650,7 +650,7 @@ TEST(AlterationManifest, ParsesStrictWaveformSamplerMetadataAndRejectsInvalidLoo
     ]})"));
 }
 
-TEST(AlterationManifest, ParsesStrictTx16wDiskSetImport) {
+TEST(AlterationManifest, RejectsObsoleteTx16wImport) {
     const auto parsed = axk::parse_alteration_manifest(R"({
     "schema_version":"1.0","operations":[
       {"id":"tx16w","type":"import_tx16w_disk_set","partition_index":0,
@@ -658,14 +658,7 @@ TEST(AlterationManifest, ParsesStrictTx16wDiskSetImport) {
        "import_mode":"hierarchy"}
     ]})",
                                                        "/imports");
-    ASSERT_TRUE(parsed) << parsed.error().message;
-    const auto *operation = std::get_if<axk::ImportTx16wDiskSetOperation>(&parsed->operations.front().data);
-    ASSERT_NE(operation, nullptr);
-    EXPECT_EQ(operation->volume_name, "TX16W");
-    EXPECT_EQ(operation->disk_paths,
-              (std::vector<std::filesystem::path>{"/imports/source.img", "/imports/companion.img"}));
-    EXPECT_EQ(operation->import_mode, axk::tx16w::ImportMode::hierarchy);
-    EXPECT_EQ(axk::operation_type_name(parsed->operations.front().data), "import_tx16w_disk_set");
+    EXPECT_FALSE(parsed);
 
     EXPECT_FALSE(axk::parse_alteration_manifest(R"({
     "schema_version":"1.0","operations":[

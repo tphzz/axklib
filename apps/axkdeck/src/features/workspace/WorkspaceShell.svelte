@@ -118,8 +118,10 @@
             <span class="brand-mark"><Icon name="waveform" size={20} /></span><strong>axkdeck</strong>
         </button>
         <div class="workspace-image-context">
-            <div class="source-context"><strong title={imageName}>{imageName}</strong><small>{context}</small></div>
-            {#if documentSelector}{@render documentSelector()}{/if}
+            {#if documentSelector}{@render documentSelector()}
+            {:else}<div class="source-context">
+                    <strong title={imageName}>{imageName}</strong><small>{context}</small>
+                </div>{/if}
         </div>
         <div class="global-controls">
             {#if isDesktop}<button
@@ -230,7 +232,18 @@
 <style>
     .modular-shell {
         --workspace-accent: #dc8b35;
+        --workspace-inspector-width: 268px;
+        grid-template-columns: var(--library-column-width) minmax(0, 1fr) var(--workspace-inspector-width);
         grid-template-rows: auto minmax(0, 1fr) var(--density-status-bar);
+    }
+    .modular-shell.sidebar-closed {
+        grid-template-columns: minmax(0, 1fr) var(--workspace-inspector-width);
+    }
+    .modular-shell.inspector-closed {
+        grid-template-columns: var(--library-column-width) minmax(0, 1fr);
+    }
+    .modular-shell.sidebar-closed.inspector-closed {
+        grid-template-columns: minmax(0, 1fr);
     }
     .modular-shell[data-workspace-mode='files'] {
         --workspace-accent: #58bdb4;
@@ -241,10 +254,12 @@
         min-height: var(--density-app-header);
     }
     .workspace-image-context {
-        display: grid;
-        gap: 2px;
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 6px 8px;
         min-width: 0;
-        padding: 0 8px;
+        padding: 6px 8px;
     }
     .workspace-image-context strong {
         font-size: 11px;
@@ -327,12 +342,19 @@
     .global-controls {
         grid-column: 3;
     }
-    @media (max-width: 850px) {
+    @media (max-width: 1100px) {
         .modular-shell {
+            --workspace-inspector-width: 240px;
+        }
+    }
+    @media (max-width: 850px) {
+        .modular-shell,
+        .modular-shell.inspector-closed {
             min-width: 0;
             grid-template-columns: var(--library-column-width) minmax(0, 1fr);
         }
-        .modular-shell.sidebar-closed {
+        .modular-shell.sidebar-closed,
+        .modular-shell.sidebar-closed.inspector-closed {
             grid-template-columns: minmax(0, 1fr);
         }
         .workspace-inspector {
@@ -349,7 +371,7 @@
         .workspace-image-context {
             grid-row: 2;
             grid-column: 1 / -1;
-            padding: 0 8px 6px;
+            padding: 6px 8px;
         }
         .global-controls {
             grid-column: 2;

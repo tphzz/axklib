@@ -19,6 +19,11 @@ mixing alternate editions that happen to have similar names. Adding or removing
 a member reruns inspection and the destination plan for the complete selected
 set.
 
+The import uses the shared [directional conversion plan](conversion.md) contract.
+Alternatively, open a TX16W document first and use **Convert** to select an
+A-series destination image on the same server. Both paths prepare one immutable
+plan and execute its reviewed output without repeating conversion.
+
 ## Import Stages
 
 Inspection decodes TX16W Waves, Timbres, Voices, Performances, key regions,
@@ -88,14 +93,16 @@ operation, so a partial TX16W hierarchy is not left in the destination volume.
 The preview classifies every non-trivial mapping:
 
 - **Exact** means the source value has a direct supported destination value.
-- **Approximated** means the value is translated or resampled according to a
-  documented rule.
-- **Defaulted** means the destination needs a value that the source does not
-  supply.
-- **Not imported** means the source field remains visible in the preview but is
-  not authored.
-- **Blocked** means the current writer profile cannot preserve the relationship
+- **Representation** means an equivalent encoding changes, such as expanding
+  signed 12-bit PCM to 16-bit PCM or translating native key numbering.
+- **Loss** means resampling, approximation or an omitted source control.
+- **Uncertainty** means an unverified interpretation or destination default.
+- **Blocker** means the current writer profile cannot preserve the relationship
   safely, so import is disabled.
+
+**Best** permits explicitly acknowledged loss and uncertainty. **Strict** rejects
+both, while allowing exact and representation-only changes. Unsupported or
+ambiguous relationships cannot be acknowledged away.
 
 Current parameter behavior is:
 
@@ -129,10 +136,14 @@ Use the import dialog as a plan review:
 3. Choose **Programs and samples** for a complete hierarchy. Use **Wave Data
    only** deliberately when recovering decodable Waves from an incomplete or
    partly unsupported set.
-4. Review the object counts and expand the Program, Sample Bank, Sample, and
-   Wave Data sections.
-5. Review all approximated, defaulted, omitted, and blocked mappings.
-6. Import only when the preview reports that it is ready.
+4. Review the paged action table: final names, slots, assignments, key ranges,
+   sample rates and loop boundaries.
+5. Select Best or Strict and review the mapping issues. In Best mode, explicitly
+   acknowledge each loss or uncertainty before continuing.
+6. Import only when the retained plan reports that it is ready. Changes to inputs
+   or destination require preparation again; expired or consumed plans cannot be
+   executed. Use Refresh after a saved import whose cleanup or refresh failed,
+   and Check status after an uncertain response. Never repeat an uncertain write.
 
 For audible validation, compare the imported A-series Program layout with the
 same TX16W disk in a known TX16W implementation. Check Program assignments,

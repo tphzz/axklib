@@ -10,6 +10,115 @@
     }
   ],
   "paths": {
+    "/conversion-profiles": {
+      "get": {
+        "operationId": "conversions.profiles",
+        "responses": {
+          "200": {
+            "description": "Available directional conversion profiles",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversionProfilesResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/conversion-plans/{planId}": {
+      "parameters": [
+        {
+          "name": "planId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      ],
+      "get": {
+        "operationId": "conversions.plan",
+        "parameters": [
+          {
+            "name": "offset",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 32768
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 200
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Owner-scoped retained plan and paged report",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversionPlanResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "operationId": "conversions.release",
+        "responses": {
+          "200": {
+            "description": "Unsubmitted plan released",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "data"
+                  ],
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "released"
+                      ],
+                      "properties": {
+                        "released": {
+                          "const": true
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/conversion-plans/{planId}/executions": {
+      "parameters": [
+        {
+          "name": "planId",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      ]
+    },
     "/diagnostics/capture": {
       "get": {
         "operationId": "diagnostics.capture.get",
@@ -1978,6 +2087,515 @@
       }
     },
     "schemas": {
+      "ConversionDocumentRef": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "imageId",
+          "documentId",
+          "expectedRevision"
+        ],
+        "properties": {
+          "imageId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "documentId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      },
+      "ConversionSource": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "imageId",
+              "documentId",
+              "expectedRevision"
+            ],
+            "properties": {
+              "kind": {
+                "const": "DOCUMENT"
+              },
+              "imageId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "documentId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "sources"
+            ],
+            "properties": {
+              "kind": {
+                "const": "SOURCES"
+              },
+              "sources": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 32,
+                "items": {
+                  "oneOf": [
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "kind",
+                        "file"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "const": "FILE"
+                        },
+                        "file": {
+                          "$ref": "#/components/schemas/FileRef"
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "kind",
+                        "directory"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "const": "DIRECTORY"
+                        },
+                        "directory": {
+                          "$ref": "#/components/schemas/DirectoryRef"
+                        }
+                      }
+                    },
+                    {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "kind",
+                        "upload"
+                      ],
+                      "properties": {
+                        "kind": {
+                          "const": "UPLOAD"
+                        },
+                        "upload": {
+                          "$ref": "#/components/schemas/UploadRef"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      },
+      "ConversionPlanRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "profileId",
+          "source",
+          "destination",
+          "options",
+          "fidelity"
+        ],
+        "properties": {
+          "profileId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "source": {
+            "$ref": "#/components/schemas/ConversionSource"
+          },
+          "destination": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "imageId",
+              "documentId",
+              "expectedRevision",
+              "selection"
+            ],
+            "properties": {
+              "imageId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "documentId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "expectedRevision": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "selection": {
+                "type": "object"
+              }
+            }
+          },
+          "options": {
+            "type": "object"
+          },
+          "fidelity": {
+            "type": "string",
+            "enum": [
+              "BEST",
+              "STRICT"
+            ]
+          },
+          "capacityPolicy": {
+            "$ref": "#/components/schemas/VolumeCapacityPolicy"
+          }
+        }
+      },
+      "ConversionAction": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "name",
+          "sourceObject",
+          "action",
+          "details"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "sourceObject": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string"
+          },
+          "details": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["label", "value"],
+              "properties": {
+                "label": {"type": "string"},
+                "value": {"type": "string"}
+              }
+            }
+          }
+        }
+      },
+      "ConversionIssue": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "code",
+          "impact",
+          "sourceObject",
+          "sourceParameter",
+          "targetObject",
+          "targetParameter",
+          "message"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          },
+          "impact": {
+            "type": "string",
+            "enum": [
+              "EXACT",
+              "REPRESENTATION",
+              "LOSS",
+              "UNCERTAINTY",
+              "BLOCKER"
+            ]
+          },
+          "sourceObject": {
+            "type": "string"
+          },
+          "sourceParameter": {
+            "type": "string"
+          },
+          "targetObject": {
+            "type": "string"
+          },
+          "targetParameter": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "ConversionReport": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "profileId",
+          "fidelity",
+          "executable",
+          "actions",
+          "issues",
+          "actionCount",
+          "issueCount",
+          "offset",
+          "capacity",
+          "destination"
+        ],
+        "properties": {
+          "profileId": {
+            "type": "string"
+          },
+          "fidelity": {
+            "type": "string",
+            "enum": [
+              "BEST",
+              "STRICT"
+            ]
+          },
+          "executable": {
+            "type": "boolean"
+          },
+          "actions": {
+            "type": "array",
+            "maxItems": 200,
+            "items": {
+              "$ref": "#/components/schemas/ConversionAction"
+            }
+          },
+          "issues": {
+            "type": "array",
+            "maxItems": 200,
+            "items": {
+              "$ref": "#/components/schemas/ConversionIssue"
+            }
+          },
+          "actionCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 32768
+          },
+          "issueCount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 16384
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 32768
+          },
+          "capacity": {
+            "$ref": "#/components/schemas/VolumeCapacityAdmission"
+          },
+          "destination": {
+            "$ref": "#/components/schemas/ConversionDocumentRef"
+          }
+        }
+      },
+      "ConversionPlan": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "planId",
+          "state",
+          "expiresAt",
+          "jobId",
+          "report"
+        ],
+        "properties": {
+          "planId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "READY",
+              "ACCEPTED",
+              "EXECUTING",
+              "TERMINAL"
+            ]
+          },
+          "expiresAt": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "jobId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "report": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ConversionReport"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "ConversionExecutionRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "acknowledgedIssueIds"
+        ],
+        "properties": {
+          "acknowledgedIssueIds": {
+            "type": "array",
+            "uniqueItems": true,
+            "maxItems": 16384,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      },
+      "ConversionResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "planId",
+          "imageId",
+          "documentId",
+          "revision",
+          "applied",
+          "cleanupPending",
+          "warnings"
+        ],
+        "properties": {
+          "planId": {
+            "type": "string"
+          },
+          "imageId": {
+            "type": "string"
+          },
+          "documentId": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "applied": {
+            "type": "boolean"
+          },
+          "cleanupPending": {
+            "type": "boolean"
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "ConversionProfile": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "name",
+          "sourceFormat",
+          "destinationFormat",
+          "optionsSchema"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "sourceFormat": {
+            "type": "string"
+          },
+          "destinationFormat": {
+            "type": "string"
+          },
+          "optionsSchema": {
+            "type": "object"
+          }
+        }
+      },
+      "ConversionProfiles": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "profiles"
+        ],
+        "properties": {
+          "profiles": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConversionProfile"
+            }
+          }
+        }
+      },
+      "ConversionProfilesResponse": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ConversionProfiles"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ResponseMeta"
+          }
+        }
+      },
+      "ConversionPlanResponse": {
+        "type": "object",
+        "required": [
+          "data"
+        ],
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ConversionPlan"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ResponseMeta"
+          }
+        }
+      },
       "DiagnosticCaptureRequest": {
         "type": "object",
         "additionalProperties": false,
@@ -7913,359 +8531,6 @@
         "properties": {
           "source": {
             "$ref": "#/components/schemas/InputRef"
-          }
-        }
-      },
-      "ImageSessionTx16wImportTarget": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "partitionIndex",
-          "volumeName"
-        ],
-        "properties": {
-          "partitionIndex": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 7
-          },
-          "volumeName": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 16
-          }
-        }
-      },
-      "ImageSessionTx16wImportInspectionRequest": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "imageId",
-          "expectedRevision",
-          "sources",
-          "importMode",
-          "target",
-          "documentId"
-        ],
-        "properties": {
-          "imageId": {
-            "type": "string",
-            "minLength": 1
-          },
-          "expectedRevision": {
-            "type": "integer",
-            "minimum": 1
-          },
-          "sources": {
-            "type": "array",
-            "minItems": 1,
-            "maxItems": 32,
-            "items": {
-              "$ref": "#/components/schemas/InputRef"
-            }
-          },
-          "importMode": {
-            "enum": [
-              "HIERARCHY",
-              "WAVE_DATA_ONLY"
-            ]
-          },
-          "target": {
-            "$ref": "#/components/schemas/ImageSessionTx16wImportTarget"
-          },
-          "documentId": {
-            "type": "string",
-            "minLength": 1
-          }
-        }
-      },
-      "ImageSessionTx16wImportCounts": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "waveData",
-          "samples",
-          "sampleBanks",
-          "programs"
-        ],
-        "properties": {
-          "waveData": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "samples": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "sampleBanks": {
-            "type": "integer",
-            "minimum": 0
-          },
-          "programs": {
-            "type": "integer",
-            "minimum": 0
-          }
-        }
-      },
-      "ImageSessionTx16wWaveDataPlan": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "name",
-          "targetSampleRate"
-        ],
-        "properties": {
-          "name": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 16
-          },
-          "targetSampleRate": {
-            "type": "integer",
-            "minimum": 1
-          }
-        }
-      },
-      "ImageSessionTx16wSamplePlan": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "name",
-          "waveDataName",
-          "rootKey",
-          "keyLow",
-          "keyHigh"
-        ],
-        "properties": {
-          "name": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 16
-          },
-          "waveDataName": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 16
-          },
-          "rootKey": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 127
-          },
-          "keyLow": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 127
-          },
-          "keyHigh": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 127
-          }
-        }
-      },
-      "ImageSessionTx16wSampleBankPlan": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "name",
-          "sampleNames"
-        ],
-        "properties": {
-          "name": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 16
-          },
-          "sampleNames": {
-            "type": "array",
-            "items": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 16
-            }
-          }
-        }
-      },
-      "ImageSessionTx16wProgramAssignmentPlan": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "kind",
-          "name"
-        ],
-        "properties": {
-          "kind": {
-            "enum": [
-              "SBAC",
-              "SBNK"
-            ]
-          },
-          "name": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 16
-          }
-        }
-      },
-      "ImageSessionTx16wProgramPlan": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "slot",
-          "name",
-          "assignments"
-        ],
-        "properties": {
-          "slot": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 128
-          },
-          "name": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 8
-          },
-          "assignments": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ImageSessionTx16wProgramAssignmentPlan"
-            }
-          }
-        }
-      },
-      "ImageSessionTx16wImportObjects": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "waveData",
-          "samples",
-          "sampleBanks",
-          "programs"
-        ],
-        "properties": {
-          "waveData": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ImageSessionTx16wWaveDataPlan"
-            }
-          },
-          "samples": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ImageSessionTx16wSamplePlan"
-            }
-          },
-          "sampleBanks": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ImageSessionTx16wSampleBankPlan"
-            }
-          },
-          "programs": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ImageSessionTx16wProgramPlan"
-            }
-          }
-        }
-      },
-      "ImageSessionTx16wMappingNotice": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "disposition",
-          "sourceObject",
-          "sourceParameter",
-          "targetObject",
-          "targetParameter",
-          "message"
-        ],
-        "properties": {
-          "disposition": {
-            "enum": [
-              "EXACT",
-              "APPROXIMATED",
-              "DEFAULTED",
-              "OMITTED",
-              "BLOCKED"
-            ]
-          },
-          "sourceObject": {
-            "type": "string"
-          },
-          "sourceParameter": {
-            "type": "string"
-          },
-          "targetObject": {
-            "type": "string"
-          },
-          "targetParameter": {
-            "type": "string"
-          },
-          "message": {
-            "type": "string",
-            "minLength": 1
-          }
-        }
-      },
-      "ImageSessionTx16wImportInspection": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "schemaVersion",
-          "sourceMembers",
-          "importMode",
-          "profile",
-          "target",
-          "valid",
-          "counts",
-          "objects",
-          "notices"
-        ],
-        "properties": {
-          "schemaVersion": {
-            "const": "1.0"
-          },
-          "sourceMembers": {
-            "type": "array",
-            "minItems": 1,
-            "maxItems": 32,
-            "items": {
-              "type": "string",
-              "minLength": 1
-            }
-          },
-          "importMode": {
-            "enum": [
-              "HIERARCHY",
-              "WAVE_DATA_ONLY"
-            ]
-          },
-          "profile": {
-            "enum": [
-              "YAMAHA_NATIVE",
-              "YAMAHA_NATIVE_WITH_AUXILIARY"
-            ]
-          },
-          "target": {
-            "$ref": "#/components/schemas/ImageSessionTx16wImportTarget"
-          },
-          "valid": {
-            "type": "boolean"
-          },
-          "counts": {
-            "$ref": "#/components/schemas/ImageSessionTx16wImportCounts"
-          },
-          "objects": {
-            "$ref": "#/components/schemas/ImageSessionTx16wImportObjects"
-          },
-          "notices": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ImageSessionTx16wMappingNotice"
-            }
           }
         }
       },
@@ -14402,7 +14667,6 @@
               "RENAME_VOLUME",
               "RENAME_PARTITION",
               "REPAIR_OBJECT_PLACEMENTS",
-              "IMPORT_TX16W_DISK_SET",
               "CLEAR_PROGRAM_ASSIGNMENTS",
               "UPDATE_PROGRAM_PARAMETERS",
               "UPDATE_SAMPLE_BANK_PARAMETERS",
@@ -14438,7 +14702,6 @@
               "RENAME_VOLUME": "rename_volume",
               "RENAME_PARTITION": "rename_partition",
               "REPAIR_OBJECT_PLACEMENTS": "repair_object_placements",
-              "IMPORT_TX16W_DISK_SET": "import_tx16w_disk_set",
               "CLEAR_PROGRAM_ASSIGNMENTS": "clear_program_assignments",
               "UPDATE_PROGRAM_PARAMETERS": "update_program_parameters",
               "UPDATE_SAMPLE_BANK_PARAMETERS": "update_sample_bank_parameters",

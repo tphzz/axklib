@@ -31,6 +31,7 @@ export function applyOpenedImageMetadata(workflow: ImageSessionWorkflow, opened:
     workflow.documents = opened.documents;
     workflow.documentId = opened.documentId;
     workflow.sources = opened.sources;
+    workflow.activeSourceMemberId = opened.activeSourceMemberId;
     workflow.discovery = opened.discovery;
 }
 

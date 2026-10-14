@@ -324,14 +324,6 @@ Result<void> validate_operation_data(const AlterationOperationData &data) {
                         return std::unexpected{manifest_error("object_sfs_ids must contain unique object SFS IDs")};
                 }
                 return {};
-            } else if constexpr (std::same_as<T, ImportTx16wDiskSetOperation>) {
-                if (auto valid = require_object_name(operation.volume_name, "volume_name"); !valid)
-                    return valid;
-                if (operation.disk_paths.empty() || operation.disk_paths.size() > 32U)
-                    return std::unexpected{manifest_error("disk_paths must contain 1..32 paths")};
-                if (std::ranges::any_of(operation.disk_paths, &std::filesystem::path::empty))
-                    return std::unexpected{manifest_error("disk_paths must contain non-empty paths")};
-                return {};
             } else {
                 if (auto valid = require_text(operation.volume_name, "volume_name"); !valid)
                     return valid;

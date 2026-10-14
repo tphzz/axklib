@@ -8,7 +8,7 @@ describe('Document selector', () => {
         const fixture = nativeWorkspaceFixture();
         const onselect = vi.fn().mockResolvedValue(undefined);
         render(DocumentSelector, {
-            documents: fixture.documents,
+            documents: [...fixture.documents, { ...fixture.documents[0], id: 'other' }],
             selected: fixture.documentId,
             disabled: false,
             discovery: fixture.discovery,
@@ -16,16 +16,19 @@ describe('Document selector', () => {
             onresolve: vi.fn(),
         });
         const control = screen.getByRole('combobox') as HTMLSelectElement;
-        await fireEvent.change(control, { target: { value: '' } });
+        await fireEvent.change(control, { target: { value: 'other' } });
         await waitFor(() => expect(control.value).toBe(fixture.documentId));
-        expect(onselect).toHaveBeenCalledWith(null);
+        expect(onselect).toHaveBeenCalledWith('other');
     });
 
     it('retains incomplete candidates and exposes invalid discovery without offering them as choices', async () => {
         const onselect = vi.fn().mockResolvedValue(undefined);
         const onresolve = vi.fn().mockResolvedValue(undefined);
         render(DocumentSelector, {
-            documents: nativeWorkspaceFixture().documents,
+            documents: [
+                ...nativeWorkspaceFixture().documents,
+                { ...nativeWorkspaceFixture().documents[0], id: 'other' },
+            ],
             selected: null,
             disabled: false,
             discovery: {

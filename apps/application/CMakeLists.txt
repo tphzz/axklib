@@ -75,7 +75,6 @@ add_library(axk_application STATIC src/alteration_journal.cpp src/alteration_jou
                                    src/session_media_conversion_operations.cpp
                                    src/session_placement_operations.cpp src/session_placement_plan.cpp
                                    src/session_sequence_operations.cpp src/session_volume_package_operations.cpp
-                                   src/session_tx16w_operations.cpp
                                    src/session_volume_floppy_export_operations.cpp
                                    src/system_service.cpp
                                    src/secure_random.cpp src/uploads.cpp src/validation_allocation.cpp
@@ -84,7 +83,8 @@ add_library(axk_application STATIC src/alteration_journal.cpp src/alteration_jou
                                    src/session_write_operations.cpp src/write_manifest_operations.cpp
                                    src/write_manifest_support.cpp src/write_operations.cpp src/write_plan_support.cpp)
 add_library(axklib::application ALIAS axk_application)
-target_sources(axk_application PRIVATE src/image_document_discovery.cpp src/image_document_browsing.cpp
+target_sources(axk_application PRIVATE src/image_document_discovery.cpp src/image_document_browsing.cpp src/native_document_snapshot.cpp
+  src/conversion_plan_store.cpp src/conversion_operations.cpp src/conversion_sources.cpp src/prepared_session_commit.cpp
   src/image_source_read.cpp src/image_filesystem_workspace.cpp src/formats/a_series/admission.cpp src/formats/tx16w/session_state.cpp)
 set_target_properties(axk_application PROPERTIES POSITION_INDEPENDENT_CODE ON CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
 target_sources(axk_application PRIVATE src/device_provider.cpp src/device_xml.cpp src/device_source.cpp src/device_sessions.cpp
@@ -103,8 +103,8 @@ target_include_directories(
 )
 target_link_libraries(
   axk_application
-  PUBLIC axklib::audio axklib::format_a_series nlohmann_json::nlohmann_json
-  PRIVATE OpenSSL::Crypto unofficial::hash-library ICU::i18n ICU::uc
+  PUBLIC axklib::audio axklib::format_a_series axklib::conversion nlohmann_json::nlohmann_json
+  PRIVATE axklib::profile_tx16w_to_a_series OpenSSL::Crypto unofficial::hash-library ICU::i18n ICU::uc
 )
 if(WIN32)
   target_compile_definitions(axk_application PRIVATE _WIN32_WINNT=0x0A00)
@@ -159,6 +159,7 @@ if(BUILD_TESTING)
                                        tests/secure_random_test.cpp tests/uploads_test.cpp
                                        tests/write_operations_test.cpp)
   target_compile_features(axk_application_tests PRIVATE cxx_std_23)
+  target_sources(axk_application_tests PRIVATE tests/conversion_plan_store_test.cpp tests/conversion_operations_test.cpp)
   target_sources(axk_application_tests PRIVATE tests/device_sessions_test.cpp tests/device_guard_reads_test.cpp)
   if(AXK_BUILD_DEVICES)
     target_sources(axk_application_tests PRIVATE tests/device_candidates_test.cpp)

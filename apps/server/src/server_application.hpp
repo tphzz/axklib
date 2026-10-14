@@ -17,6 +17,7 @@
 
 #include "archive_download_budget.hpp"
 #include "axklib/application/alteration_journal.hpp"
+#include "axklib/application/conversions.hpp"
 #include "axklib/application/download_archives.hpp"
 #include "axklib/application/image_sessions.hpp"
 #include "axklib/application/jobs.hpp"
@@ -139,6 +140,7 @@ class ServerApplication {
     crow::response job_response(const crow::request &request, const std::string &job_id);
     crow::response job_events_response(const crow::request &request, const std::string &job_id) const;
     crow::response event_ticket_response(const crow::request &request);
+    crow::response conversion_response(const crow::request &request, const std::string &plan_id, bool execute);
     void broadcast(const app::JobEvent &event);
 
     crow::response health_ready_response(const crow::request &request);
@@ -167,6 +169,7 @@ class ServerApplication {
     Json openapi_document_;
     OpenApiValidator openapi_validator_;
     app::JobManager jobs_;
+    app::ConversionService conversions_;
     EventTicketStore event_tickets_;
     EventDispatcher event_dispatcher_;
     RequestTelemetry request_telemetry_;

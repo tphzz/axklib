@@ -63,6 +63,7 @@ function setup() {
         ...nativeWorkspaceFixture(),
         switchingDocument: false,
         selectDocument: async () => undefined,
+        selectImage: async () => undefined,
         resolveDocuments: async () => undefined,
         transport,
         isDesktop: false,

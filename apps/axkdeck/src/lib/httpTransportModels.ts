@@ -41,6 +41,7 @@ export interface SessionState {
     source: ImageLocation;
     sources: ImageLocation[];
     summary: ApiImageSummary;
+    activeSourceMemberId: string;
     documentId: string | null;
     contentCursors: Map<string, Map<number, string | null>>;
     contentItems: Map<string, DiskTreeItem>;

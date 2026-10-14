@@ -1,16 +1,13 @@
 import type { components } from './generated/axklibApiV1';
 import type { ImportPartitionOption } from '../features/import/packageDestinations';
 import type { ImageSessionPackageImportPlan } from './transport';
-import type { InputFileLocation } from './storageLocations';
 import type { FilesystemEdit } from './filesystem';
 import type {
     AudioImportItem,
     AudioImportOptions,
     VolumeImportDestination,
-    AudioImportTarget,
     SequenceImportItem,
     SequenceSystemExclusivePolicy,
-    Tx16wImportMode,
     JobState,
     SampleBankCreation,
     SampleBankAssignment,
@@ -26,7 +23,6 @@ export type CapacityImport =
           items: SequenceImportItem[];
           systemExclusivePolicy: SequenceSystemExclusivePolicy;
       }
-    | { kind: 'TX16W'; target: AudioImportTarget; sources: InputFileLocation[]; importMode: Tx16wImportMode }
     | { kind: 'FILES'; expectedRevision: number; edits: FilesystemEdit[] };
 
 export interface ImportMutationTransport {
@@ -49,13 +45,6 @@ export interface ImportMutationTransport {
         target: VolumeImportDestination,
         items: SequenceImportItem[],
         systemExclusivePolicy: SequenceSystemExclusivePolicy,
-        policy?: CapacityPolicy,
-    ): Promise<JobState>;
-    startTx16wDiskSetImport(
-        sessionId: number,
-        sources: InputFileLocation[],
-        target: AudioImportTarget,
-        importMode: Tx16wImportMode,
         policy?: CapacityPolicy,
     ): Promise<JobState>;
 }

@@ -19,6 +19,7 @@ export class ImportCompletion {
     private completed: JobState | null = null;
     private finish: ((job: JobState) => Promise<void>) | null = null;
     private onUpdate: (job: JobState) => void = () => undefined;
+    private resolveSubmission: (() => Promise<JobState | null>) | null = null;
 
     constructor(
         private readonly transport: Pick<ImageTransport, 'waitForJob'>,
@@ -32,7 +33,7 @@ export class ImportCompletion {
         return this.capacity.busy || this.phase !== 'idle';
     }
     get canCheck(): boolean {
-        return this.phase === 'unconfirmed' && this.jobId !== null;
+        return this.phase === 'unconfirmed' && (this.jobId !== null || this.resolveSubmission !== null);
     }
     get canDismiss(): boolean {
         return !this.capacity.busy && ['idle', 'refresh-failed', 'warnings', 'completed'].includes(this.phase);
@@ -48,6 +49,7 @@ export class ImportCompletion {
         this.jobId = null;
         this.completed = null;
         this.finish = null;
+        this.resolveSubmission = null;
     }
 
     async run(
@@ -55,6 +57,7 @@ export class ImportCompletion {
         finish: (job: JobState) => Promise<void>,
         onUpdate: (job: JobState) => void = () => undefined,
         reviewedWarnings: readonly string[] = [],
+        resolveSubmission: (() => Promise<JobState | null>) | null = null,
     ): Promise<boolean> {
         if (this.locked) return false;
         this.phase = 'importing';
@@ -63,6 +66,7 @@ export class ImportCompletion {
         this.warnings = [];
         this.reviewedWarnings = reviewedWarnings;
         this.finish = finish;
+        this.resolveSubmission = resolveSubmission;
         this.onUpdate = onUpdate;
         try {
             const job = await this.jobs.run(async () => {
@@ -91,10 +95,16 @@ export class ImportCompletion {
 
     async recover(): Promise<boolean> {
         if (this.phase === 'refresh-failed' && this.completed) return this.refresh();
-        if (!this.canCheck || this.jobId === null) return false;
+        if (!this.canCheck) return false;
         this.phase = 'checking';
         this.message = 'Checking import status';
         try {
+            if (this.jobId === null && this.resolveSubmission) {
+                const accepted = await this.resolveSubmission();
+                if (!accepted) throw new Error('No accepted execution is visible yet; do not repeat the import');
+                this.jobId = accepted.jobId;
+            }
+            if (this.jobId === null) throw new Error('No execution identity is available');
             return await this.accept(await this.transport.waitForJob(this.jobId, this.onUpdate));
         } catch (error) {
             this.unconfirmed(error);
@@ -142,6 +152,13 @@ export class ImportCompletion {
 }
 
 function alterationWarnings(value: unknown, reviewed: readonly string[]): string[] {
+    if (value && typeof value === 'object' && 'planId' in value) {
+        const result = value as components['schemas']['ConversionResult'];
+        return [
+            ...result.warnings.filter((message) => !reviewed.includes(message)),
+            ...(result.cleanupPending ? ['Conversion saved; journal cleanup is pending. Retain recovery data.'] : []),
+        ];
+    }
     if (!value || typeof value !== 'object' || !('kind' in value) || value.kind !== 'ALTERATION') return [];
     const result = value as components['schemas']['ImageSessionAlterationResult'];
     const warnings = (result.warnings ?? [])

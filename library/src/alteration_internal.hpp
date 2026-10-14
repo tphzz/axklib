@@ -69,6 +69,11 @@ struct OperationContext {
     std::string_view type;
 };
 
+Result<detail::PreparedAlteration> finish_preparation(TransactionState state, std::filesystem::path path,
+                                                      const VolumeCapacityPolicy &policy,
+                                                      const CancellationToken &cancellation,
+                                                      diagnostic_sink *diagnostics = nullptr);
+
 struct ExpectedObjectPlacement {
     PartitionIndex partition;
     SfsId sfs_id;
@@ -231,9 +236,6 @@ Result<OperationReport> insert_waveform(TransactionState &state, OperationContex
                                         const CancellationToken &cancellation);
 Result<OperationReport> insert_waveform_audio(TransactionState &state, OperationContext context,
                                               const InsertWaveformOperation &operation, const ImportedAudio &audio,
-                                              const CancellationToken &cancellation);
-Result<OperationReport> import_tx16w_disk_set(TransactionState &state, OperationContext context,
-                                              const ImportTx16wDiskSetOperation &operation,
                                               const CancellationToken &cancellation);
 Result<OperationReport> delete_waveform(TransactionState &state, OperationContext context,
                                         const DeleteWaveformOperation &operation,

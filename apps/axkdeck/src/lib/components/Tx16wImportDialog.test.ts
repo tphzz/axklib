@@ -2,7 +2,8 @@ import { fireEvent, render, screen } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { Tx16wImportRequest, Tx16wVolumeOption } from '../../features/import/tx16wWorkflow.svelte';
-import type { Tx16wImportInspection } from '../transport';
+import type { ConversionPlan } from '../conversions';
+import { fitsCapacity } from '../../test/samplerCapacityFixture';
 import Tx16wImportDialog from './Tx16wImportDialog.svelte';
 import { ImportCompletion } from '../../features/import/importCompletion.svelte';
 import { JobController } from '../../features/jobs/actions';
@@ -15,17 +16,24 @@ const option: Tx16wVolumeOption = {
     target,
 };
 
-function inspection(): Tx16wImportInspection {
+function inspection(): ConversionPlan {
     return {
-        schemaVersion: '1.0',
-        sourceMembers: ['library.ima'],
-        importMode: 'HIERARCHY',
-        profile: 'YAMAHA_NATIVE',
-        target,
-        valid: true,
-        counts: { programs: 1, sampleBanks: 1, samples: 1, waveData: 1 },
-        objects: { programs: [], sampleBanks: [], samples: [], waveData: [] },
-        notices: [],
+        planId: 'conversion-1',
+        state: 'READY',
+        expiresAt: Date.now() + 900000,
+        jobId: null,
+        report: {
+            profileId: 'yamaha.tx16w-to-a-series',
+            fidelity: 'BEST',
+            executable: true,
+            actions: [],
+            issues: [],
+            actionCount: 0,
+            issueCount: 0,
+            offset: 0,
+            capacity: fitsCapacity,
+            destination: { imageId: 'image-1', documentId: 'doc-1', expectedRevision: 1 },
+        },
     };
 }
 
@@ -47,7 +55,9 @@ function request(): Tx16wImportRequest {
         ],
         target,
         importMode: 'HIERARCHY',
-        inspection: inspection(),
+        plan: inspection(),
+        fidelity: 'BEST',
+        acknowledgedIssueIds: [],
         status: 'ready',
         progress: 1,
         error: '',
@@ -72,6 +82,8 @@ describe('Tx16wImportDialog', () => {
                 onrecover: vi.fn(),
                 ontarget: vi.fn(),
                 onmode: vi.fn(),
+                onfidelity: vi.fn(),
+                onprepare: vi.fn(),
                 onadd: vi.fn(),
                 onremove: vi.fn(),
                 onconfirm: vi.fn(),
@@ -96,6 +108,8 @@ describe('Tx16wImportDialog', () => {
                 volumeOptions: [option],
                 ontarget: vi.fn(),
                 onmode: vi.fn(),
+                onfidelity: vi.fn(),
+                onprepare: vi.fn(),
                 onadd: vi.fn(),
                 onremove: vi.fn(),
                 onconfirm,

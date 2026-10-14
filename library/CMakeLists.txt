@@ -291,6 +291,7 @@ axk_enable_sanitizers(axk_format_tx16w)
 axk_enable_coverage(axk_format_tx16w)
 
 add_library(axk_conversion_tx16w_to_a_series STATIC src/conversion/tx16w_to_a_series/source.cpp
+                                                  src/conversion/tx16w_to_a_series/document.cpp
                                                   src/conversion/tx16w_to_a_series/plan.cpp)
 add_library(axklib::conversion_tx16w_to_a_series ALIAS axk_conversion_tx16w_to_a_series)
 target_compile_features(axk_conversion_tx16w_to_a_series PUBLIC cxx_std_23)
@@ -311,6 +312,7 @@ add_library(
   adapters/pcm16_quantizer.cpp
   adapters/wav_sampler_metadata.cpp
   src/alteration.cpp
+  src/formats/a_series/authoring/prepare.cpp
   src/alteration_manifest.cpp
   src/alteration_manifest_json.cpp
   src/alteration_manifest_template.cpp
@@ -351,7 +353,6 @@ add_library(
   src/alteration_sequence.cpp
   src/alteration_support.cpp
   src/alteration_record_layout.cpp
-  src/alteration_tx16w.cpp
   src/alteration_validation.cpp
   src/alteration_volume.cpp
   src/deletion.cpp
@@ -404,7 +405,7 @@ find_package(FatFs CONFIG REQUIRED)
 target_link_libraries(
   axk_audio
   PUBLIC axklib::core
-  PRIVATE SndFile::sndfile SOXR::soxr FatFs::FatFs axklib::conversion_tx16w_to_a_series
+  PRIVATE SndFile::sndfile SOXR::soxr FatFs::FatFs
 )
 if(WIN32)
   target_compile_definitions(axk_audio PRIVATE NOMINMAX)
@@ -412,6 +413,39 @@ endif()
 axk_set_project_warnings(axk_audio)
 axk_enable_sanitizers(axk_audio)
 axk_enable_coverage(axk_audio)
+
+add_library(axk_conversion STATIC src/conversion/plan.cpp)
+add_library(axklib::conversion ALIAS axk_conversion)
+target_compile_features(axk_conversion PUBLIC cxx_std_23)
+target_include_directories(axk_conversion PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/internal")
+target_link_libraries(axk_conversion PUBLIC axklib::native nlohmann_json::nlohmann_json)
+set_target_properties(axk_conversion PROPERTIES CXX_EXTENSIONS OFF POSITION_INDEPENDENT_CODE ON
+                       VISIBILITY_INLINES_HIDDEN ON CXX_VISIBILITY_PRESET hidden)
+axk_set_project_warnings(axk_conversion)
+axk_enable_sanitizers(axk_conversion)
+axk_enable_coverage(axk_conversion)
+
+add_library(axk_profile_tx16w_to_a_series STATIC src/conversion/tx16w_to_a_series/profile.cpp)
+add_library(axklib::profile_tx16w_to_a_series ALIAS axk_profile_tx16w_to_a_series)
+target_compile_features(axk_profile_tx16w_to_a_series PUBLIC cxx_std_23)
+target_include_directories(axk_profile_tx16w_to_a_series PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/internal")
+target_link_libraries(axk_profile_tx16w_to_a_series PUBLIC axklib::conversion axklib::conversion_tx16w_to_a_series PRIVATE axklib::audio)
+set_target_properties(axk_profile_tx16w_to_a_series PROPERTIES CXX_EXTENSIONS OFF POSITION_INDEPENDENT_CODE ON
+  CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
+axk_set_project_warnings(axk_profile_tx16w_to_a_series)
+axk_enable_sanitizers(axk_profile_tx16w_to_a_series)
+axk_enable_coverage(axk_profile_tx16w_to_a_series)
+
+add_library(axk_conversion_files STATIC src/conversion/file_sources.cpp src/conversion/file_plan.cpp)
+add_library(axklib::conversion_files ALIAS axk_conversion_files)
+target_compile_features(axk_conversion_files PUBLIC cxx_std_23)
+target_include_directories(axk_conversion_files PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/internal")
+target_link_libraries(axk_conversion_files PUBLIC axklib::conversion PRIVATE axklib::profile_tx16w_to_a_series axklib::audio)
+set_target_properties(axk_conversion_files PROPERTIES CXX_EXTENSIONS OFF POSITION_INDEPENDENT_CODE ON
+  CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
+axk_set_project_warnings(axk_conversion_files)
+axk_enable_sanitizers(axk_conversion_files)
+axk_enable_coverage(axk_conversion_files)
 
 include(cmake/AxkHeaderSelfContainment.cmake)
 file(GLOB_RECURSE AXK_LIBRARY_PUBLIC_HEADERS CONFIGURE_DEPENDS
@@ -423,7 +457,7 @@ axk_add_header_self_containment_target(
   INCLUDE_DIRECTORIES
     "${CMAKE_CURRENT_SOURCE_DIR}/include"
     "${CMAKE_CURRENT_BINARY_DIR}/generated/include"
-  LINK_LIBRARIES axklib::audio
+  LINK_LIBRARIES axklib::audio axklib::conversion
 )
 
 if(AXK_BUILD_SHARED_SDK)
@@ -432,6 +466,7 @@ if(AXK_BUILD_SHARED_SDK)
     src/sdk.cpp
     src/sdk_image.cpp
     src/sdk_package.cpp
+    src/sdk_conversion.cpp
     src/sdk_writer.cpp
   )
   add_library(axklib::axklib ALIAS axklib_shared)
@@ -445,7 +480,7 @@ if(AXK_BUILD_SHARED_SDK)
       $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/generated/include>
       $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
   )
-  target_link_libraries(axklib_shared PRIVATE axklib::audio axklib::format_a_series)
+  target_link_libraries(axklib_shared PRIVATE axklib::audio axklib::format_a_series axklib::conversion_files)
   if(NOT AXK_BUILD_DEVICES)
     target_sources(axklib_shared PRIVATE src/sdk_devices_stub.cpp)
   endif()
@@ -484,6 +519,7 @@ if(AXK_BUILD_SHARED_SDK)
     tests/sdk_export_header_test.cpp
     tests/sdk_build_info_header_test.cpp
     tests/sdk_version_header_test.cpp
+    tests/sdk_conversion_header_test.cpp
   )
   target_compile_features(axk_sdk_header_tests PRIVATE cxx_std_17)
   target_include_directories(axk_sdk_header_tests PRIVATE
@@ -713,8 +749,7 @@ if(BUILD_TESTING)
     tests/system_registered_sample_write_test.cpp
     tests/system_file_write_test.cpp
     tests/sample_parameter_decode_test.cpp
-    tests/tx16w_test.cpp
-    tests/utf8_test.cpp
+        tests/utf8_test.cpp
     tests/native_contract_test.cpp
     tests/version_test.cpp
     tests/writer_test.cpp
@@ -769,6 +804,21 @@ if(BUILD_TESTING)
   axk_enable_sanitizers(axk_core_tests)
   axk_enable_coverage(axk_core_tests)
   gtest_discover_tests(axk_core_tests DISCOVERY_TIMEOUT 30)
+  add_executable(axk_conversion_tests tests/tx16w_test.cpp tests/conversion/plan_test.cpp tests/conversion/tx16w_document_test.cpp tests/conversion/file_plan_test.cpp)
+  target_link_libraries(axk_conversion_tests PRIVATE axklib::profile_tx16w_to_a_series axklib::conversion_files axklib::audio GTest::gtest_main)
+  if(TARGET axklib::axklib)
+    target_link_libraries(axk_conversion_tests PRIVATE axklib::axklib)
+    target_compile_definitions(axk_conversion_tests PRIVATE AXK_TEST_SHARED_SDK=1)
+    if(WIN32)
+      add_custom_command(TARGET axk_conversion_tests POST_BUILD
+        COMMAND "${CMAKE_COMMAND}" -E copy -t "$<TARGET_FILE_DIR:axk_conversion_tests>" "$<TARGET_RUNTIME_DLLS:axk_conversion_tests>"
+        COMMAND_EXPAND_LISTS)
+    endif()
+  endif()
+  axk_set_project_warnings(axk_conversion_tests)
+  axk_enable_sanitizers(axk_conversion_tests)
+  axk_enable_coverage(axk_conversion_tests)
+  gtest_discover_tests(axk_conversion_tests DISCOVERY_TIMEOUT 30)
   add_executable(axk_core_reader_tests tests/core_reader_test.cpp)
   target_link_libraries(axk_core_reader_tests PRIVATE axklib::core GTest::gtest_main)
   axk_set_project_warnings(axk_core_reader_tests)

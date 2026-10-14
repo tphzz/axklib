@@ -4,6 +4,7 @@
     const devices = useDevices();
     interface Props {
         image: { displayName: string } | null;
+        sourceNames?: string[];
         opening: boolean;
         storageLocationsAvailable: boolean;
         onopen: () => void;
@@ -14,6 +15,7 @@
     }
     let {
         image,
+        sourceNames = [],
         opening,
         storageLocationsAvailable,
         onopen,
@@ -24,8 +26,10 @@
     }: Props = $props();
     let imageMenuOpen = $state(false);
     const pathParts = $derived(image?.displayName.replaceAll('\\', '/').split('/').filter(Boolean) ?? []);
-    const imageName = $derived(pathParts.at(-1) ?? 'No image open');
-    const imageLocation = $derived(pathParts.slice(0, -1).join('/'));
+    const multiple = $derived(sourceNames.length > 1);
+    const imageName = $derived(multiple ? 'Multiple' : (pathParts.at(-1) ?? 'No image open'));
+    const imageLocation = $derived(multiple ? `${sourceNames.length} sources` : pathParts.slice(0, -1).join('/'));
+    const imageTitle = $derived(multiple ? sourceNames.join('\n') : image?.displayName);
 </script>
 
 <svelte:window
@@ -34,7 +38,7 @@
         if (event.key === 'Escape') imageMenuOpen = false;
     }}
 />
-<section class="image-summary" aria-label="Active image">
+<section class="image-summary" aria-label="Open images">
     <header class="image-summary-heading">
         <p class="eyebrow">Image</p>
         {#if storageLocationsAvailable}
@@ -56,10 +60,16 @@
     </header>
 
     {#if image}
-        <div class="active-image" role="group" aria-label={`Current image: ${imageName}`} aria-busy={opening}>
+        <div
+            class="active-image"
+            class:multiple
+            role="group"
+            aria-label={multiple ? `${sourceNames.length} open sources` : `Current image: ${imageName}`}
+            aria-busy={opening}
+        >
             <Icon name="hard-drive" size={16} />
             <span class="active-image-copy">
-                <strong title={image.displayName}>{imageName}</strong>
+                <strong title={imageTitle}>{imageName}</strong>
                 <small title={imageLocation}>{opening ? 'Opening image' : imageLocation || 'Storage location'}</small>
             </span>
             <div class="active-image-actions">
@@ -76,8 +86,8 @@
                 <button
                     class="icon-button"
                     type="button"
-                    aria-label="Eject image"
-                    title="Eject image"
+                    aria-label={multiple ? 'Eject all images' : 'Eject image'}
+                    title={multiple ? 'Eject all images' : 'Eject image'}
                     disabled={opening}
                     onclick={onclose}
                 >
@@ -151,3 +161,15 @@
         </div>
     {/if}
 </section>
+
+<style>
+    @media (max-width: 540px) {
+        .active-image.multiple {
+            grid-template-columns: 18px minmax(0, 1fr);
+        }
+        .multiple .active-image-actions {
+            grid-column: 1 / -1;
+            justify-self: end;
+        }
+    }
+</style>
