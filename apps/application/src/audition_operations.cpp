@@ -1,4 +1,5 @@
 #include "axklib/application/audition_operations.hpp"
+#include "axklib/application/image_session_contracts.hpp"
 
 #include <string>
 #include <vector>
@@ -35,8 +36,8 @@ axk::app::Result<void> axk::app::bind_audition_operations(OperationRegistry &reg
                                           "Preparing bounded audio sources", std::nullopt});
             }
             auto audition =
-                images.prepare_audition(image->get_ref<const std::string &>(), context.owner_id, object_ids,
-                                        context.cancellation, request.value("sourceWindow", "PLAYBACK") == "STORED");
+                images.prepare_audition(image_document_ref(request), context.owner_id, object_ids, context.cancellation,
+                                        request.value("sourceWindow", "PLAYBACK") == "STORED");
             if (!audition)
                 return std::unexpected(audition.error());
             if (context.progress != nullptr) {

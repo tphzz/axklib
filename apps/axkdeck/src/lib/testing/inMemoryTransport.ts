@@ -136,6 +136,24 @@ export interface InMemoryImageTransportOptions {
 }
 
 export class InMemoryImageTransport implements ImageTransport {
+    selectDocument(sessionId: number, documentId: string | null): Promise<OpenedImage> {
+        return this.invoke('selectDocument', [sessionId, documentId]);
+    }
+    resolveDocuments(sessionId: number, selectedFormats: string[]): Promise<OpenedImage> {
+        return this.invoke('resolveDocuments', [sessionId, selectedFormats]);
+    }
+    nativeContent(sessionId: number): ReturnType<ImageTransport['nativeContent']> {
+        return this.invoke('nativeContent', [sessionId]);
+    }
+    nativeObjects(sessionId: number): ReturnType<ImageTransport['nativeObjects']> {
+        return this.invoke('nativeObjects', [sessionId]);
+    }
+    nativeRelationships(sessionId: number): ReturnType<ImageTransport['nativeRelationships']> {
+        return this.invoke('nativeRelationships', [sessionId]);
+    }
+    nativeObjectDetail(sessionId: number, objectId: string): ReturnType<ImageTransport['nativeObjectDetail']> {
+        return this.invoke('nativeObjectDetail', [sessionId, objectId]);
+    }
     inspectImportCapacity(
         sessionId: number,
         request: import('../importCapacity').CapacityImport,
@@ -238,7 +256,7 @@ export class InMemoryImageTransport implements ImageTransport {
         return this.invoke('sandboxDirectory', [directory, cursor]);
     }
 
-    inspectSandboxMediaSource(directory: DirectoryRef): Promise<'AXK_OBJECT_DIRECTORY' | null> {
+    inspectSandboxMediaSource(directory: DirectoryRef): Promise<'DIRECTORY' | null> {
         return this.invoke('inspectSandboxMediaSource', [directory]);
     }
 
@@ -254,7 +272,7 @@ export class InMemoryImageTransport implements ImageTransport {
         return this.invoke('deleteSandboxEntry', [entry]);
     }
 
-    async openImage(source: ImageLocation): Promise<OpenedImage> {
+    async openImage(source: ImageLocation[]): Promise<OpenedImage> {
         this.calls.push('openImage');
         const configured = this.options.operations?.openImage;
         if (configured) return configured(source);
@@ -351,7 +369,11 @@ export class InMemoryImageTransport implements ImageTransport {
     }
 
     allocationMapReference(sessionId: number): Promise<AllocationMapReference> {
-        return Promise.resolve({ imageId: `in-memory-${sessionId}`, revision: this.options.opened.revision ?? 1 });
+        return Promise.resolve({
+            imageId: `in-memory-${sessionId}`,
+            sourceMemberId: 'source-1',
+            revision: this.options.opened.revision ?? 1,
+        });
     }
 
     async closeImage(sessionId: number): Promise<void> {

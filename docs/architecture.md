@@ -3,6 +3,9 @@
 The native implementation separates storage, sampler semantics, and host
 integration.
 
+The incremental multi-sampler engine boundaries and remaining integration work
+are described in [Native Sampler Modules](native-sampler-architecture.md).
+
 ## Desktop Workspace Modules
 
 Axkdeck separates the shared workspace shell from backend orchestration and

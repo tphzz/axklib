@@ -141,7 +141,8 @@ Result<void> bind_filesystem_edit_operations(OperationRegistry &registry, const 
                 verification.reviewed_readers.push_back(file.reader);
             }
             if (!execute) {
-                const auto session = images.begin_read(image_id, context.owner_id, revision);
+                const auto session =
+                    images.begin_source_read({image_id, resolved->source_member_id}, context.owner_id, revision);
                 if (!session)
                     return std::unexpected{session.error()};
                 VolumeCapacityAdmission capacity;
@@ -165,9 +166,10 @@ Result<void> bind_filesystem_edit_operations(OperationRegistry &registry, const 
                 return Json{
                     {"imageId", image_id}, {"revision", revision}, {"capacity", capacity_admission_json(capacity)}};
             }
-            auto result = apply_filesystem_edits(images, journals, image_id, context.owner_id, revision,
-                                                 resolved->partition, resolved->edits, context.cancellation,
-                                                 context.progress, verification, *policy, context.mutation_id);
+            auto result =
+                apply_filesystem_edits(images, journals, {image_id, resolved->source_member_id}, context.owner_id,
+                                       revision, resolved->partition, resolved->edits, context.cancellation,
+                                       context.progress, verification, *policy, context.mutation_id);
             if (!result)
                 return std::unexpected(result.error());
             // The relationship notice was acknowledged before execution, not produced by this write.

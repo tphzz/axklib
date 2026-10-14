@@ -40,6 +40,24 @@ import type {
 import type { DirectoryListing, DirectoryRef, FileRef, SandboxRoot } from './storageLocations';
 
 class UnavailableTransport implements ImageTransport {
+    selectDocument(): Promise<OpenedImage> {
+        return this.unavailable();
+    }
+    resolveDocuments(): Promise<OpenedImage> {
+        return this.unavailable();
+    }
+    nativeContent(): ReturnType<ImageTransport['nativeContent']> {
+        return this.unavailable();
+    }
+    nativeObjects(): ReturnType<ImageTransport['nativeObjects']> {
+        return this.unavailable();
+    }
+    nativeRelationships(): ReturnType<ImageTransport['nativeRelationships']> {
+        return this.unavailable();
+    }
+    nativeObjectDetail(): ReturnType<ImageTransport['nativeObjectDetail']> {
+        return this.unavailable();
+    }
     inspectImportCapacity(): Promise<import('./importCapacity').CapacityAdmission> {
         return this.unavailable();
     }
@@ -95,7 +113,7 @@ class UnavailableTransport implements ImageTransport {
     sandboxDirectory(_directory: DirectoryRef, _cursor?: string): Promise<DirectoryListing> {
         return this.unavailable();
     }
-    inspectSandboxMediaSource(_directory: DirectoryRef): Promise<'AXK_OBJECT_DIRECTORY' | null> {
+    inspectSandboxMediaSource(_directory: DirectoryRef): Promise<'DIRECTORY' | null> {
         return this.unavailable();
     }
     createSandboxDirectory(_parent: DirectoryRef, _name: string): Promise<void> {

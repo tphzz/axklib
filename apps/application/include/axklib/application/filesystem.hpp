@@ -104,6 +104,7 @@ struct SandboxTreeEntry {
     std::string relative_path;
     SandboxTreeEntryKind kind{SandboxTreeEntryKind::file};
     std::uint64_t size{};
+    std::string revision{};
 };
 
 struct OpenedSandboxTreeFile {
@@ -128,7 +129,9 @@ class SandboxTree {
     SandboxTree &operator=(const SandboxTree &) = delete;
 
     [[nodiscard]] std::span<const SandboxTreeEntry> entries() const noexcept;
+    [[nodiscard]] std::string revision() const;
     [[nodiscard]] Result<OpenedSandboxTreeFile> open_file(std::size_t index) const;
+    [[nodiscard]] Result<void> verify_same_tree(const SandboxTree &current) const;
 
   private:
     struct Implementation;

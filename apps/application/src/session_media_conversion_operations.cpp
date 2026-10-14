@@ -1,4 +1,5 @@
 #include "axklib/application/session_media_conversion_operations.hpp"
+#include "axklib/application/image_session_contracts.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -223,28 +224,28 @@ axk::app::Result<void> axk::app::bind_session_media_conversion_operations(Operat
                                                                           DownloadArchiveStore &downloads,
                                                                           const axk::MediaBuildLimits &media_limits) {
     if (!registry.is_implemented("images.media_conversion.inspect")) {
-        auto bound =
-            registry.bind("images.media_conversion.inspect",
-                          [&images, media_limits](const Json &input, const OperationContext &context) -> Result<Json> {
-                              const auto identity = parse_session_identity(input);
-                              if (!identity)
-                                  return std::unexpected(identity.error());
-                              auto session = images.begin_read(identity->first, context.owner_id, identity->second);
-                              if (!session)
-                                  return std::unexpected(session.error());
-                              if (session->source.kind != ImageSourceKind::file)
-                                  return std::unexpected(operation_error(
-                                      "media_conversion_unsupported", "Only HDA and HDS image files can be converted"));
-                              const auto source = source_stem(session->source);
-                              const auto request = parse_conversion_request(input, source);
-                              if (!request)
-                                  return std::unexpected(request.error());
-                              auto plan = axk::plan_media_conversion(session->reader, session->source.relative_path,
-                                                                     *request, media_limits, context.cancellation);
-                              if (!plan)
-                                  return std::unexpected(core_error(plan.error()));
-                              return plan_json(identity->first, identity->second, source, *plan);
-                          });
+        auto bound = registry.bind(
+            "images.media_conversion.inspect",
+            [&images, media_limits](const Json &input, const OperationContext &context) -> Result<Json> {
+                const auto identity = parse_session_identity(input);
+                if (!identity)
+                    return std::unexpected(identity.error());
+                auto session = images.begin_read(image_document_ref(input), context.owner_id, identity->second);
+                if (!session)
+                    return std::unexpected(session.error());
+                if (session->source.kind != ImageSourceKind::file)
+                    return std::unexpected(operation_error("media_conversion_unsupported",
+                                                           "Only HDA and HDS image files can be converted"));
+                const auto source = source_stem(session->source);
+                const auto request = parse_conversion_request(input, source);
+                if (!request)
+                    return std::unexpected(request.error());
+                auto plan = axk::plan_media_conversion(session->reader, session->source.relative_path, *request,
+                                                       media_limits, context.cancellation);
+                if (!plan)
+                    return std::unexpected(core_error(plan.error()));
+                return plan_json(identity->first, identity->second, source, *plan);
+            });
         if (!bound)
             return bound;
     }
@@ -256,7 +257,7 @@ axk::app::Result<void> axk::app::bind_session_media_conversion_operations(Operat
                 const auto identity = parse_session_identity(input);
                 if (!identity)
                     return std::unexpected(identity.error());
-                auto session = images.begin_read(identity->first, context.owner_id, identity->second);
+                auto session = images.begin_read(image_document_ref(input), context.owner_id, identity->second);
                 if (!session)
                     return std::unexpected(session.error());
                 if (session->source.kind != ImageSourceKind::file)

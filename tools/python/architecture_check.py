@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -17,6 +18,82 @@ class ArchitectureIssue:
     code: str
     path: str
     message: str
+
+
+def _native_module_dependencies(root: Path) -> list[ArchitectureIssue]:
+    common = ("axklib/error.hpp", "axklib/export.hpp", "axklib/io.hpp")
+    rules = {
+        "native": (*common, "axklib/native/", "axklib/filesystems/"),
+        "filesystems": (*common, "axklib/filesystems/"),
+        "formats/a_series": (
+            *common,
+            "axklib/formats/a_series/",
+            "axklib/native/",
+            "axklib/media.hpp",
+            "axklib/relationship.hpp",
+            "axklib/semantic.hpp",
+            "axklib/diagnostics.hpp",
+        ),
+        "formats/tx16w": (*common, "axklib/formats/tx16w/", "axklib/native/"),
+    }
+    issues: list[ArchitectureIssue] = []
+    include = re.compile(r'^\s*#\s*include\s*([<"])([^>"\n]+)[>"]', re.MULTILINE)
+    for module, allowed in rules.items():
+        for prefix in ("library/src", "library/include/axklib", "library/internal/axklib"):
+            directory = root / prefix / module
+            for path in sorted(directory.rglob("*")):
+                if not path.is_file() or path.suffix not in {".cpp", ".hpp", ".h", ".cc"}:
+                    continue
+                relative = path.relative_to(root).as_posix()
+                for match in include.finditer(path.read_text(encoding="utf-8")):
+                    delimiter, dependency = match.groups()
+                    if delimiter == "<" and "/" not in dependency and "\\" not in dependency:
+                        continue
+                    # This adapter is the narrow bridge to the existing FAT implementation.
+                    if relative == "library/src/filesystems/fat/view.cpp" and dependency == "axklib/media.hpp":
+                        continue
+                    if any(
+                        dependency.startswith(item) if item.endswith("/") else dependency == item
+                        for item in allowed
+                    ) and ".." not in PurePosixPath(dependency).parts:
+                        continue
+                    issues.append(
+                        ArchitectureIssue(
+                            "module_dependency_forbidden",
+                            relative,
+                            f"{module} must not depend on {dependency}",
+                        )
+                    )
+    return issues
+
+
+def _session_module_dependencies(root: Path) -> list[ArchitectureIssue]:
+    shared_files = (
+        "image_sessions_internal.hpp",
+        "native_document_state.hpp",
+        "native_filesystem_bindings.hpp",
+        "image_session_access.cpp",
+        "image_session_inspection.cpp",
+        "image_session_object_detail.cpp",
+        "image_filesystem_index.cpp",
+    )
+    includes = re.compile(r'^\s*#\s*include\s*[<"]([^>"\n]+)[>"]', re.MULTILINE)
+    issues: list[ArchitectureIssue] = []
+    for filename in shared_files:
+        path = root / "apps/application/src" / filename
+        if not path.is_file():
+            continue
+        for dependency in includes.findall(path.read_text(encoding="utf-8")):
+            parts = PurePosixPath(dependency).parts
+            if "formats" in parts:
+                issues.append(
+                    ArchitectureIssue(
+                        "module_dependency_forbidden",
+                        path.relative_to(root).as_posix(),
+                        f"shared session infrastructure must not depend on {dependency}",
+                    )
+                )
+    return issues
 
 
 def physical_line_count(path: Path) -> int:
@@ -220,7 +297,7 @@ def check_repository(root: Path, policy_path: Path) -> list[ArchitectureIssue]:
                     f"Lower the recorded count from {recorded} to the current {current}",
                 )
             )
-    return issues
+    return [*issues, *_native_module_dependencies(root), *_session_module_dependencies(root)]
 
 
 def main() -> int:

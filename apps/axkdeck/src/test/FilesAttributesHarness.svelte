@@ -1,6 +1,7 @@
 <script lang="ts">
     import FilesInspector from '../features/files/FilesInspector.svelte';
     import { filesystemEntry } from '../lib/testing/filesystem';
+    import { nativeWorkspaceFixture } from './nativeWorkspaceFixture';
 
     const parameters = new URLSearchParams(window.location.search);
     const width = Number(parameters.get('width') ?? 320);
@@ -12,7 +13,9 @@
         name: directory ? 'Samples' : 'Piano Left',
         path: directory ? '/Samples' : '/Piano/SMPL/Piano Left',
         sizeBytes: directory ? null : 304664,
-        objectId: directory ? null : 'sample',
+        bindings: directory
+            ? []
+            : [{ documentId: 'document-a-series-source-1', objectId: 'sample', contentScopeId: null }],
         rawAttributes: kind === 'fat' ? 'FAT 0x23' : directory ? 'SFS 0xB4646972' : 'SFS 0xBE000000',
         storage: 'Record 45; 1 extent; 327680 allocated bytes',
         attributes:
@@ -80,7 +83,7 @@
 </script>
 
 <div class="fixture" style:width={`${width}px`} style:zoom={scale} data-navigated={navigated}>
-    <FilesInspector {entry} canShowDevice={!directory} onshowdevice={() => (navigated = true)} />
+    <FilesInspector {entry} documents={nativeWorkspaceFixture().documents} onshowdevice={() => (navigated = true)} />
 </div>
 
 <style>

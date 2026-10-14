@@ -22,13 +22,15 @@ struct MutationGuard {
 } // namespace
 
 Result<ImageSessionSummary> apply_session_filesystem_mutation(
-    ImageSessionManager &images, AlterationJournalStore &journals, std::string_view image_id, std::string_view owner_id,
-    std::uint64_t expected_revision, PartitionIndex partition, const SessionFilesystemPlanner &prepare,
-    const std::function<Result<void>()> &verify_inputs, const CancellationToken &cancellation, ProgressSink *progress,
-    const SessionFilesystemAdmitter &admit, std::string_view operation_id) {
+    ImageSessionManager &images, AlterationJournalStore &journals, const ImageSourceTarget &target,
+    std::string_view owner_id, std::uint64_t expected_revision, PartitionIndex partition,
+    const SessionFilesystemPlanner &prepare, const std::function<Result<void>()> &verify_inputs,
+    const CancellationToken &cancellation, ProgressSink *progress, const SessionFilesystemAdmitter &admit,
+    std::string_view operation_id) {
+    const auto &image_id = target.image_id;
     if (auto checked = cancellation.check(); !checked)
         return std::unexpected(write_operations_internal::core_error(checked.error()));
-    auto mutation = images.begin_filesystem_mutation(image_id, owner_id, expected_revision, partition, operation_id);
+    auto mutation = images.begin_filesystem_mutation(target, owner_id, expected_revision, partition, operation_id);
     if (!mutation)
         return std::unexpected(mutation.error());
     MutationGuard guard{images, *mutation, owner_id};

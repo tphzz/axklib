@@ -3,18 +3,23 @@
     import InspectorSection from '../../lib/components/InspectorSection.svelte';
     import { provideInspectorPanels } from '../../lib/inspectorPanels.svelte';
     import AttributeHelp from '../../lib/components/AttributeHelp.svelte';
-    import type { FilesystemEntry } from '../../lib/filesystem';
+    import type { FilesystemEntry, FilesystemBinding } from '../../lib/filesystem';
+    import type { OpenedImage } from '../../lib/transport';
+    import { nativeBindingTargets } from './nativeBindingTargets';
     let {
         entry,
-        canShowDevice = false,
+        documents = [],
+        diagnostics = [],
         interpretationLabel = '',
         onshowdevice = () => undefined,
     }: {
         entry: FilesystemEntry | null;
-        canShowDevice?: boolean;
+        documents?: OpenedImage['documents'];
+        diagnostics?: OpenedImage['sources'][number]['diagnostics'];
         interpretationLabel?: string;
-        onshowdevice?: (id: string) => void;
+        onshowdevice?: (binding: FilesystemBinding) => void;
     } = $props();
+    const nativeTargets = $derived(nativeBindingTargets(entry?.bindings ?? [], documents));
     provideInspectorPanels();
 </script>
 
@@ -78,6 +83,9 @@
                     </dl>
                 </InspectorSection>
                 {#if entry.issue}<p class="entry-issue" role="status">{entry.issue}</p>{/if}
+                {#each diagnostics as issue}<p class="entry-issue" role="status">
+                        {issue.code}: {issue.message}
+                    </p>{/each}
                 {#if entry.storage || entry.rawAttributes || entry.attributes.length}<InspectorSection
                         scope="files"
                         sectionId="storage"
@@ -114,12 +122,21 @@
             </div>
         {:else}<p class="empty-copy">No entry selected</p>{/if}
     </div>
-    {#if canShowDevice && entry?.objectId}
-        <InspectorModeFooter mode="device" onclick={() => entry?.objectId && onshowdevice(entry.objectId)} />
+    {#if nativeTargets.length}
+        <div class="native-targets">
+            {#each nativeTargets as target (target.binding.documentId)}
+                <InspectorModeFooter mode="device" label={target.label} onclick={() => onshowdevice(target.binding)} />
+            {/each}
+        </div>
     {/if}
 </aside>
 
 <style>
+    .native-targets {
+        flex: none;
+        max-height: 144px;
+        overflow: auto;
+    }
     .file-path {
         overflow-wrap: anywhere;
         white-space: normal;

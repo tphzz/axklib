@@ -12,8 +12,9 @@ const entry = (id: string, parentId: string | null, kind: FilesystemEntry['kind'
     kind,
     sizeBytes: kind === 'file' ? 12 : null,
     childCount: kind === 'file' ? 0 : 1,
-    objectId: null,
-    contentScopeId: null,
+    sourceMemberId: 'source-1',
+    bindings: [],
+
     interpretation: '',
     storage: '',
     filesystemMetadata: false,

@@ -44,7 +44,7 @@ try {
             await dialog.waitFor();
             const source = mode !== 'recovery';
             const v6 = mode === 'v6' || mode === 'v6-invalid';
-            let footer = source ? dialog.locator('.open-source-panel:not([hidden]) footer') : dialog.locator('footer');
+            let footer = source ? dialog.locator('.open-source-panel:not([hidden]) > footer') : dialog.locator('footer');
             let primary = footer.locator('button').last();
             if (source) {
                 assert.deepEqual(await dialog.getByRole('tab').allTextContents(), [
@@ -80,7 +80,9 @@ try {
                 await page.getByLabel('Fixture calls').filter({ hasText: 'list ' }).waitFor();
                 if (mode === 'image') {
                     await dialog.getByRole('tab', { name: 'Image', exact: true }).click();
-                    await dialog.getByRole('option', { name: 'Yamaha images' }).click();
+                    await dialog.getByRole('option', { name: /Yamaha images/ }).click();
+                    await dialog.getByRole('option', { name: /^Disk1\.hds/ }).click();
+                    await dialog.getByRole('button', { name: 'Add 1 file', exact: true }).click();
                     const rows = dialog.getByRole('listbox');
                     assert(await rows.evaluate((node) => node.scrollHeight > node.clientHeight));
                     await rows.evaluate((node) => {
@@ -89,7 +91,7 @@ try {
                 } else {
                     const device = dialog.getByRole('combobox', { name: 'Device', exact: true });
                     assert.equal(await device.inputValue(), '');
-                    footer = dialog.locator('.open-source-panel:not([hidden]) footer');
+                    footer = dialog.locator('.open-source-panel:not([hidden]) > footer');
                     primary = footer.getByRole('button', { name: 'Open', exact: true });
                     assert(await primary.isDisabled());
                     await device.selectOption('fixture');
@@ -143,6 +145,7 @@ try {
                     await page.waitForFunction(
                         () => document.querySelector('[aria-label="Fixture calls"]')?.textContent === 'list list ',
                     );
+                    await dialog.getByRole('button', { name: 'Refresh devices', exact: true }).click({ trial: true });
                     assert.equal(await device.inputValue(), 'fixture', 'Refresh must retain the selected device');
                     assert(
                         await dialog.getByRole('checkbox').isChecked(),
@@ -174,7 +177,7 @@ try {
                 }
                 const current = await dialog.boundingBox();
                 assert.deepEqual(current, initial, 'Tab switching must not resize or recenter the dialog');
-                footer = dialog.locator('.open-source-panel:not([hidden]) footer');
+                footer = dialog.locator('.open-source-panel:not([hidden]) > footer');
                 primary = footer.locator('.dialog-footer-actions button').last();
             } else if (mode === 'recovery') {
                 assert(await primary.isDisabled());

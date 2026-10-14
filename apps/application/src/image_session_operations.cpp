@@ -11,10 +11,7 @@ axk::app::Result<void> axk::app::bind_image_session_operations(OperationRegistry
     const auto bound = registry.bind(
         "images.open",
         [&images](const nlohmann::json &input, const OperationContext &context) -> Result<nlohmann::json> {
-            const auto source = input.find("source");
-            if (source == input.end())
-                return std::unexpected(Error{"invalid_request", "image source is required"});
-            auto parsed_source = image_source_ref_from_json(*source);
+            auto parsed_source = image_open_sources_from_json(input);
             if (!parsed_source)
                 return std::unexpected(parsed_source.error());
             OperationDiagnosticSink diagnostics{context};

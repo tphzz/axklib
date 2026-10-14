@@ -439,8 +439,7 @@ TEST_F(FileOperationsTest, InfoReadsAnExplicitFlatObjectDirectory) {
     ASSERT_TRUE(axk::app::bind_file_operations(registry, *sandbox_));
     const auto result = registry.invoke(
         "report.info",
-        {{"sources",
-          {{{"kind", "AXK_OBJECT_DIRECTORY"}, {"directory", {{"rootId", "workspace"}, {"relativePath", "objects"}}}}}}},
+        {{"sources", {{{"kind", "DIRECTORY"}, {"directory", {{"rootId", "workspace"}, {"relativePath", "objects"}}}}}}},
         {.owner_id = "owner", .request_id = "request", .cancellation = {}, .progress = nullptr, .display_path = {}});
     ASSERT_TRUE(result) << result.error().message;
     EXPECT_EQ(result->at("loadedCount"), 1U);

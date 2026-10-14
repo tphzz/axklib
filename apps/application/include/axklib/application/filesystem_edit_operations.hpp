@@ -34,7 +34,7 @@ struct FilesystemInputVerification {
 // Unlisted readers receive before/after digest checks here. The supplied
 // verifier owns the listed readers' checks; failure rolls back.
 [[nodiscard]] Result<ImageSessionSummary>
-apply_filesystem_edits(ImageSessionManager &images, AlterationJournalStore &journals, std::string_view image_id,
+apply_filesystem_edits(ImageSessionManager &images, AlterationJournalStore &journals, const ImageSourceTarget &target,
                        std::string_view owner_id, std::uint64_t expected_revision, PartitionIndex partition,
                        std::span<const FilesystemEdit> edits, const CancellationToken &cancellation = {},
                        ProgressSink *progress = nullptr, const FilesystemInputVerification &input_verification = {},

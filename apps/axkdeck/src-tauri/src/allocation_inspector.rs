@@ -16,6 +16,7 @@ const WINDOW_LABEL: &str = "allocation-inspector";
 #[serde(rename_all = "camelCase")]
 pub(crate) struct AllocationInspectorRequest {
     image_id: String,
+    source_member_id: String,
     revision: u64,
     partition_index: u32,
     partition_name: String,
@@ -32,6 +33,7 @@ fn inspector_path(request: &AllocationInspectorRequest) -> PathBuf {
     let query = url::form_urlencoded::Serializer::new(String::new())
         .append_pair("view", "allocation")
         .append_pair("imageId", &request.image_id)
+        .append_pair("sourceMemberId", &request.source_member_id)
         .append_pair("revision", &request.revision.to_string())
         .append_pair("partitionIndex", &request.partition_index.to_string())
         .append_pair("partitionName", &request.partition_name)
@@ -216,13 +218,14 @@ mod tests {
     fn inspector_path_encodes_revision_pinned_partition_identity() {
         let path = inspector_path(&AllocationInspectorRequest {
             image_id: "image/one".to_string(),
+            source_member_id: "source-1".to_string(),
             revision: 7,
             partition_index: 2,
             partition_name: "Sounds & Tests".to_string(),
         });
         assert_eq!(
             path.to_string_lossy(),
-            "index.html?view=allocation&imageId=image%2Fone&revision=7&partitionIndex=2&partitionName=Sounds+%26+Tests"
+            "index.html?view=allocation&imageId=image%2Fone&sourceMemberId=source-1&revision=7&partitionIndex=2&partitionName=Sounds+%26+Tests"
         );
     }
 

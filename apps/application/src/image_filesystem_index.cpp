@@ -22,12 +22,8 @@ constexpr std::size_t maximum_depth = 64U;
 class Builder {
   public:
     ImageFilesystemIndex index;
+    NativeFilesystemBindings bindings;
     std::shared_ptr<const RandomAccessReader> source;
-    std::map<std::pair<std::uint8_t, std::uint32_t>, std::vector<std::string>> record_objects;
-    std::map<std::uint64_t, std::vector<std::string>> offset_objects;
-    std::map<std::string, std::string> interpretations;
-    std::map<std::pair<std::uint8_t, std::uint32_t>, std::string> volume_scopes;
-    std::map<std::uint8_t, std::string> partition_scopes;
     bool exceeded{};
     std::size_t metadata_bytes{};
 
@@ -68,7 +64,7 @@ class Builder {
             return;
         auto &entry = index.entries[position];
         entry.object_id = ids.front();
-        entry.interpretation = interpretations.at(ids.front());
+        entry.interpretation = bindings.interpretations.at(ids.front());
     }
 
     void sfs(const Container &container) {
@@ -87,7 +83,8 @@ class Builder {
                                                   23U,
                                                   "^[ -~]{1,23}$",
                                                   "Use 1-23 printable ASCII characters."};
-            if (const auto scope = partition_scopes.find(partition.index.value); scope != partition_scopes.end())
+            if (const auto scope = bindings.partition_scopes.find(partition.index.value);
+                scope != bindings.partition_scopes.end())
                 index.entries[root].content_scope_id = scope->second;
             index.entries[root].storage =
                 std::format("{} bytes per sector; {} sectors per cluster", container.superblock().sector_size_bytes,
@@ -144,11 +141,11 @@ class Builder {
                     if (!directory) {
                         entry.size_bytes = record->data_size;
                         index.files.emplace(entry.id, SfsFilesystemFile{partition.index, record->sfs_id});
-                        object(position, record_objects[{partition.index.value, record->sfs_id.value}]);
+                        object(position, bindings.record_objects[{partition.index.value, record->sfs_id.value}]);
                         continue;
                     }
-                    if (const auto scope = volume_scopes.find({partition.index.value, record->sfs_id.value});
-                        scope != volume_scopes.end())
+                    if (const auto scope = bindings.volume_scopes.find({partition.index.value, record->sfs_id.value});
+                        scope != bindings.volume_scopes.end())
                         entry.content_scope_id = scope->second;
                     if (current.ancestors.contains(record->sfs_id.value)) {
                         entry.issue = "Directory cycle; traversal stopped";
@@ -236,7 +233,7 @@ class Builder {
             describe_fat_attributes(index.entries[position], file.attributes);
             account_attributes(position);
             if (map_objects)
-                object(position, offset_objects[file.first_data_offset]);
+                object(position, bindings.offset_objects[file.first_data_offset]);
         }
     }
 
@@ -280,45 +277,29 @@ class Builder {
             else {
                 index.entries[position].size_bytes = file.size;
                 index.files.emplace(index.entries[position].id, IsoFilesystemFile{order[ordinal]});
-                object(position, offset_objects[static_cast<std::uint64_t>(file.extent_sector) * 2048U]);
+                object(position, bindings.offset_objects[static_cast<std::uint64_t>(file.extent_sector) * 2048U]);
             }
         }
     }
 };
 } // namespace
 
-Result<ImageFilesystemIndex>
-build_image_filesystem(const MediaContainer &media, std::shared_ptr<const RandomAccessReader> source,
-                       const std::unordered_map<std::string, ObjectSnapshot> &objects,
-                       const std::unordered_map<std::string, MediaObjectDescriptor> &descriptors,
-                       const std::vector<ImageContentItem> &content) {
+Result<ImageFilesystemIndex> build_image_filesystem(const MediaContainer &media,
+                                                    std::shared_ptr<const RandomAccessReader> source,
+                                                    NativeFilesystemBindings bindings) {
     Builder builder;
+    builder.bindings = std::move(bindings);
     builder.source = std::move(source);
-    for (const auto &[id, object] : objects) {
-        if (object.object.format != ObjectFormat::unknown)
-            builder.index.device_view = "a-series";
-        builder.record_objects[{object.partition.value, object.sfs_id.value}].push_back(id);
-        builder.interpretations.emplace(id, object.object.header.raw_type);
-    }
-    for (const auto &[id, descriptor] : descriptors)
-        builder.offset_objects[descriptor.data_offset].push_back(id);
-    for (const auto &item : content) {
-        if (!item.partition_index)
-            continue;
-        if (item.kind == "partition")
-            builder.partition_scopes.emplace(*item.partition_index, item.id);
-        if (item.kind == "volume" && item.volume_directory_id)
-            builder.volume_scopes.emplace(std::pair{*item.partition_index, *item.volume_directory_id}, item.id);
-    }
+    builder.index.device_view = builder.bindings.profile;
     if (const auto *sfs = std::get_if<Container>(&media.storage())) {
         builder.sfs(*sfs);
-        // An empty SFS image can be populated with A-series volumes without an object discriminator.
+        // An adapter may advertise authoring into an otherwise empty filesystem.
         if (std::ranges::none_of(builder.index.entries, [](const auto &entry) {
                 const bool partition_support =
                     entry.parent_id == entry.root_id && (entry.name == "sfserrlog" || entry.name == "sfserram");
                 return entry.kind == "file" && !partition_support;
             }))
-            builder.index.device_view = "a-series";
+            builder.index.device_view = builder.bindings.empty_sfs_profile;
     } else if (const auto *fat = std::get_if<FatImage>(&media.storage()))
         builder.files(*fat, 0U, true, PartitionIndex{0});
     else if (const auto *disk = std::get_if<FatDiskImage>(&media.storage())) {

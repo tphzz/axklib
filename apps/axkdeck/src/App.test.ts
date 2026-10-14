@@ -1,3 +1,4 @@
+import { nativeWorkspaceFixture } from './test/nativeWorkspaceFixture';
 import { sampleFormatFixture } from './test/sampleFormatFixture';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { flushSync, tick } from 'svelte';
@@ -93,14 +94,18 @@ function renderAcknowledgedApp(props: AppProps = {}) {
     return rendered;
 }
 
-async function chooseNestedImage(reuseDirectory = false): Promise<void> {
+async function chooseNestedImage(reuseDirectory = false, waitForDocument = true): Promise<void> {
     await fireEvent.click(screen.getByRole('button', { name: 'Open' }));
     const picker = await screen.findByRole('dialog', { name: 'Open' }, { timeout: 5_000 });
     if (!reuseDirectory) {
         await fireEvent.click(await within(picker).findByText('Yamaha'));
         await fireEvent.click(await within(picker).findByText('images'));
     }
-    await fireEvent.click(await within(picker).findByText('nested.hds'));
+    const entry = await within(picker).findByRole('option', { name: /nested\.hds/ });
+    if (entry.getAttribute('aria-selected') !== 'true') await fireEvent.click(entry);
+    await fireEvent.click(within(picker).getByRole('button', { name: 'Add 1 file' }));
+    await fireEvent.click(within(picker).getByRole('button', { name: 'Open' }));
+    if (waitForDocument) await screen.findByRole('combobox', { name: 'Native document' });
 }
 
 async function openSampleSelectionFixture(props: AppProps = {}) {
@@ -130,6 +135,7 @@ async function openSampleSelectionFixture(props: AppProps = {}) {
     }));
     const opened = await mocks.openImage();
     mocks.openImage.mockResolvedValue({
+        ...nativeWorkspaceFixture(),
         ...opened,
         tree: [{ id: 'disk-17', name: 'nested.hds', kind: 'disk', childCount: 1, children: [volume] }],
         initialVolume: volume,
@@ -270,6 +276,7 @@ describe('App panel layout', () => {
             },
         ]);
         mocks.openImage.mockReset().mockResolvedValue({
+            ...nativeWorkspaceFixture(),
             sessionId: 17,
             format: 'sfs',
             revision: 1,
@@ -470,6 +477,7 @@ describe('App panel layout', () => {
 
     it('keeps one stable toolbar across all side-panel combinations', async () => {
         const { container } = renderAcknowledgedApp();
+        await chooseNestedImage();
         const shell = container.querySelector('.app-shell');
         const toolbar = screen.getByRole('toolbar', { name: 'Panel layout' });
         const library = screen.getByRole('button', { name: 'Library panel' });
@@ -507,8 +515,9 @@ describe('App panel layout', () => {
         expect(shell?.classList.contains('inspector-closed')).toBe(false);
     });
 
-    it('uses canonical Yamaha object terminology', () => {
+    it('uses canonical Yamaha object terminology', async () => {
         renderAcknowledgedApp();
+        await chooseNestedImage();
 
         expect(screen.getByRole('button', { name: 'Sample Banks' })).toBeTruthy();
         expect(screen.getByRole('button', { name: 'Samples' })).toBeTruthy();
@@ -543,6 +552,8 @@ describe('App panel layout', () => {
             let revision = 1;
             let tune = 0;
             mocks.objectDetail.mockImplementation(async (_session, id) => ({
+                formatId: 'yamaha.a-series',
+                profile: 'a-series',
                 image: { revision },
                 object: { ...objects.find((object) => object.key === id), id },
                 relationships: [],
@@ -684,6 +695,7 @@ describe('App panel layout', () => {
 
     it('keeps autoplay session-local and disabled until the user enables it', async () => {
         renderAcknowledgedApp();
+        await chooseNestedImage();
 
         expect(screen.queryByRole('checkbox', { name: 'Autoplay' })).toBeNull();
         await fireEvent.click(screen.getByRole('button', { name: 'Samples' }));
@@ -695,6 +707,7 @@ describe('App panel layout', () => {
 
     it('uses contained-object lanes above the editor for SBAC and SBNK views', async () => {
         const { container } = renderAcknowledgedApp();
+        await chooseNestedImage();
         await fireEvent.click(screen.getByRole('button', { name: 'Editor panel' }));
 
         await fireEvent.click(screen.getByRole('button', { name: 'Sample Banks' }));
@@ -783,6 +796,7 @@ describe('App panel layout', () => {
             },
         ];
         mocks.openImage.mockResolvedValueOnce({
+            ...nativeWorkspaceFixture(),
             sessionId: 17,
             tree: [{ id: 'disk-17', name: 'nested.hds', kind: 'disk', childCount: 1, children: [volume] }],
             validation: {
@@ -931,6 +945,7 @@ describe('App panel layout', () => {
             relationship('wave-00', sample00.key, wave00.key, 'SBNK_LEFT_MEMBER_TO_SMPL'),
         ];
         mocks.openImage.mockResolvedValueOnce({
+            ...nativeWorkspaceFixture(),
             sessionId: 17,
             tree: [{ id: 'disk-17', name: 'nested.hds', kind: 'disk', childCount: 1, children: [volume] }],
             validation: {
@@ -1036,10 +1051,18 @@ describe('App panel layout', () => {
             },
         ];
         const opened = {
+            ...nativeWorkspaceFixture(),
             sessionId: 17,
             companionSources: [],
             floppySet: null,
             tree: [{ id: 'disk-17', name: 'DISK2', kind: 'disk' as const, childCount: 1, children: [volume] }],
+            sources: [
+                {
+                    ...nativeWorkspaceFixture().sources[0],
+                    source: { kind: 'DIRECTORY' as const, directory: { rootId: 'workspace', relativePath: 'DISK2' } },
+                    format: 'directory',
+                },
+            ],
             validation: {
                 valid: true,
                 issueCount: 0,
@@ -1068,7 +1091,7 @@ describe('App panel layout', () => {
             truncated: false,
             nextCursor: null,
         }));
-        mocks.inspectSandboxMediaSource.mockResolvedValue('AXK_OBJECT_DIRECTORY');
+        mocks.inspectSandboxMediaSource.mockResolvedValue('DIRECTORY');
         mocks.openImage.mockResolvedValueOnce(opened);
         mocks.objectPage.mockResolvedValue({
             objects: [bank, sample, wave],
@@ -1079,7 +1102,7 @@ describe('App panel layout', () => {
             ...opened,
             companionSources: [
                 {
-                    kind: 'axk-object-directory',
+                    kind: 'server-directory',
                     reference: { rootId: 'workspace', relativePath: 'DISK1' },
                     displayName: 'DISK1',
                 },
@@ -1104,8 +1127,9 @@ describe('App panel layout', () => {
             const picker = await screen.findByRole('dialog', { name: 'Open' });
             await fireEvent.click(await within(picker).findByText('Yamaha'));
             await fireEvent.click(await within(picker).findByText('DISK2'));
-            await fireEvent.click(within(picker).getByRole('button', { name: 'Open current folder' }));
-            await fireEvent.click(screen.getByRole('button', { name: 'Sample Banks' }));
+            await fireEvent.click(within(picker).getByRole('button', { name: 'Add current folder' }));
+            await fireEvent.click(within(picker).getByRole('button', { name: 'Open' }));
+            await fireEvent.click(await screen.findByRole('button', { name: 'Sample Banks' }));
             await fireEvent.click(await screen.findByRole('button', { name: 'Play Slice Bank' }));
 
             sequenceCompletion?.({
@@ -1168,6 +1192,8 @@ describe('App panel layout', () => {
         const picker = await screen.findByRole('dialog', { name: 'Open' });
         await fireEvent.click(await within(picker).findByText('Yamaha'));
         await fireEvent.click(await within(picker).findByText('disk01.ima'));
+        await fireEvent.click(within(picker).getByRole('button', { name: 'Add 1 file' }));
+        await fireEvent.click(within(picker).getByRole('button', { name: 'Open' }));
         await vi.waitFor(() => expect(mocks.openImage).toHaveBeenCalledOnce());
         await mocks.openImage.mock.results[0].value;
 
@@ -1212,7 +1238,7 @@ describe('App panel layout', () => {
         expect(screen.getByRole('button', { name: 'Create image' }).closest('aside')).toBe(navigator);
         expect(screen.queryByRole('textbox', { name: 'Disk image path' })).toBeNull();
         expect(screen.queryByRole('button', { name: 'Eject image' })).toBeNull();
-        expect(screen.getByText('Partitions and volumes')).toBeTruthy();
+        expect(screen.getByText('No source set open')).toBeTruthy();
     });
 
     it('keeps a Files initialization failure retryable without hiding Device status', async () => {
@@ -1255,6 +1281,7 @@ describe('App panel layout', () => {
 
     it('automatically warns when allocation integrity makes alteration unsafe', async () => {
         mocks.openImage.mockResolvedValueOnce({
+            ...nativeWorkspaceFixture(),
             sessionId: 17,
             revision: 4,
             companionSources: [],
@@ -1363,7 +1390,10 @@ describe('App panel layout', () => {
 
         await fireEvent.click(screen.getByRole('button', { name: 'Open' }));
         const replacementPicker = await screen.findByRole('dialog', { name: 'Open' });
+        await fireEvent.click(await within(replacementPicker).findByRole('option', { name: /nested\.hds/ }));
         await fireEvent.click(await within(replacementPicker).findByText('earlier.hds'));
+        await fireEvent.click(within(replacementPicker).getByRole('button', { name: 'Add 1 file' }));
+        await fireEvent.click(within(replacementPicker).getByRole('button', { name: 'Open' }));
         await vi.waitFor(() => expect(screen.getByText('Replacement is invalid')).toBeTruthy());
         await fireEvent.click(screen.getByRole('button', { name: 'Eject image' }));
         await vi.waitFor(() => expect(screen.getByRole('button', { name: 'Open' })).toBeTruthy());
@@ -1378,7 +1408,7 @@ describe('App panel layout', () => {
     it('closes the active image session when the application is unmounted', async () => {
         const desktop = renderAcknowledgedApp();
 
-        await chooseNestedImage();
+        await chooseNestedImage(false, false);
         await vi.waitFor(() => expect(mocks.openImage).toHaveBeenCalledOnce());
         await mocks.openImage.mock.results[0].value;
 
@@ -1414,6 +1444,7 @@ describe('App panel layout', () => {
             partitionIndex: 0,
         };
         const opened = {
+            ...nativeWorkspaceFixture(),
             sessionId: 17,
             tree: [{ id: 'disk-17', name: 'nested.hds', kind: 'disk' as const, childCount: 1, children: [volume] }],
             validation: {
@@ -1547,6 +1578,7 @@ describe('App panel layout', () => {
             partitionIndex: 0,
         };
         const opened = {
+            ...nativeWorkspaceFixture(),
             sessionId: 17,
             tree: [{ id: 'disk-17', name: 'nested.hds', kind: 'disk' as const, childCount: 1, children: [volume] }],
             validation: {
@@ -1692,6 +1724,7 @@ describe('App panel layout', () => {
             sampleWidthBytes: 2,
         };
         const opened = {
+            ...nativeWorkspaceFixture(),
             sessionId: 17,
             tree: [{ id: 'disk-17', name: 'nested.hds', kind: 'disk' as const, childCount: 1, children: [volume] }],
             validation: {
@@ -1765,11 +1798,12 @@ describe('App panel layout', () => {
         );
         const desktop = renderAcknowledgedApp();
 
-        await chooseNestedImage();
+        await chooseNestedImage(false, false);
         await vi.waitFor(() => expect(mocks.openImage).toHaveBeenCalledOnce());
         desktop.unmount();
 
         finishOpening?.({
+            ...nativeWorkspaceFixture(),
             sessionId: 29,
             tree: [{ id: 'disk-29', name: 'nested.hds', kind: 'disk', childCount: 0 }],
             validation: {
@@ -1811,6 +1845,7 @@ describe('App panel layout', () => {
             partitionIndex: 0,
         };
         mocks.openImage.mockResolvedValueOnce({
+            ...nativeWorkspaceFixture(),
             sessionId: 17,
             tree: [{ id: 'disk-17', name: 'nested.hds', kind: 'disk', childCount: 1, children: [volume] }],
             validation: {
@@ -1953,6 +1988,7 @@ describe('App panel layout', () => {
             partitionIndex: 0,
         };
         mocks.openImage.mockResolvedValueOnce({
+            ...nativeWorkspaceFixture(),
             sessionId: 17,
             tree: [{ id: 'disk-17', name: 'nested.hds', kind: 'disk', childCount: 1, children: [partition] }],
             validation: {
@@ -2007,6 +2043,7 @@ describe('App panel layout', () => {
             storedSizeBytes: 512,
         }));
         mocks.openImage.mockResolvedValueOnce({
+            ...nativeWorkspaceFixture(),
             sessionId: 17,
             tree: [
                 {
@@ -2104,6 +2141,7 @@ describe('App panel layout', () => {
             storedSizeBytes: 512,
         };
         mocks.openImage.mockResolvedValueOnce({
+            ...nativeWorkspaceFixture(),
             sessionId: 17,
             tree: [
                 {
@@ -2169,6 +2207,7 @@ describe('App panel layout', () => {
             partitionIndex: 0,
         };
         mocks.openImage.mockResolvedValueOnce({
+            ...nativeWorkspaceFixture(),
             sessionId: 17,
             tree: [
                 {
@@ -2448,6 +2487,7 @@ describe('App panel layout', () => {
             partitionIndex: 0,
         };
         mocks.openImage.mockResolvedValueOnce({
+            ...nativeWorkspaceFixture(),
             sessionId: 17,
             format: 'sfs',
             tree: [{ id: 'disk-17', name: 'nested.hds', kind: 'disk', childCount: 1, children: [volume] }],
@@ -2526,6 +2566,7 @@ describe('App panel layout', () => {
             partitionIndex: 0,
         };
         mocks.openImage.mockResolvedValueOnce({
+            ...nativeWorkspaceFixture(),
             sessionId: 17,
             format: 'sfs',
             tree: [{ id: 'disk-17', name: 'nested.hds', kind: 'disk', childCount: 1, children: [volume] }],
@@ -2617,6 +2658,7 @@ describe('App panel layout', () => {
         expect(await screen.findByText('nested.hds')).toBeTruthy();
         await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
 
+        await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Open' })).toBeNull());
         await fireEvent.click(screen.getByRole('button', { name: 'Open' }));
         expect(await screen.findByText('nested.hds')).toBeTruthy();
         expect(mocks.sandboxDirectory).toHaveBeenLastCalledWith({ rootId: 'workspace', relativePath: 'images' });
@@ -2646,6 +2688,7 @@ function openedImageWithVolumes(
     initialVolume: (typeof volumes)[number],
 ) {
     return {
+        ...nativeWorkspaceFixture(),
         sessionId: 17,
         format: 'sfs',
         companionSources: [],

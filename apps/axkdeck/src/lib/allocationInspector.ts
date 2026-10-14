@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 
 export interface AllocationInspectorRequest {
     imageId: string;
+    sourceMemberId: string;
     revision: number;
     partitionIndex: number;
     partitionName: string;

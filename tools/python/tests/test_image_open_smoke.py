@@ -18,13 +18,13 @@ class FakeClient:
         summary = {
             "imageId": "image-1",
             "revision": 1,
-            "format": "fat12",
-            "objectCount": 1,
-            "validation": {"valid": True, "errorCount": 0},
+            "sources": [{"id": "source-1", "format": "fat12", "diagnostics": []}],
+            "documents": [{"id": "document-1", "profile": self.device, "format": "fat12",
+                           "objectCount": 1, "validation": {"valid": True, "errorCount": 0, "warningCount": 0, "infoCount": 0}}] if self.device else [],
         }
         if path == "/images" and method == "POST":
             assert body == {
-                "source": {"kind": "FILE", "file": {"rootId": "corpus", "relativePath": "disk.img"}}
+                "sources": [{"kind": "FILE", "file": {"rootId": "corpus", "relativePath": "disk.img"}}]
             }
             return 202, {"data": {"jobId": "job-1"}}
         if path == "/jobs/job-1":
@@ -38,11 +38,12 @@ class FakeClient:
         if "/filesystem?" in path:
             parent = "parentId=root" in path
             offset = "offset=1" in path
-            entry = {
+            entry: dict[str, Any] = {
                 "id": "f2" if offset else "f1",
                 "parentId": "root",
                 "kind": "FILE",
                 "name": "second" if offset else "first",
+                "sourceMemberId": "source-1", "bindings": [],
             }
             return 200, {
                 "data": {
@@ -53,7 +54,7 @@ class FakeClient:
                     "totalCount": 2 if parent else 1,
                     "items": [entry]
                     if parent
-                    else [{"id": "root", "parentId": None, "kind": "ROOT", "name": "Disk"}],
+                    else [{"id": "root", "parentId": None, "kind": "ROOT", "name": "Disk", "sourceMemberId": "source-1", "bindings": []}],
                 }
             }
         if "/content?" in path:
@@ -119,9 +120,9 @@ def test_image_validation_errors_are_not_a_successful_open() -> None:
         def request(self, method: str, path: str, body: Any = None) -> tuple[int, Any]:
             status, document = super().request(method, path, body)
             if path == "/jobs/job-1":
-                document["data"]["result"]["validation"] = {"valid": False, "errorCount": 1}
+                document["data"]["result"]["documents"][0]["validation"] = {"valid": False, "errorCount": 1}
             elif path == "/images/image-1":
-                document["data"]["validation"] = {"valid": False, "errorCount": 1}
+                document["data"]["documents"][0]["validation"] = {"valid": False, "errorCount": 1}
             return status, document
 
     with pytest.raises(RuntimeError, match="validation"):
@@ -137,9 +138,9 @@ def test_warning_only_image_reports_issues_and_requires_requested_write_capabili
         def request(self, method: str, path: str, body: Any = None) -> tuple[int, Any]:
             status, document = super().request(method, path, body)
             if path == "/jobs/job-1":
-                document["data"]["result"]["validation"]["warningCount"] = 1
+                document["data"]["result"]["documents"][0]["validation"]["warningCount"] = 1
             elif path == "/images/image-1":
-                document["data"]["validation"]["warningCount"] = 1
+                document["data"]["documents"][0]["validation"]["warningCount"] = 1
             elif "/filesystem?" in path:
                 document["data"]["rootCapabilities"] = [
                     {"createDirectory": True, "putFile": True, "deleteEntry": True}
@@ -192,10 +193,10 @@ def test_directory_companions_require_each_completed_session_state() -> None:
 
         def request(self, method: str, path: str, body: Any = None) -> tuple[int, Any]:
             if path == "/images" and method == "POST":
-                assert body["source"] == {
-                    "kind": "AXK_OBJECT_DIRECTORY",
+                assert body["sources"] == [{
+                    "kind": "DIRECTORY",
                     "directory": {"rootId": "corpus", "relativePath": "disk1"},
-                }
+                }]
                 return 202, {"data": {"jobId": "job-1"}}
             if path.endswith("/companions"):
                 assert body["expectedRevision"] == self.revision
@@ -210,7 +211,8 @@ def test_directory_companions_require_each_completed_session_state() -> None:
             status, document = super().request(method, path, body)
             if path in {"/jobs/job-1", "/images/image-1"}:
                 summary = document["data"]["result"] if path == "/jobs/job-1" else document["data"]
-                summary.update(
+                summary["revision"] = self.revision
+                summary["documents"][0].update(
                     format="axk-object-directory",
                     revision=self.revision,
                     floppySet={
@@ -239,7 +241,7 @@ def test_directory_companions_require_each_completed_session_state() -> None:
             "filesystemAvailable": False,
             "minimumFiles": 0,
         },
-        source_kind="AXK_OBJECT_DIRECTORY",
+        source_kind="DIRECTORY",
         companion_steps=[
             {"path": "disk2", "beforeNextIndex": 2, "nextRequiredIndex": 3, "status": "INCOMPLETE"},
             {

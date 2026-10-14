@@ -343,8 +343,7 @@ axk::cli::LocalOperationRuntime::info(std::span<const LocalInfoSource> sources, 
     auto encoded = Json::array();
     for (const auto &source : sources) {
         if (source.object_directory) {
-            encoded.push_back(
-                {{"kind", "AXK_OBJECT_DIRECTORY"}, {"directory", directory_ref_json(*source.object_directory)}});
+            encoded.push_back({{"kind", "DIRECTORY"}, {"directory", directory_ref_json(*source.object_directory)}});
         } else if (source.file) {
             encoded.push_back({{"kind", "FILE"}, {"file", file_ref_json(*source.file)}});
         } else {

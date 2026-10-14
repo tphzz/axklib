@@ -32,25 +32,32 @@ add_library(axk_application STATIC src/alteration_journal.cpp src/alteration_jou
                                    src/filesystem_file_publication.cpp src/filesystem_native.cpp
                                    src/filesystem_native_publication.cpp src/filesystem_paths.cpp
                                    src/filesystem_roots.cpp src/filesystem_support.cpp src/filesystem_tree.cpp
-                                   src/image_session_access.cpp src/image_session_allocation_map.cpp src/image_session_audition.cpp
+                                   src/image_session_access.cpp src/image_session_allocation_map.cpp src/formats/a_series/audition.cpp
                                    src/image_allocation_map.cpp
                                    src/image_filesystem.cpp src/image_filesystem_index.cpp src/image_filesystem_edits.cpp
                                    src/image_filesystem_attributes.cpp
-                                   src/image_session_floppy_set.cpp src/image_session_inspection.cpp
-                                   src/image_session_volume_capacity.cpp src/volume_capacity.cpp
+                                   src/formats/a_series/floppy_set.cpp src/image_session_inspection.cpp
+                                   src/formats/a_series/volume_capacity.cpp src/volume_capacity.cpp
                                    src/image_session_contracts.cpp src/image_session_operations.cpp
-                                   src/image_session_program_generation.cpp
-                                   src/image_session_program_assignment_cleanup.cpp
-                                   src/image_session_system_program_contexts.cpp
-                                   src/image_session_object_detail.cpp src/image_session_object_reader.cpp src/image_session_open.cpp
-                                   src/a_series_sample_editor.cpp
-                                   src/a_series_program_editor.cpp src/program_editor_catalog.cpp
-                                   src/a_series_program_context.cpp
-                                   src/a_series_bank_editor.cpp
-                                   src/sample_formats.cpp
-                                   src/program_formats.cpp
-                                   src/image_session_directory.cpp
-                                   src/image_session_support.cpp src/image_sessions.cpp
+                                   src/formats/a_series/program_generation.cpp
+                                   src/formats/a_series/program_assignment_cleanup.cpp
+                                   src/formats/a_series/system_program_contexts.cpp
+                                   src/formats/a_series/object_detail.cpp src/formats/a_series/object_reader.cpp src/image_session_open.cpp
+                                   src/formats/a_series/pcm.cpp
+                                   src/formats/a_series/projection.cpp src/formats/a_series/identity.cpp
+                                   src/formats/a_series/support.cpp
+                                   src/formats/a_series/capabilities.cpp src/formats/a_series/deletion.cpp
+                                   src/formats/a_series/filesystem_bindings.cpp
+                                   src/formats/a_series/session_read.cpp
+                                   src/image_session_object_detail.cpp
+                                   src/formats/a_series/sample_editor.cpp
+                                   src/formats/a_series/program_editor.cpp src/formats/a_series/program_editor_catalog.cpp
+                                   src/formats/a_series/program_context.cpp
+                                   src/formats/a_series/bank_editor.cpp
+                                   src/formats/a_series/sample_formats.cpp
+                                   src/formats/a_series/program_formats.cpp
+                                   src/formats/a_series/directory.cpp
+                                   src/image_session_support.cpp src/image_sessions.cpp src/image_sources.cpp
                                    src/job_request_resources.cpp src/jobs.cpp src/operation_diagnostics.cpp src/midi_operations.cpp
                                    src/jobs_support.cpp
                                    src/operation_registry.cpp src/operation_registry_names.cpp
@@ -77,6 +84,8 @@ add_library(axk_application STATIC src/alteration_journal.cpp src/alteration_jou
                                    src/session_write_operations.cpp src/write_manifest_operations.cpp
                                    src/write_manifest_support.cpp src/write_operations.cpp src/write_plan_support.cpp)
 add_library(axklib::application ALIAS axk_application)
+target_sources(axk_application PRIVATE src/image_document_discovery.cpp src/image_document_browsing.cpp
+  src/image_source_read.cpp src/image_filesystem_workspace.cpp src/formats/a_series/admission.cpp src/formats/tx16w/session_state.cpp)
 set_target_properties(axk_application PROPERTIES POSITION_INDEPENDENT_CODE ON CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
 target_sources(axk_application PRIVATE src/device_provider.cpp src/device_xml.cpp src/device_source.cpp src/device_sessions.cpp
                                        src/device_patch_alignment.cpp src/device_transactions.cpp src/image_device_mutation.cpp
@@ -90,10 +99,11 @@ target_include_directories(
   axk_application
   PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include"
   PRIVATE "${AXK_REPOSITORY_ROOT}/library/internal"
+          "${CMAKE_CURRENT_SOURCE_DIR}/src"
 )
 target_link_libraries(
   axk_application
-  PUBLIC axklib::audio nlohmann_json::nlohmann_json
+  PUBLIC axklib::audio axklib::format_a_series nlohmann_json::nlohmann_json
   PRIVATE OpenSSL::Crypto unofficial::hash-library ICU::i18n ICU::uc
 )
 if(WIN32)
@@ -131,7 +141,7 @@ if(BUILD_TESTING)
                                        tests/program_bitmap_reporting_test.cpp
                                        tests/program_formats_test.cpp
                                        tests/a_series_program_editor_test.cpp
-                                       tests/filesystem_test.cpp tests/natural_name_order_test.cpp tests/image_filesystem_test.cpp tests/image_sessions_test.cpp tests/jobs_test.cpp
+                                       tests/filesystem_test.cpp tests/natural_name_order_test.cpp tests/image_filesystem_test.cpp tests/image_sessions_test.cpp tests/image_sources_test.cpp tests/jobs_test.cpp
                                        tests/filesystem_edit_operations_test.cpp
                                        tests/filesystem_fat_edit_test.cpp
                                        tests/filesystem_inputs_test.cpp

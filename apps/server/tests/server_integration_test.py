@@ -854,7 +854,7 @@ def exercise_raw_filesystem_jobs(
     copy.write_bytes((root / "fixture.hds").read_bytes())
     status, opened = http_request(
         port, "POST", "/api/v1/images",
-        {"source": {"kind": "FILE", "file": {"rootId": "workspace", "relativePath": copy.name}}},
+        {"sources": [{"kind": "FILE", "file": {"rootId": "workspace", "relativePath": copy.name}}]},
     )
     assert status == 202, opened
     ready = wait_for_job(port, opened["data"]["jobId"], process)
@@ -1302,7 +1302,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 },
             )
             assert status == 200, object_inspection
-            assert object_inspection["data"]["mediaSourceKind"] == "AXK_OBJECT_DIRECTORY"
+            assert object_inspection["data"]["mediaSourceKind"] == "DIRECTORY"
             status, ordinary_inspection = http_request(
                 port,
                 "POST",
@@ -1771,13 +1771,13 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 "POST",
                 "/api/v1/images",
                 {
-                    "source": {
+                    "sources": [{
                         "kind": "FILE",
                         "file": {
                             "rootId": "workspace",
                             "relativePath": session_fixture.name,
                         },
-                    }
+                    }]
                 },
             )
             assert status == 202, opened
@@ -1882,9 +1882,10 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
             )
             assert status == 409, in_use
             assert in_use["error"]["code"] == "entry_in_use"
-            assert opened_image["data"]["format"] == "sfs"
+            document_id = opened_image["data"]["documents"][0]["id"]
+            assert opened_image["data"]["documents"][0]["format"] == "sfs"
             assert opened_image["data"]["revision"] == 1
-            assert opened_image["data"]["availableOperations"] == [
+            assert opened_image["data"]["documents"][0]["availableOperations"] == [
                 "images.content",
                 "images.objects",
                 "images.relationships",
@@ -1910,21 +1911,21 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 "images.program_assignments.cleanup.inspect",
                 "images.program_assignments.cleanup",
             ]
-            assert opened_image["data"]["objectCount"] > 0
+            assert opened_image["data"]["documents"][0]["objectCount"] > 0
             status, missing_system_partition = http_request(
-                port, "GET", f"/api/v1/images/{image_id}/system-program-contexts"
+                port, "GET", f"/api/v1/images/{image_id}/documents/{document_id}/system-program-contexts"
             )
             assert status == 400, missing_system_partition
             status, invalid_system_partition = http_request(
                 port,
                 "GET",
-                f"/api/v1/images/{image_id}/system-program-contexts?partitionIndex=8",
+                f"/api/v1/images/{image_id}/documents/{document_id}/system-program-contexts?partitionIndex=8",
             )
             assert status == 400, invalid_system_partition
             status, system_program_contexts = http_request(
                 port,
                 "GET",
-                f"/api/v1/images/{image_id}/system-program-contexts?partitionIndex=0",
+                f"/api/v1/images/{image_id}/documents/{document_id}/system-program-contexts?partitionIndex=0",
             )
             assert status == 200, system_program_contexts
             assert system_program_contexts["data"] == {
@@ -1947,12 +1948,12 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 "message": "",
             }
             status, objects = http_request(
-                port, "GET", f"/api/v1/images/{image_id}/objects?limit=100"
+                port, "GET", f"/api/v1/images/{image_id}/documents/{document_id}/objects?limit=100"
             )
             assert status == 200 and objects["data"]["items"], objects
             for invalid_page in ("limit=0", "limit=5001", f"cursor={'x' * 513}"):
                 status, invalid = http_request(
-                    port, "GET", f"/api/v1/images/{image_id}/objects?{invalid_page}"
+                    port, "GET", f"/api/v1/images/{image_id}/documents/{document_id}/objects?{invalid_page}"
                 )
                 assert status == 400, invalid
             assert all(
@@ -1961,12 +1962,12 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
             assert all(item["sizeBytes"] > 0 for item in objects["data"]["items"])
             assert root not in json.dumps(objects)
             status, waveforms = http_request(
-                port, "GET", f"/api/v1/images/{image_id}/objects?limit=100&type=SMPL"
+                port, "GET", f"/api/v1/images/{image_id}/documents/{document_id}/objects?limit=100&type=SMPL"
             )
             assert status == 200 and waveforms["data"]["items"], waveforms
             assert all(item["type"] == "SMPL" for item in waveforms["data"]["items"])
             status, missing_objects = http_request(
-                port, "GET", f"/api/v1/images/{image_id}/objects?limit=100&type=MISSING"
+                port, "GET", f"/api/v1/images/{image_id}/documents/{document_id}/objects?limit=100&type=MISSING"
             )
             assert status == 200 and missing_objects["data"]["items"] == [], (
                 missing_objects
@@ -1980,7 +1981,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
             ), waveform
             preview_query = urlencode({"objectId": waveform["id"], "bins": 16})
             status, preview = http_request(
-                port, "GET", f"/api/v1/images/{image_id}/preview?{preview_query}"
+                port, "GET", f"/api/v1/images/{image_id}/documents/{document_id}/preview?{preview_query}"
             )
             assert status == 200 and "frameCount" not in preview["data"], preview
             assert len(preview["data"]["lanes"]) == 1, preview
@@ -2012,7 +2013,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 port,
                 "POST",
                 "/api/v1/auditions",
-                {"imageId": image_id, "objectIds": [waveform["id"]]},
+                {"documentId": "document-a-series-source-1", "imageId": image_id, "objectIds": [waveform["id"]]},
             )
             assert status == 202, submitted
             audition_job = wait_for_job(port, str(submitted["data"]["jobId"]), process)
@@ -2046,7 +2047,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
             )
             assert status == 404
             status, content_page = http_request(
-                port, "GET", f"/api/v1/images/{image_id}/content?limit=2"
+                port, "GET", f"/api/v1/images/{image_id}/documents/{document_id}/content?limit=2"
             )
             assert status == 200 and content_page["data"]["items"], content_page
             assert content_page["data"]["totalCount"] >= len(
@@ -2063,7 +2064,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
             parent_id = content_page["data"]["items"][0]["id"]
             child_query = urlencode({"limit": 100, "parentId": parent_id})
             status, child_page = http_request(
-                port, "GET", f"/api/v1/images/{image_id}/content?{child_query}"
+                port, "GET", f"/api/v1/images/{image_id}/documents/{document_id}/content?{child_query}"
             )
             assert status == 200 and child_page["data"]["items"], child_page
             assert child_page["data"]["totalCount"] >= len(
@@ -2073,7 +2074,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 item["parentId"] == parent_id for item in child_page["data"]["items"]
             ), child_page
             status, relationships = http_request(
-                port, "GET", f"/api/v1/images/{image_id}/relationships?limit=2"
+                port, "GET", f"/api/v1/images/{image_id}/documents/{document_id}/relationships?limit=2"
             )
             assert status == 200 and relationships["data"]["items"], relationships
             assert all(
@@ -2091,7 +2092,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
             status, filtered_relationships = http_request(
                 port,
                 "GET",
-                f"/api/v1/images/{image_id}/relationships?{relationship_query}",
+                f"/api/v1/images/{image_id}/documents/{document_id}/relationships?{relationship_query}",
             )
             assert status == 200 and filtered_relationships["data"]["items"], (
                 filtered_relationships
@@ -2102,7 +2103,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 for item in filtered_relationships["data"]["items"]
             ), filtered_relationships
             status, validation = http_request(
-                port, "GET", f"/api/v1/images/{image_id}/validation/issues?limit=2"
+                port, "GET", f"/api/v1/images/{image_id}/documents/{document_id}/validation/issues?limit=2"
             )
             assert status == 200 and "items" in validation["data"], validation
 
@@ -2111,7 +2112,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 for item in objects["data"]["items"]
             }
             session_alteration = {
-                "imageId": image_id,
+                "documentId": "document-a-series-source-1", "imageId": image_id,
                 "expectedRevision": 1,
                 "manifest": {
                     "inline": {
@@ -2147,7 +2148,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
             status, refreshed = http_request(port, "GET", f"/api/v1/images/{image_id}")
             assert status == 200 and refreshed["data"]["revision"] == 2, refreshed
             status, refreshed_objects = http_request(
-                port, "GET", f"/api/v1/images/{image_id}/objects?limit=100"
+                port, "GET", f"/api/v1/images/{image_id}/documents/{document_id}/objects?limit=100"
             )
             assert status == 200, refreshed_objects
             assert {
@@ -2159,7 +2160,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 for item in refreshed_objects["data"]["items"]
             ), refreshed_objects
             status, refreshed_roots = http_request(
-                port, "GET", f"/api/v1/images/{image_id}/content?limit=100"
+                port, "GET", f"/api/v1/images/{image_id}/documents/{document_id}/content?limit=100"
             )
             assert status == 200 and refreshed_roots["data"]["items"], refreshed_roots
             refreshed_parent = refreshed_roots["data"]["items"][0]["id"]
@@ -2169,7 +2170,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
             status, refreshed_children = http_request(
                 port,
                 "GET",
-                f"/api/v1/images/{image_id}/content?{refreshed_child_query}",
+                f"/api/v1/images/{image_id}/documents/{document_id}/content?{refreshed_child_query}",
             )
             assert status == 200, refreshed_children
             assert any(
@@ -2183,7 +2184,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 if item["type"] == "SBNK"
             )
             deletion_request = {
-                "imageId": image_id,
+                "documentId": "document-a-series-source-1", "imageId": image_id,
                 "expectedRevision": 2,
                 "targetObjectIds": [sample["id"]],
                 "referrerObjectIds": [],
@@ -2233,7 +2234,7 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 deleted_object_ids
             ), deletion_job
             status, after_deletion = http_request(
-                port, "GET", f"/api/v1/images/{image_id}/objects?limit=100"
+                port, "GET", f"/api/v1/images/{image_id}/documents/{document_id}/objects?limit=100"
             )
             assert status == 200, after_deletion
             assert deleted_object_ids.isdisjoint(

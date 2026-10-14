@@ -32,10 +32,17 @@ Result<std::vector<std::byte>> read_filesystem_range(const MediaContainer &media
                 }
                 if (fat && locator.ordinal < fat->files().size())
                     return fat->read_file_range(fat->files()[locator.ordinal], offset, size, cancellation);
-            } else {
+            } else if constexpr (std::is_same_v<T, IsoFilesystemFile>) {
                 if (const auto *iso = std::get_if<IsoImage>(&media.storage());
                     iso && locator.ordinal < iso->files().size())
                     return iso->read_file_range(iso->files()[locator.ordinal], offset, size, cancellation);
+            } else {
+                if (locator.reader && offset <= locator.reader->size() && size <= locator.reader->size() - offset) {
+                    std::vector<std::byte> result(size);
+                    if (auto read = locator.reader->read_exact_at(offset, result); !read)
+                        return std::unexpected(read.error());
+                    return result;
+                }
             }
             return std::unexpected(axk::make_error(ErrorCode::invalid_argument, ErrorCategory::container,
                                                    "Filesystem payload locator is invalid"));

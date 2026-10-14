@@ -154,14 +154,15 @@ result<image> device_host::open_image(const std::string &id, const std::string &
             source.kind = app::ImageSourceKind::device;
             source.device_session_id = id;
             source.device_target_id = target;
-            auto opened = impl_->images.open(source, std::string{owner}, context.impl_->cancellation.token(),
+            auto opened = impl_->images.open({{source}, {}}, std::string{owner}, context.impl_->cancellation.token(),
                                              context.impl_.get());
             if (!opened)
                 return failure(opened.error());
             impl_->opened.emplace(key, std::move(*opened));
         }
         const auto &opened = impl_->opened.at(key);
-        auto access = impl_->images.begin_read(opened.image_id, owner, opened.revision);
+        auto access =
+            impl_->images.begin_source_read({opened.image_id, opened.sources.front().id}, owner, opened.revision);
         if (!access)
             return failure(access.error());
         auto media = open_media(access->reader, "device.hds", context.impl_->cancellation.token());
@@ -191,6 +192,8 @@ result<device_operation> device_host::apply(const std::string &id, const std::st
         const auto at = impl_->opened.find({id, target});
         if (at == impl_->opened.end())
             return invalid_argument("open the device target before editing");
+        if (at->second.documents.size() != 1U || at->second.documents.front().format_id != "yamaha.a-series")
+            return invalid_argument("device target has no unique editable A-series document");
         if (manifest.size() > 1024U * 1024U)
             return invalid_argument("alteration manifest exceeds 1 MiB");
         auto json = nlohmann::json::parse(manifest, nullptr, false);
@@ -201,6 +204,7 @@ result<device_operation> device_host::apply(const std::string &id, const std::st
                                         operation_id};
         auto applied = impl_->registry.invoke("images.alter",
                                               {{"imageId", at->second.image_id},
+                                               {"documentId", at->second.documents.front().id},
                                                {"expectedRevision", at->second.revision},
                                                {"manifest", {{"inline", std::move(json)}}}},
                                               execution);

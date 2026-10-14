@@ -6,11 +6,14 @@ import { HttpImageTransport } from '../../lib/httpTransport';
 import { serverFileLocation } from '../../lib/storageLocations';
 import type { ObjectDetail } from '../../lib/transport';
 import { ObjectEditorWorkflow } from './workflow.svelte';
+import { nativeWorkspaceFixture } from '../../test/nativeWorkspaceFixture';
 
 function sampleDetail(): ObjectDetail {
     return {
+        formatId: 'yamaha.a-series',
+        profile: 'a-series',
         schemaVersion: 1,
-        image: { imageId: 'image-1', revision: 1, format: 'sfs' },
+        image: { documentId: 'document-a-series-source-1', imageId: 'image-1', revision: 1, format: 'sfs' },
         object: {
             sampleFormat: sampleFormatFixture().sampleFormat,
             programFormat: null,
@@ -128,10 +131,9 @@ async function setup(detail: ObjectDetail, failConversion = false) {
                     result: {
                         imageId: 'image-1',
                         revision: 1,
-                        format: 'sfs',
-                        companionSources: [],
-                        floppySet: null,
-                        validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                        sources: nativeWorkspaceFixture().sources,
+                        documents: nativeWorkspaceFixture().documents,
+                        discovery: nativeWorkspaceFixture().discovery,
                     },
                 });
             if (path.endsWith('/content')) return response({ items: [], totalCount: 0, nextCursor: null });
@@ -144,7 +146,7 @@ async function setup(detail: ObjectDetail, failConversion = false) {
         bearerToken: 'test',
         mode: 'local',
     });
-    const image = await transport.openImage(serverFileLocation({ rootId: 'test', relativePath: 'test.hds' }));
+    const image = await transport.openImage([serverFileLocation({ rootId: 'test', relativePath: 'test.hds' })]);
     const workflow = new ObjectEditorWorkflow({
         transport,
         refresh: vi.fn(),

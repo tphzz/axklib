@@ -93,13 +93,16 @@ class SessionVolumeFloppyExportOperationsTest : public testing::Test {
     }
 
     [[nodiscard]] nlohmann::json base_request() {
-        const auto opened = images_->open({"workspace", "source.hds"}, "owner");
+        const auto opened = images_->open({{{"workspace", "source.hds"}}, {}}, "owner");
         EXPECT_TRUE(opened) << opened.error().message;
-        const auto roots = images_->content(opened->image_id, "owner", 32U);
+        const auto roots = images_->content({opened->image_id, "document-a-series-source-1"}, "owner", 32U);
         EXPECT_TRUE(roots) << roots.error().message;
         const auto partition = std::ranges::find(roots->items, "partition", &axk::app::ImageContentItem::kind);
         EXPECT_NE(partition, roots->items.end());
-        return {{"imageId", opened->image_id}, {"expectedRevision", opened->revision}, {"scopeId", partition->id}};
+        return {{"imageId", opened->image_id},
+                {"documentId", "document-a-series-source-1"},
+                {"expectedRevision", opened->revision},
+                {"scopeId", partition->id}};
     }
 
     std::filesystem::path root_;

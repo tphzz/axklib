@@ -23,7 +23,7 @@ namespace {
 MediaObjectDescriptor describe_media_object(const MediaObject &object) {
     return {
         object.key,         object.logical_path, object.scope_key,   object.raw_group, object.raw_volume,
-        object.group_label, object.volume_label, object.data_offset, object.size,
+        object.group_label, object.volume_label, object.data_offset, object.size,      object.source_files,
     };
 }
 

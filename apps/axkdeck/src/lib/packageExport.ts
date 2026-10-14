@@ -21,7 +21,7 @@ function mediaRootName(items: PackageExportSelection[], location: ImageLocation 
     if (items.length !== 1 || items[0]?.kind !== 'VOLUME' || !location) return undefined;
 
     const basename = locationBasename(location);
-    if (location.kind === 'axk-object-directory') return basename || undefined;
+    if (location.kind === 'server-directory') return basename || undefined;
 
     const match = /^(.*)\.(?:ima|img)$/i.exec(basename);
     return match?.[1] || undefined;

@@ -18,7 +18,15 @@ import {
     mapRelationship,
     validationSummary,
 } from './httpTransportModels';
-import { collectPages } from './pagination';
+import { aSeriesHierarchy, documentCapabilities } from '../features/devices/a-series/openedDocument';
+import {
+    documentPath,
+    documentSession,
+    documentTarget,
+    selectedDocument,
+    refreshedDocumentSession,
+} from './httpNativeDocuments';
+import { HttpNativeDocumentReads } from './httpNativeDocumentReads';
 import type { ImageLocation, InputFileLocation } from './storageLocations';
 import type {
     CompanionSelection,
@@ -51,7 +59,6 @@ import { inspectVolumeCapacity, inspectVolumeDeletion } from './httpVolumeOperat
 import { startSu700Import } from './httpSu700Import';
 import { inspectFilesystemInputs, inspectFilesystemImage, filesystemEditWire } from './httpFilesystemInputs';
 import type { Su700Request } from './su700Import';
-import type { DiskTreeItem } from './types';
 import type { FilesystemEdit, FilesystemPage, FilesystemQuery, FilesystemImportEntry } from './filesystem';
 import type {
     FilesystemExportDestination,
@@ -135,6 +142,7 @@ export class HttpImageSessions {
     async filesystem(sessionId: number, filter: FilesystemQuery = {}): Promise<FilesystemPage> {
         const session = this.get(sessionId);
         const query = new URLSearchParams({ expectedRevision: String(session.revision), limit: '200' });
+        if (filter.objectId || filter.contentScopeId) query.set('documentId', documentTarget(session).documentId);
         for (const [key, value] of Object.entries(filter)) {
             if (value !== undefined) query.set(key, String(value));
         }
@@ -142,6 +150,7 @@ export class HttpImageSessions {
             'GET',
             `/images/${encodeURIComponent(session.remoteId)}/filesystem?${query}`,
         );
+        this.assertCurrent(sessionId, session);
         const kinds = { ROOT: 'root', PARTITION: 'partition', DIRECTORY: 'directory', FILE: 'file' } as const;
         return { ...page, items: page.items.map((entry) => ({ ...entry, kind: kinds[entry.kind] })) };
     }
@@ -170,6 +179,7 @@ export class HttpImageSessions {
     private readonly sessions = new Map<number, SessionState>();
     private nextSessionId = 1;
     readonly mutations: HttpCapacityGate;
+    readonly native: HttpNativeDocumentReads;
 
     constructor(
         private readonly client: AxklibHttpApiClient,
@@ -177,15 +187,19 @@ export class HttpImageSessions {
         mutations?: HttpCapacityGate,
     ) {
         this.mutations = mutations ?? new HttpCapacityGate(client, jobs);
+        this.native = new HttpNativeDocumentReads(client, (id) => this.get(id));
     }
 
-    async open(location: ImageLocation, options: ImageOpenOptions = {}): Promise<OpenedImage> {
-        if (!['server-file', 'axk-object-directory', 'device'].includes(location.kind)) {
-            throw new Error('Opening images requires a server sandbox file selection or AXK object directory');
-        }
-        const wireSource = imageSourceReference(location);
+    async open(locations: ImageLocation[], options: ImageOpenOptions = {}): Promise<OpenedImage> {
+        if (
+            !locations.length ||
+            locations.length > 32 ||
+            locations.some((location) => !['server-file', 'server-directory', 'device'].includes(location.kind)) ||
+            (locations.length > 1 && locations.some((location) => location.kind === 'device'))
+        )
+            throw new Error('Select one to 32 files or folders, or one physical device');
         const submitted = await this.client.request<components['schemas']['Job']>('POST', '/images', {
-            source: wireSource,
+            sources: locations.map(imageSourceReference),
         });
         if (!this.jobs.isJob(submitted)) throw new Error('images.open did not return a job');
         const localJob = this.jobs.map(submitted);
@@ -208,16 +222,8 @@ export class HttpImageSessions {
         }
         const summary = completed.result as ApiImageSummary;
         const sessionId = this.nextSessionId++;
-        if (location.kind === 'device') this.client.deviceWrites.bind(summary.imageId, location);
-        this.sessions.set(sessionId, {
-            remoteId: summary.imageId,
-            revision: summary.revision,
-            source: location,
-            contentCursors: new Map(),
-            contentItems: new Map(),
-            objectCursors: new Map(),
-            relationshipCursors: new Map(),
-        });
+        if (locations[0].kind === 'device') this.client.deviceWrites.bind(summary.imageId, locations[0]);
+        this.sessions.set(sessionId, { ...documentSession(summary), sources: locations, source: locations[0] });
         try {
             return await this.openedImage(sessionId, summary);
         } catch (error) {
@@ -232,7 +238,8 @@ export class HttpImageSessions {
             'GET',
             `/images/${encodeURIComponent(session.remoteId)}`,
         );
-        this.replaceRevision(session, summary.revision);
+        this.assertCurrent(sessionId, session);
+        this.sessions.set(sessionId, refreshedDocumentSession(summary, session));
         return this.openedImage(sessionId, summary);
     }
 
@@ -242,7 +249,36 @@ export class HttpImageSessions {
             'GET',
             `/images/${encodeURIComponent(session.remoteId)}`,
         );
-        if (summary.revision > session.revision) this.replaceRevision(session, summary.revision);
+        this.assertCurrent(sessionId, session);
+        if (summary.revision > session.revision)
+            this.sessions.set(sessionId, refreshedDocumentSession(summary, session));
+    }
+
+    async selectDocument(sessionId: number, documentId: string | null): Promise<OpenedImage> {
+        const previous = this.get(sessionId);
+        const next = documentSession(previous.summary, documentId);
+        this.sessions.set(sessionId, next);
+        try {
+            return await this.openedImage(sessionId, previous.summary);
+        } catch (error) {
+            if (this.get(sessionId) === next) this.sessions.set(sessionId, previous);
+            throw error;
+        }
+    }
+
+    async resolveDocuments(sessionId: number, selectedFormats: string[]): Promise<OpenedImage> {
+        const session = this.get(sessionId);
+        const summary = await this.client.request<ApiImageSummary>(
+            'POST',
+            `/images/${encodeURIComponent(session.remoteId)}/documents`,
+            {
+                expectedRevision: session.revision,
+                selectedFormats,
+            },
+        );
+        this.assertCurrent(sessionId, session);
+        this.sessions.set(sessionId, documentSession(summary));
+        return this.openedImage(sessionId, summary);
     }
 
     async attachCompanions(sessionId: number, selection: CompanionSelection): Promise<OpenedImage> {
@@ -251,15 +287,12 @@ export class HttpImageSessions {
             selection.kind === 'sources'
                 ? { kind: 'SOURCES', sources: selection.sources.map(imageSourceReference) }
                 : { kind: 'IMMEDIATE_SIBLINGS' };
-        const summary = await this.client.request<ApiImageSummary>(
-            'POST',
-            `/images/${encodeURIComponent(session.remoteId)}/companions`,
-            {
-                expectedRevision: session.revision,
-                selection: wireSelection,
-            },
-        );
-        this.replaceRevision(session, summary.revision);
+        const summary = await this.client.request<ApiImageSummary>('POST', `${documentPath(session)}/companions`, {
+            expectedRevision: session.revision,
+            selection: wireSelection,
+        });
+        this.assertCurrent(sessionId, session);
+        this.sessions.set(sessionId, documentSession(summary, session.documentId));
         return this.openedImage(sessionId, summary);
     }
 
@@ -277,8 +310,9 @@ export class HttpImageSessions {
         if (parentId) query.set('parentId', parentId);
         const page = await this.client.request<ApiPage<ApiContentItem>>(
             'GET',
-            `/images/${encodeURIComponent(session.remoteId)}/content?${query}`,
+            `${documentPath(session)}/content?${query}`,
         );
+        this.assertCurrent(sessionId, session);
         if (page.nextCursor) cursors.set(offset + page.items.length, page.nextCursor);
         const parent = session.contentItems.get(parentId);
         const items = page.items.map((item) => mapContentItem(item, parent));
@@ -295,8 +329,9 @@ export class HttpImageSessions {
             if (cursor) query.set('cursor', cursor);
             const page = await this.client.request<ApiPage<ImageValidationIssue>>(
                 'GET',
-                `/images/${encodeURIComponent(session.remoteId)}/validation/issues?${query}`,
+                `${documentPath(session)}/validation/issues?${query}`,
             );
+            this.assertCurrent(sessionId, session);
             issues.push(...page.items);
             cursor = page.nextCursor;
             if (!cursor) return issues;
@@ -306,7 +341,9 @@ export class HttpImageSessions {
 
     async allocationMapReference(sessionId: number): Promise<AllocationMapReference> {
         const session = this.get(sessionId);
-        return { imageId: session.remoteId, revision: session.revision };
+        const document = selectedDocument(session);
+        if (!document || document.sourceMemberIds.length !== 1) throw new Error('Select one allocation source');
+        return { imageId: session.remoteId, sourceMemberId: document.sourceMemberIds[0], revision: session.revision };
     }
 
     async objectPage(
@@ -330,18 +367,17 @@ export class HttpImageSessions {
         if (filter.scopeId) query.set('scopeId', filter.scopeId);
         const page = await this.client.request<ApiPage<ApiObjectItem>>(
             'GET',
-            `/images/${encodeURIComponent(session.remoteId)}/objects?${query}`,
+            `${documentPath(session)}/objects?${query}`,
         );
+        this.assertCurrent(sessionId, session);
         if (page.nextCursor) cursors.set(offset + page.items.length, page.nextCursor);
         return { objects: page.items.map(mapObject), totalCount: page.totalCount };
     }
 
     async objectDetail(sessionId: number, objectId: string): Promise<ObjectDetail> {
-        const session = this.get(sessionId);
-        return this.client.request<ObjectDetail>(
-            'GET',
-            `/images/${encodeURIComponent(session.remoteId)}/objects/${encodeURIComponent(objectId)}`,
-        );
+        const detail = await this.native.detail(sessionId, objectId);
+        if (detail.formatId !== 'yamaha.a-series') throw new Error('The A-series editor cannot open this document');
+        return detail;
     }
 
     async relationshipPage(
@@ -372,8 +408,9 @@ export class HttpImageSessions {
         if (filter.relationshipType) query.set('type', filter.relationshipType);
         const page = await this.client.request<ApiPage<ApiRelationshipItem>>(
             'GET',
-            `/images/${encodeURIComponent(session.remoteId)}/relationships?${query}`,
+            `${documentPath(session)}/relationships?${query}`,
         );
+        this.assertCurrent(sessionId, session);
         if (page.nextCursor) cursors.set(offset + page.items.length, page.nextCursor);
         return { relationships: page.items.map(mapRelationship), totalCount: page.totalCount };
     }
@@ -381,10 +418,12 @@ export class HttpImageSessions {
     async systemProgramContexts(sessionId: number, partitionIndex: number): Promise<SystemProgramContexts> {
         const session = this.get(sessionId);
         const query = new URLSearchParams({ partitionIndex: String(partitionIndex) });
-        return this.client.request<SystemProgramContexts>(
+        const result = await this.client.request<SystemProgramContexts>(
             'GET',
-            `/images/${encodeURIComponent(session.remoteId)}/system-program-contexts?${query}`,
+            `${documentPath(session)}/system-program-contexts?${query}`,
         );
+        this.assertCurrent(sessionId, session);
+        return result;
     }
 
     async close(sessionId: number): Promise<void> {
@@ -422,7 +461,7 @@ export class HttpImageSessions {
     ): Promise<PlacementRepairInspection> {
         const session = this.get(sessionId);
         const result = await this.client.invoke<PlacementRepairInspection>('images.placement.inspect', {
-            imageId: session.remoteId,
+            ...documentTarget(session),
             expectedRevision: session.revision,
             scope,
             ...(recoveryVolumeName ? { recoveryVolumeName } : {}),
@@ -438,7 +477,7 @@ export class HttpImageSessions {
     ): Promise<JobState> {
         const session = this.get(sessionId);
         const result = await this.client.invoke<Record<string, unknown>>('images.placement.repair.prepare', {
-            imageId: session.remoteId,
+            ...documentTarget(session),
             expectedRevision: session.revision,
             scope,
             ...(recoveryVolumeName ? { recoveryVolumeName } : {}),
@@ -455,7 +494,7 @@ export class HttpImageSessions {
     ): Promise<ObjectDeletionInspection> {
         const session = this.get(sessionId);
         const result = await this.client.invoke<ApiObjectDeletionInspection>('images.deletion.inspect', {
-            imageId: session.remoteId,
+            ...documentTarget(session),
             expectedRevision: session.revision,
             targetObjectIds,
             referrerObjectIds,
@@ -468,7 +507,7 @@ export class HttpImageSessions {
     async inspectWaveDataOrphans(sessionId: number, contentScopeId: string): Promise<WaveDataOrphanInspection> {
         const session = this.get(sessionId);
         const result = await this.client.invoke<ApiWaveDataOrphanInspection>('images.deletion.orphans.inspect', {
-            imageId: session.remoteId,
+            ...documentTarget(session),
             expectedRevision: session.revision,
             contentScopeId,
         });
@@ -486,7 +525,7 @@ export class HttpImageSessions {
         const result = await this.client.invoke<never>(
             'images.delete',
             {
-                imageId: session.remoteId,
+                ...documentTarget(session),
                 expectedRevision: session.revision,
                 targetObjectIds,
                 referrerObjectIds,
@@ -501,7 +540,7 @@ export class HttpImageSessions {
     async inspectProgramGeneration(sessionId: number, contentScopeId: string): Promise<ProgramGenerationInspection> {
         const session = this.get(sessionId);
         const result = await this.client.invoke<ProgramGenerationInspection>('images.programs.generate.inspect', {
-            imageId: session.remoteId,
+            ...documentTarget(session),
             expectedRevision: session.revision,
             contentScopeId,
         });
@@ -518,7 +557,7 @@ export class HttpImageSessions {
     ): Promise<JobState> {
         const session = this.get(sessionId);
         const result = await this.client.invoke<Record<string, unknown>>('images.programs.generate.prepare', {
-            imageId: session.remoteId,
+            ...documentTarget(session),
             expectedRevision: session.revision,
             contentScopeId,
             programs,
@@ -534,7 +573,7 @@ export class HttpImageSessions {
         const session = this.get(sessionId);
         const result = await this.client.invoke<ProgramAssignmentCleanupInspection>(
             'images.program_assignments.cleanup.inspect',
-            { imageId: session.remoteId, expectedRevision: session.revision, contentScopeId },
+            { ...documentTarget(session), expectedRevision: session.revision, contentScopeId },
         );
         if (this.jobs.isJob(result)) {
             throw new Error('images.program_assignments.cleanup.inspect unexpectedly returned a job');
@@ -550,7 +589,7 @@ export class HttpImageSessions {
         const session = this.get(sessionId);
         const result = await this.client.invoke<never>(
             'images.program_assignments.cleanup',
-            { imageId: session.remoteId, expectedRevision: session.revision, contentScopeId, assignments },
+            { ...documentTarget(session), expectedRevision: session.revision, contentScopeId, assignments },
             { idempotencyKey: randomIdempotencyKey() },
         );
         if (!this.jobs.isJob(result)) {
@@ -567,7 +606,7 @@ export class HttpImageSessions {
         const result = await this.client.invoke<never>(
             'images.extent_layout.repair',
             {
-                imageId: session.remoteId,
+                ...documentTarget(session),
                 expectedRevision: session.revision,
                 destination,
             },
@@ -585,7 +624,7 @@ export class HttpImageSessions {
         if (operations.length === 0) throw new Error('at least one image mutation is required');
         const session = this.get(sessionId);
         return this.mutations.start({
-            imageId: session.remoteId,
+            ...documentTarget(session),
             expectedRevision: expectedRevision ?? session.revision,
             manifest: {
                 inline: {
@@ -605,76 +644,36 @@ export class HttpImageSessions {
 
     private async openedImage(sessionId: number, summary: ApiImageSummary): Promise<OpenedImage> {
         const session = this.get(sessionId);
-        const roots = await this.allContentChildren(sessionId, '');
-        const disk: DiskTreeItem = {
-            id: `session:${sessionId}`,
-            name: session.source.displayName,
-            kind: 'disk',
-            children: roots.items,
-            childCount: roots.totalCount,
-        };
-        const initialVolume = await this.loadVolumeHierarchy(sessionId, roots.items);
+        const document = selectedDocument(session);
+        const source = summary.sources.find((member) => document?.sourceMemberIds.includes(member.id));
+        const hierarchy =
+            document?.formatId === 'yamaha.a-series'
+                ? await aSeriesHierarchy(
+                      sessionId,
+                      source ? imageLocation(source.source).displayName : document.name,
+                      (parent, offset, limit) => this.contentChildren(sessionId, parent, offset, limit),
+                  )
+                : { tree: [], initialVolume: null };
+        this.assertCurrent(sessionId, session);
         return {
             sessionId,
             revision: summary.revision,
-            companionSources: summary.companionSources.map(imageLocation),
-            floppySet: summary.floppySet,
-            validation: validationSummary(summary),
+            sources: summary.sources,
+            documents: summary.documents,
+            documentId: session.documentId,
+            discovery: summary.discovery,
+            companionSources: document?.companionSources.map(imageLocation) ?? [],
+            floppySet: document?.floppySet ?? null,
+            validation: validationSummary(document),
             objects: [],
             objectTotalCount: 0,
-            initialVolume,
-            volumeMutationsAvailable: (summary.availableOperations ?? []).includes('images.alter.volumes'),
-            partitionMutationsAvailable: (summary.availableOperations ?? []).includes('images.alter.partitions'),
-            objectRenameAvailable: (summary.availableOperations ?? []).includes('images.alter.objects'),
-            objectDeletionAvailable: (summary.availableOperations ?? []).includes('images.alter.objects'),
-            waveDataCleanupAvailable: (summary.availableOperations ?? []).includes('images.deletion.orphans.inspect'),
-            programGenerationAvailable:
-                (summary.availableOperations ?? []).includes('images.programs.generate.inspect') &&
-                (summary.availableOperations ?? []).includes('images.programs.generate'),
-            programAssignmentCleanupAvailable:
-                (summary.availableOperations ?? []).includes('images.program_assignments.cleanup.inspect') &&
-                (summary.availableOperations ?? []).includes('images.program_assignments.cleanup'),
-            packageImportAvailable: (summary.availableOperations ?? []).includes('images.package.import'),
-            packageExportAvailable: (summary.availableOperations ?? []).includes('images.package.export'),
-            volumePackageExportAvailable: (summary.availableOperations ?? []).includes('images.volume_package_export'),
-            volumeFloppyExportAvailable: (summary.availableOperations ?? []).includes('images.volume_floppy_export'),
-            audioExportAvailable: (summary.availableOperations ?? []).includes('images.audio_export'),
-            sequenceExportAvailable: (summary.availableOperations ?? []).includes('images.sequence_export'),
-            mediaConversionAvailable: (summary.availableOperations ?? []).includes('images.media_conversion'),
-            extentLayoutRepairAvailable: (summary.availableOperations ?? []).includes('images.extent_layout.repair'),
-            allocationInspectionAvailable: summary.format === 'sfs',
-            format: summary.format,
-            tree: [disk],
+            format: document?.format,
+            ...documentCapabilities(document),
+            ...hierarchy,
         };
     }
 
-    private async loadVolumeHierarchy(sessionId: number, nodes: DiskTreeItem[]): Promise<DiskTreeItem | null> {
-        let firstVolume: DiskTreeItem | null = null;
-        for (const node of nodes) {
-            if (node.kind === 'volume') {
-                firstVolume ??= node;
-                continue;
-            }
-            if (node.childCount === 0) continue;
-            const children = await this.allContentChildren(sessionId, node.id);
-            node.children = children.items;
-            firstVolume ??= await this.loadVolumeHierarchy(sessionId, children.items);
-        }
-        return firstVolume;
-    }
-
-    private async allContentChildren(sessionId: number, parentId: string): Promise<ContentPage> {
-        const items = await collectPages((offset, limit) => this.contentChildren(sessionId, parentId, offset, limit), {
-            key: (item) => item.id,
-        });
-        return { items, totalCount: items.length };
-    }
-
-    private replaceRevision(session: SessionState, revision: number): void {
-        session.revision = revision;
-        session.contentCursors.clear();
-        session.contentItems.clear();
-        session.objectCursors.clear();
-        session.relationshipCursors.clear();
+    private assertCurrent(sessionId: number, session: SessionState): void {
+        if (this.get(sessionId) !== session) throw new Error('Native document or workspace revision changed');
     }
 }

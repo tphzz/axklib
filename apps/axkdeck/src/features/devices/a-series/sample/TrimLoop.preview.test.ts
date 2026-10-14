@@ -55,6 +55,8 @@ function envelope(count: number): PreviewEnvelope {
 
 function setup() {
     const detail = {
+        formatId: 'yamaha.a-series',
+        profile: 'a-series',
         image: { revision: 1 },
         object: { id: 'A', key: 'A', name: 'Sample A', type: 'SBNK' },
         formatConversion: sampleConversionFixture(),

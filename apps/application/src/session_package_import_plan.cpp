@@ -1,3 +1,4 @@
+#include "axklib/application/formats/a_series/session_read.hpp"
 #include "package_operations_internal.hpp"
 
 #include <algorithm>
@@ -86,9 +87,9 @@ Result<void> append_policy(const Json &input, std::size_t package_count, axk::Pa
 
 } // namespace
 
-Result<SessionImportPreparation>
-prepare_session_import(const Json &input, std::span<const axk::PortablePackage> packages,
-                       const std::unordered_map<std::string, ImageVolumeScopeIdentity> &volume_scopes_by_id) {
+Result<SessionImportPreparation> prepare_session_import(
+    const Json &input, std::span<const axk::PortablePackage> packages,
+    const std::unordered_map<std::string, axk::app::formats::a_series::VolumeScopeIdentity> &volume_scopes_by_id) {
     SessionImportPreparation result;
     try {
         const auto &destination = input.at("destination");

@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <format>
@@ -10,6 +11,7 @@
 #include <string>
 #include <string_view>
 #include <variant>
+#include <vector>
 
 #include <gtest/gtest.h>
 
@@ -23,7 +25,8 @@
 #include "axklib/writer.hpp"
 
 #include "a3k_test_fixture.hpp"
-#include "a_series_sample_editor.hpp"
+#include "formats/a_series/sample_editor.hpp"
+#include "formats/a_series/session_state.hpp"
 
 namespace {
 
@@ -242,38 +245,39 @@ class ImageSessionTest : public testing::Test {
 
 TEST_F(ImageSessionTest, OpensMetadataOnlySessionAndNeverExposesEngineKeysOrPaths) {
     axk::app::ImageSessionManager sessions{*sandbox_};
-    const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");
+    const auto opened = sessions.open({{{"workspace", "fixture.hds"}}, {}}, "owner-a");
     ASSERT_TRUE(opened) << opened.error().message;
-    EXPECT_EQ(opened->source.root_id, "workspace");
-    EXPECT_EQ(opened->source.relative_path, "fixture.hds");
-    EXPECT_EQ(opened->format, "sfs");
-    EXPECT_EQ(opened->available_operations, (std::vector<std::string>{"images.content",
-                                                                      "images.objects",
-                                                                      "images.relationships",
-                                                                      "images.systemProgramContexts",
-                                                                      "images.validation.issues",
-                                                                      "images.preview",
-                                                                      "auditions.prepare",
-                                                                      "images.package.export",
-                                                                      "images.audio_export",
-                                                                      "images.sequence_export",
-                                                                      "images.volume_package_export",
-                                                                      "images.volume_capacity.inspect",
-                                                                      "images.volume_floppy_export",
-                                                                      "images.media_conversion",
-                                                                      "images.alter.volumes",
-                                                                      "images.alter.partitions",
-                                                                      "images.alter.objects",
-                                                                      "images.package.import",
-                                                                      "images.floppy.import",
-                                                                      "images.deletion.orphans.inspect",
-                                                                      "images.programs.generate.inspect",
-                                                                      "images.programs.generate",
-                                                                      "images.program_assignments.cleanup.inspect",
-                                                                      "images.program_assignments.cleanup"}));
-    EXPECT_GT(opened->object_count, 0U);
+    EXPECT_EQ(opened->sources.at(0).source.root_id, "workspace");
+    EXPECT_EQ(opened->sources.at(0).source.relative_path, "fixture.hds");
+    EXPECT_EQ(opened->documents.at(0).format, "sfs");
+    EXPECT_EQ(opened->documents.at(0).available_operations,
+              (std::vector<std::string>{"images.content",
+                                        "images.objects",
+                                        "images.relationships",
+                                        "images.systemProgramContexts",
+                                        "images.validation.issues",
+                                        "images.preview",
+                                        "auditions.prepare",
+                                        "images.package.export",
+                                        "images.audio_export",
+                                        "images.sequence_export",
+                                        "images.volume_package_export",
+                                        "images.volume_capacity.inspect",
+                                        "images.volume_floppy_export",
+                                        "images.media_conversion",
+                                        "images.alter.volumes",
+                                        "images.alter.partitions",
+                                        "images.alter.objects",
+                                        "images.package.import",
+                                        "images.floppy.import",
+                                        "images.deletion.orphans.inspect",
+                                        "images.programs.generate.inspect",
+                                        "images.programs.generate",
+                                        "images.program_assignments.cleanup.inspect",
+                                        "images.program_assignments.cleanup"}));
+    EXPECT_GT(opened->documents.at(0).object_count, 0U);
 
-    const auto objects = sessions.objects(opened->image_id, "owner-a", 100U);
+    const auto objects = sessions.objects({opened->image_id, "document-a-series-source-1"}, "owner-a", 100U);
     ASSERT_TRUE(objects) << objects.error().message;
     ASSERT_FALSE(objects->items.empty());
     for (const auto &object : objects->items) {
@@ -281,7 +285,7 @@ TEST_F(ImageSessionTest, OpensMetadataOnlySessionAndNeverExposesEngineKeysOrPath
         EXPECT_EQ(object.id.find(root_.string()), std::string::npos);
         EXPECT_EQ(object.id.find("p0:sfs"), std::string::npos);
     }
-    const auto content = sessions.content(opened->image_id, "owner-a", 100U);
+    const auto content = sessions.content({opened->image_id, "document-a-series-source-1"}, "owner-a", 100U);
     ASSERT_TRUE(content) << content.error().message;
     ASSERT_FALSE(content->items.empty());
     EXPECT_EQ(content->items.front().kind, "partition");
@@ -311,7 +315,7 @@ TEST_F(ImageSessionTest, OpensMetadataOnlySessionAndNeverExposesEngineKeysOrPath
 
 TEST_F(ImageSessionTest, RejectsReadsAfterTheOpenedImageChangesExternally) {
     axk::app::ImageSessionManager sessions{*sandbox_};
-    const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");
+    const auto opened = sessions.open({{{"workspace", "fixture.hds"}}, {}}, "owner-a");
     ASSERT_TRUE(opened) << opened.error().message;
 
     const auto fixture = root_ / "fixture.hds";
@@ -319,51 +323,60 @@ TEST_F(ImageSessionTest, RejectsReadsAfterTheOpenedImageChangesExternally) {
     patch_sample_cached_reference(fixture, 0x12345678U);
     std::filesystem::last_write_time(fixture, previous_write_time + std::chrono::seconds{1});
 
-    const auto read = sessions.begin_read(opened->image_id, "owner-a", opened->revision);
+    const auto read =
+        sessions.begin_read({opened->image_id, "document-a-series-source-1"}, "owner-a", opened->revision);
     ASSERT_FALSE(read);
     EXPECT_EQ(read.error().code, "image_source_changed");
 }
 
 TEST_F(ImageSessionTest, RejectsFileMutationAfterTheOpenedImageChangesExternally) {
     axk::app::ImageSessionManager sessions{*sandbox_};
-    const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");
+    const auto opened = sessions.open({{{"workspace", "fixture.hds"}}, {}}, "owner-a");
     ASSERT_TRUE(opened) << opened.error().message;
     const auto fixture = root_ / "fixture.hds";
     const auto previous = std::filesystem::last_write_time(fixture);
     patch_sample_cached_reference(fixture, 0x12345678U);
     std::filesystem::last_write_time(fixture, previous + std::chrono::seconds{1});
 
-    const auto mutation = sessions.begin_mutation(opened->image_id, "owner-a", opened->revision);
+    const auto mutation =
+        sessions.begin_mutation({opened->image_id, "document-a-series-source-1"}, "owner-a", opened->revision);
     ASSERT_FALSE(mutation);
     EXPECT_EQ(mutation.error().code, "image_source_changed");
 }
 
 TEST_F(ImageSessionTest, VolumeCapacityRequiresOwnedCurrentPhysicalVolumeAndRejectsStaleCache) {
     axk::app::ImageSessionManager sessions{*sandbox_};
-    const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");
+    const auto opened = sessions.open({{{"workspace", "fixture.hds"}}, {}}, "owner-a");
     ASSERT_TRUE(opened) << opened.error().message;
-    const auto roots = sessions.content(opened->image_id, "owner-a", 100U);
+    const auto roots = sessions.content({opened->image_id, "document-a-series-source-1"}, "owner-a", 100U);
     ASSERT_TRUE(roots);
     ASSERT_FALSE(roots->items.empty());
-    const auto volumes = sessions.content(opened->image_id, "owner-a", 100U, std::nullopt, roots->items.front().id);
+    const auto volumes = sessions.content({opened->image_id, "document-a-series-source-1"}, "owner-a", 100U,
+                                          std::nullopt, roots->items.front().id);
     ASSERT_TRUE(volumes);
     const auto volume = std::ranges::find_if(volumes->items, [](const auto &item) { return item.kind == "volume"; });
     ASSERT_NE(volume, volumes->items.end());
-    const auto first = sessions.volume_capacity(opened->image_id, "owner-a", opened->revision, volume->id);
+    const auto first = sessions.volume_capacity({opened->image_id, "document-a-series-source-1"}, "owner-a",
+                                                opened->revision, volume->id);
     ASSERT_TRUE(first) << first.error().message;
     ASSERT_EQ(first->profiles.size(), 2U);
-    const auto cached = sessions.volume_capacity(opened->image_id, "owner-a", opened->revision, volume->id);
+    const auto cached = sessions.volume_capacity({opened->image_id, "document-a-series-source-1"}, "owner-a",
+                                                 opened->revision, volume->id);
     ASSERT_TRUE(cached);
     EXPECT_EQ(first->volume_directory, cached->volume_directory);
     EXPECT_EQ(first->profiles[1].minimum_resident_bytes, cached->profiles[1].minimum_resident_bytes);
-    EXPECT_FALSE(sessions.volume_capacity(opened->image_id, "owner-b", opened->revision, volume->id));
-    EXPECT_FALSE(sessions.volume_capacity(opened->image_id, "owner-a", opened->revision + 1U, volume->id));
-    EXPECT_FALSE(sessions.volume_capacity(opened->image_id, "owner-a", opened->revision, roots->items.front().id));
+    EXPECT_FALSE(sessions.volume_capacity({opened->image_id, "document-a-series-source-1"}, "owner-b", opened->revision,
+                                          volume->id));
+    EXPECT_FALSE(sessions.volume_capacity({opened->image_id, "document-a-series-source-1"}, "owner-a",
+                                          opened->revision + 1U, volume->id));
+    EXPECT_FALSE(sessions.volume_capacity({opened->image_id, "document-a-series-source-1"}, "owner-a", opened->revision,
+                                          roots->items.front().id));
     const auto fixture = root_ / "fixture.hds";
     const auto previous = std::filesystem::last_write_time(fixture);
     patch_sample_cached_reference(fixture, 0x12345678U);
     std::filesystem::last_write_time(fixture, previous + std::chrono::seconds{1});
-    const auto stale = sessions.volume_capacity(opened->image_id, "owner-a", opened->revision, volume->id);
+    const auto stale = sessions.volume_capacity({opened->image_id, "document-a-series-source-1"}, "owner-a",
+                                                opened->revision, volume->id);
     ASSERT_FALSE(stale);
     EXPECT_EQ(stale.error().code, "image_source_changed");
 }
@@ -372,61 +385,65 @@ TEST_F(ImageSessionTest, ReadOnlyMediaCanBeLeasedForPackageExportButNotMutation)
     auto read_only = axk::app::Sandbox::create({{"library", "Library", root_, false}});
     ASSERT_TRUE(read_only) << read_only.error().message;
     axk::app::ImageSessionManager sessions{*read_only};
-    const auto opened = sessions.open({"library", "fixture.hds"}, "owner-a");
+    const auto opened = sessions.open({{{"library", "fixture.hds"}}, {}}, "owner-a");
     ASSERT_TRUE(opened) << opened.error().message;
-    EXPECT_NE(std::ranges::find(opened->available_operations, "images.package.export"),
-              opened->available_operations.end());
-    EXPECT_NE(std::ranges::find(opened->available_operations, "images.audio_export"),
-              opened->available_operations.end());
-    EXPECT_NE(std::ranges::find(opened->available_operations, "images.volume_package_export"),
-              opened->available_operations.end());
-    EXPECT_NE(std::ranges::find(opened->available_operations, "images.volume_floppy_export"),
-              opened->available_operations.end());
-    EXPECT_EQ(std::ranges::find(opened->available_operations, "images.package.import"),
-              opened->available_operations.end());
-    EXPECT_EQ(std::ranges::find(opened->available_operations, "images.deletion.orphans.inspect"),
-              opened->available_operations.end());
-    EXPECT_EQ(std::ranges::find(opened->available_operations, "images.programs.generate.inspect"),
-              opened->available_operations.end());
+    EXPECT_NE(std::ranges::find(opened->documents.at(0).available_operations, "images.package.export"),
+              opened->documents.at(0).available_operations.end());
+    EXPECT_NE(std::ranges::find(opened->documents.at(0).available_operations, "images.audio_export"),
+              opened->documents.at(0).available_operations.end());
+    EXPECT_NE(std::ranges::find(opened->documents.at(0).available_operations, "images.volume_package_export"),
+              opened->documents.at(0).available_operations.end());
+    EXPECT_NE(std::ranges::find(opened->documents.at(0).available_operations, "images.volume_floppy_export"),
+              opened->documents.at(0).available_operations.end());
+    EXPECT_EQ(std::ranges::find(opened->documents.at(0).available_operations, "images.package.import"),
+              opened->documents.at(0).available_operations.end());
+    EXPECT_EQ(std::ranges::find(opened->documents.at(0).available_operations, "images.deletion.orphans.inspect"),
+              opened->documents.at(0).available_operations.end());
+    EXPECT_EQ(std::ranges::find(opened->documents.at(0).available_operations, "images.programs.generate.inspect"),
+              opened->documents.at(0).available_operations.end());
 
     {
-        const auto read = sessions.begin_read(opened->image_id, "owner-a", opened->revision);
+        const auto read =
+            sessions.begin_read({opened->image_id, "document-a-series-source-1"}, "owner-a", opened->revision);
         ASSERT_TRUE(read) << read.error().message;
         ASSERT_NE(read->reader, nullptr);
         EXPECT_GT(read->reader->size(), 0U);
         ASSERT_NE(read->media, nullptr);
         EXPECT_EQ(read->media->kind(), axk::MediaKind::sfs);
     }
-    const auto mutation = sessions.begin_mutation(opened->image_id, "owner-a", opened->revision);
+    const auto mutation =
+        sessions.begin_mutation({opened->image_id, "document-a-series-source-1"}, "owner-a", opened->revision);
     ASSERT_FALSE(mutation);
 }
 
 TEST_F(ImageSessionTest, AllocationMetadataMismatchRemainsReadableButCannotBeAltered) {
     corrupt_fixed_allocation_bitmap_copy(root_ / "fixture.hds");
     axk::app::ImageSessionManager sessions{*sandbox_};
-    const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");
+    const auto opened = sessions.open({{{"workspace", "fixture.hds"}}, {}}, "owner-a");
     ASSERT_TRUE(opened) << opened.error().message;
 
-    EXPECT_NE(std::ranges::find(opened->available_operations, "images.package.export"),
-              opened->available_operations.end());
-    EXPECT_NE(std::ranges::find(opened->available_operations, "images.validation.issues"),
-              opened->available_operations.end());
-    EXPECT_EQ(std::ranges::find(opened->available_operations, "images.alter.volumes"),
-              opened->available_operations.end());
-    EXPECT_EQ(std::ranges::find(opened->available_operations, "images.package.import"),
-              opened->available_operations.end());
+    EXPECT_NE(std::ranges::find(opened->documents.at(0).available_operations, "images.package.export"),
+              opened->documents.at(0).available_operations.end());
+    EXPECT_NE(std::ranges::find(opened->documents.at(0).available_operations, "images.validation.issues"),
+              opened->documents.at(0).available_operations.end());
+    EXPECT_EQ(std::ranges::find(opened->documents.at(0).available_operations, "images.alter.volumes"),
+              opened->documents.at(0).available_operations.end());
+    EXPECT_EQ(std::ranges::find(opened->documents.at(0).available_operations, "images.package.import"),
+              opened->documents.at(0).available_operations.end());
 
-    const auto issues = sessions.validation_issues(opened->image_id, "owner-a", 100U);
+    const auto issues = sessions.validation_issues({opened->image_id, "document-a-series-source-1"}, "owner-a", 100U);
     ASSERT_TRUE(issues) << issues.error().message;
     EXPECT_NE(
         std::ranges::find(issues->items, "SFS_ALLOCATION_BITMAP_COPIES_DIFFER", &axk::app::ImageValidationItem::code),
         issues->items.end());
 
     {
-        const auto read = sessions.begin_read(opened->image_id, "owner-a", opened->revision);
+        const auto read =
+            sessions.begin_read({opened->image_id, "document-a-series-source-1"}, "owner-a", opened->revision);
         ASSERT_TRUE(read) << read.error().message;
     }
-    const auto mutation = sessions.begin_mutation(opened->image_id, "owner-a", opened->revision);
+    const auto mutation =
+        sessions.begin_mutation({opened->image_id, "document-a-series-source-1"}, "owner-a", opened->revision);
     ASSERT_FALSE(mutation);
     EXPECT_EQ(mutation.error().code, "image_integrity_unsafe");
 }
@@ -454,42 +471,46 @@ TEST_F(ImageSessionTest, OpensReadOnlyAxkObjectDirectoryThroughSandboxHandles) {
 
     axk::app::ImageSessionManager sessions{*sandbox_, 2U, 64U};
     const auto opened =
-        sessions.open({"workspace", "objects", axk::app::ImageSourceKind::axk_object_directory}, "owner-a");
+        sessions.open({{{"workspace", "objects", axk::app::ImageSourceKind::directory}}, {}}, "owner-a");
     ASSERT_TRUE(opened) << opened.error().message;
-    EXPECT_EQ(opened->source.kind, axk::app::ImageSourceKind::axk_object_directory);
-    EXPECT_EQ(opened->format, "axk-object-directory");
-    EXPECT_EQ(opened->object_count, source_objects->size());
-    EXPECT_NE(std::ranges::find(opened->available_operations, "images.package.export"),
-              opened->available_operations.end());
-    EXPECT_NE(std::ranges::find(opened->available_operations, "images.audio_export"),
-              opened->available_operations.end());
-    EXPECT_EQ(std::ranges::find(opened->available_operations, "images.volume_package_export"),
-              opened->available_operations.end());
-    EXPECT_EQ(std::ranges::find(opened->available_operations, "images.volume_floppy_export"),
-              opened->available_operations.end());
-    EXPECT_EQ(std::ranges::find(opened->available_operations, "images.package.import"),
-              opened->available_operations.end());
+    EXPECT_EQ(opened->sources.at(0).source.kind, axk::app::ImageSourceKind::directory);
+    EXPECT_EQ(opened->documents.at(0).format, "axk-object-directory");
+    EXPECT_EQ(opened->documents.at(0).object_count, source_objects->size());
+    EXPECT_NE(std::ranges::find(opened->documents.at(0).available_operations, "images.package.export"),
+              opened->documents.at(0).available_operations.end());
+    EXPECT_NE(std::ranges::find(opened->documents.at(0).available_operations, "images.audio_export"),
+              opened->documents.at(0).available_operations.end());
+    EXPECT_EQ(std::ranges::find(opened->documents.at(0).available_operations, "images.volume_package_export"),
+              opened->documents.at(0).available_operations.end());
+    EXPECT_EQ(std::ranges::find(opened->documents.at(0).available_operations, "images.volume_floppy_export"),
+              opened->documents.at(0).available_operations.end());
+    EXPECT_EQ(std::ranges::find(opened->documents.at(0).available_operations, "images.package.import"),
+              opened->documents.at(0).available_operations.end());
 
-    const auto content = sessions.content(opened->image_id, "owner-a", 64U);
+    const auto content = sessions.content({opened->image_id, "document-a-series-source-1"}, "owner-a", 64U);
     ASSERT_TRUE(content) << content.error().message;
     ASSERT_EQ(content->items.size(), 1U);
     EXPECT_EQ(content->items.front().kind, "volume");
     EXPECT_EQ(content->items.front().name, "Object directory");
     EXPECT_EQ(content->items.front().partition_index, 0U);
 
-    const auto wave_data = sessions.objects(opened->image_id, "owner-a", 64U, std::nullopt, "SMPL");
+    const auto wave_data =
+        sessions.objects({opened->image_id, "document-a-series-source-1"}, "owner-a", 64U, std::nullopt, "SMPL");
     ASSERT_TRUE(wave_data) << wave_data.error().message;
     ASSERT_FALSE(wave_data->items.empty());
-    const auto audition = sessions.prepare_audition(opened->image_id, "owner-a", {wave_data->items.front().id});
+    const auto audition = sessions.prepare_audition({opened->image_id, "document-a-series-source-1"}, "owner-a",
+                                                    {wave_data->items.front().id});
     ASSERT_TRUE(audition) << audition.error().message;
     EXPECT_GT(audition->content_size_bytes, 44U);
 
     {
-        const auto read = sessions.begin_read(opened->image_id, "owner-a", opened->revision);
+        const auto read =
+            sessions.begin_read({opened->image_id, "document-a-series-source-1"}, "owner-a", opened->revision);
         ASSERT_TRUE(read) << read.error().message;
         EXPECT_EQ(read->media->kind(), axk::MediaKind::axk_object_directory);
     }
-    const auto mutation = sessions.begin_mutation(opened->image_id, "owner-a", opened->revision);
+    const auto mutation =
+        sessions.begin_mutation({opened->image_id, "document-a-series-source-1"}, "owner-a", opened->revision);
     ASSERT_FALSE(mutation);
     EXPECT_EQ(mutation.error().code, "image_mutation_unsupported");
 }
@@ -497,21 +518,21 @@ TEST_F(ImageSessionTest, OpensReadOnlyAxkObjectDirectoryThroughSandboxHandles) {
 TEST_F(ImageSessionTest, OpensReadOnlyA3kArchiveWithBrowseAndAuditionCapabilities) {
     axk::app::test::write_a3k_archive(root_ / "fixture.hds", root_ / "archive.a3k");
     axk::app::ImageSessionManager sessions{*sandbox_, 2U, 64U};
-    const auto opened = sessions.open({"workspace", "archive.a3k"}, "owner-a");
+    const auto opened = sessions.open({{{"workspace", "archive.a3k"}}, {}}, "owner-a");
     ASSERT_TRUE(opened) << opened.error().message;
-    EXPECT_EQ(opened->format, "a3k-archive");
-    EXPECT_NE(std::ranges::find(opened->available_operations, "images.package.export"),
-              opened->available_operations.end());
-    EXPECT_NE(std::ranges::find(opened->available_operations, "images.audio_export"),
-              opened->available_operations.end());
-    EXPECT_EQ(std::ranges::find(opened->available_operations, "images.volume_package_export"),
-              opened->available_operations.end());
-    EXPECT_EQ(std::ranges::find(opened->available_operations, "images.volume_floppy_export"),
-              opened->available_operations.end());
-    EXPECT_EQ(std::ranges::find(opened->available_operations, "images.package.import"),
-              opened->available_operations.end());
+    EXPECT_EQ(opened->documents.at(0).format, "a3k-archive");
+    EXPECT_NE(std::ranges::find(opened->documents.at(0).available_operations, "images.package.export"),
+              opened->documents.at(0).available_operations.end());
+    EXPECT_NE(std::ranges::find(opened->documents.at(0).available_operations, "images.audio_export"),
+              opened->documents.at(0).available_operations.end());
+    EXPECT_EQ(std::ranges::find(opened->documents.at(0).available_operations, "images.volume_package_export"),
+              opened->documents.at(0).available_operations.end());
+    EXPECT_EQ(std::ranges::find(opened->documents.at(0).available_operations, "images.volume_floppy_export"),
+              opened->documents.at(0).available_operations.end());
+    EXPECT_EQ(std::ranges::find(opened->documents.at(0).available_operations, "images.package.import"),
+              opened->documents.at(0).available_operations.end());
 
-    const auto content = sessions.content(opened->image_id, "owner-a", 64U);
+    const auto content = sessions.content({opened->image_id, "document-a-series-source-1"}, "owner-a", 64U);
     ASSERT_TRUE(content) << content.error().message;
     ASSERT_EQ(content->items.size(), 1U);
     EXPECT_EQ(content->items.front().kind, "volume");
@@ -519,19 +540,23 @@ TEST_F(ImageSessionTest, OpensReadOnlyA3kArchiveWithBrowseAndAuditionCapabilitie
     EXPECT_EQ(content->items.front().partition_index, 0U);
     EXPECT_EQ(content->items.front().volume_directory_id, 1U);
 
-    const auto wave_data = sessions.objects(opened->image_id, "owner-a", 64U, std::nullopt, "SMPL");
+    const auto wave_data =
+        sessions.objects({opened->image_id, "document-a-series-source-1"}, "owner-a", 64U, std::nullopt, "SMPL");
     ASSERT_TRUE(wave_data) << wave_data.error().message;
     ASSERT_FALSE(wave_data->items.empty());
-    const auto audition = sessions.prepare_audition(opened->image_id, "owner-a", {wave_data->items.front().id});
+    const auto audition = sessions.prepare_audition({opened->image_id, "document-a-series-source-1"}, "owner-a",
+                                                    {wave_data->items.front().id});
     ASSERT_TRUE(audition) << audition.error().message;
     EXPECT_GT(audition->content_size_bytes, 44U);
 
     {
-        const auto read = sessions.begin_read(opened->image_id, "owner-a", opened->revision);
+        const auto read =
+            sessions.begin_read({opened->image_id, "document-a-series-source-1"}, "owner-a", opened->revision);
         ASSERT_TRUE(read) << read.error().message;
         EXPECT_EQ(read->media->kind(), axk::MediaKind::a3k_archive);
     }
-    const auto mutation = sessions.begin_mutation(opened->image_id, "owner-a", opened->revision);
+    const auto mutation =
+        sessions.begin_mutation({opened->image_id, "document-a-series-source-1"}, "owner-a", opened->revision);
     ASSERT_FALSE(mutation);
     EXPECT_EQ(mutation.error().code, "image_mutation_unsupported");
 }
@@ -578,30 +603,30 @@ TEST_F(ImageSessionTest, OpensCatalogedFoldersAsAnOrderedSetAndAttachesAllLaterO
     }
     axk::app::ImageSessionManager sessions{*sandbox_};
     const auto opened =
-        sessions.open({"workspace", "catalog-set/disk1", axk::app::ImageSourceKind::axk_object_directory}, "owner-a");
+        sessions.open({{{"workspace", "catalog-set/disk1", axk::app::ImageSourceKind::directory}}, {}}, "owner-a");
     ASSERT_TRUE(opened) << opened.error().message;
-    ASSERT_TRUE(opened->floppy_set);
-    EXPECT_EQ(opened->floppy_set->status, axk::app::ImageFloppySetStatus::incomplete);
-    EXPECT_EQ(opened->floppy_set->next_required_index, 2U);
+    ASSERT_TRUE(opened->documents.at(0).floppy_set);
+    EXPECT_EQ(opened->documents.at(0).floppy_set->status, axk::app::ImageFloppySetStatus::incomplete);
+    EXPECT_EQ(opened->documents.at(0).floppy_set->next_required_index, 2U);
     const auto attach = [&](const axk::app::ImageSessionSummary &summary, std::string path) {
-        return sessions.attach_companions(
-            summary.image_id, "owner-a", summary.revision,
-            {axk::app::CompanionSelectionKind::sources,
-             {{"workspace", std::move(path), axk::app::ImageSourceKind::axk_object_directory}}});
+        return sessions.attach_companions({summary.image_id, "document-a-series-source-1"}, "owner-a", summary.revision,
+                                          {axk::app::CompanionSelectionKind::sources,
+                                           {{"workspace", std::move(path), axk::app::ImageSourceKind::directory}}});
     };
     const auto skipped = attach(*opened, "catalog-set/disk3");
     ASSERT_FALSE(skipped);
     EXPECT_EQ(sessions.inspect(opened->image_id, "owner-a")->revision, opened->revision);
     const auto second = attach(*opened, "catalog-set/disk2");
     ASSERT_TRUE(second) << second.error().message;
-    EXPECT_EQ(second->floppy_set->next_required_index, 3U);
+    EXPECT_EQ(second->documents.at(0).floppy_set->next_required_index, 3U);
     const auto complete = attach(*second, "catalog-set/disk3");
     ASSERT_TRUE(complete) << complete.error().message;
-    EXPECT_EQ(complete->floppy_set->status, axk::app::ImageFloppySetStatus::complete);
-    EXPECT_FALSE(complete->floppy_set->next_required_index);
-    EXPECT_EQ(complete->floppy_set->members.size(), 3U);
+    EXPECT_EQ(complete->documents.at(0).floppy_set->status, axk::app::ImageFloppySetStatus::complete);
+    EXPECT_FALSE(complete->documents.at(0).floppy_set->next_required_index);
+    EXPECT_EQ(complete->documents.at(0).floppy_set->members.size(), 3U);
     {
-        const auto read = sessions.begin_read(complete->image_id, "owner-a", complete->revision);
+        const auto read =
+            sessions.begin_read({complete->image_id, "document-a-series-source-1"}, "owner-a", complete->revision);
         ASSERT_TRUE(read);
         const auto all = read->media->objects(axk::MediaObjectReadMode::complete);
         ASSERT_TRUE(all);
@@ -617,20 +642,22 @@ TEST_F(ImageSessionTest, OpensCatalogedFoldersAsAnOrderedSetAndAttachesAllLaterO
     }
     EXPECT_FALSE(attach(*complete, "catalog-set/disk2"));
     const auto later =
-        sessions.open({"workspace", "catalog-set/disk3", axk::app::ImageSourceKind::axk_object_directory}, "owner-a");
+        sessions.open({{{"workspace", "catalog-set/disk3", axk::app::ImageSourceKind::directory}}, {}}, "owner-a");
     ASSERT_TRUE(later);
-    EXPECT_EQ(later->floppy_set->next_required_index, 1U);
-    const auto nearby = sessions.attach_companions(later->image_id, "owner-a", later->revision,
-                                                   {axk::app::CompanionSelectionKind::immediate_siblings, {}});
+    EXPECT_EQ(later->documents.at(0).floppy_set->next_required_index, 1U);
+    const auto nearby =
+        sessions.attach_companions({later->image_id, "document-a-series-source-1"}, "owner-a", later->revision,
+                                   {axk::app::CompanionSelectionKind::immediate_siblings, {}});
     ASSERT_TRUE(nearby) << nearby.error().message;
-    EXPECT_EQ(nearby->floppy_set->status, axk::app::ImageFloppySetStatus::complete);
+    EXPECT_EQ(nearby->documents.at(0).floppy_set->status, axk::app::ImageFloppySetStatus::complete);
     std::filesystem::copy(root_ / "catalog-set/disk2", root_ / "catalog-set/duplicate",
                           std::filesystem::copy_options::recursive);
     const auto ambiguous =
-        sessions.open({"workspace", "catalog-set/disk1", axk::app::ImageSourceKind::axk_object_directory}, "owner-a");
+        sessions.open({{{"workspace", "catalog-set/disk1", axk::app::ImageSourceKind::directory}}, {}}, "owner-a");
     ASSERT_TRUE(ambiguous);
-    const auto rejected = sessions.attach_companions(ambiguous->image_id, "owner-a", ambiguous->revision,
-                                                     {axk::app::CompanionSelectionKind::immediate_siblings, {}});
+    const auto rejected =
+        sessions.attach_companions({ambiguous->image_id, "document-a-series-source-1"}, "owner-a", ambiguous->revision,
+                                   {axk::app::CompanionSelectionKind::immediate_siblings, {}});
     ASSERT_FALSE(rejected);
     EXPECT_EQ(rejected.error().code, "companion_ambiguous");
 }
@@ -675,26 +702,29 @@ TEST_F(ImageSessionTest, AttachesSelectedOrNearbyCompanionSegmentsOnlyOnRequest)
     axk::app::ImageSessionManager sessions{
         *sandbox_, 3U, 64U, std::chrono::minutes{15}, std::chrono::steady_clock::now, &reservations};
     const auto complete =
-        sessions.open({"workspace", "disk-set", axk::app::ImageSourceKind::axk_object_directory}, "owner-a");
+        sessions.open({{{"workspace", "disk-set", axk::app::ImageSourceKind::directory}}, {}}, "owner-a");
     ASSERT_TRUE(complete) << complete.error().message;
-    const auto complete_objects = sessions.objects(complete->image_id, "owner-a", 64U, std::nullopt, "SMPL");
+    const auto complete_objects =
+        sessions.objects({complete->image_id, "document-a-series-source-1"}, "owner-a", 64U, std::nullopt, "SMPL");
     ASSERT_TRUE(complete_objects) << complete_objects.error().message;
     ASSERT_EQ(complete_objects->items.size(), 1U);
-    const auto audition =
-        sessions.prepare_audition(complete->image_id, "owner-a", {complete_objects->items.front().id});
+    const auto audition = sessions.prepare_audition({complete->image_id, "document-a-series-source-1"}, "owner-a",
+                                                    {complete_objects->items.front().id});
     ASSERT_TRUE(audition) << audition.error().message;
     EXPECT_GT(audition->content_size_bytes, 44U);
     ASSERT_TRUE(sessions.close(complete->image_id, "owner-a"));
 
     const auto incomplete =
-        sessions.open({"workspace", "disk-set/DISK2", axk::app::ImageSourceKind::axk_object_directory}, "owner-a");
+        sessions.open({{{"workspace", "disk-set/DISK2", axk::app::ImageSourceKind::directory}}, {}}, "owner-a");
     ASSERT_TRUE(incomplete) << incomplete.error().message;
-    EXPECT_TRUE(incomplete->companion_sources.empty());
-    const auto sibling_objects = sessions.objects(incomplete->image_id, "owner-a", 64U, std::nullopt, "SMPL");
+    EXPECT_TRUE(incomplete->documents.at(0).companion_sources.empty());
+    const auto sibling_objects =
+        sessions.objects({incomplete->image_id, "document-a-series-source-1"}, "owner-a", 64U, std::nullopt, "SMPL");
     ASSERT_TRUE(sibling_objects) << sibling_objects.error().message;
     ASSERT_EQ(sibling_objects->items.size(), 1U);
     const auto object_id = sibling_objects->items.front().id;
-    const auto rejected = sessions.prepare_audition(incomplete->image_id, "owner-a", {object_id});
+    const auto rejected =
+        sessions.prepare_audition({incomplete->image_id, "document-a-series-source-1"}, "owner-a", {object_id});
     ASSERT_FALSE(rejected);
     EXPECT_EQ(rejected.error().code, "companion_disks_required");
     EXPECT_NE(rejected.error().message.find("Add extracted companion disk folders"), std::string::npos);
@@ -702,9 +732,9 @@ TEST_F(ImageSessionTest, AttachesSelectedOrNearbyCompanionSegmentsOnlyOnRequest)
         axk::app::PathAccess{{"workspace", "disk-set/DISK1/SMP_TEST.001"}, axk::app::PathAccessMode::exclusive}));
 
     const auto no_match = sessions.attach_companions(
-        incomplete->image_id, "owner-a", incomplete->revision,
+        {incomplete->image_id, "document-a-series-source-1"}, "owner-a", incomplete->revision,
         {axk::app::CompanionSelectionKind::sources,
-         {{"workspace", "disk-set/DISK2", axk::app::ImageSourceKind::axk_object_directory}}});
+         {{"workspace", "disk-set/DISK2", axk::app::ImageSourceKind::directory}}});
     ASSERT_FALSE(no_match);
     EXPECT_EQ(no_match.error().code, "companion_segment_not_found");
     const auto unchanged = sessions.inspect(incomplete->image_id, "owner-a");
@@ -712,27 +742,29 @@ TEST_F(ImageSessionTest, AttachesSelectedOrNearbyCompanionSegmentsOnlyOnRequest)
     EXPECT_EQ(unchanged->revision, incomplete->revision);
 
     const auto attached = sessions.attach_companions(
-        incomplete->image_id, "owner-a", incomplete->revision,
+        {incomplete->image_id, "document-a-series-source-1"}, "owner-a", incomplete->revision,
         {axk::app::CompanionSelectionKind::sources,
-         {{"workspace", "disk-set/DISK1", axk::app::ImageSourceKind::axk_object_directory}}});
+         {{"workspace", "disk-set/DISK1", axk::app::ImageSourceKind::directory}}});
     ASSERT_TRUE(attached) << attached.error().message;
     EXPECT_EQ(attached->image_id, incomplete->image_id);
     EXPECT_EQ(attached->revision, incomplete->revision + 1U);
-    EXPECT_EQ(attached->companion_sources,
-              (std::vector<axk::app::ImageSourceRef>{
-                  {"workspace", "disk-set/DISK1", axk::app::ImageSourceKind::axk_object_directory}}));
-    const auto refreshed_objects = sessions.objects(attached->image_id, "owner-a", 64U, std::nullopt, "SMPL");
+    EXPECT_EQ(
+        attached->documents.at(0).companion_sources,
+        (std::vector<axk::app::ImageSourceRef>{{"workspace", "disk-set/DISK1", axk::app::ImageSourceKind::directory}}));
+    const auto refreshed_objects =
+        sessions.objects({attached->image_id, "document-a-series-source-1"}, "owner-a", 64U, std::nullopt, "SMPL");
     ASSERT_TRUE(refreshed_objects) << refreshed_objects.error().message;
     ASSERT_EQ(refreshed_objects->items.size(), 1U);
     EXPECT_EQ(refreshed_objects->items.front().id, object_id);
-    const auto sibling_audition =
-        sessions.prepare_audition(attached->image_id, "owner-a", {refreshed_objects->items.front().id});
+    const auto sibling_audition = sessions.prepare_audition({attached->image_id, "document-a-series-source-1"},
+                                                            "owner-a", {refreshed_objects->items.front().id});
     ASSERT_TRUE(sibling_audition) << sibling_audition.error().message;
     EXPECT_GT(sibling_audition->content_size_bytes, 44U);
     EXPECT_FALSE(reservations.try_acquire(
         axk::app::PathAccess{{"workspace", "disk-set/DISK1/SMP_TEST.001"}, axk::app::PathAccessMode::exclusive}));
-    const auto stale = sessions.attach_companions(attached->image_id, "owner-a", incomplete->revision,
-                                                  {axk::app::CompanionSelectionKind::immediate_siblings, {}});
+    const auto stale =
+        sessions.attach_companions({attached->image_id, "document-a-series-source-1"}, "owner-a", incomplete->revision,
+                                   {axk::app::CompanionSelectionKind::immediate_siblings, {}});
     ASSERT_FALSE(stale);
     EXPECT_EQ(stale.error().code, "image_revision_stale");
     ASSERT_TRUE(sessions.close(attached->image_id, "owner-a"));
@@ -740,14 +772,15 @@ TEST_F(ImageSessionTest, AttachesSelectedOrNearbyCompanionSegmentsOnlyOnRequest)
         axk::app::PathAccess{{"workspace", "disk-set/DISK1/SMP_TEST.001"}, axk::app::PathAccessMode::exclusive}));
 
     const auto nearby =
-        sessions.open({"workspace", "disk-set/DISK2", axk::app::ImageSourceKind::axk_object_directory}, "owner-a");
+        sessions.open({{{"workspace", "disk-set/DISK2", axk::app::ImageSourceKind::directory}}, {}}, "owner-a");
     ASSERT_TRUE(nearby) << nearby.error().message;
-    const auto nearby_attached = sessions.attach_companions(nearby->image_id, "owner-a", nearby->revision,
-                                                            {axk::app::CompanionSelectionKind::immediate_siblings, {}});
+    const auto nearby_attached =
+        sessions.attach_companions({nearby->image_id, "document-a-series-source-1"}, "owner-a", nearby->revision,
+                                   {axk::app::CompanionSelectionKind::immediate_siblings, {}});
     ASSERT_TRUE(nearby_attached) << nearby_attached.error().message;
-    EXPECT_EQ(nearby_attached->companion_sources,
-              (std::vector<axk::app::ImageSourceRef>{
-                  {"workspace", "disk-set/DISK1", axk::app::ImageSourceKind::axk_object_directory}}));
+    EXPECT_EQ(
+        nearby_attached->documents.at(0).companion_sources,
+        (std::vector<axk::app::ImageSourceRef>{{"workspace", "disk-set/DISK1", axk::app::ImageSourceKind::directory}}));
 }
 
 TEST_F(ImageSessionTest, AttachesACompleteMissingStereoLaneAlongsideContinuationSegments) {
@@ -826,25 +859,29 @@ TEST_F(ImageSessionTest, AttachesACompleteMissingStereoLaneAlongsideContinuation
     write_object_file(second_disk / "UNRELATED.004", unrelated_wave_data);
 
     axk::app::ImageSessionManager sessions{*sandbox_, 2U, 64U};
-    const auto opened = sessions.open(
-        {"workspace", "stereo-disk-set/DISK1", axk::app::ImageSourceKind::axk_object_directory}, "owner-a");
+    const auto opened =
+        sessions.open({{{"workspace", "stereo-disk-set/DISK1", axk::app::ImageSourceKind::directory}}, {}}, "owner-a");
     ASSERT_TRUE(opened) << opened.error().message;
-    const auto samples = sessions.objects(opened->image_id, "owner-a", 64U, std::nullopt, "SBNK");
+    const auto samples =
+        sessions.objects({opened->image_id, "document-a-series-source-1"}, "owner-a", 64U, std::nullopt, "SBNK");
     ASSERT_TRUE(samples) << samples.error().message;
     ASSERT_EQ(samples->items.size(), 1U);
-    const auto rejected = sessions.prepare_audition(opened->image_id, "owner-a", {samples->items.front().id});
+    const auto rejected = sessions.prepare_audition({opened->image_id, "document-a-series-source-1"}, "owner-a",
+                                                    {samples->items.front().id});
     ASSERT_FALSE(rejected);
     EXPECT_EQ(rejected.error().code, "companion_disks_required");
 
-    const auto attached = sessions.attach_companions(
-        opened->image_id, "owner-a", opened->revision,
-        {axk::app::CompanionSelectionKind::sources,
-         {{"workspace", "stereo-disk-set/DISK2", axk::app::ImageSourceKind::axk_object_directory}}});
+    const auto attached =
+        sessions.attach_companions({opened->image_id, "document-a-series-source-1"}, "owner-a", opened->revision,
+                                   {axk::app::CompanionSelectionKind::sources,
+                                    {{"workspace", "stereo-disk-set/DISK2", axk::app::ImageSourceKind::directory}}});
     ASSERT_TRUE(attached) << attached.error().message;
-    const auto attached_wave_data = sessions.objects(attached->image_id, "owner-a", 64U, std::nullopt, "SMPL");
+    const auto attached_wave_data =
+        sessions.objects({attached->image_id, "document-a-series-source-1"}, "owner-a", 64U, std::nullopt, "SMPL");
     ASSERT_TRUE(attached_wave_data) << attached_wave_data.error().message;
     EXPECT_EQ(attached_wave_data->items.size(), 2U);
-    const auto audition = sessions.prepare_audition(attached->image_id, "owner-a", {samples->items.front().id});
+    const auto audition = sessions.prepare_audition({attached->image_id, "document-a-series-source-1"}, "owner-a",
+                                                    {samples->items.front().id});
     ASSERT_TRUE(audition) << audition.error().message;
     ASSERT_EQ(audition->clips.size(), 1U);
     EXPECT_EQ(audition->clips.front().lanes.size(), 2U);
@@ -864,9 +901,10 @@ TEST_F(ImageSessionTest, ReportsCompleteStoredObjectSize) {
     ASSERT_NE(descriptor, inventory->objects.end());
 
     axk::app::ImageSessionManager sessions{*sandbox_};
-    const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");
+    const auto opened = sessions.open({{{"workspace", "fixture.hds"}}, {}}, "owner-a");
     ASSERT_TRUE(opened) << opened.error().message;
-    const auto objects = sessions.objects(opened->image_id, "owner-a", 100U, std::nullopt, "SMPL");
+    const auto objects =
+        sessions.objects({opened->image_id, "document-a-series-source-1"}, "owner-a", 100U, std::nullopt, "SMPL");
     ASSERT_TRUE(objects) << objects.error().message;
     const auto object =
         std::ranges::find(objects->items, catalog_object->object.header.name, &axk::app::ImageObjectItem::name);
@@ -880,14 +918,16 @@ TEST_F(ImageSessionTest, ReportsCompleteStoredObjectSize) {
 
 TEST_F(ImageSessionTest, PlansOpaqueIdDeletionWithOptionalWaveDataCleanup) {
     axk::app::ImageSessionManager sessions{*sandbox_, 2U, 64U};
-    const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");
+    const auto opened = sessions.open({{{"workspace", "fixture.hds"}}, {}}, "owner-a");
     ASSERT_TRUE(opened) << opened.error().message;
-    const auto samples = sessions.objects(opened->image_id, "owner-a", 64U, std::nullopt, "SBNK");
+    const auto samples =
+        sessions.objects({opened->image_id, "document-a-series-source-1"}, "owner-a", 64U, std::nullopt, "SBNK");
     ASSERT_TRUE(samples) << samples.error().message;
     const auto sample = std::ranges::find(samples->items, "sine wave", &axk::app::ImageObjectItem::name);
     ASSERT_NE(sample, samples->items.end());
 
-    const auto inspected = sessions.plan_deletion(opened->image_id, "owner-a", opened->revision, {sample->id}, {}, {});
+    const auto inspected = sessions.plan_deletion({opened->image_id, "document-a-series-source-1"}, "owner-a",
+                                                  opened->revision, {sample->id}, {}, {});
 
     ASSERT_TRUE(inspected) << inspected.error().message;
     EXPECT_TRUE(inspected->inspection.can_apply);
@@ -902,27 +942,29 @@ TEST_F(ImageSessionTest, PlansOpaqueIdDeletionWithOptionalWaveDataCleanup) {
     EXPECT_EQ(optional_wave->status, "OPTIONAL");
     EXPECT_FALSE(optional_wave->selected);
 
-    const auto selected = sessions.plan_deletion(opened->image_id, "owner-a", opened->revision, {sample->id}, {},
-                                                 {optional_wave->object_id});
+    const auto selected = sessions.plan_deletion({opened->image_id, "document-a-series-source-1"}, "owner-a",
+                                                 opened->revision, {sample->id}, {}, {optional_wave->object_id});
     ASSERT_TRUE(selected) << selected.error().message;
     ASSERT_EQ(selected->manifest.operations.size(), 2U);
     EXPECT_GT(selected->inspection.estimated_freed_bytes, 0U);
 
-    const auto stale = sessions.plan_deletion(opened->image_id, "owner-a", opened->revision + 1U, {sample->id}, {}, {});
+    const auto stale = sessions.plan_deletion({opened->image_id, "document-a-series-source-1"}, "owner-a",
+                                              opened->revision + 1U, {sample->id}, {}, {});
     ASSERT_FALSE(stale);
     EXPECT_EQ(stale.error().code, "image_revision_stale");
 }
 
 TEST_F(ImageSessionTest, DiscoversOnlyConfirmedUnreferencedWaveDataWithinTheRequestedVolume) {
     axk::app::ImageSessionManager source_sessions{*sandbox_, 2U, 64U};
-    const auto source = source_sessions.open({"workspace", "fixture.hds"}, "owner-a");
+    const auto source = source_sessions.open({{{"workspace", "fixture.hds"}}, {}}, "owner-a");
     ASSERT_TRUE(source) << source.error().message;
-    const auto samples = source_sessions.objects(source->image_id, "owner-a", 64U, std::nullopt, "SBNK");
+    const auto samples =
+        source_sessions.objects({source->image_id, "document-a-series-source-1"}, "owner-a", 64U, std::nullopt, "SBNK");
     ASSERT_TRUE(samples) << samples.error().message;
     const auto sample = std::ranges::find(samples->items, "sine wave", &axk::app::ImageObjectItem::name);
     ASSERT_NE(sample, samples->items.end());
-    const auto deletion =
-        source_sessions.plan_deletion(source->image_id, "owner-a", source->revision, {sample->id}, {}, {});
+    const auto deletion = source_sessions.plan_deletion({source->image_id, "document-a-series-source-1"}, "owner-a",
+                                                        source->revision, {sample->id}, {}, {});
     ASSERT_TRUE(deletion) << deletion.error().message;
     ASSERT_TRUE(deletion->inspection.can_apply);
     ASSERT_TRUE(source_sessions.close(source->image_id, "owner-a"));
@@ -930,20 +972,21 @@ TEST_F(ImageSessionTest, DiscoversOnlyConfirmedUnreferencedWaveDataWithinTheRequ
     ASSERT_TRUE(altered) << altered.error().message;
 
     axk::app::ImageSessionManager sessions{*sandbox_, 2U, 64U};
-    const auto opened = sessions.open({"workspace", "orphan.hds"}, "owner-a");
+    const auto opened = sessions.open({{{"workspace", "orphan.hds"}}, {}}, "owner-a");
     ASSERT_TRUE(opened) << opened.error().message;
-    EXPECT_NE(std::ranges::find(opened->available_operations, "images.deletion.orphans.inspect"),
-              opened->available_operations.end());
-    const auto roots = sessions.content(opened->image_id, "owner-a", 64U);
+    EXPECT_NE(std::ranges::find(opened->documents.at(0).available_operations, "images.deletion.orphans.inspect"),
+              opened->documents.at(0).available_operations.end());
+    const auto roots = sessions.content({opened->image_id, "document-a-series-source-1"}, "owner-a", 64U);
     ASSERT_TRUE(roots) << roots.error().message;
     ASSERT_EQ(roots->items.size(), 1U);
-    const auto volumes = sessions.content(opened->image_id, "owner-a", 64U, std::nullopt, roots->items.front().id);
+    const auto volumes = sessions.content({opened->image_id, "document-a-series-source-1"}, "owner-a", 64U,
+                                          std::nullopt, roots->items.front().id);
     ASSERT_TRUE(volumes) << volumes.error().message;
     const auto volume = std::ranges::find(volumes->items, "volume", &axk::app::ImageContentItem::kind);
     ASSERT_NE(volume, volumes->items.end());
 
-    const auto inspection =
-        sessions.inspect_wave_data_orphans(opened->image_id, "owner-a", opened->revision, volume->id, 1024U);
+    const auto inspection = sessions.inspect_wave_data_orphans({opened->image_id, "document-a-series-source-1"},
+                                                               "owner-a", opened->revision, volume->id, 1024U);
     ASSERT_TRUE(inspection) << inspection.error().message;
     EXPECT_EQ(inspection->image_id, opened->image_id);
     EXPECT_EQ(inspection->revision, opened->revision);
@@ -957,12 +1000,12 @@ TEST_F(ImageSessionTest, DiscoversOnlyConfirmedUnreferencedWaveDataWithinTheRequ
     EXPECT_GT(inspection->candidates.front().recoverable_bytes, 0U);
     EXPECT_GT(inspection->candidates.front().recoverable_clusters, 0U);
 
-    const auto stale =
-        sessions.inspect_wave_data_orphans(opened->image_id, "owner-a", opened->revision + 1U, volume->id, 1024U);
+    const auto stale = sessions.inspect_wave_data_orphans({opened->image_id, "document-a-series-source-1"}, "owner-a",
+                                                          opened->revision + 1U, volume->id, 1024U);
     ASSERT_FALSE(stale);
     EXPECT_EQ(stale.error().code, "image_revision_stale");
-    const auto partition = sessions.inspect_wave_data_orphans(opened->image_id, "owner-a", opened->revision,
-                                                              roots->items.front().id, 1024U);
+    const auto partition = sessions.inspect_wave_data_orphans(
+        {opened->image_id, "document-a-series-source-1"}, "owner-a", opened->revision, roots->items.front().id, 1024U);
     ASSERT_FALSE(partition);
     EXPECT_EQ(partition.error().code, "content_scope_invalid");
 }
@@ -974,12 +1017,12 @@ TEST_F(ImageSessionTest, HoldsPathReservationFromBeforeOpenUntilClose) {
     auto mutation = reservations.try_acquire(
         axk::app::PathAccess{{"workspace", "fixture.hds"}, axk::app::PathAccessMode::exclusive});
     ASSERT_TRUE(mutation) << mutation.error().message;
-    const auto blocked = sessions.open({"workspace", "fixture.hds"}, "owner-a");
+    const auto blocked = sessions.open({{{"workspace", "fixture.hds"}}, {}}, "owner-a");
     ASSERT_FALSE(blocked);
     EXPECT_EQ(blocked.error().code, "entry_in_use");
     mutation = {};
 
-    const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");
+    const auto opened = sessions.open({{{"workspace", "fixture.hds"}}, {}}, "owner-a");
     ASSERT_TRUE(opened) << opened.error().message;
     EXPECT_FALSE(
         reservations.try_acquire(axk::app::PathAccess{{"workspace", ""}, axk::app::PathAccessMode::exclusive}));
@@ -992,10 +1035,11 @@ TEST_F(ImageSessionTest, MutationAdmissionUpgradesAndAbortRestoresTheSessionLeas
     axk::app::PathReservationCoordinator reservations;
     axk::app::ImageSessionManager sessions{
         *sandbox_, 4U, 100U, std::chrono::minutes{15}, std::chrono::steady_clock::now, &reservations};
-    const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");
+    const auto opened = sessions.open({{{"workspace", "fixture.hds"}}, {}}, "owner-a");
     ASSERT_TRUE(opened) << opened.error().message;
     EXPECT_EQ(opened->revision, 1U);
-    const auto mutation = sessions.begin_mutation(opened->image_id, "owner-a", opened->revision);
+    const auto mutation =
+        sessions.begin_mutation({opened->image_id, "document-a-series-source-1"}, "owner-a", opened->revision);
     ASSERT_TRUE(mutation) << mutation.error().message;
     EXPECT_FALSE(
         reservations.try_acquire(axk::app::PathAccess{{"workspace", "fixture.hds"}, axk::app::PathAccessMode::shared}));
@@ -1014,66 +1058,140 @@ TEST_F(ImageSessionTest, UncertainMutationInvalidatesAnUnchangedSourceUntilClose
     axk::app::PathReservationCoordinator reservations;
     axk::app::ImageSessionManager sessions{
         *sandbox_, 4U, 100U, std::chrono::minutes{15}, std::chrono::steady_clock::now, &reservations};
-    const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");
+    const auto opened = sessions.open({{{"workspace", "fixture.hds"}}, {}}, "owner-a");
     ASSERT_TRUE(opened);
-    auto mutation = sessions.begin_mutation(opened->image_id, "owner-a", opened->revision);
+    auto mutation =
+        sessions.begin_mutation({opened->image_id, "document-a-series-source-1"}, "owner-a", opened->revision);
     ASSERT_TRUE(mutation) << mutation.error().message;
     // No bytes or timestamps change: invalidation must not depend on source metadata.
     sessions.abort_mutation(opened->image_id, "owner-a", opened->revision, true);
     mutation->target.reset();
-    const auto read = sessions.begin_read(opened->image_id, "owner-a", opened->revision);
+    const auto read =
+        sessions.begin_read({opened->image_id, "document-a-series-source-1"}, "owner-a", opened->revision);
     ASSERT_FALSE(read);
     EXPECT_EQ(read.error().code, "image_session_invalidated");
     const auto inspect = sessions.inspect(opened->image_id, "owner-a");
     ASSERT_FALSE(inspect);
     EXPECT_EQ(inspect.error().code, "image_session_invalidated");
-    EXPECT_FALSE(sessions.content(opened->image_id, "owner-a", 100U));
-    EXPECT_FALSE(sessions.begin_mutation(opened->image_id, "owner-a", opened->revision));
+    EXPECT_FALSE(sessions.content({opened->image_id, "document-a-series-source-1"}, "owner-a", 100U));
+    EXPECT_FALSE(
+        sessions.begin_mutation({opened->image_id, "document-a-series-source-1"}, "owner-a", opened->revision));
     EXPECT_TRUE(sessions.close(opened->image_id, "owner-a"));
-    EXPECT_TRUE(sessions.open({"workspace", "fixture.hds"}, "owner-a"));
+    EXPECT_TRUE(sessions.open({{{"workspace", "fixture.hds"}}, {}}, "owner-a"));
+}
+
+TEST_F(ImageSessionTest, RefreshedDocumentKeepsObjectIdentityAndReplacesAuditionState) {
+    axk::app::PathReservationCoordinator reservations;
+    axk::app::ImageSessionManager sessions{
+        *sandbox_, 4U, 256U, std::chrono::minutes{15}, std::chrono::steady_clock::now, &reservations};
+    const auto opened = sessions.open({{{"workspace", "fixture.hds"}}, {}}, "owner");
+    ASSERT_TRUE(opened) << opened.error().message;
+    const auto objects =
+        sessions.objects({opened->image_id, "document-a-series-source-1"}, "owner", 64U, std::nullopt, "SMPL");
+    ASSERT_TRUE(objects);
+    ASSERT_FALSE(objects->items.empty());
+    const auto object_id = objects->items.front().id;
+    const auto audition =
+        sessions.prepare_audition({opened->image_id, "document-a-series-source-1"}, "owner", {object_id});
+    ASSERT_TRUE(audition) << audition.error().message;
+    std::vector<std::byte> before_pcm;
+    {
+        const auto before = sessions.audition_range(audition->audition_id, "owner", 44U, 32U);
+        ASSERT_TRUE(before);
+        before_pcm = before->bytes;
+    }
+    const auto files_before = sessions.filesystem(
+        opened->image_id, "owner", 1U, {.object_id = object_id, .document_id = "document-a-series-source-1"});
+    ASSERT_TRUE(files_before) << files_before.error().message;
+    ASSERT_EQ(files_before->items.size(), 1U);
+    auto mutation = sessions.begin_mutation({opened->image_id, "document-a-series-source-1"}, "owner", 1U);
+    ASSERT_TRUE(mutation) << mutation.error().message;
+    const auto refreshed = sessions.commit_mutation(opened->image_id, "owner", 1U);
+    ASSERT_TRUE(refreshed) << refreshed.error().message;
+    mutation->target.reset();
+    EXPECT_EQ(refreshed->revision, 2U);
+    EXPECT_FALSE(sessions.audition_range(audition->audition_id, "owner", 44U, 32U));
+    ASSERT_TRUE(sessions.object_detail({opened->image_id, "document-a-series-source-1"}, "owner", object_id));
+    const auto files_after = sessions.filesystem(opened->image_id, "owner", 2U,
+                                                 {.object_id = object_id, .document_id = "document-a-series-source-1"});
+    ASSERT_TRUE(files_after) << files_after.error().message;
+    ASSERT_EQ(files_after->items.size(), 1U);
+    EXPECT_EQ(files_after->items.front().id, files_before->items.front().id);
+    const auto fresh_audition =
+        sessions.prepare_audition({opened->image_id, "document-a-series-source-1"}, "owner", {object_id});
+    ASSERT_TRUE(fresh_audition) << fresh_audition.error().message;
+    const auto after = sessions.audition_range(fresh_audition->audition_id, "owner", 44U, 32U);
+    ASSERT_TRUE(after);
+    EXPECT_EQ(after->bytes, before_pcm);
+}
+
+TEST_F(ImageSessionTest, AdapterRetainsItsDecodedDocumentAndPcmReaders) {
+    auto media = axk::open_media(root_ / "fixture.hds");
+    ASSERT_TRUE(media);
+    auto document = axk::formats::a_series::Document::open(std::move(*media));
+    ASSERT_TRUE(document);
+    auto adapter = axk::app::formats::a_series::SessionState::create(*document, {"workspace", "fixture.hds"});
+    ASSERT_TRUE(adapter) << adapter.error().message;
+    document->reset();
+    const auto wave = std::ranges::find((*adapter)->objects, "SMPL", &axk::app::ImageObjectItem::type);
+    ASSERT_NE(wave, (*adapter)->objects.end());
+    EXPECT_GT((*adapter)->descriptors_by_id.at(wave->id)->size, 0U);
+    EXPECT_NE((*adapter)->snapshots_by_id.at(wave->id), nullptr);
+    const auto source = (*adapter)->prepare_source(wave->id, axk::app::formats::a_series::PcmReadWindow::stored_pcm,
+                                                   (*adapter)->relationships);
+    ASSERT_TRUE(source) << source.error().message;
+    ASSERT_FALSE(source->members.empty());
+    const auto pcm = (*adapter)->read_member_pcm(source->members.front(), 0U, 8U, {});
+    ASSERT_TRUE(pcm) << pcm.error().message;
+    EXPECT_FALSE(pcm->empty());
 }
 
 TEST_F(ImageSessionTest, PagesDeterministicallyAndRejectsForeignOrInvalidCursors) {
     axk::app::ImageSessionManager sessions{*sandbox_, 4U, 2U};
-    const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");
+    const auto opened = sessions.open({{{"workspace", "fixture.hds"}}, {}}, "owner-a");
     ASSERT_TRUE(opened) << opened.error().message;
-    const auto first = sessions.objects(opened->image_id, "owner-a", 2U);
+    const auto first = sessions.objects({opened->image_id, "document-a-series-source-1"}, "owner-a", 2U);
     ASSERT_TRUE(first) << first.error().message;
     ASSERT_EQ(first->items.size(), 2U);
     ASSERT_TRUE(first->next_cursor);
-    const auto repeated = sessions.objects(opened->image_id, "owner-a", 2U);
+    const auto repeated = sessions.objects({opened->image_id, "document-a-series-source-1"}, "owner-a", 2U);
     ASSERT_TRUE(repeated);
     EXPECT_EQ(repeated->next_cursor, first->next_cursor);
     EXPECT_EQ(repeated->items.front().id, first->items.front().id);
-    const auto second = sessions.objects(opened->image_id, "owner-a", 2U, *first->next_cursor);
+    const auto second =
+        sessions.objects({opened->image_id, "document-a-series-source-1"}, "owner-a", 2U, *first->next_cursor);
     ASSERT_TRUE(second) << second.error().message;
     EXPECT_NE(second->items.front().id, first->items.front().id);
 
-    const auto invalid = sessions.objects(opened->image_id, "owner-a", 2U, "cursor-invalid");
+    const auto invalid =
+        sessions.objects({opened->image_id, "document-a-series-source-1"}, "owner-a", 2U, "cursor-invalid");
     ASSERT_FALSE(invalid);
     EXPECT_EQ(invalid.error().code, "invalid_cursor");
-    const auto foreign = sessions.objects(opened->image_id, "owner-b", 2U);
+    const auto foreign = sessions.objects({opened->image_id, "document-a-series-source-1"}, "owner-b", 2U);
     ASSERT_FALSE(foreign);
     EXPECT_EQ(foreign.error().code, "image_not_found");
 }
 
 TEST_F(ImageSessionTest, FiltersObjectsAndBindsCursorsToTheObjectType) {
     axk::app::ImageSessionManager sessions{*sandbox_, 4U, 1U};
-    const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");
+    const auto opened = sessions.open({{{"workspace", "fixture.hds"}}, {}}, "owner-a");
     ASSERT_TRUE(opened) << opened.error().message;
 
-    const auto waveforms = sessions.objects(opened->image_id, "owner-a", 1U, std::nullopt, "SMPL");
+    const auto waveforms =
+        sessions.objects({opened->image_id, "document-a-series-source-1"}, "owner-a", 1U, std::nullopt, "SMPL");
     ASSERT_TRUE(waveforms) << waveforms.error().message;
     ASSERT_FALSE(waveforms->items.empty());
     EXPECT_TRUE(std::ranges::all_of(waveforms->items, [](const auto &item) { return item.type == "SMPL"; }));
 
-    const auto missing = sessions.objects(opened->image_id, "owner-a", 1U, std::nullopt, "MISSING");
+    const auto missing =
+        sessions.objects({opened->image_id, "document-a-series-source-1"}, "owner-a", 1U, std::nullopt, "MISSING");
     ASSERT_TRUE(missing) << missing.error().message;
     EXPECT_TRUE(missing->items.empty());
     EXPECT_EQ(missing->total_count, 0U);
 
     if (waveforms->next_cursor) {
-        const auto wrong_filter = sessions.objects(opened->image_id, "owner-a", 1U, *waveforms->next_cursor, "SBNK");
+        const auto wrong_filter = sessions.objects({opened->image_id, "document-a-series-source-1"}, "owner-a", 1U,
+                                                   *waveforms->next_cursor, "SBNK");
         ASSERT_FALSE(wrong_filter);
         EXPECT_EQ(wrong_filter.error().code, "invalid_cursor");
     }
@@ -1081,38 +1199,42 @@ TEST_F(ImageSessionTest, FiltersObjectsAndBindsCursorsToTheObjectType) {
 
 TEST_F(ImageSessionTest, FiltersObjectsByContentScopeAndBindsCursorsToTheScope) {
     axk::app::ImageSessionManager sessions{*sandbox_, 4U, 1U};
-    const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");
+    const auto opened = sessions.open({{{"workspace", "fixture.hds"}}, {}}, "owner-a");
     ASSERT_TRUE(opened) << opened.error().message;
 
-    const auto roots = sessions.content(opened->image_id, "owner-a", 1U);
+    const auto roots = sessions.content({opened->image_id, "document-a-series-source-1"}, "owner-a", 1U);
     ASSERT_TRUE(roots) << roots.error().message;
     ASSERT_FALSE(roots->items.empty());
-    const auto volumes = sessions.content(opened->image_id, "owner-a", 1U, std::nullopt, roots->items.front().id);
+    const auto volumes = sessions.content({opened->image_id, "document-a-series-source-1"}, "owner-a", 1U, std::nullopt,
+                                          roots->items.front().id);
     ASSERT_TRUE(volumes) << volumes.error().message;
     const auto volume = std::ranges::find(volumes->items, "volume", &axk::app::ImageContentItem::kind);
     ASSERT_NE(volume, volumes->items.end());
     EXPECT_EQ(volume->partition_index, roots->items.front().partition_index);
 
-    const auto waveforms = sessions.objects(opened->image_id, "owner-a", 1U, std::nullopt, "SMPL", volume->id);
+    const auto waveforms = sessions.objects({opened->image_id, "document-a-series-source-1"}, "owner-a", 1U,
+                                            std::nullopt, "SMPL", volume->id);
     ASSERT_TRUE(waveforms) << waveforms.error().message;
     ASSERT_FALSE(waveforms->items.empty());
     EXPECT_TRUE(std::ranges::all_of(waveforms->items, [&](const auto &item) {
         return item.type == "SMPL" && item.volume_name == volume->display_name;
     }));
 
-    const auto missing =
-        sessions.objects(opened->image_id, "owner-a", 1U, std::nullopt, std::nullopt, "content-missing");
+    const auto missing = sessions.objects({opened->image_id, "document-a-series-source-1"}, "owner-a", 1U, std::nullopt,
+                                          std::nullopt, "content-missing");
     ASSERT_FALSE(missing);
     EXPECT_EQ(missing.error().code, "content_not_found");
 
-    const auto scoped = sessions.objects(opened->image_id, "owner-a", 1U, std::nullopt, std::nullopt, volume->id);
+    const auto scoped = sessions.objects({opened->image_id, "document-a-series-source-1"}, "owner-a", 1U, std::nullopt,
+                                         std::nullopt, volume->id);
     ASSERT_TRUE(scoped) << scoped.error().message;
     ASSERT_TRUE(scoped->next_cursor);
-    const auto wrong_type = sessions.objects(opened->image_id, "owner-a", 1U, *scoped->next_cursor, "SMPL", volume->id);
+    const auto wrong_type = sessions.objects({opened->image_id, "document-a-series-source-1"}, "owner-a", 1U,
+                                             *scoped->next_cursor, "SMPL", volume->id);
     ASSERT_FALSE(wrong_type);
     EXPECT_EQ(wrong_type.error().code, "invalid_cursor");
-    const auto wrong_scope =
-        sessions.objects(opened->image_id, "owner-a", 1U, *scoped->next_cursor, std::nullopt, roots->items.front().id);
+    const auto wrong_scope = sessions.objects({opened->image_id, "document-a-series-source-1"}, "owner-a", 1U,
+                                              *scoped->next_cursor, std::nullopt, roots->items.front().id);
     ASSERT_FALSE(wrong_scope);
     EXPECT_EQ(wrong_scope.error().code, "invalid_cursor");
 }
@@ -1150,13 +1272,15 @@ TEST_F(ImageSessionTest, ExcludesProgramReferencesFromContainingContentScopes) {
     ASSERT_TRUE(written) << written.error().message;
 
     axk::app::ImageSessionManager sessions{*sandbox_, 4U, 100U};
-    const auto opened = sessions.open({"workspace", "program-scope.hds"}, "owner-a");
+    const auto opened = sessions.open({{{"workspace", "program-scope.hds"}}, {}}, "owner-a");
     ASSERT_TRUE(opened) << opened.error().message;
 
-    const auto samples = sessions.objects(opened->image_id, "owner-a", 64U, std::nullopt, "SBNK");
+    const auto samples =
+        sessions.objects({opened->image_id, "document-a-series-source-1"}, "owner-a", 64U, std::nullopt, "SBNK");
     ASSERT_TRUE(samples);
     ASSERT_FALSE(samples->items.empty());
-    const auto detail = sessions.object_detail(opened->image_id, "owner-a", samples->items.front().id);
+    const auto detail =
+        sessions.object_detail({opened->image_id, "document-a-series-source-1"}, "owner-a", samples->items.front().id);
     ASSERT_TRUE(detail) << detail.error().message;
     const auto &editing = detail->at("editing");
     ASSERT_FALSE(editing.is_null());
@@ -1166,45 +1290,49 @@ TEST_F(ImageSessionTest, ExcludesProgramReferencesFromContainingContentScopes) {
     EXPECT_TRUE(editing.at("parameters").contains("level"));
     EXPECT_FALSE(editing.at("sources").empty());
 
-    const auto roots = sessions.content(opened->image_id, "owner-a", 100U);
+    const auto roots = sessions.content({opened->image_id, "document-a-series-source-1"}, "owner-a", 100U);
     ASSERT_TRUE(roots) << roots.error().message;
     ASSERT_FALSE(roots->items.empty());
     EXPECT_TRUE(std::ranges::all_of(roots->items, [](const auto &item) { return item.scope_role == "CONTAINED"; }));
 
-    const auto volumes = sessions.content(opened->image_id, "owner-a", 100U, std::nullopt, roots->items.front().id);
+    const auto volumes = sessions.content({opened->image_id, "document-a-series-source-1"}, "owner-a", 100U,
+                                          std::nullopt, roots->items.front().id);
     ASSERT_TRUE(volumes) << volumes.error().message;
     const auto volume = std::ranges::find(volumes->items, "volume", &axk::app::ImageContentItem::kind);
     ASSERT_NE(volume, volumes->items.end());
-    const auto categories = sessions.content(opened->image_id, "owner-a", 100U, std::nullopt, volume->id);
+    const auto categories =
+        sessions.content({opened->image_id, "document-a-series-source-1"}, "owner-a", 100U, std::nullopt, volume->id);
     ASSERT_TRUE(categories) << categories.error().message;
     const auto programs =
         std::ranges::find(categories->items, std::string{"Programs"}, &axk::app::ImageContentItem::display_name);
     ASSERT_NE(programs, categories->items.end());
-    const auto program_nodes = sessions.content(opened->image_id, "owner-a", 100U, std::nullopt, programs->id);
+    const auto program_nodes =
+        sessions.content({opened->image_id, "document-a-series-source-1"}, "owner-a", 100U, std::nullopt, programs->id);
     ASSERT_TRUE(program_nodes) << program_nodes.error().message;
     const auto program =
         std::ranges::find_if(program_nodes->items, [](const auto &item) { return item.child_count > 0U; });
     ASSERT_NE(program, program_nodes->items.end());
 
-    const auto program_scope =
-        sessions.objects(opened->image_id, "owner-a", 100U, std::nullopt, std::nullopt, program->id);
+    const auto program_scope = sessions.objects({opened->image_id, "document-a-series-source-1"}, "owner-a", 100U,
+                                                std::nullopt, std::nullopt, program->id);
     ASSERT_TRUE(program_scope) << program_scope.error().message;
     ASSERT_EQ(program_scope->items.size(), 1U);
     EXPECT_EQ(program_scope->items.front().type, "PROG");
 
-    const auto references = sessions.content(opened->image_id, "owner-a", 100U, std::nullopt, program->id);
+    const auto references =
+        sessions.content({opened->image_id, "document-a-series-source-1"}, "owner-a", 100U, std::nullopt, program->id);
     ASSERT_TRUE(references) << references.error().message;
     ASSERT_FALSE(references->items.empty());
     EXPECT_TRUE(
         std::ranges::all_of(references->items, [](const auto &item) { return item.scope_role == "REFERENCE"; }));
-    const auto reference_scope =
-        sessions.objects(opened->image_id, "owner-a", 100U, std::nullopt, std::nullopt, references->items.front().id);
+    const auto reference_scope = sessions.objects({opened->image_id, "document-a-series-source-1"}, "owner-a", 100U,
+                                                  std::nullopt, std::nullopt, references->items.front().id);
     ASSERT_TRUE(reference_scope) << reference_scope.error().message;
     ASSERT_EQ(reference_scope->items.size(), 1U);
     EXPECT_NE(reference_scope->items.front().type, "PROG");
 
-    const auto volume_objects =
-        sessions.objects(opened->image_id, "owner-a", 100U, std::nullopt, std::nullopt, volume->id);
+    const auto volume_objects = sessions.objects({opened->image_id, "document-a-series-source-1"}, "owner-a", 100U,
+                                                 std::nullopt, std::nullopt, volume->id);
     ASSERT_TRUE(volume_objects) << volume_objects.error().message;
     std::uint64_t stored_volume_size{};
     for (const auto &object : volume_objects->items)
@@ -1279,18 +1407,19 @@ TEST_F(ImageSessionTest, PlansProgramsForDisjointUnreferencedSampleBanksAndSampl
     ASSERT_TRUE(pruned) << pruned.error().message;
 
     axk::app::ImageSessionManager sessions{*sandbox_, 4U, 100U};
-    const auto opened = sessions.open({"workspace", "generation-pruned.hds"}, "owner-a");
+    const auto opened = sessions.open({{{"workspace", "generation-pruned.hds"}}, {}}, "owner-a");
     ASSERT_TRUE(opened) << opened.error().message;
-    const auto roots = sessions.content(opened->image_id, "owner-a", 100U);
+    const auto roots = sessions.content({opened->image_id, "document-a-series-source-1"}, "owner-a", 100U);
     ASSERT_TRUE(roots) << roots.error().message;
     ASSERT_EQ(roots->items.size(), 1U);
-    const auto volumes = sessions.content(opened->image_id, "owner-a", 100U, std::nullopt, roots->items.front().id);
+    const auto volumes = sessions.content({opened->image_id, "document-a-series-source-1"}, "owner-a", 100U,
+                                          std::nullopt, roots->items.front().id);
     ASSERT_TRUE(volumes) << volumes.error().message;
     const auto volume = std::ranges::find(volumes->items, "volume", &axk::app::ImageContentItem::kind);
     ASSERT_NE(volume, volumes->items.end());
 
-    const auto inspection =
-        sessions.inspect_program_generation(opened->image_id, "owner-a", opened->revision, volume->id);
+    const auto inspection = sessions.inspect_program_generation({opened->image_id, "document-a-series-source-1"},
+                                                                "owner-a", opened->revision, volume->id);
     ASSERT_TRUE(inspection) << inspection.error().message;
     ASSERT_GE(inspection->available_program_numbers.size(), 3U);
     EXPECT_EQ(inspection->available_program_numbers[0], 1U);
@@ -1309,8 +1438,8 @@ TEST_F(ImageSessionTest, PlansProgramsForDisjointUnreferencedSampleBanksAndSampl
         axk::app::ImageProgramGenerationSelection{inspection->candidates[0].target_object_id, 1U, "Bank 2"},
         axk::app::ImageProgramGenerationSelection{inspection->candidates[2].target_object_id, 2U, "Loose 3"},
     };
-    const auto plan =
-        sessions.plan_program_generation(opened->image_id, "owner-a", opened->revision, volume->id, selections);
+    const auto plan = sessions.plan_program_generation({opened->image_id, "document-a-series-source-1"}, "owner-a",
+                                                       opened->revision, volume->id, selections);
     ASSERT_TRUE(plan) << plan.error().message;
     ASSERT_EQ(plan->manifest.operations.size(), 2U);
     const auto *bank_program = std::get_if<axk::InsertProgramOperation>(&plan->manifest.operations[0].data);
@@ -1325,8 +1454,8 @@ TEST_F(ImageSessionTest, PlansProgramsForDisjointUnreferencedSampleBanksAndSampl
     EXPECT_EQ(sample_program->program.number, 2U);
     EXPECT_EQ(sample_program->program.assignments.front().target_kind, "SBNK");
 
-    const auto stale =
-        sessions.inspect_program_generation(opened->image_id, "owner-a", opened->revision + 1U, volume->id);
+    const auto stale = sessions.inspect_program_generation({opened->image_id, "document-a-series-source-1"}, "owner-a",
+                                                           opened->revision + 1U, volume->id);
     ASSERT_FALSE(stale);
     EXPECT_EQ(stale.error().code, "image_revision_stale");
 }
@@ -1437,17 +1566,18 @@ TEST_F(ImageSessionTest, PlansCleanupForEveryUnresolvedProgramAssignmentInVolume
     patch_program_assignment_name(root_ / "cleanup.hds", "005", 1U, "Other Missing");
 
     axk::app::ImageSessionManager sessions{*sandbox_, 4U, 100U};
-    const auto opened = sessions.open({"workspace", "cleanup.hds"}, "owner-a");
+    const auto opened = sessions.open({{{"workspace", "cleanup.hds"}}, {}}, "owner-a");
     ASSERT_TRUE(opened) << opened.error().message;
-    const auto roots = sessions.content(opened->image_id, "owner-a", 100U);
+    const auto roots = sessions.content({opened->image_id, "document-a-series-source-1"}, "owner-a", 100U);
     ASSERT_TRUE(roots);
-    const auto volumes = sessions.content(opened->image_id, "owner-a", 100U, std::nullopt, roots->items.front().id);
+    const auto volumes = sessions.content({opened->image_id, "document-a-series-source-1"}, "owner-a", 100U,
+                                          std::nullopt, roots->items.front().id);
     ASSERT_TRUE(volumes);
     const auto volume_item = std::ranges::find(volumes->items, "volume", &axk::app::ImageContentItem::kind);
     ASSERT_NE(volume_item, volumes->items.end());
 
-    const auto inspection =
-        sessions.inspect_program_assignment_cleanup(opened->image_id, "owner-a", opened->revision, volume_item->id);
+    const auto inspection = sessions.inspect_program_assignment_cleanup(
+        {opened->image_id, "document-a-series-source-1"}, "owner-a", opened->revision, volume_item->id);
     ASSERT_TRUE(inspection) << inspection.error().message;
     ASSERT_EQ(inspection->candidates.size(), 4U);
     const auto &missing = inspection->candidates[0];
@@ -1467,7 +1597,8 @@ TEST_F(ImageSessionTest, PlansCleanupForEveryUnresolvedProgramAssignmentInVolume
     EXPECT_EQ(ambiguous.candidate_target_count, 2U);
     EXPECT_EQ(second_program.program_number, 5U);
     EXPECT_EQ(second_program.assignment_name, "Other Missing");
-    const auto metadata = sessions.object_detail(opened->image_id, "owner-a", missing.program_object_id);
+    const auto metadata =
+        sessions.object_detail({opened->image_id, "document-a-series-source-1"}, "owner-a", missing.program_object_id);
     ASSERT_TRUE(metadata) << metadata.error().message;
     const auto &decoded = metadata->at("object").at("decoded");
     EXPECT_EQ(decoded.at("kind"), "PROG");
@@ -1497,8 +1628,8 @@ TEST_F(ImageSessionTest, PlansCleanupForEveryUnresolvedProgramAssignmentInVolume
     std::vector<axk::app::ImageProgramAssignmentCleanupSelection> selections;
     for (const auto &candidate : inspection->candidates)
         selections.push_back({candidate.program_object_id, candidate.assignment_ordinal});
-    const auto plan = sessions.plan_program_assignment_cleanup(opened->image_id, "owner-a", opened->revision,
-                                                               volume_item->id, selections);
+    const auto plan = sessions.plan_program_assignment_cleanup(
+        {opened->image_id, "document-a-series-source-1"}, "owner-a", opened->revision, volume_item->id, selections);
     ASSERT_TRUE(plan) << plan.error().message;
     ASSERT_EQ(plan->manifest.operations.size(), 2U);
     const auto *first_cleanup = std::get_if<axk::ClearProgramAssignmentsOperation>(&plan->manifest.operations[0].data);
@@ -1510,35 +1641,38 @@ TEST_F(ImageSessionTest, PlansCleanupForEveryUnresolvedProgramAssignmentInVolume
     EXPECT_EQ(second_cleanup->program_number, 5U);
     EXPECT_EQ(second_cleanup->assignment_ordinals, (std::vector<std::uint16_t>{0U, 1U}));
 
-    const auto rejected = sessions.plan_program_assignment_cleanup(opened->image_id, "owner-a", opened->revision,
-                                                                   volume_item->id, {{missing.program_object_id, 2U}});
+    const auto rejected =
+        sessions.plan_program_assignment_cleanup({opened->image_id, "document-a-series-source-1"}, "owner-a",
+                                                 opened->revision, volume_item->id, {{missing.program_object_id, 2U}});
     ASSERT_FALSE(rejected);
     EXPECT_EQ(rejected.error().code, "program_assignment_cleanup_stale");
 }
 
 TEST_F(ImageSessionTest, FiltersRelationshipsByVolumeObjectAndTypeAndBindsCursorsToTheFilter) {
     axk::app::ImageSessionManager sessions{*sandbox_, 4U, 100U};
-    const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");
+    const auto opened = sessions.open({{{"workspace", "fixture.hds"}}, {}}, "owner-a");
     ASSERT_TRUE(opened) << opened.error().message;
 
-    const auto roots = sessions.content(opened->image_id, "owner-a", 1U);
+    const auto roots = sessions.content({opened->image_id, "document-a-series-source-1"}, "owner-a", 1U);
     ASSERT_TRUE(roots) << roots.error().message;
-    const auto volumes = sessions.content(opened->image_id, "owner-a", 100U, std::nullopt, roots->items.front().id);
+    const auto volumes = sessions.content({opened->image_id, "document-a-series-source-1"}, "owner-a", 100U,
+                                          std::nullopt, roots->items.front().id);
     ASSERT_TRUE(volumes) << volumes.error().message;
     const auto volume = std::ranges::find(volumes->items, "volume", &axk::app::ImageContentItem::kind);
     ASSERT_NE(volume, volumes->items.end());
 
-    const auto scoped = sessions.relationships(opened->image_id, "owner-a", 1U, std::nullopt,
-                                               {.content_scope_id = volume->id,
-                                                .source_object_id = std::nullopt,
-                                                .target_object_id = std::nullopt,
-                                                .relationship_type = std::nullopt});
+    const auto scoped =
+        sessions.relationships({opened->image_id, "document-a-series-source-1"}, "owner-a", 1U, std::nullopt,
+                               {.content_scope_id = volume->id,
+                                .source_object_id = std::nullopt,
+                                .target_object_id = std::nullopt,
+                                .relationship_type = std::nullopt});
     ASSERT_TRUE(scoped) << scoped.error().message;
     ASSERT_FALSE(scoped->items.empty());
     const auto &first = scoped->items.front();
 
     const auto combined = sessions.relationships(
-        opened->image_id, "owner-a", 100U, std::nullopt,
+        {opened->image_id, "document-a-series-source-1"}, "owner-a", 100U, std::nullopt,
         {.content_scope_id = volume->id,
          .source_object_id = first.source_object_id,
          .target_object_id =
@@ -1552,7 +1686,8 @@ TEST_F(ImageSessionTest, FiltersRelationshipsByVolumeObjectAndTypeAndBindsCursor
     }));
 
     if (scoped->next_cursor) {
-        const auto wrong_filter = sessions.relationships(opened->image_id, "owner-a", 1U, *scoped->next_cursor,
+        const auto wrong_filter = sessions.relationships({opened->image_id, "document-a-series-source-1"}, "owner-a",
+                                                         1U, *scoped->next_cursor,
                                                          {.content_scope_id = volume->id,
                                                           .source_object_id = std::nullopt,
                                                           .target_object_id = std::nullopt,
@@ -1561,39 +1696,43 @@ TEST_F(ImageSessionTest, FiltersRelationshipsByVolumeObjectAndTypeAndBindsCursor
         EXPECT_EQ(wrong_filter.error().code, "invalid_cursor");
     }
 
-    const auto missing = sessions.relationships(opened->image_id, "owner-a", 1U, std::nullopt,
-                                                {.content_scope_id = "content-missing",
-                                                 .source_object_id = std::nullopt,
-                                                 .target_object_id = std::nullopt,
-                                                 .relationship_type = std::nullopt});
+    const auto missing =
+        sessions.relationships({opened->image_id, "document-a-series-source-1"}, "owner-a", 1U, std::nullopt,
+                               {.content_scope_id = "content-missing",
+                                .source_object_id = std::nullopt,
+                                .target_object_id = std::nullopt,
+                                .relationship_type = std::nullopt});
     ASSERT_FALSE(missing);
     EXPECT_EQ(missing.error().code, "content_not_found");
 }
 
 TEST_F(ImageSessionTest, PagesContentByParentAndBindsCursorsToThatParent) {
     axk::app::ImageSessionManager sessions{*sandbox_, 4U, 2U};
-    const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");
+    const auto opened = sessions.open({{{"workspace", "fixture.hds"}}, {}}, "owner-a");
     ASSERT_TRUE(opened) << opened.error().message;
 
-    const auto roots = sessions.content(opened->image_id, "owner-a", 2U);
+    const auto roots = sessions.content({opened->image_id, "document-a-series-source-1"}, "owner-a", 2U);
     ASSERT_TRUE(roots) << roots.error().message;
     ASSERT_FALSE(roots->items.empty());
     for (const auto &item : roots->items)
         EXPECT_FALSE(item.parent_id);
 
     const auto parent_id = roots->items.front().id;
-    const auto children = sessions.content(opened->image_id, "owner-a", 2U, std::nullopt, parent_id);
+    const auto children =
+        sessions.content({opened->image_id, "document-a-series-source-1"}, "owner-a", 2U, std::nullopt, parent_id);
     ASSERT_TRUE(children) << children.error().message;
     ASSERT_FALSE(children->items.empty());
     for (const auto &item : children->items)
         EXPECT_EQ(item.parent_id, parent_id);
 
-    const auto missing = sessions.content(opened->image_id, "owner-a", 2U, std::nullopt, "content-missing");
+    const auto missing = sessions.content({opened->image_id, "document-a-series-source-1"}, "owner-a", 2U, std::nullopt,
+                                          "content-missing");
     ASSERT_FALSE(missing);
     EXPECT_EQ(missing.error().code, "content_not_found");
 
     if (children->next_cursor) {
-        const auto wrong_parent = sessions.content(opened->image_id, "owner-a", 2U, *children->next_cursor);
+        const auto wrong_parent =
+            sessions.content({opened->image_id, "document-a-series-source-1"}, "owner-a", 2U, *children->next_cursor);
         ASSERT_FALSE(wrong_parent);
         EXPECT_EQ(wrong_parent.error().code, "invalid_cursor");
     }
@@ -1602,7 +1741,7 @@ TEST_F(ImageSessionTest, PagesContentByParentAndBindsCursorsToThatParent) {
 TEST_F(ImageSessionTest, ExpiresSessionsAndKeepsCloseIdempotent) {
     auto now = std::chrono::steady_clock::now();
     axk::app::ImageSessionManager sessions{*sandbox_, 2U, 100U, std::chrono::seconds{5}, [&] { return now; }};
-    const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");
+    const auto opened = sessions.open({{{"workspace", "fixture.hds"}}, {}}, "owner-a");
     ASSERT_TRUE(opened) << opened.error().message;
     now += std::chrono::seconds{6};
     const auto expired = sessions.inspect(opened->image_id, "owner-a");
@@ -1614,16 +1753,16 @@ TEST_F(ImageSessionTest, ExpiresSessionsAndKeepsCloseIdempotent) {
 
 TEST_F(ImageSessionTest, EnforcesCapacityAndSurvivesCloseDuringAnExistingPage) {
     axk::app::ImageSessionManager sessions{*sandbox_, 1U};
-    const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");
+    const auto opened = sessions.open({{{"workspace", "fixture.hds"}}, {}}, "owner-a");
     ASSERT_TRUE(opened) << opened.error().message;
-    const auto full = sessions.open({"workspace", "fixture.hds"}, "owner-a");
+    const auto full = sessions.open({{{"workspace", "fixture.hds"}}, {}}, "owner-a");
     ASSERT_FALSE(full);
     EXPECT_EQ(full.error().code, "image_capacity_exhausted");
     EXPECT_TRUE(full.error().retryable);
-    const auto missing = sessions.open({"workspace", "does-not-exist.hds"}, "owner-a");
+    const auto missing = sessions.open({{{"workspace", "does-not-exist.hds"}}, {}}, "owner-a");
     ASSERT_FALSE(missing);
     EXPECT_EQ(missing.error().code, "image_capacity_exhausted");
-    const auto page = sessions.content(opened->image_id, "owner-a", 100U);
+    const auto page = sessions.content({opened->image_id, "document-a-series-source-1"}, "owner-a", 100U);
     ASSERT_TRUE(page);
     ASSERT_TRUE(sessions.close(opened->image_id, "owner-a"));
     EXPECT_FALSE(page->items.empty());
@@ -1632,33 +1771,36 @@ TEST_F(ImageSessionTest, EnforcesCapacityAndSurvivesCloseDuringAnExistingPage) {
 
 TEST_F(ImageSessionTest, BuildsBoundedPreviewForOpaqueWaveformIdentifier) {
     axk::app::ImageSessionManager sessions{*sandbox_, 2U, 64U};
-    const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");
+    const auto opened = sessions.open({{{"workspace", "fixture.hds"}}, {}}, "owner-a");
     ASSERT_TRUE(opened) << opened.error().message;
-    const auto objects = sessions.objects(opened->image_id, "owner-a", 64U);
+    const auto objects = sessions.objects({opened->image_id, "document-a-series-source-1"}, "owner-a", 64U);
     ASSERT_TRUE(objects);
     const auto waveform = std::ranges::find(objects->items, "SMPL", &axk::app::ImageObjectItem::type);
     ASSERT_NE(waveform, objects->items.end());
-    const auto preview = sessions.preview(opened->image_id, "owner-a", waveform->id, 32U);
+    const auto preview =
+        sessions.preview({opened->image_id, "document-a-series-source-1"}, "owner-a", waveform->id, 32U);
     ASSERT_TRUE(preview) << preview.error().message;
     EXPECT_EQ(preview->object_id, waveform->id);
     ASSERT_EQ(preview->lanes.size(), 1U);
     EXPECT_EQ(preview->lanes.front().bins.size(), 32U);
     EXPECT_GT(preview->lanes.front().stored_frame_count, 0U);
     EXPECT_GT(preview->lanes.front().sample_rate, 0U);
-    EXPECT_TRUE(sessions.preview(opened->image_id, "owner-a", waveform->id, 1024U));
-    EXPECT_FALSE(sessions.preview(opened->image_id, "owner-a", waveform->id, 4097U));
-    EXPECT_FALSE(sessions.preview(opened->image_id, "owner-a", "object-unknown", 32U));
+    EXPECT_TRUE(sessions.preview({opened->image_id, "document-a-series-source-1"}, "owner-a", waveform->id, 1024U));
+    EXPECT_FALSE(sessions.preview({opened->image_id, "document-a-series-source-1"}, "owner-a", waveform->id, 4097U));
+    EXPECT_FALSE(sessions.preview({opened->image_id, "document-a-series-source-1"}, "owner-a", "object-unknown", 32U));
 }
 
 TEST_F(ImageSessionTest, ReturnsDecodedObjectDetailWithoutContentPayloads) {
     axk::app::ImageSessionManager sessions{*sandbox_, 2U, 64U};
-    const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");
+    const auto opened = sessions.open({{{"workspace", "fixture.hds"}}, {}}, "owner-a");
     ASSERT_TRUE(opened) << opened.error().message;
-    const auto objects = sessions.objects(opened->image_id, "owner-a", 64U, std::nullopt, "SMPL");
+    const auto objects =
+        sessions.objects({opened->image_id, "document-a-series-source-1"}, "owner-a", 64U, std::nullopt, "SMPL");
     ASSERT_TRUE(objects) << objects.error().message;
     ASSERT_FALSE(objects->items.empty());
 
-    const auto metadata = sessions.object_detail(opened->image_id, "owner-a", objects->items.front().id);
+    const auto metadata =
+        sessions.object_detail({opened->image_id, "document-a-series-source-1"}, "owner-a", objects->items.front().id);
     ASSERT_TRUE(metadata) << metadata.error().message;
     EXPECT_EQ(metadata->at("schemaVersion"), 1U);
     EXPECT_EQ(metadata->at("image").at("imageId"), opened->image_id);
@@ -1680,8 +1822,9 @@ TEST_F(ImageSessionTest, ReturnsDecodedObjectDetailWithoutContentPayloads) {
         return std::ranges::contains(relationship.at("selectedObjectRoles"), "TARGET");
     }));
     EXPECT_EQ(metadata->dump().find("rawPayloadHex"), std::string::npos);
-    EXPECT_FALSE(sessions.object_detail(opened->image_id, "owner-b", objects->items.front().id));
-    EXPECT_FALSE(sessions.object_detail(opened->image_id, "owner-a", "object-missing"));
+    EXPECT_FALSE(
+        sessions.object_detail({opened->image_id, "document-a-series-source-1"}, "owner-b", objects->items.front().id));
+    EXPECT_FALSE(sessions.object_detail({opened->image_id, "document-a-series-source-1"}, "owner-a", "object-missing"));
 }
 
 TEST_F(ImageSessionTest, RejectsUnsupportedWaveDataTransferControlsForPreviewAndAudition) {
@@ -1713,23 +1856,25 @@ TEST_F(ImageSessionTest, RejectsUnsupportedWaveDataTransferControlsForPreviewAnd
             }
         }
         axk::app::ImageSessionManager sessions{*sandbox_};
-        const auto opened = sessions.open({"workspace", filename}, "owner-a");
+        const auto opened = sessions.open({{{"workspace", filename}}, {}}, "owner-a");
         ASSERT_TRUE(opened) << opened.error().message;
         for (const auto type : {"SMPL", "SBNK"}) {
-            const auto objects = sessions.objects(opened->image_id, "owner-a", 64U, std::nullopt, type);
+            const auto objects =
+                sessions.objects({opened->image_id, "document-a-series-source-1"}, "owner-a", 64U, std::nullopt, type);
             ASSERT_TRUE(objects);
             ASSERT_FALSE(objects->items.empty());
             const auto &id = objects->items.front().id;
-            const auto detail = sessions.object_detail(opened->image_id, "owner-a", id);
+            const auto detail = sessions.object_detail({opened->image_id, "document-a-series-source-1"}, "owner-a", id);
             ASSERT_TRUE(detail);
             EXPECT_FALSE(detail->at("relationships").empty());
             if (std::string_view{type} == "SMPL") {
                 EXPECT_EQ(detail->at("object").at("decoded").at("pcmTransferControl").at("value"), control);
             }
-            const auto preview = sessions.preview(opened->image_id, "owner-a", id, 32U);
+            const auto preview = sessions.preview({opened->image_id, "document-a-series-source-1"}, "owner-a", id, 32U);
             ASSERT_FALSE(preview);
             EXPECT_EQ(preview.error().code, "audition_unsupported");
-            const auto audition = sessions.prepare_audition(opened->image_id, "owner-a", {id});
+            const auto audition =
+                sessions.prepare_audition({opened->image_id, "document-a-series-source-1"}, "owner-a", {id});
             ASSERT_FALSE(audition);
             EXPECT_EQ(audition.error().code, "audition_unsupported");
             EXPECT_EQ(audition.error().context.object_id, id);
@@ -1740,13 +1885,15 @@ TEST_F(ImageSessionTest, RejectsUnsupportedWaveDataTransferControlsForPreviewAnd
 
 TEST_F(ImageSessionTest, PreparesOwnerBoundRangeReadableWavAndInvalidatesItWithTheImage) {
     axk::app::ImageSessionManager sessions{*sandbox_, 2U, 64U};
-    const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");
+    const auto opened = sessions.open({{{"workspace", "fixture.hds"}}, {}}, "owner-a");
     ASSERT_TRUE(opened) << opened.error().message;
-    const auto objects = sessions.objects(opened->image_id, "owner-a", 64U, std::nullopt, "SMPL");
+    const auto objects =
+        sessions.objects({opened->image_id, "document-a-series-source-1"}, "owner-a", 64U, std::nullopt, "SMPL");
     ASSERT_TRUE(objects);
     ASSERT_FALSE(objects->items.empty());
 
-    const auto audition = sessions.prepare_audition(opened->image_id, "owner-a", {objects->items.front().id});
+    const auto audition = sessions.prepare_audition({opened->image_id, "document-a-series-source-1"}, "owner-a",
+                                                    {objects->items.front().id});
     ASSERT_TRUE(audition) << audition.error().message;
     ASSERT_EQ(audition->clips.size(), 1U);
     ASSERT_EQ(audition->clips.front().lanes.size(), 1U);
@@ -1775,17 +1922,20 @@ TEST_F(ImageSessionTest, PreparesOwnerBoundRangeReadableWavAndInvalidatesItWithT
 
 TEST_F(ImageSessionTest, PreparesOneOrderedBundleAndReadsAcrossLaneBoundaries) {
     axk::app::ImageSessionManager sessions{*sandbox_, 2U, 64U};
-    const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");
+    const auto opened = sessions.open({{{"workspace", "fixture.hds"}}, {}}, "owner-a");
     ASSERT_TRUE(opened) << opened.error().message;
-    const auto samples = sessions.objects(opened->image_id, "owner-a", 64U, std::nullopt, "SBNK");
-    const auto wave_data = sessions.objects(opened->image_id, "owner-a", 64U, std::nullopt, "SMPL");
+    const auto samples =
+        sessions.objects({opened->image_id, "document-a-series-source-1"}, "owner-a", 64U, std::nullopt, "SBNK");
+    const auto wave_data =
+        sessions.objects({opened->image_id, "document-a-series-source-1"}, "owner-a", 64U, std::nullopt, "SMPL");
     ASSERT_TRUE(samples) << samples.error().message;
     ASSERT_TRUE(wave_data) << wave_data.error().message;
     ASSERT_FALSE(samples->items.empty());
     ASSERT_FALSE(wave_data->items.empty());
 
     const std::vector object_ids{samples->items.front().id, wave_data->items.front().id};
-    const auto audition = sessions.prepare_audition(opened->image_id, "owner-a", object_ids);
+    const auto audition =
+        sessions.prepare_audition({opened->image_id, "document-a-series-source-1"}, "owner-a", object_ids);
     ASSERT_TRUE(audition) << audition.error().message;
     ASSERT_EQ(audition->clips.size(), 2U);
     EXPECT_EQ(audition->clips[0].object_id, object_ids[0]);
@@ -1804,18 +1954,21 @@ TEST_F(ImageSessionTest, PreparesOneOrderedBundleAndReadsAcrossLaneBoundaries) {
 
 TEST_F(ImageSessionTest, PreparesSampleAuditionFromConfirmedLinkedWaveData) {
     axk::app::ImageSessionManager sessions{*sandbox_, 2U, 64U};
-    const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");
+    const auto opened = sessions.open({{{"workspace", "fixture.hds"}}, {}}, "owner-a");
     ASSERT_TRUE(opened) << opened.error().message;
-    const auto objects = sessions.objects(opened->image_id, "owner-a", 64U, std::nullopt, "SBNK");
+    const auto objects =
+        sessions.objects({opened->image_id, "document-a-series-source-1"}, "owner-a", 64U, std::nullopt, "SBNK");
     ASSERT_TRUE(objects);
     ASSERT_FALSE(objects->items.empty());
 
-    const auto detail = sessions.object_detail(opened->image_id, "owner-a", objects->items.front().id);
+    const auto detail =
+        sessions.object_detail({opened->image_id, "document-a-series-source-1"}, "owner-a", objects->items.front().id);
     ASSERT_TRUE(detail) << detail.error().message;
     ASSERT_FALSE(detail->at("editing").is_null());
     EXPECT_EQ(detail->at("editing").at("profile"), "a-series/sample");
 
-    const auto audition = sessions.prepare_audition(opened->image_id, "owner-a", {objects->items.front().id});
+    const auto audition = sessions.prepare_audition({opened->image_id, "document-a-series-source-1"}, "owner-a",
+                                                    {objects->items.front().id});
     ASSERT_TRUE(audition) << audition.error().message;
     ASSERT_EQ(audition->clips.size(), 1U);
     ASSERT_EQ(audition->clips.front().lanes.size(), 1U);
@@ -1913,13 +2066,15 @@ TEST_F(ImageSessionTest, PreviewsAndAuditionsAuthoredLoopedSampleFromItsFullWave
     ASSERT_TRUE(axk::write_hds_image(manifest, root_ / "looped.hds"));
 
     axk::app::ImageSessionManager sessions{*sandbox_, 2U, 64U};
-    const auto opened = sessions.open({"workspace", "looped.hds"}, "owner-a");
+    const auto opened = sessions.open({{{"workspace", "looped.hds"}}, {}}, "owner-a");
     ASSERT_TRUE(opened) << opened.error().message;
-    const auto samples = sessions.objects(opened->image_id, "owner-a", 64U, std::nullopt, "SBNK");
+    const auto samples =
+        sessions.objects({opened->image_id, "document-a-series-source-1"}, "owner-a", 64U, std::nullopt, "SBNK");
     ASSERT_TRUE(samples) << samples.error().message;
     ASSERT_EQ(samples->items.size(), 1U);
 
-    const auto preview = sessions.preview(opened->image_id, "owner-a", samples->items.front().id, 32U);
+    const auto preview =
+        sessions.preview({opened->image_id, "document-a-series-source-1"}, "owner-a", samples->items.front().id, 32U);
     ASSERT_TRUE(preview) << preview.error().message;
     ASSERT_EQ(preview->lanes.size(), 1U);
     EXPECT_EQ(preview->lanes.front().stored_frame_count, 404U);
@@ -1927,7 +2082,8 @@ TEST_F(ImageSessionTest, PreviewsAndAuditionsAuthoredLoopedSampleFromItsFullWave
     EXPECT_EQ(preview->lanes.front().playback_length_frames, 400U);
     EXPECT_EQ(preview->lanes.front().loop_start_frame, 17U);
     EXPECT_EQ(preview->lanes.front().loop_length_frames, 335U);
-    const auto audition = sessions.prepare_audition(opened->image_id, "owner-a", {samples->items.front().id});
+    const auto audition = sessions.prepare_audition({opened->image_id, "document-a-series-source-1"}, "owner-a",
+                                                    {samples->items.front().id});
     ASSERT_TRUE(audition) << audition.error().message;
     ASSERT_EQ(audition->clips.front().lanes.size(), 1U);
     EXPECT_EQ(audition->clips.front().lanes.front().frame_count, 400U);
@@ -1937,16 +2093,19 @@ TEST_F(ImageSessionTest, PreviewsAndAuditionsAuthoredLoopedSampleFromItsFullWave
 
 TEST_F(ImageSessionTest, InvokesAuditionPreparationThroughTheApplicationRegistryWithoutCrow) {
     axk::app::ImageSessionManager sessions{*sandbox_, 2U, 64U};
-    const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");
+    const auto opened = sessions.open({{{"workspace", "fixture.hds"}}, {}}, "owner-a");
     ASSERT_TRUE(opened) << opened.error().message;
-    const auto objects = sessions.objects(opened->image_id, "owner-a", 64U, std::nullopt, "SBNK");
+    const auto objects =
+        sessions.objects({opened->image_id, "document-a-series-source-1"}, "owner-a", 64U, std::nullopt, "SBNK");
     ASSERT_TRUE(objects) << objects.error().message;
     ASSERT_FALSE(objects->items.empty());
 
     auto registry = axk::app::make_operation_registry();
     ASSERT_TRUE(axk::app::bind_audition_operations(registry, sessions));
     const auto result = registry.invoke("auditions.prepare",
-                                        {{"imageId", opened->image_id}, {"objectIds", {objects->items.front().id}}},
+                                        {{"imageId", opened->image_id},
+                                         {"documentId", "document-a-series-source-1"},
+                                         {"objectIds", {objects->items.front().id}}},
                                         {.owner_id = "owner-a",
                                          .request_id = "request-a",
                                          .cancellation = {},
@@ -1964,10 +2123,12 @@ TEST_F(ImageSessionTest, PreviewsStoredWaveDataWithSamplePlaybackWindowAndAuditi
     patch_sample_window(root_ / "fixture.hds", 32U, 32U, 40U, 8U);
     patch_wave_data_window(root_ / "fixture.hds", 32U, 32U, 40U, 8U);
     axk::app::ImageSessionManager sessions{*sandbox_, 2U, 64U};
-    const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");
+    const auto opened = sessions.open({{{"workspace", "fixture.hds"}}, {}}, "owner-a");
     ASSERT_TRUE(opened) << opened.error().message;
-    const auto sample_objects = sessions.objects(opened->image_id, "owner-a", 64U, std::nullopt, "SBNK");
-    const auto wave_objects = sessions.objects(opened->image_id, "owner-a", 64U, std::nullopt, "SMPL");
+    const auto sample_objects =
+        sessions.objects({opened->image_id, "document-a-series-source-1"}, "owner-a", 64U, std::nullopt, "SBNK");
+    const auto wave_objects =
+        sessions.objects({opened->image_id, "document-a-series-source-1"}, "owner-a", 64U, std::nullopt, "SMPL");
     ASSERT_TRUE(sample_objects) << sample_objects.error().message;
     ASSERT_TRUE(wave_objects) << wave_objects.error().message;
     ASSERT_FALSE(sample_objects->items.empty());
@@ -1981,7 +2142,8 @@ TEST_F(ImageSessionTest, PreviewsStoredWaveDataWithSamplePlaybackWindowAndAuditi
     EXPECT_EQ(wave->waveform->wave_length_frames, 32U);
     EXPECT_EQ(wave->waveform->storage_state, "COMPLETE");
 
-    const auto sample_preview = sessions.preview(opened->image_id, "owner-a", sample.id, 32U);
+    const auto sample_preview =
+        sessions.preview({opened->image_id, "document-a-series-source-1"}, "owner-a", sample.id, 32U);
     ASSERT_TRUE(sample_preview) << sample_preview.error().message;
     ASSERT_EQ(sample_preview->lanes.size(), 1U);
     const auto &sample_preview_lane = sample_preview->lanes.front();
@@ -1995,7 +2157,8 @@ TEST_F(ImageSessionTest, PreviewsStoredWaveDataWithSamplePlaybackWindowAndAuditi
     EXPECT_EQ(sample_preview_lane.loop_length_frames, 8U);
     EXPECT_EQ(sample_preview_lane.bins.size(), 32U);
 
-    const auto stored_audition = sessions.prepare_audition(opened->image_id, "owner-a", {sample.id}, {}, true);
+    const auto stored_audition =
+        sessions.prepare_audition({opened->image_id, "document-a-series-source-1"}, "owner-a", {sample.id}, {}, true);
     ASSERT_TRUE(stored_audition) << stored_audition.error().message;
     ASSERT_EQ(stored_audition->clips.front().lanes.size(), 1U);
     EXPECT_EQ(stored_audition->clips.front().lanes.front().frame_count, 132U);
@@ -2003,8 +2166,10 @@ TEST_F(ImageSessionTest, PreviewsStoredWaveDataWithSamplePlaybackWindowAndAuditi
     ASSERT_TRUE(stored_pcm) << stored_pcm.error().message;
     EXPECT_EQ(stored_pcm->bytes.size(), 264U);
 
-    const auto sample_audition = sessions.prepare_audition(opened->image_id, "owner-a", {sample.id});
-    const auto wave_audition = sessions.prepare_audition(opened->image_id, "owner-a", {wave->id});
+    const auto sample_audition =
+        sessions.prepare_audition({opened->image_id, "document-a-series-source-1"}, "owner-a", {sample.id});
+    const auto wave_audition =
+        sessions.prepare_audition({opened->image_id, "document-a-series-source-1"}, "owner-a", {wave->id});
     ASSERT_TRUE(sample_audition) << sample_audition.error().message;
     ASSERT_TRUE(wave_audition) << wave_audition.error().message;
     ASSERT_EQ(sample_audition->clips.size(), 1U);
@@ -2030,7 +2195,8 @@ TEST_F(ImageSessionTest, PreviewsStoredWaveDataWithSamplePlaybackWindowAndAuditi
     ASSERT_TRUE(wave_pcm) << wave_pcm.error().message;
     EXPECT_EQ(sample_pcm->bytes, wave_pcm->bytes);
 
-    const auto wave_preview = sessions.preview(opened->image_id, "owner-a", wave->id, 32U);
+    const auto wave_preview =
+        sessions.preview({opened->image_id, "document-a-series-source-1"}, "owner-a", wave->id, 32U);
     ASSERT_TRUE(wave_preview) << wave_preview.error().message;
     ASSERT_EQ(wave_preview->lanes.size(), 1U);
     const auto &wave_preview_lane = wave_preview->lanes.front();
@@ -2045,12 +2211,14 @@ TEST_F(ImageSessionTest, PreviewsStoredWaveDataWithSamplePlaybackWindowAndAuditi
 TEST_F(ImageSessionTest, RejectsSamplePlaybackWindowsOutsideStoredWaveData) {
     patch_sample_window(root_ / "fixture.hds", 120U, 16U, 120U, 16U);
     axk::app::ImageSessionManager sessions{*sandbox_, 2U, 64U};
-    const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");
+    const auto opened = sessions.open({{{"workspace", "fixture.hds"}}, {}}, "owner-a");
     ASSERT_TRUE(opened) << opened.error().message;
-    const auto objects = sessions.objects(opened->image_id, "owner-a", 64U, std::nullopt, "SBNK");
+    const auto objects =
+        sessions.objects({opened->image_id, "document-a-series-source-1"}, "owner-a", 64U, std::nullopt, "SBNK");
     ASSERT_TRUE(objects) << objects.error().message;
     ASSERT_FALSE(objects->items.empty());
-    const auto audition = sessions.prepare_audition(opened->image_id, "owner-a", {objects->items.front().id});
+    const auto audition = sessions.prepare_audition({opened->image_id, "document-a-series-source-1"}, "owner-a",
+                                                    {objects->items.front().id});
     ASSERT_FALSE(audition);
     EXPECT_EQ(audition.error().code, "invalid_audio_range");
     EXPECT_EQ(audition.error().context.object_id, objects->items.front().id);
@@ -2059,13 +2227,15 @@ TEST_F(ImageSessionTest, RejectsSamplePlaybackWindowsOutsideStoredWaveData) {
 TEST_F(ImageSessionTest, UsesIndependentStereoMemberWindowsAndPadsTheShorterLane) {
     patch_sample_window(root_ / "fixture.hds", 32U, 32U, 40U, 8U, std::array{64U, 16U, 72U, 8U});
     axk::app::ImageSessionManager sessions{*sandbox_, 2U, 64U};
-    const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");
+    const auto opened = sessions.open({{{"workspace", "fixture.hds"}}, {}}, "owner-a");
     ASSERT_TRUE(opened) << opened.error().message;
-    const auto objects = sessions.objects(opened->image_id, "owner-a", 64U, std::nullopt, "SBNK");
+    const auto objects =
+        sessions.objects({opened->image_id, "document-a-series-source-1"}, "owner-a", 64U, std::nullopt, "SBNK");
     ASSERT_TRUE(objects) << objects.error().message;
     ASSERT_FALSE(objects->items.empty());
 
-    const auto preview = sessions.preview(opened->image_id, "owner-a", objects->items.front().id, 32U);
+    const auto preview =
+        sessions.preview({opened->image_id, "document-a-series-source-1"}, "owner-a", objects->items.front().id, 32U);
     ASSERT_TRUE(preview) << preview.error().message;
     ASSERT_EQ(preview->lanes.size(), 2U);
     EXPECT_EQ(preview->lanes[0].role, "LEFT");
@@ -2082,7 +2252,8 @@ TEST_F(ImageSessionTest, UsesIndependentStereoMemberWindowsAndPadsTheShorterLane
     EXPECT_EQ(preview->lanes[1].loop_start_frame, 72U);
     EXPECT_EQ(preview->lanes[1].loop_length_frames, 8U);
 
-    const auto audition = sessions.prepare_audition(opened->image_id, "owner-a", {objects->items.front().id});
+    const auto audition = sessions.prepare_audition({opened->image_id, "document-a-series-source-1"}, "owner-a",
+                                                    {objects->items.front().id});
     ASSERT_TRUE(audition) << audition.error().message;
     ASSERT_EQ(audition->clips.size(), 1U);
     const auto &clip = audition->clips.front();
@@ -2103,13 +2274,15 @@ TEST_F(ImageSessionTest, UsesIndependentStereoMemberWindowsAndPadsTheShorterLane
 TEST_F(ImageSessionTest, PreservesMixedStereoLaneRatesForIndependentClientNormalization) {
     patch_sample_window(root_ / "fixture.hds", 32U, 32U, 40U, 8U, std::array{64U, 16U, 72U, 8U}, 32'000U);
     axk::app::ImageSessionManager sessions{*sandbox_, 2U, 64U};
-    const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");
+    const auto opened = sessions.open({{{"workspace", "fixture.hds"}}, {}}, "owner-a");
     ASSERT_TRUE(opened) << opened.error().message;
-    const auto objects = sessions.objects(opened->image_id, "owner-a", 64U, std::nullopt, "SBNK");
+    const auto objects =
+        sessions.objects({opened->image_id, "document-a-series-source-1"}, "owner-a", 64U, std::nullopt, "SBNK");
     ASSERT_TRUE(objects) << objects.error().message;
     ASSERT_FALSE(objects->items.empty());
 
-    const auto audition = sessions.prepare_audition(opened->image_id, "owner-a", {objects->items.front().id});
+    const auto audition = sessions.prepare_audition({opened->image_id, "document-a-series-source-1"}, "owner-a",
+                                                    {objects->items.front().id});
     ASSERT_TRUE(audition) << audition.error().message;
     ASSERT_EQ(audition->clips.size(), 1U);
     const auto &clip = audition->clips.front();
@@ -2125,13 +2298,15 @@ TEST_F(ImageSessionTest, PreservesMixedStereoLaneRatesForIndependentClientNormal
 TEST_F(ImageSessionTest, PreparesSampleAuditionWhenTheNamedWaveDataHasAStaleCachedReference) {
     patch_sample_cached_reference(root_ / "fixture.hds", 0xdeadbeefU);
     axk::app::ImageSessionManager sessions{*sandbox_, 2U, 64U};
-    const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");
+    const auto opened = sessions.open({{{"workspace", "fixture.hds"}}, {}}, "owner-a");
     ASSERT_TRUE(opened) << opened.error().message;
-    const auto objects = sessions.objects(opened->image_id, "owner-a", 64U, std::nullopt, "SBNK");
+    const auto objects =
+        sessions.objects({opened->image_id, "document-a-series-source-1"}, "owner-a", 64U, std::nullopt, "SBNK");
     ASSERT_TRUE(objects);
     ASSERT_FALSE(objects->items.empty());
 
-    const auto audition = sessions.prepare_audition(opened->image_id, "owner-a", {objects->items.front().id});
+    const auto audition = sessions.prepare_audition({opened->image_id, "document-a-series-source-1"}, "owner-a",
+                                                    {objects->items.front().id});
     ASSERT_TRUE(audition) << audition.error().message;
     ASSERT_EQ(audition->clips.size(), 1U);
     ASSERT_EQ(audition->clips.front().lanes.size(), 1U);
@@ -2141,12 +2316,14 @@ TEST_F(ImageSessionTest, PreparesSampleAuditionWhenTheNamedWaveDataHasAStaleCach
 TEST_F(ImageSessionTest, ActiveAuditionRangesKeepTheOwningImageSessionAlive) {
     auto now = std::chrono::steady_clock::now();
     axk::app::ImageSessionManager sessions{*sandbox_, 2U, 64U, std::chrono::seconds{5}, [&] { return now; }};
-    const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");
+    const auto opened = sessions.open({{{"workspace", "fixture.hds"}}, {}}, "owner-a");
     ASSERT_TRUE(opened) << opened.error().message;
-    const auto objects = sessions.objects(opened->image_id, "owner-a", 64U, std::nullopt, "SMPL");
+    const auto objects =
+        sessions.objects({opened->image_id, "document-a-series-source-1"}, "owner-a", 64U, std::nullopt, "SMPL");
     ASSERT_TRUE(objects);
     ASSERT_FALSE(objects->items.empty());
-    const auto audition = sessions.prepare_audition(opened->image_id, "owner-a", {objects->items.front().id});
+    const auto audition = sessions.prepare_audition({opened->image_id, "document-a-series-source-1"}, "owner-a",
+                                                    {objects->items.front().id});
     ASSERT_TRUE(audition) << audition.error().message;
 
     now += std::chrono::seconds{4};
@@ -2157,10 +2334,11 @@ TEST_F(ImageSessionTest, ActiveAuditionRangesKeepTheOwningImageSessionAlive) {
 
 TEST_F(ImageSessionTest, ReportsBothSavedSystemFilesAsAbsentInDeterministicOrder) {
     axk::app::ImageSessionManager sessions{*sandbox_, 2U, 64U};
-    const auto opened = sessions.open({"workspace", "fixture.hds"}, "owner-a");
+    const auto opened = sessions.open({{{"workspace", "fixture.hds"}}, {}}, "owner-a");
     ASSERT_TRUE(opened) << opened.error().message;
 
-    const auto contexts = sessions.system_program_contexts(opened->image_id, "owner-a", 0U);
+    const auto contexts =
+        sessions.system_program_contexts({opened->image_id, "document-a-series-source-1"}, "owner-a", 0U);
 
     ASSERT_TRUE(contexts) << contexts.error().message;
     EXPECT_EQ(contexts->partition_index, 0U);
@@ -2178,10 +2356,11 @@ TEST_F(ImageSessionTest, ReportsBothSavedSystemFilesAsAbsentInDeterministicOrder
 TEST_F(ImageSessionTest, ReportsUnsupportedMediaWithoutInventingMultiAssignments) {
     axk::app::test::write_a3k_archive(root_ / "fixture.hds", root_ / "archive.a3k");
     axk::app::ImageSessionManager sessions{*sandbox_, 2U, 64U};
-    const auto opened = sessions.open({"workspace", "archive.a3k"}, "owner-a");
+    const auto opened = sessions.open({{{"workspace", "archive.a3k"}}, {}}, "owner-a");
     ASSERT_TRUE(opened) << opened.error().message;
 
-    const auto contexts = sessions.system_program_contexts(opened->image_id, "owner-a", 0U);
+    const auto contexts =
+        sessions.system_program_contexts({opened->image_id, "document-a-series-source-1"}, "owner-a", 0U);
 
     ASSERT_TRUE(contexts) << contexts.error().message;
     EXPECT_EQ(contexts->partition_index, 0U);

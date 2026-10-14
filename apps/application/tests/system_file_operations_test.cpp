@@ -134,7 +134,7 @@ TEST_F(SystemFileOperations, MlanCombinedEditsRollbackAndRefreshWithoutChangingI
     }
     axk::app::ImageSessionManager sessions{
         *sandbox, 32U, 500U, std::chrono::minutes{15}, std::chrono::steady_clock::now, &reservations};
-    auto opened = sessions.open({"workspace", "image.hds"}, "owner");
+    auto opened = sessions.open({{{"workspace", "image.hds"}}, {}}, "owner");
     ASSERT_TRUE(opened);
     for (const auto target : {axk::ASeriesModel::a4000, axk::ASeriesModel::a5000}) {
         const auto original = bytes();
@@ -158,24 +158,26 @@ TEST_F(SystemFileOperations, MlanCombinedEditsRollbackAndRefreshWithoutChangingI
                                                   }};
         auto invalid = patch;
         invalid.mlan.audio_input = static_cast<axk::SystemMlanAudioInput>(2);
-        EXPECT_FALSE(axk::app::apply_system_file(sessions, journals, opened->image_id, "owner", opened->revision,
-                                                 axk::PartitionIndex{0}, invalid, target));
+        EXPECT_FALSE(axk::app::apply_system_file(sessions, journals, {opened->image_id, "document-a-series-source-1"},
+                                                 "owner", opened->revision, axk::PartitionIndex{0}, invalid, target));
         EXPECT_FALSE(all_written);
         EXPECT_EQ(bytes(), original);
         const auto cancelled =
-            axk::app::apply_system_file(sessions, journals, opened->image_id, "owner", opened->revision,
-                                        axk::PartitionIndex{0}, patch, target, cancellation.token());
+            axk::app::apply_system_file(sessions, journals, {opened->image_id, "document-a-series-source-1"}, "owner",
+                                        opened->revision, axk::PartitionIndex{0}, patch, target, cancellation.token());
         ASSERT_FALSE(cancelled);
         EXPECT_EQ(cancelled.error().code, "operation_cancelled");
         EXPECT_TRUE(all_written);
         EXPECT_EQ(bytes(), original);
-        EXPECT_TRUE(sessions.begin_read(opened->image_id, "owner", opened->revision));
-        const auto updated = axk::app::apply_system_file(sessions, journals, opened->image_id, "owner",
-                                                         opened->revision, axk::PartitionIndex{0}, patch, target);
+        EXPECT_TRUE(sessions.begin_read({opened->image_id, "document-a-series-source-1"}, "owner", opened->revision));
+        const auto updated =
+            axk::app::apply_system_file(sessions, journals, {opened->image_id, "document-a-series-source-1"}, "owner",
+                                        opened->revision, axk::PartitionIndex{0}, patch, target);
         ASSERT_TRUE(updated) << updated.error().message;
         EXPECT_EQ(updated->revision, opened->revision + 1U);
         EXPECT_EQ(bytes(), expected);
-        const auto read = sessions.begin_read(updated->image_id, "owner", updated->revision);
+        const auto read =
+            sessions.begin_read({updated->image_id, "document-a-series-source-1"}, "owner", updated->revision);
         ASSERT_TRUE(read);
         std::array<std::byte, 16> block{};
         ASSERT_TRUE(read->reader->read_exact_at(record_offset + 0x694U, block));
@@ -188,7 +190,7 @@ TEST_F(SystemFileOperations, MlanCombinedEditsRollbackAndRefreshWithoutChangingI
 TEST_F(SystemFileOperations, RevisionZeroMlanRequestDoesNotCommitOtherRequestedGroups) {
     axk::app::ImageSessionManager sessions{
         *sandbox, 32U, 500U, std::chrono::minutes{15}, std::chrono::steady_clock::now, &reservations};
-    const auto opened = sessions.open({"workspace", "image.hds"}, "owner");
+    const auto opened = sessions.open({{{"workspace", "image.hds"}}, {}}, "owner");
     ASSERT_TRUE(opened);
     bool journal_started{};
     axk::app::AlterationJournalStore journals{root / "journals", 65536U, [&](std::string_view, std::size_t) {
@@ -198,17 +200,18 @@ TEST_F(SystemFileOperations, RevisionZeroMlanRequestDoesNotCommitOtherRequestedG
     auto patch = edits();
     patch.mlan.midi_input = axk::SystemMlanMidiInput::midi;
     const auto original = bytes();
-    EXPECT_FALSE(axk::app::apply_system_file(sessions, journals, opened->image_id, "owner", opened->revision,
-                                             axk::PartitionIndex{0}, patch, axk::ASeriesModel::a5000));
+    EXPECT_FALSE(axk::app::apply_system_file(sessions, journals, {opened->image_id, "document-a-series-source-1"},
+                                             "owner", opened->revision, axk::PartitionIndex{0}, patch,
+                                             axk::ASeriesModel::a5000));
     EXPECT_FALSE(journal_started);
     EXPECT_EQ(bytes(), original);
-    EXPECT_TRUE(sessions.begin_read(opened->image_id, "owner", opened->revision));
+    EXPECT_TRUE(sessions.begin_read({opened->image_id, "document-a-series-source-1"}, "owner", opened->revision));
 }
 
 TEST_F(SystemFileOperations, RegisteredTemplateEditsRollbackAtomicallyAndRefreshForEveryModel) {
     axk::app::ImageSessionManager sessions{
         *sandbox, 32U, 500U, std::chrono::minutes{15}, std::chrono::steady_clock::now, &reservations};
-    auto opened = sessions.open({"workspace", "image.hds"}, "owner");
+    auto opened = sessions.open({{{"workspace", "image.hds"}}, {}}, "owner");
     ASSERT_TRUE(opened);
     for (auto model : {axk::ASeriesModel::a3000, axk::ASeriesModel::a4000, axk::ASeriesModel::a5000}) {
         const auto original = bytes();
@@ -299,58 +302,59 @@ TEST_F(SystemFileOperations, RegisteredTemplateEditsRollbackAtomicallyAndRefresh
                                                   }};
         auto invalid = patch;
         invalid.disk.scsi_mounts[6] = true;
-        EXPECT_FALSE(axk::app::apply_system_file(sessions, journals, opened->image_id, "owner", opened->revision,
-                                                 axk::PartitionIndex{0}, invalid, model));
+        EXPECT_FALSE(axk::app::apply_system_file(sessions, journals, {opened->image_id, "document-a-series-source-1"},
+                                                 "owner", opened->revision, axk::PartitionIndex{0}, invalid, model));
         EXPECT_FALSE(started);
         EXPECT_EQ(bytes(), original);
         invalid = patch;
         invalid.midi.device_number = 18;
-        EXPECT_FALSE(axk::app::apply_system_file(sessions, journals, opened->image_id, "owner", opened->revision,
-                                                 axk::PartitionIndex{0}, invalid, model));
+        EXPECT_FALSE(axk::app::apply_system_file(sessions, journals, {opened->image_id, "document-a-series-source-1"},
+                                                 "owner", opened->revision, axk::PartitionIndex{0}, invalid, model));
         EXPECT_FALSE(started);
         EXPECT_EQ(bytes(), original);
         invalid = patch;
         invalid.playback.digital_output_bits = static_cast<axk::SystemDigitalOutputBits>(16);
-        EXPECT_FALSE(axk::app::apply_system_file(sessions, journals, opened->image_id, "owner", opened->revision,
-                                                 axk::PartitionIndex{0}, invalid, model));
+        EXPECT_FALSE(axk::app::apply_system_file(sessions, journals, {opened->image_id, "document-a-series-source-1"},
+                                                 "owner", opened->revision, axk::PartitionIndex{0}, invalid, model));
         EXPECT_FALSE(started);
         EXPECT_EQ(bytes(), original);
         invalid = patch;
         invalid.registered_program.effects[1].input_level = 128;
-        EXPECT_FALSE(axk::app::apply_system_file(sessions, journals, opened->image_id, "owner", opened->revision,
-                                                 axk::PartitionIndex{0}, invalid, model));
+        EXPECT_FALSE(axk::app::apply_system_file(sessions, journals, {opened->image_id, "document-a-series-source-1"},
+                                                 "owner", opened->revision, axk::PartitionIndex{0}, invalid, model));
         EXPECT_FALSE(started);
         EXPECT_EQ(bytes(), original);
         invalid = patch;
         invalid.registered_sample.loop_start_frame = 701;
-        EXPECT_FALSE(axk::app::apply_system_file(sessions, journals, opened->image_id, "owner", opened->revision,
-                                                 axk::PartitionIndex{0}, invalid, model));
+        EXPECT_FALSE(axk::app::apply_system_file(sessions, journals, {opened->image_id, "document-a-series-source-1"},
+                                                 "owner", opened->revision, axk::PartitionIndex{0}, invalid, model));
         EXPECT_FALSE(started);
         EXPECT_EQ(bytes(), original);
         invalid = patch;
         invalid.registered_sample.root_key = 60;
-        EXPECT_FALSE(axk::app::apply_system_file(sessions, journals, opened->image_id, "owner", opened->revision,
-                                                 axk::PartitionIndex{0}, invalid, model));
+        EXPECT_FALSE(axk::app::apply_system_file(sessions, journals, {opened->image_id, "document-a-series-source-1"},
+                                                 "owner", opened->revision, axk::PartitionIndex{0}, invalid, model));
         EXPECT_FALSE(started);
         EXPECT_EQ(bytes(), original);
         if (!native) {
             invalid = patch;
             invalid.registered_remix[0].steps[0].processing = static_cast<axk::SystemRemixProcessing>(35);
-            EXPECT_FALSE(axk::app::apply_system_file(sessions, journals, opened->image_id, "owner", opened->revision,
-                                                     axk::PartitionIndex{0}, invalid, model));
+            EXPECT_FALSE(axk::app::apply_system_file(sessions, journals,
+                                                     {opened->image_id, "document-a-series-source-1"}, "owner",
+                                                     opened->revision, axk::PartitionIndex{0}, invalid, model));
             EXPECT_FALSE(started);
             EXPECT_EQ(bytes(), original);
         }
         const auto cancelled =
-            axk::app::apply_system_file(sessions, journals, opened->image_id, "owner", opened->revision,
-                                        axk::PartitionIndex{0}, patch, model, cancellation.token());
+            axk::app::apply_system_file(sessions, journals, {opened->image_id, "document-a-series-source-1"}, "owner",
+                                        opened->revision, axk::PartitionIndex{0}, patch, model, cancellation.token());
         ASSERT_FALSE(cancelled);
         EXPECT_EQ(cancelled.error().code, "operation_cancelled");
         EXPECT_TRUE(all_written);
         EXPECT_EQ(bytes(), original);
-        EXPECT_TRUE(sessions.begin_read(opened->image_id, "owner", opened->revision));
-        auto updated = axk::app::apply_system_file(sessions, journals, opened->image_id, "owner", opened->revision,
-                                                   axk::PartitionIndex{0}, patch, model);
+        EXPECT_TRUE(sessions.begin_read({opened->image_id, "document-a-series-source-1"}, "owner", opened->revision));
+        auto updated = axk::app::apply_system_file(sessions, journals, {opened->image_id, "document-a-series-source-1"},
+                                                   "owner", opened->revision, axk::PartitionIndex{0}, patch, model);
         ASSERT_TRUE(updated) << updated.error().message;
         EXPECT_EQ(updated->revision, opened->revision + 1U);
         EXPECT_EQ(bytes(), expected);
@@ -361,7 +365,7 @@ TEST_F(SystemFileOperations, RegisteredTemplateEditsRollbackAtomicallyAndRefresh
 TEST_F(SystemFileOperations, CommitsOnlyOwnedBytesAndRefreshesTheSessionForEveryModel) {
     axk::app::ImageSessionManager sessions{
         *sandbox, 32U, 500U, std::chrono::minutes{15}, std::chrono::steady_clock::now, &reservations};
-    auto opened = sessions.open({"workspace", "image.hds"}, "owner");
+    auto opened = sessions.open({{{"workspace", "image.hds"}}, {}}, "owner");
     ASSERT_TRUE(opened);
     // This budget fits a few changed bytes, not a journal of the whole image.
     axk::app::AlterationJournalStore journals{root / "journals", 65536U};
@@ -410,14 +414,16 @@ TEST_F(SystemFileOperations, CommitsOnlyOwnedBytesAndRefreshesTheSessionForEvery
         patches.global.master_fine_tune = static_cast<std::int8_t>(value - 63U);
         patches.recording.configuration.click_level = value;
         patches.recording.effects[0].input_level = value++;
-        const auto updated = axk::app::apply_system_file(sessions, journals, opened->image_id, "owner",
-                                                         opened->revision, axk::PartitionIndex{0}, patches, model);
+        const auto updated =
+            axk::app::apply_system_file(sessions, journals, {opened->image_id, "document-a-series-source-1"}, "owner",
+                                        opened->revision, axk::PartitionIndex{0}, patches, model);
         ASSERT_TRUE(updated) << updated.error().message;
         EXPECT_EQ(updated->image_id, opened->image_id);
         EXPECT_EQ(updated->revision, opened->revision + 1U);
         EXPECT_EQ(bytes(), expected);
         {
-            const auto read = sessions.begin_read(updated->image_id, "owner", updated->revision);
+            const auto read =
+                sessions.begin_read({updated->image_id, "document-a-series-source-1"}, "owner", updated->revision);
             ASSERT_TRUE(read) << read.error().message;
             std::array<std::byte, 1> actual{};
             ASSERT_TRUE(read->reader->read_exact_at(offset, actual));
@@ -430,7 +436,7 @@ TEST_F(SystemFileOperations, CommitsOnlyOwnedBytesAndRefreshesTheSessionForEvery
 TEST_F(SystemFileOperations, SortingOnlyEditsRollbackAndRetryWithoutChangingOtherRecords) {
     axk::app::ImageSessionManager sessions{
         *sandbox, 32U, 500U, std::chrono::minutes{15}, std::chrono::steady_clock::now, &reservations};
-    auto opened = sessions.open({"workspace", "image.hds"}, "owner");
+    auto opened = sessions.open({{{"workspace", "image.hds"}}, {}}, "owner");
     ASSERT_TRUE(opened);
     for (const auto model : {axk::ASeriesModel::a3000, axk::ASeriesModel::a4000, axk::ASeriesModel::a5000}) {
         const bool native = model == axk::ASeriesModel::a3000;
@@ -465,21 +471,22 @@ TEST_F(SystemFileOperations, SortingOnlyEditsRollbackAndRetryWithoutChangingOthe
             invalid.panel.tree_sort = axk::SystemStatusSort::off;
         else
             invalid.panel.sample_name_order_selection = 0;
-        EXPECT_FALSE(axk::app::apply_system_file(sessions, journals, opened->image_id, "owner", opened->revision,
-                                                 axk::PartitionIndex{0}, invalid, model));
+        EXPECT_FALSE(axk::app::apply_system_file(sessions, journals, {opened->image_id, "document-a-series-source-1"},
+                                                 "owner", opened->revision, axk::PartitionIndex{0}, invalid, model));
         EXPECT_FALSE(all_written);
         EXPECT_EQ(bytes(), original);
         const auto cancelled =
-            axk::app::apply_system_file(sessions, journals, opened->image_id, "owner", opened->revision,
-                                        axk::PartitionIndex{0}, patch, model, cancellation.token());
+            axk::app::apply_system_file(sessions, journals, {opened->image_id, "document-a-series-source-1"}, "owner",
+                                        opened->revision, axk::PartitionIndex{0}, patch, model, cancellation.token());
         ASSERT_FALSE(cancelled);
         EXPECT_EQ(cancelled.error().code, "operation_cancelled");
         EXPECT_TRUE(all_written);
         EXPECT_EQ(bytes(), original);
-        EXPECT_TRUE(sessions.begin_read(opened->image_id, "owner", opened->revision));
+        EXPECT_TRUE(sessions.begin_read({opened->image_id, "document-a-series-source-1"}, "owner", opened->revision));
         EXPECT_TRUE(journals.storage_ready());
-        const auto updated = axk::app::apply_system_file(sessions, journals, opened->image_id, "owner",
-                                                         opened->revision, axk::PartitionIndex{0}, patch, model);
+        const auto updated =
+            axk::app::apply_system_file(sessions, journals, {opened->image_id, "document-a-series-source-1"}, "owner",
+                                        opened->revision, axk::PartitionIndex{0}, patch, model);
         ASSERT_TRUE(updated) << updated.error().message;
         EXPECT_EQ(updated->revision, opened->revision + 1U);
         EXPECT_EQ(bytes(), expected);
@@ -490,7 +497,7 @@ TEST_F(SystemFileOperations, SortingOnlyEditsRollbackAndRetryWithoutChangingOthe
 TEST_F(SystemFileOperations, RejectsInvalidRequestsWithoutChangingBytesOrRetainingMutationAccess) {
     axk::app::ImageSessionManager sessions{
         *sandbox, 32U, 500U, std::chrono::minutes{15}, std::chrono::steady_clock::now, &reservations};
-    const auto opened = sessions.open({"workspace", "image.hds"}, "owner");
+    const auto opened = sessions.open({{{"workspace", "image.hds"}}, {}}, "owner");
     ASSERT_TRUE(opened);
     bool journal_started{};
     axk::app::AlterationJournalStore journals{root / "journals", 65536U, [&](std::string_view, std::size_t) {
@@ -500,13 +507,15 @@ TEST_F(SystemFileOperations, RejectsInvalidRequestsWithoutChangingBytesOrRetaini
     const auto original = bytes();
     auto invalid = edits();
     invalid.recording.effects[2].type = 255;
-    EXPECT_FALSE(axk::app::apply_system_file(sessions, journals, opened->image_id, "owner", opened->revision,
-                                             axk::PartitionIndex{0}, invalid, axk::ASeriesModel::a4000));
+    EXPECT_FALSE(axk::app::apply_system_file(sessions, journals, {opened->image_id, "document-a-series-source-1"},
+                                             "owner", opened->revision, axk::PartitionIndex{0}, invalid,
+                                             axk::ASeriesModel::a4000));
     invalid = edits();
     invalid.recording.configuration.input = 3;
     invalid.recording.configuration.frequency_selection = 4;
-    EXPECT_FALSE(axk::app::apply_system_file(sessions, journals, opened->image_id, "owner", opened->revision,
-                                             axk::PartitionIndex{0}, invalid, axk::ASeriesModel::a4000));
+    EXPECT_FALSE(axk::app::apply_system_file(sessions, journals, {opened->image_id, "document-a-series-source-1"},
+                                             "owner", opened->revision, axk::PartitionIndex{0}, invalid,
+                                             axk::ASeriesModel::a4000));
     std::array<axk::SystemPanelPatch, 3> invalid_commands{};
     invalid_commands[0].import_view = static_cast<axk::SystemImportView>(4);
     invalid_commands[1].cdr_scsi_id = 8;
@@ -514,36 +523,41 @@ TEST_F(SystemFileOperations, RejectsInvalidRequestsWithoutChangingBytesOrRetaini
     for (const auto &panel : invalid_commands) {
         invalid = edits();
         invalid.panel = panel;
-        EXPECT_FALSE(axk::app::apply_system_file(sessions, journals, opened->image_id, "owner", opened->revision,
-                                                 axk::PartitionIndex{0}, invalid, axk::ASeriesModel::a4000));
+        EXPECT_FALSE(axk::app::apply_system_file(sessions, journals, {opened->image_id, "document-a-series-source-1"},
+                                                 "owner", opened->revision, axk::PartitionIndex{0}, invalid,
+                                                 axk::ASeriesModel::a4000));
         EXPECT_FALSE(journal_started);
         EXPECT_EQ(bytes(), original);
     }
-    EXPECT_FALSE(axk::app::apply_system_file(sessions, journals, opened->image_id, "other", opened->revision,
-                                             axk::PartitionIndex{0}, edits(), axk::ASeriesModel::a4000));
-    const auto stale = axk::app::apply_system_file(sessions, journals, opened->image_id, "owner", opened->revision + 1U,
-                                                   axk::PartitionIndex{0}, edits(), axk::ASeriesModel::a4000);
+    EXPECT_FALSE(axk::app::apply_system_file(sessions, journals, {opened->image_id, "document-a-series-source-1"},
+                                             "other", opened->revision, axk::PartitionIndex{0}, edits(),
+                                             axk::ASeriesModel::a4000));
+    const auto stale =
+        axk::app::apply_system_file(sessions, journals, {opened->image_id, "document-a-series-source-1"}, "owner",
+                                    opened->revision + 1U, axk::PartitionIndex{0}, edits(), axk::ASeriesModel::a4000);
     ASSERT_FALSE(stale);
     EXPECT_EQ(stale.error().code, "image_revision_stale");
-    EXPECT_FALSE(axk::app::apply_system_file(sessions, journals, opened->image_id, "owner", opened->revision,
-                                             axk::PartitionIndex{7}, edits(), axk::ASeriesModel::a4000));
-    EXPECT_FALSE(axk::app::apply_system_file(sessions, journals, opened->image_id, "owner", opened->revision,
-                                             axk::PartitionIndex{0}, edits(), static_cast<axk::ASeriesModel>(255)));
+    EXPECT_FALSE(axk::app::apply_system_file(sessions, journals, {opened->image_id, "document-a-series-source-1"},
+                                             "owner", opened->revision, axk::PartitionIndex{7}, edits(),
+                                             axk::ASeriesModel::a4000));
+    EXPECT_FALSE(axk::app::apply_system_file(sessions, journals, {opened->image_id, "document-a-series-source-1"},
+                                             "owner", opened->revision, axk::PartitionIndex{0}, edits(),
+                                             static_cast<axk::ASeriesModel>(255)));
     axk::CancellationSource cancelled;
     cancelled.cancel();
-    EXPECT_FALSE(axk::app::apply_system_file(sessions, journals, opened->image_id, "owner", opened->revision,
-                                             axk::PartitionIndex{0}, edits(), axk::ASeriesModel::a4000,
-                                             cancelled.token()));
+    EXPECT_FALSE(axk::app::apply_system_file(sessions, journals, {opened->image_id, "document-a-series-source-1"},
+                                             "owner", opened->revision, axk::PartitionIndex{0}, edits(),
+                                             axk::ASeriesModel::a4000, cancelled.token()));
     EXPECT_EQ(bytes(), original);
     EXPECT_FALSE(journal_started);
-    const auto read = sessions.begin_read(opened->image_id, "owner", opened->revision);
+    const auto read = sessions.begin_read({opened->image_id, "document-a-series-source-1"}, "owner", opened->revision);
     EXPECT_TRUE(read);
 }
 
 TEST_F(SystemFileOperations, EachParameterGroupCanBeEditedWithoutTouchingTheOthers) {
     axk::app::ImageSessionManager sessions{
         *sandbox, 32U, 500U, std::chrono::minutes{15}, std::chrono::steady_clock::now, &reservations};
-    auto opened = sessions.open({"workspace", "image.hds"}, "owner");
+    auto opened = sessions.open({{{"workspace", "image.hds"}}, {}}, "owner");
     ASSERT_TRUE(opened);
     axk::app::AlterationJournalStore journals{root / "journals", 65536U};
     const auto offset = input_offset(axk::ASeriesModel::a4000);
@@ -571,8 +585,8 @@ TEST_F(SystemFileOperations, EachParameterGroupCanBeEditedWithoutTouchingTheOthe
             expected[end_type_offset(axk::ASeriesModel::a4000) + 4U] = std::byte{};
         }
         const auto updated =
-            axk::app::apply_system_file(sessions, journals, opened->image_id, "owner", opened->revision,
-                                        axk::PartitionIndex{0}, patch, axk::ASeriesModel::a4000);
+            axk::app::apply_system_file(sessions, journals, {opened->image_id, "document-a-series-source-1"}, "owner",
+                                        opened->revision, axk::PartitionIndex{0}, patch, axk::ASeriesModel::a4000);
         ASSERT_TRUE(updated) << updated.error().message;
         EXPECT_EQ(updated->revision, opened->revision + 1U);
         EXPECT_EQ(bytes(), expected);
@@ -583,7 +597,7 @@ TEST_F(SystemFileOperations, EachParameterGroupCanBeEditedWithoutTouchingTheOthe
 TEST_F(SystemFileOperations, RollsBackCancelledWritesAndAllowsRetryAtTheSameRevision) {
     axk::app::ImageSessionManager sessions{
         *sandbox, 32U, 500U, std::chrono::minutes{15}, std::chrono::steady_clock::now, &reservations};
-    const auto opened = sessions.open({"workspace", "image.hds"}, "owner");
+    const auto opened = sessions.open({{{"workspace", "image.hds"}}, {}}, "owner");
     ASSERT_TRUE(opened);
     const auto original = bytes();
     axk::CancellationSource cancellation;
@@ -595,20 +609,22 @@ TEST_F(SystemFileOperations, RollsBackCancelledWritesAndAllowsRetryAtTheSameRevi
                                                   }
                                                   return false;
                                               }};
-    const auto result =
-        axk::app::apply_system_file(sessions, journals, opened->image_id, "owner", opened->revision,
-                                    axk::PartitionIndex{0}, edits(), axk::ASeriesModel::a4000, cancellation.token());
+    const auto result = axk::app::apply_system_file(
+        sessions, journals, {opened->image_id, "document-a-series-source-1"}, "owner", opened->revision,
+        axk::PartitionIndex{0}, edits(), axk::ASeriesModel::a4000, cancellation.token());
     ASSERT_TRUE(wrote);
     ASSERT_FALSE(result);
     EXPECT_EQ(result.error().code, "operation_cancelled");
     EXPECT_TRUE(journals.storage_ready());
     EXPECT_EQ(bytes(), original);
     {
-        const auto read = sessions.begin_read(opened->image_id, "owner", opened->revision);
+        const auto read =
+            sessions.begin_read({opened->image_id, "document-a-series-source-1"}, "owner", opened->revision);
         ASSERT_TRUE(read) << read.error().message;
     }
-    const auto retry = axk::app::apply_system_file(sessions, journals, opened->image_id, "owner", opened->revision,
-                                                   axk::PartitionIndex{0}, edits(), axk::ASeriesModel::a4000);
+    const auto retry =
+        axk::app::apply_system_file(sessions, journals, {opened->image_id, "document-a-series-source-1"}, "owner",
+                                    opened->revision, axk::PartitionIndex{0}, edits(), axk::ASeriesModel::a4000);
     ASSERT_TRUE(retry) << retry.error().message;
     EXPECT_EQ(retry->revision, opened->revision + 1U);
 }
@@ -618,13 +634,14 @@ TEST_F(SystemFileOperations, RetainsInterruptedJournalForRecoveryBeforeReopening
     {
         axk::app::ImageSessionManager sessions{
             *sandbox, 32U, 500U, std::chrono::minutes{15}, std::chrono::steady_clock::now, &reservations};
-        const auto opened = sessions.open({"workspace", "image.hds"}, "owner");
+        const auto opened = sessions.open({{{"workspace", "image.hds"}}, {}}, "owner");
         ASSERT_TRUE(opened);
         axk::app::AlterationJournalStore journals{
             root / "journals", 65536U,
             [](std::string_view phase, std::size_t index) { return phase == "after-patch" && index == 6U; }};
-        const auto result = axk::app::apply_system_file(sessions, journals, opened->image_id, "owner", opened->revision,
-                                                        axk::PartitionIndex{0}, edits(), axk::ASeriesModel::a4000);
+        const auto result =
+            axk::app::apply_system_file(sessions, journals, {opened->image_id, "document-a-series-source-1"}, "owner",
+                                        opened->revision, axk::PartitionIndex{0}, edits(), axk::ASeriesModel::a4000);
         ASSERT_FALSE(result);
         EXPECT_FALSE(journals.storage_ready());
         auto changed = original;
@@ -639,23 +656,25 @@ TEST_F(SystemFileOperations, RetainsInterruptedJournalForRecoveryBeforeReopening
         changed[end_type_offset(axk::ASeriesModel::a4000) - 5U] = std::byte{1};
         changed[end_type_offset(axk::ASeriesModel::a4000) + 4U] = std::byte{};
         EXPECT_EQ(bytes(), changed);
-        const auto stale = sessions.begin_read(opened->image_id, "owner", opened->revision);
+        const auto stale =
+            sessions.begin_read({opened->image_id, "document-a-series-source-1"}, "owner", opened->revision);
         ASSERT_FALSE(stale);
         EXPECT_EQ(stale.error().code, "image_session_invalidated");
         EXPECT_FALSE(sessions.inspect(opened->image_id, "owner"));
-        EXPECT_FALSE(sessions.begin_mutation(opened->image_id, "owner", opened->revision));
+        EXPECT_FALSE(
+            sessions.begin_mutation({opened->image_id, "document-a-series-source-1"}, "owner", opened->revision));
     }
     axk::app::AlterationJournalStore recovery{root / "journals", 65536U};
     ASSERT_TRUE(recovery.recover(*sandbox));
     EXPECT_EQ(bytes(), original);
     axk::app::ImageSessionManager reopened{*sandbox};
-    EXPECT_TRUE(reopened.open({"workspace", "image.hds"}, "owner"));
+    EXPECT_TRUE(reopened.open({{{"workspace", "image.hds"}}, {}}, "owner"));
 }
 
 TEST_F(SystemFileOperations, CancellationAfterAllGroupsWereWrittenRestoresAllAtTheOldRevision) {
     axk::app::ImageSessionManager sessions{
         *sandbox, 32U, 500U, std::chrono::minutes{15}, std::chrono::steady_clock::now, &reservations};
-    const auto opened = sessions.open({"workspace", "image.hds"}, "owner");
+    const auto opened = sessions.open({{{"workspace", "image.hds"}}, {}}, "owner");
     ASSERT_TRUE(opened);
     const auto original = bytes();
     auto expected = original;
@@ -679,15 +698,15 @@ TEST_F(SystemFileOperations, CancellationAfterAllGroupsWereWrittenRestoresAllAtT
                                                   }
                                                   return false;
                                               }};
-    const auto result =
-        axk::app::apply_system_file(sessions, journals, opened->image_id, "owner", opened->revision,
-                                    axk::PartitionIndex{0}, edits(), axk::ASeriesModel::a4000, cancellation.token());
+    const auto result = axk::app::apply_system_file(
+        sessions, journals, {opened->image_id, "document-a-series-source-1"}, "owner", opened->revision,
+        axk::PartitionIndex{0}, edits(), axk::ASeriesModel::a4000, cancellation.token());
     ASSERT_TRUE(all_written);
     ASSERT_FALSE(result);
     EXPECT_EQ(result.error().code, "operation_cancelled");
     EXPECT_EQ(bytes(), original);
     EXPECT_TRUE(journals.storage_ready());
-    EXPECT_TRUE(sessions.begin_read(opened->image_id, "owner", opened->revision));
+    EXPECT_TRUE(sessions.begin_read({opened->image_id, "document-a-series-source-1"}, "owner", opened->revision));
 }
 
 TEST_F(SystemFileOperations, RejectsReadOnlySourcesAndCompetingSessionLeases) {
@@ -698,35 +717,39 @@ TEST_F(SystemFileOperations, RejectsReadOnlySourcesAndCompetingSessionLeases) {
         ASSERT_TRUE(readonly);
         axk::app::ImageSessionManager sessions{
             *readonly, 32U, 500U, std::chrono::minutes{15}, std::chrono::steady_clock::now, &reservations};
-        const auto opened = sessions.open({"workspace", "image.hds"}, "owner");
+        const auto opened = sessions.open({{{"workspace", "image.hds"}}, {}}, "owner");
         ASSERT_TRUE(opened);
-        EXPECT_FALSE(axk::app::apply_system_file(sessions, journals, opened->image_id, "owner", opened->revision,
-                                                 axk::PartitionIndex{0}, edits(), axk::ASeriesModel::a4000));
+        EXPECT_FALSE(axk::app::apply_system_file(sessions, journals, {opened->image_id, "document-a-series-source-1"},
+                                                 "owner", opened->revision, axk::PartitionIndex{0}, edits(),
+                                                 axk::ASeriesModel::a4000));
     }
     axk::app::ImageSessionManager sessions{
         *sandbox, 32U, 500U, std::chrono::minutes{15}, std::chrono::steady_clock::now, &reservations};
-    const auto opened = sessions.open({"workspace", "image.hds"}, "owner");
-    const auto other = sessions.open({"workspace", "image.hds"}, "other");
+    const auto opened = sessions.open({{{"workspace", "image.hds"}}, {}}, "owner");
+    const auto other = sessions.open({{{"workspace", "image.hds"}}, {}}, "other");
     ASSERT_TRUE(opened);
     ASSERT_TRUE(other);
-    EXPECT_FALSE(axk::app::apply_system_file(sessions, journals, opened->image_id, "owner", opened->revision,
-                                             axk::PartitionIndex{0}, edits(), axk::ASeriesModel::a4000));
+    EXPECT_FALSE(axk::app::apply_system_file(sessions, journals, {opened->image_id, "document-a-series-source-1"},
+                                             "owner", opened->revision, axk::PartitionIndex{0}, edits(),
+                                             axk::ASeriesModel::a4000));
     EXPECT_EQ(bytes(), original);
     ASSERT_TRUE(sessions.close(other->image_id, "other"));
-    EXPECT_TRUE(axk::app::apply_system_file(sessions, journals, opened->image_id, "owner", opened->revision,
-                                            axk::PartitionIndex{0}, edits(), axk::ASeriesModel::a4000));
+    EXPECT_TRUE(axk::app::apply_system_file(sessions, journals, {opened->image_id, "document-a-series-source-1"},
+                                            "owner", opened->revision, axk::PartitionIndex{0}, edits(),
+                                            axk::ASeriesModel::a4000));
 }
 
 TEST_F(SystemFileOperations, MissingSystemFileIsNotCreatedAndMutationAccessIsReleased) {
     std::filesystem::copy_file(root / "blank.hds", root / "workspace/missing.hds");
     axk::app::ImageSessionManager sessions{
         *sandbox, 32U, 500U, std::chrono::minutes{15}, std::chrono::steady_clock::now, &reservations};
-    const auto opened = sessions.open({"workspace", "missing.hds"}, "owner");
+    const auto opened = sessions.open({{{"workspace", "missing.hds"}}, {}}, "owner");
     ASSERT_TRUE(opened);
     axk::app::AlterationJournalStore journals{root / "journals", 65536U};
-    EXPECT_FALSE(axk::app::apply_system_file(sessions, journals, opened->image_id, "owner", opened->revision,
-                                             axk::PartitionIndex{0}, edits(), axk::ASeriesModel::a4000));
-    const auto read = sessions.begin_read(opened->image_id, "owner", opened->revision);
+    EXPECT_FALSE(axk::app::apply_system_file(sessions, journals, {opened->image_id, "document-a-series-source-1"},
+                                             "owner", opened->revision, axk::PartitionIndex{0}, edits(),
+                                             axk::ASeriesModel::a4000));
+    const auto read = sessions.begin_read({opened->image_id, "document-a-series-source-1"}, "owner", opened->revision);
     ASSERT_TRUE(read);
     const auto before = axk::FileReader::open(root / "blank.hds").value();
     std::vector<std::byte> expected(static_cast<std::size_t>(before->size()));
@@ -750,25 +773,25 @@ TEST_F(SystemFileOperations, CancellationDuringMetadataRefreshRollsBackBeforePub
     } progress;
     axk::app::ImageSessionManager sessions{
         *sandbox, 32U, 500U, std::chrono::minutes{15}, std::chrono::steady_clock::now, &reservations};
-    const auto opened = sessions.open({"workspace", "image.hds"}, "owner");
+    const auto opened = sessions.open({{{"workspace", "image.hds"}}, {}}, "owner");
     ASSERT_TRUE(opened);
     const auto original = bytes();
     axk::app::AlterationJournalStore journals{root / "journals", 65536U};
-    const auto result = axk::app::apply_system_file(sessions, journals, opened->image_id, "owner", opened->revision,
-                                                    axk::PartitionIndex{0}, edits(), axk::ASeriesModel::a4000,
-                                                    progress.cancellation.token(), &progress);
+    const auto result = axk::app::apply_system_file(
+        sessions, journals, {opened->image_id, "document-a-series-source-1"}, "owner", opened->revision,
+        axk::PartitionIndex{0}, edits(), axk::ASeriesModel::a4000, progress.cancellation.token(), &progress);
     ASSERT_TRUE(progress.refreshing);
     ASSERT_FALSE(result);
     EXPECT_EQ(result.error().code, "operation_cancelled");
     EXPECT_EQ(bytes(), original);
     EXPECT_TRUE(journals.storage_ready());
-    const auto read = sessions.begin_read(opened->image_id, "owner", opened->revision);
+    const auto read = sessions.begin_read({opened->image_id, "document-a-series-source-1"}, "owner", opened->revision);
     EXPECT_TRUE(read);
 }
 TEST_F(SystemFileOperations, CombinedGlobalAndRecordingEditRefreshesTheRoutingContextInOneRevision) {
     axk::app::ImageSessionManager sessions{
         *sandbox, 32U, 500U, std::chrono::minutes{15}, std::chrono::steady_clock::now, &reservations};
-    const auto opened = sessions.open({"workspace", "image.hds"}, "owner");
+    const auto opened = sessions.open({{{"workspace", "image.hds"}}, {}}, "owner");
     ASSERT_TRUE(opened);
     axk::app::AlterationJournalStore journals{root / "journals", 65536U};
     axk::SystemFilePatch patch;
@@ -789,12 +812,14 @@ TEST_F(SystemFileOperations, CombinedGlobalAndRecordingEditRefreshesTheRoutingCo
         expected[global + 0x30U + i] = static_cast<std::byte>(128U - i);
     expected[offset] = std::byte{78};
     expected[offset - 1U + 120U + 0x13U] = std::byte{91};
-    const auto result = axk::app::apply_system_file(sessions, journals, opened->image_id, "owner", opened->revision,
-                                                    axk::PartitionIndex{0}, patch, axk::ASeriesModel::a5000);
+    const auto result =
+        axk::app::apply_system_file(sessions, journals, {opened->image_id, "document-a-series-source-1"}, "owner",
+                                    opened->revision, axk::PartitionIndex{0}, patch, axk::ASeriesModel::a5000);
     ASSERT_TRUE(result) << result.error().message;
     EXPECT_EQ(result->revision, opened->revision + 1U);
     EXPECT_EQ(bytes(), expected);
-    const auto contexts = sessions.system_program_contexts(result->image_id, "owner", 0);
+    const auto contexts =
+        sessions.system_program_contexts({result->image_id, "document-a-series-source-1"}, "owner", 0);
     ASSERT_TRUE(contexts);
     const auto context = std::ranges::find(contexts->files, axk::app::SystemProgramContextFile::system2,
                                            &axk::app::ImageSystemProgramContext::file_kind);
@@ -813,7 +838,7 @@ TEST_F(SystemFileOperations, CombinedGlobalAndRecordingEditRefreshesTheRoutingCo
 TEST_F(SystemFileOperations, InvalidGlobalWithValidRecordingNeverStartsTheJournal) {
     axk::app::ImageSessionManager sessions{
         *sandbox, 32U, 500U, std::chrono::minutes{15}, std::chrono::steady_clock::now, &reservations};
-    const auto opened = sessions.open({"workspace", "image.hds"}, "owner");
+    const auto opened = sessions.open({{{"workspace", "image.hds"}}, {}}, "owner");
     ASSERT_TRUE(opened);
     bool journal_started{};
     axk::app::AlterationJournalStore journals{root / "journals", 65536U, [&](std::string_view, std::size_t) {
@@ -823,17 +848,18 @@ TEST_F(SystemFileOperations, InvalidGlobalWithValidRecordingNeverStartsTheJourna
     const auto original = bytes();
     auto patch = edits();
     patch.global.master_fine_tune = 64;
-    EXPECT_FALSE(axk::app::apply_system_file(sessions, journals, opened->image_id, "owner", opened->revision,
-                                             axk::PartitionIndex{0}, patch, axk::ASeriesModel::a4000));
+    EXPECT_FALSE(axk::app::apply_system_file(sessions, journals, {opened->image_id, "document-a-series-source-1"},
+                                             "owner", opened->revision, axk::PartitionIndex{0}, patch,
+                                             axk::ASeriesModel::a4000));
     EXPECT_FALSE(journal_started);
     EXPECT_EQ(bytes(), original);
-    EXPECT_TRUE(sessions.begin_read(opened->image_id, "owner", opened->revision));
+    EXPECT_TRUE(sessions.begin_read({opened->image_id, "document-a-series-source-1"}, "owner", opened->revision));
 }
 
 TEST_F(SystemFileOperations, InvalidFavoritesWithValidOtherGroupsNeverStartsTheJournal) {
     axk::app::ImageSessionManager sessions{
         *sandbox, 32U, 500U, std::chrono::minutes{15}, std::chrono::steady_clock::now, &reservations};
-    const auto opened = sessions.open({"workspace", "image.hds"}, "owner");
+    const auto opened = sessions.open({{{"workspace", "image.hds"}}, {}}, "owner");
     ASSERT_TRUE(opened);
     bool journal_started{};
     axk::app::AlterationJournalStore journals{root / "journals", 65536U, [&](std::string_view, std::size_t) {
@@ -843,17 +869,18 @@ TEST_F(SystemFileOperations, InvalidFavoritesWithValidOtherGroupsNeverStartsTheJ
     const auto original = bytes();
     auto patch = edits();
     patch.favorites.push_back({15, {2, {}, {}, {}}});
-    EXPECT_FALSE(axk::app::apply_system_file(sessions, journals, opened->image_id, "owner", opened->revision,
-                                             axk::PartitionIndex{0}, patch, axk::ASeriesModel::a4000));
+    EXPECT_FALSE(axk::app::apply_system_file(sessions, journals, {opened->image_id, "document-a-series-source-1"},
+                                             "owner", opened->revision, axk::PartitionIndex{0}, patch,
+                                             axk::ASeriesModel::a4000));
     EXPECT_FALSE(journal_started);
     EXPECT_EQ(bytes(), original);
-    EXPECT_TRUE(sessions.begin_read(opened->image_id, "owner", opened->revision));
+    EXPECT_TRUE(sessions.begin_read({opened->image_id, "document-a-series-source-1"}, "owner", opened->revision));
 }
 
 TEST_F(SystemFileOperations, InvalidPanelWithValidOtherGroupsNeverStartsTheJournal) {
     axk::app::ImageSessionManager sessions{
         *sandbox, 32U, 500U, std::chrono::minutes{15}, std::chrono::steady_clock::now, &reservations};
-    const auto opened = sessions.open({"workspace", "image.hds"}, "owner");
+    const auto opened = sessions.open({{{"workspace", "image.hds"}}, {}}, "owner");
     ASSERT_TRUE(opened);
     bool journal_started{};
     axk::app::AlterationJournalStore journals{root / "journals", 65536U, [&](std::string_view, std::size_t) {
@@ -863,10 +890,11 @@ TEST_F(SystemFileOperations, InvalidPanelWithValidOtherGroupsNeverStartsTheJourn
     const auto original = bytes();
     auto patch = edits();
     patch.panel.end_type = axk::SystemEndType::graph;
-    EXPECT_FALSE(axk::app::apply_system_file(sessions, journals, opened->image_id, "owner", opened->revision,
-                                             axk::PartitionIndex{0}, patch, axk::ASeriesModel::a4000));
+    EXPECT_FALSE(axk::app::apply_system_file(sessions, journals, {opened->image_id, "document-a-series-source-1"},
+                                             "owner", opened->revision, axk::PartitionIndex{0}, patch,
+                                             axk::ASeriesModel::a4000));
     EXPECT_FALSE(journal_started);
     EXPECT_EQ(bytes(), original);
-    EXPECT_TRUE(sessions.begin_read(opened->image_id, "owner", opened->revision));
+    EXPECT_TRUE(sessions.begin_read({opened->image_id, "document-a-series-source-1"}, "owner", opened->revision));
 }
 } // namespace

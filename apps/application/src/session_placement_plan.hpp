@@ -1,5 +1,7 @@
 #pragma once
 
+#include "axklib/application/formats/a_series/session_read.hpp"
+
 #include <cstddef>
 #include <cstdint>
 #include <map>
@@ -42,7 +44,7 @@ struct PlacementRepairPlan {
 };
 
 [[nodiscard]] Result<PlacementRepairPlan>
-plan_placement_repair(const ImageSessionRead &session, PlacementRepairScope scope,
+plan_placement_repair(const axk::app::formats::a_series::SessionRead &session, PlacementRepairScope scope,
                       std::optional<std::string> recovery_volume_name = std::nullopt);
 
 } // namespace axk::app::detail

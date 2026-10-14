@@ -1,4 +1,6 @@
 #include "axklib/application/session_audio_export_operations.hpp"
+#include "axklib/application/formats/a_series/session_read.hpp"
+#include "axklib/application/image_session_contracts.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -130,9 +132,9 @@ axk::app::Result<AudioExportSelectionMode> parse_selection_mode(const Json &inpu
         operation_error("invalid_request", "selectionMode must be DEPENDENCY_CLOSURE or SELECTED_AUDIO_OBJECTS"));
 }
 
-axk::app::Result<std::vector<AudioExportRoot>>
-parse_roots(const Json &input, const std::unordered_map<std::string, std::string> &object_keys_by_id,
-            const std::unordered_map<std::string, axk::app::ImageVolumeScopeIdentity> &volume_scopes_by_id) {
+axk::app::Result<std::vector<AudioExportRoot>> parse_roots(
+    const Json &input, const std::unordered_map<std::string, std::string> &object_keys_by_id,
+    const std::unordered_map<std::string, axk::app::formats::a_series::VolumeScopeIdentity> &volume_scopes_by_id) {
     try {
         const auto &values = input.at("roots");
         if (!values.is_array() || values.empty() || values.size() > 1024U)
@@ -385,7 +387,7 @@ Json inspection_json(std::string_view image_id, std::uint64_t revision, std::siz
             {"issues", selection.issues}};
 }
 
-axk::ObjectCatalog catalog_from_session(const axk::app::ImageSessionRead &session) {
+axk::ObjectCatalog catalog_from_session(const axk::app::formats::a_series::SessionRead &session) {
     axk::ObjectCatalog catalog;
     catalog.objects.reserve(session.catalog_objects.size());
     for (const auto *object : session.catalog_objects)
@@ -407,29 +409,29 @@ axk::app::Result<void> axk::app::bind_session_audio_export_operations(OperationR
                                                                       ImageSessionManager &images,
                                                                       DownloadArchiveStore &downloads) {
     if (!registry.is_implemented("images.audio_export.inspect")) {
-        auto bound =
-            registry.bind("images.audio_export.inspect",
-                          [&images](const Json &input, const OperationContext &context) -> Result<Json> {
-                              const auto identity = parse_session_identity(input);
-                              if (!identity)
-                                  return std::unexpected(identity.error());
-                              auto session = images.begin_read(identity->first, context.owner_id, identity->second);
-                              if (!session)
-                                  return std::unexpected(session.error());
-                              const auto roots =
-                                  parse_roots(input, session->object_keys_by_id, session->volume_scopes_by_id);
-                              if (!roots)
-                                  return std::unexpected(roots.error());
-                              const auto mode = parse_selection_mode(input);
-                              if (!mode)
-                                  return std::unexpected(mode.error());
-                              const auto catalog = catalog_from_session(*session);
-                              const auto graph = axk::build_relationship_graph(catalog);
-                              const auto selection = resolve_selection(*roots, catalog, graph, *mode);
-                              if (!selection)
-                                  return std::unexpected(selection.error());
-                              return inspection_json(identity->first, identity->second, roots->size(), *selection);
-                          });
+        auto bound = registry.bind(
+            "images.audio_export.inspect",
+            [&images](const Json &input, const OperationContext &context) -> Result<Json> {
+                const auto identity = parse_session_identity(input);
+                if (!identity)
+                    return std::unexpected(identity.error());
+                auto session = axk::app::formats::a_series::SessionReader::acquire(images, image_document_ref(input),
+                                                                                   context.owner_id, identity->second);
+                if (!session)
+                    return std::unexpected(session.error());
+                const auto roots = parse_roots(input, session->object_keys_by_id, session->volume_scopes_by_id);
+                if (!roots)
+                    return std::unexpected(roots.error());
+                const auto mode = parse_selection_mode(input);
+                if (!mode)
+                    return std::unexpected(mode.error());
+                const auto catalog = catalog_from_session(*session);
+                const auto graph = axk::build_relationship_graph(catalog);
+                const auto selection = resolve_selection(*roots, catalog, graph, *mode);
+                if (!selection)
+                    return std::unexpected(selection.error());
+                return inspection_json(identity->first, identity->second, roots->size(), *selection);
+            });
         if (!bound)
             return bound;
     }
@@ -441,7 +443,8 @@ axk::app::Result<void> axk::app::bind_session_audio_export_operations(OperationR
                 const auto identity = parse_session_identity(input);
                 if (!identity)
                     return std::unexpected(identity.error());
-                auto session = images.begin_read(identity->first, context.owner_id, identity->second);
+                auto session = axk::app::formats::a_series::SessionReader::acquire(images, image_document_ref(input),
+                                                                                   context.owner_id, identity->second);
                 if (!session)
                     return std::unexpected(session.error());
                 const auto roots = parse_roots(input, session->object_keys_by_id, session->volume_scopes_by_id);
@@ -481,7 +484,7 @@ axk::app::Result<void> axk::app::bind_session_audio_export_operations(OperationR
                 report_progress(context, axk::ProgressPhase::resolving, 0U, 4U, "Resolving export selection");
                 auto plan = axk::build_export_plan(*session->media, catalog, graph, context.cancellation);
                 if (!plan && plan.error().code == axk::ErrorCode::object_missing &&
-                    session->source.kind == ImageSourceKind::axk_object_directory) {
+                    session->source.kind == ImageSourceKind::directory) {
                     return std::unexpected(operation_error("companion_disks_required",
                                                            "Wave Data continues on another sampler disk. Add extracted "
                                                            "companion disk folders to export it.",

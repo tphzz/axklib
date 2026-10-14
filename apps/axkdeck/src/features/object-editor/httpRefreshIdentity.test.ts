@@ -23,8 +23,10 @@ function page(items: unknown[]): Response {
 function detail(format: KnownFormat, revision: number, level: number): ObjectDetail {
     const formats = sampleFormatFixture(format);
     return {
+        formatId: 'yamaha.a-series',
+        profile: 'a-series',
         schemaVersion: 1,
-        image: { imageId: 'image-1', revision, format: 'sfs' },
+        image: { documentId: 'document-a-series-source-1', imageId: 'image-1', revision, format: 'sfs' },
         object: {
             id: 'sample-1',
             key: 'SBNK:1',
@@ -109,14 +111,34 @@ async function setup(initialFormat: KnownFormat, failFirstCatalogRefresh = false
     const summary = (): ApiImageSummary => ({
         imageId: 'image-1',
         revision,
-        format: 'sfs',
-        source: { kind: 'FILE', file: { rootId: 'test', relativePath: 'test.hds' } },
-        companionSources: [],
-        floppySet: null,
-        rootCount: 1,
-        objectCount: 1,
-        relationshipCount: 0,
-        validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+        sources: [
+            {
+                id: 'source-1',
+                source: { kind: 'FILE', file: { rootId: 'test', relativePath: 'test.hds' } },
+                format: 'sfs',
+                filesystemRootIds: ['source-1:sfs-0'],
+                diagnostics: [],
+            },
+        ],
+        documents: [
+            {
+                id: 'document-a-series-source-1',
+                formatId: 'yamaha.a-series',
+                profile: 'a-series',
+                name: 'A-series',
+                completeness: 'COMPLETE',
+                sourceMemberIds: ['source-1'],
+                format: 'sfs',
+                floppySet: null,
+                companionSources: [],
+                validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                rootCount: 1,
+                objectCount: 1,
+                relationshipCount: 0,
+                availableOperations: [],
+            },
+        ],
+        discovery: { selectionRequired: false, candidates: [] },
     });
     const content = (kind: 'partition' | 'volume' | 'object'): ApiContentItem => ({
         id: kind === 'volume' ? currentVolume() : `${kind}-r${revision}`,
@@ -254,7 +276,7 @@ async function setup(initialFormat: KnownFormat, failFirstCatalogRefresh = false
         mutation: { setCapabilities: () => {} },
         clearExportSelection,
     } as unknown as Parameters<ImageSessionWorkflow['connect']>[0]);
-    await image.open(serverFileLocation({ rootId: 'test', relativePath: 'test.hds' }));
+    await image.open([serverFileLocation({ rootId: 'test', relativePath: 'test.hds' })]);
     expect(image.status).not.toContain('failed');
     expect(catalog.samples.map((item) => item.objectId)).toEqual(['sample-1']);
     catalog.selectedSampleId = 'sample-1';

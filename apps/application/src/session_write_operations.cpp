@@ -1,3 +1,4 @@
+#include "axklib/application/image_session_contracts.hpp"
 #include "axklib/application/write_operations.hpp"
 
 #include <algorithm>
@@ -66,7 +67,7 @@ axk::app::Result<void> axk::app::bind_session_write_operations(OperationRegistry
                     return std::unexpected{policy.error()};
                 const auto image = input.at("imageId").get<std::string>();
                 const auto revision = input.at("expectedRevision").get<std::uint64_t>();
-                const auto session = images.begin_read(image, context.owner_id, revision);
+                const auto session = images.begin_read(image_document_ref(input), context.owner_id, revision);
                 if (!session)
                     return std::unexpected{session.error()};
                 auto document = load_manifest(input, context, sandbox, uploads);
@@ -148,7 +149,8 @@ axk::app::Result<void> axk::app::bind_session_write_operations(OperationRegistry
         }
 
         const auto admission_started = Clock::now();
-        auto mutation = images.begin_mutation(image_id, context.owner_id, expected_revision, context.mutation_id);
+        auto mutation =
+            images.begin_mutation(image_document_ref(input), context.owner_id, expected_revision, context.mutation_id);
         if (!mutation)
             return std::unexpected(mutation.error());
         measured_reader = mutation->target.get();
@@ -286,8 +288,14 @@ axk::app::Result<void> axk::app::bind_session_write_operations(OperationRegistry
         measured_reader = nullptr;
         auto summary = images.finalize_mutation_commit(std::move(*prepared_commit));
         mutation_finished = true;
+        const auto selected_document =
+            std::ranges::find(summary.documents, input.at("documentId").get<std::string>(), &ImageDocumentSummary::id);
+        // Removing the last native volume can legitimately leave a Files-only source.
+        const auto object_count = selected_document == summary.documents.end() ? 0U : selected_document->object_count;
+        const auto validation =
+            selected_document == summary.documents.end() ? ImageValidationSummary{} : selected_document->validation;
         diagnostic("session-refresh", refresh_started,
-                   {{"imageId", image_id}, {"revision", summary.revision}, {"objectCount", summary.object_count}});
+                   {{"imageId", image_id}, {"revision", summary.revision}, {"objectCount", object_count}});
         if (context.progress) {
             context.progress->report({axk::ProgressPhase::publishing, 1U, 1U, "Image changes committed", std::nullopt});
         }
@@ -295,8 +303,7 @@ axk::app::Result<void> axk::app::bind_session_write_operations(OperationRegistry
         auto operations = Json::array();
         for (const auto &operation : prepared->operations)
             operations.push_back(operation_report_json(operation, document->logical_input_paths));
-        const auto issue_count =
-            summary.validation.info_count + summary.validation.warning_count + summary.validation.error_count;
+        const auto issue_count = validation.info_count + validation.warning_count + validation.error_count;
         diagnostic("total", operation_started,
                    {{"imageId", image_id},
                     {"revision", summary.revision},
@@ -308,8 +315,8 @@ axk::app::Result<void> axk::app::bind_session_write_operations(OperationRegistry
                     {"imageId", image_id},
                     {"revision", summary.revision},
                     {"summary", alteration_summary(prepared->operations)},
-                    {"objectCount", summary.object_count},
-                    {"validation", {{"valid", summary.validation.valid()}, {"issueCount", issue_count}}},
+                    {"objectCount", object_count},
+                    {"validation", {{"valid", validation.valid()}, {"issueCount", issue_count}}},
                     {"warnings", Json::array()},
                     {"applied", !patches.empty()},
                     {"operations", std::move(operations)}};
@@ -328,7 +335,8 @@ axk::app::Result<void> axk::app::bind_session_write_operations(OperationRegistry
                     const auto targets = input.at("targetObjectIds").get<std::vector<std::string>>();
                     const auto referrers = input.at("referrerObjectIds").get<std::vector<std::string>>();
                     const auto cleanup = input.at("cleanupObjectIds").get<std::vector<std::string>>();
-                    auto plan = images.plan_deletion(image_id, context.owner_id, revision, targets, referrers, cleanup);
+                    auto plan = images.plan_deletion(image_document_ref(input), context.owner_id, revision, targets,
+                                                     referrers, cleanup);
                     if (!plan)
                         return std::unexpected(plan.error());
                     return deletion_inspection_json(plan->inspection);
@@ -349,8 +357,8 @@ axk::app::Result<void> axk::app::bind_session_write_operations(OperationRegistry
                                   const auto image_id = input.at("imageId").get<std::string>();
                                   const auto revision = input.at("expectedRevision").get<std::uint64_t>();
                                   const auto content_scope_id = input.at("contentScopeId").get<std::string>();
-                                  auto inspection = images.inspect_wave_data_orphans(image_id, context.owner_id,
-                                                                                     revision, content_scope_id);
+                                  auto inspection = images.inspect_wave_data_orphans(
+                                      image_document_ref(input), context.owner_id, revision, content_scope_id);
                                   if (!inspection)
                                       return std::unexpected(inspection.error());
                                   return wave_data_orphan_inspection_json(*inspection);
@@ -370,8 +378,8 @@ axk::app::Result<void> axk::app::bind_session_write_operations(OperationRegistry
                                   const auto image_id = input.at("imageId").get<std::string>();
                                   const auto revision = input.at("expectedRevision").get<std::uint64_t>();
                                   const auto content_scope_id = input.at("contentScopeId").get<std::string>();
-                                  auto inspection = images.inspect_program_generation(image_id, context.owner_id,
-                                                                                      revision, content_scope_id);
+                                  auto inspection = images.inspect_program_generation(
+                                      image_document_ref(input), context.owner_id, revision, content_scope_id);
                                   if (!inspection)
                                       return std::unexpected(inspection.error());
                                   return program_generation_inspection_json(*inspection);
@@ -408,11 +416,12 @@ axk::app::Result<void> axk::app::bind_session_write_operations(OperationRegistry
                         "invalid_request",
                         "imageId, expectedRevision, contentScopeId, and valid Program selections are required"));
                 }
-                auto plan =
-                    images.plan_program_generation(image_id, context.owner_id, revision, content_scope_id, selections);
+                auto plan = images.plan_program_generation(image_document_ref(input), context.owner_id, revision,
+                                                           content_scope_id, selections);
                 if (!plan)
                     return std::unexpected(plan.error());
                 Json mutation{{"imageId", image_id},
+                              {"documentId", input.at("documentId")},
                               {"expectedRevision", revision},
                               {"manifest", {{"inline", program_generation_manifest_json(plan->manifest)}}},
                               {"inputBindings", Json::array()}};
@@ -451,7 +460,7 @@ axk::app::Result<void> axk::app::bind_session_write_operations(OperationRegistry
                                   const auto revision = input.at("expectedRevision").get<std::uint64_t>();
                                   const auto content_scope_id = input.at("contentScopeId").get<std::string>();
                                   auto inspection = images.inspect_program_assignment_cleanup(
-                                      image_id, context.owner_id, revision, content_scope_id);
+                                      image_document_ref(input), context.owner_id, revision, content_scope_id);
                                   if (!inspection)
                                       return std::unexpected(inspection.error());
                                   return program_assignment_cleanup_inspection_json(*inspection);
@@ -489,12 +498,13 @@ axk::app::Result<void> axk::app::bind_session_write_operations(OperationRegistry
                         "invalid_request",
                         "imageId, expectedRevision, contentScopeId, and valid assignment selections are required"));
                 }
-                auto plan = images.plan_program_assignment_cleanup(image_id, context.owner_id, revision,
-                                                                   content_scope_id, selections);
+                auto plan = images.plan_program_assignment_cleanup(image_document_ref(input), context.owner_id,
+                                                                   revision, content_scope_id, selections);
                 if (!plan)
                     return std::unexpected(plan.error());
                 auto altered =
                     alter_session({{"imageId", image_id},
+                                   {"documentId", input.at("documentId")},
                                    {"expectedRevision", revision},
                                    {"manifest", {{"inline", program_assignment_cleanup_manifest_json(plan->manifest)}}},
                                    {"inputBindings", Json::array()}},
@@ -542,7 +552,8 @@ axk::app::Result<void> axk::app::bind_session_write_operations(OperationRegistry
                                                            "imageId, expectedRevision, targetObjectIds, "
                                                            "referrerObjectIds, and cleanupObjectIds are required"));
                 }
-                auto plan = images.plan_deletion(image_id, context.owner_id, revision, targets, referrers, cleanup);
+                auto plan = images.plan_deletion(image_document_ref(input), context.owner_id, revision, targets,
+                                                 referrers, cleanup);
                 if (!plan)
                     return std::unexpected(plan.error());
                 if (!plan->inspection.can_apply) {
@@ -551,6 +562,7 @@ axk::app::Result<void> axk::app::bind_session_write_operations(OperationRegistry
                     return std::unexpected(operation_error("deletion_blocked", message));
                 }
                 auto altered = alter_session({{"imageId", image_id},
+                                              {"documentId", input.at("documentId")},
                                               {"expectedRevision", revision},
                                               {"manifest", {{"inline", deletion_manifest_json(plan->manifest)}}},
                                               {"inputBindings", Json::array()}},

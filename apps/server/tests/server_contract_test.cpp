@@ -97,13 +97,13 @@ TEST(ServerContract, EmbedsValidOpenApi31WithSandboxReferences) {
     EXPECT_TRUE(document.at("paths").contains("/files/media-source/inspect"));
     EXPECT_TRUE(document.at("paths").contains("/filesystem/directories"));
     EXPECT_TRUE(document.at("paths").contains("/filesystem/entries"));
-    EXPECT_TRUE(document.at("paths").contains("/images/{imageId}/companions"));
-    EXPECT_TRUE(document.at("paths").contains("/images/{imageId}/content"));
-    EXPECT_TRUE(document.at("paths").contains("/images/{imageId}/objects"));
-    EXPECT_TRUE(document.at("paths").contains("/images/{imageId}/objects/{objectId}"));
-    EXPECT_TRUE(document.at("paths").contains("/images/{imageId}/relationships"));
-    EXPECT_TRUE(document.at("paths").contains("/images/{imageId}/validation/issues"));
-    EXPECT_TRUE(document.at("paths").contains("/images/{imageId}/preview"));
+    EXPECT_TRUE(document.at("paths").contains("/images/{imageId}/documents/{documentId}/companions"));
+    EXPECT_TRUE(document.at("paths").contains("/images/{imageId}/documents/{documentId}/content"));
+    EXPECT_TRUE(document.at("paths").contains("/images/{imageId}/documents/{documentId}/objects"));
+    EXPECT_TRUE(document.at("paths").contains("/images/{imageId}/documents/{documentId}/objects/{objectId}"));
+    EXPECT_TRUE(document.at("paths").contains("/images/{imageId}/documents/{documentId}/relationships"));
+    EXPECT_TRUE(document.at("paths").contains("/images/{imageId}/documents/{documentId}/validation/issues"));
+    EXPECT_TRUE(document.at("paths").contains("/images/{imageId}/documents/{documentId}/preview"));
     EXPECT_TRUE(document.at("paths").contains("/auditions/{auditionId}"));
     EXPECT_TRUE(document.at("paths").contains("/auditions/{auditionId}/content"));
     EXPECT_TRUE(document.at("paths").contains("/jobs/{jobId}"));
@@ -191,7 +191,8 @@ TEST(ServerContract, GeneratedValidationPlanMatchesTheSchemaCompilerForRepresent
 TEST(ServerContract, ImageObjectScopeUsesAnOpaqueContentNodeIdentifier) {
     const auto document =
         axk::server::build_openapi_document(axk::server::embedded_openapi(), axk::app::make_operation_registry());
-    const auto &parameters = document.at("paths").at("/images/{imageId}/objects").at("parameters");
+    const auto &parameters =
+        document.at("paths").at("/images/{imageId}/documents/{documentId}/objects").at("parameters");
     const auto scope = std::ranges::find_if(parameters, [](const auto &parameter) {
         return parameter.is_object() && parameter.value("name", "") == "scopeId";
     });
@@ -201,7 +202,7 @@ TEST(ServerContract, ImageObjectScopeUsesAnOpaqueContentNodeIdentifier) {
     EXPECT_EQ(scope->at("schema").at("type"), "string");
 
     const auto &content_response = document.at("paths")
-                                       .at("/images/{imageId}/content")
+                                       .at("/images/{imageId}/documents/{documentId}/content")
                                        .at("get")
                                        .at("responses")
                                        .at("200")
@@ -250,7 +251,7 @@ TEST(ServerContract, DirectoryListingsSeparateMediaSourceInspection) {
     EXPECT_FALSE(entry.at("properties").contains("mediaSourceKind"));
     const auto &inspection =
         schemas.at("MediaSourceInspectResponse").at("properties").at("data").at("properties").at("mediaSourceKind");
-    EXPECT_EQ(inspection.at("enum"), nlohmann::json::array({"AXK_OBJECT_DIRECTORY", nullptr}));
+    EXPECT_EQ(inspection.at("enum"), nlohmann::json::array({"DIRECTORY", nullptr}));
 }
 
 TEST(ServerContract, AlterationJobReportsCoverEveryNativeOperation) {
@@ -298,7 +299,7 @@ TEST(ServerContract, AlterationJobReportsCoverEveryNativeOperation) {
 TEST(ServerContract, ImageRelationshipsExposeBoundedFiltersAndAssignmentChannelMetadata) {
     const auto document =
         axk::server::build_openapi_document(axk::server::embedded_openapi(), axk::app::make_operation_registry());
-    const auto &path = document.at("paths").at("/images/{imageId}/relationships");
+    const auto &path = document.at("paths").at("/images/{imageId}/documents/{documentId}/relationships");
     const auto &parameters = path.at("parameters");
     for (const auto name : {"scopeId", "sourceObjectId", "targetObjectId", "type"}) {
         const auto parameter = std::ranges::find_if(parameters, [name](const auto &candidate) {
@@ -320,7 +321,7 @@ TEST(ServerContract, ImageRelationshipsExposeBoundedFiltersAndAssignmentChannelM
 
 TEST(ServerContract, SystemProgramContextsArePartitionScopedAndIndependentlyAvailable) {
     const auto document = nlohmann::json::parse(axk::server::embedded_openapi());
-    const auto &path = document.at("paths").at("/images/{imageId}/system-program-contexts");
+    const auto &path = document.at("paths").at("/images/{imageId}/documents/{documentId}/system-program-contexts");
     EXPECT_EQ(path.at("get").at("operationId"), "images.systemProgramContexts");
     const auto &parameters = path.at("parameters");
     const auto partition = std::ranges::find_if(parameters, [](const auto &candidate) {
@@ -436,13 +437,17 @@ TEST(ServerContract, InfrastructureJsonOperationsDeclareConcreteRequestAndRespon
         Expectation{"/filesystem/entries", "patch", "RenameEntryRequest", "200", "EntryMetadataResponse"},
         Expectation{"/images/{imageId}", "get", "", "200", "ImageSessionResponse"},
         Expectation{"/images/{imageId}", "delete", "", "200", "ImageCloseResponse"},
-        Expectation{"/images/{imageId}/companions", "post", "ImageCompanionsRequest", "200", "ImageSessionResponse"},
-        Expectation{"/images/{imageId}/content", "get", "", "200", "ImageContentPageResponse"},
-        Expectation{"/images/{imageId}/objects", "get", "", "200", "ImageObjectPageResponse"},
-        Expectation{"/images/{imageId}/objects/{objectId}", "get", "", "200", "ImageObjectDetailResponse"},
-        Expectation{"/images/{imageId}/relationships", "get", "", "200", "ImageRelationshipPageResponse"},
-        Expectation{"/images/{imageId}/validation/issues", "get", "", "200", "ImageValidationPageResponse"},
-        Expectation{"/images/{imageId}/preview", "get", "", "200", "ImagePreviewResponse"},
+        Expectation{"/images/{imageId}/documents/{documentId}/companions", "post", "ImageCompanionsRequest", "200",
+                    "ImageSessionResponse"},
+        Expectation{"/images/{imageId}/documents/{documentId}/content", "get", "", "200", "ImageContentPageResponse"},
+        Expectation{"/images/{imageId}/documents/{documentId}/objects", "get", "", "200", "ImageObjectPageResponse"},
+        Expectation{"/images/{imageId}/documents/{documentId}/objects/{objectId}", "get", "", "200",
+                    "ImageObjectDetailResponse"},
+        Expectation{"/images/{imageId}/documents/{documentId}/relationships", "get", "", "200",
+                    "ImageRelationshipPageResponse"},
+        Expectation{"/images/{imageId}/documents/{documentId}/validation/issues", "get", "", "200",
+                    "ImageValidationPageResponse"},
+        Expectation{"/images/{imageId}/documents/{documentId}/preview", "get", "", "200", "ImagePreviewResponse"},
         Expectation{"/uploads", "post", "UploadCreateRequest", "201", "UploadResponse"},
         Expectation{"/uploads/{uploadId}", "get", "", "200", "UploadResponse"},
         Expectation{"/uploads/{uploadId}", "put", "", "200", "UploadResponse"},
@@ -537,7 +542,8 @@ TEST(ServerContract, EveryHttpResponseCarriesRequestIdAndPaginationIsBounded) {
     EXPECT_EQ(parameters.at("PageCursor").at("schema").at("minLength"), 1);
     EXPECT_EQ(parameters.at("PageCursor").at("schema").at("maxLength"), 512);
 
-    const auto &preview_parameters = document.at("paths").at("/images/{imageId}/preview").at("parameters");
+    const auto &preview_parameters =
+        document.at("paths").at("/images/{imageId}/documents/{documentId}/preview").at("parameters");
     const auto bins = std::ranges::find_if(preview_parameters, [](const auto &parameter) {
         return parameter.is_object() && parameter.value("name", "") == "bins";
     });
@@ -718,6 +724,8 @@ TEST(ServerContract, ProgramAssignmentAdjustmentsValidateForPlansAndImportResult
     application_session_result.erase("sfsIndexCapacity");
     application_session_result.erase("capacity");
     application_session_result["imageId"] = "image-1";
+    application_session_result["documentId"] = "document-1";
+    application_session_result["sourceMemberId"] = "source-1";
     application_session_result["revision"] = 2U;
     application_session_result["objectCount"] = 4U;
     application_session_result["applied"] = true;
@@ -742,8 +750,7 @@ TEST(ServerContract, CanonicalReportRequestSchemasMatchApplicationInputs) {
                                      {"includeDefaultPrograms", true}};
     EXPECT_TRUE(axk::server::validate_openapi_value(document, "InfoRequest", info));
     auto directory_info = info;
-    directory_info["sources"] =
-        nlohmann::json::array({{{"kind", "AXK_OBJECT_DIRECTORY"}, {"directory", directory_ref()}}});
+    directory_info["sources"] = nlohmann::json::array({{{"kind", "DIRECTORY"}, {"directory", directory_ref()}}});
     EXPECT_TRUE(axk::server::validate_openapi_value(document, "InfoRequest", directory_info));
     auto obsolete_info = info;
     obsolete_info["sources"] = nlohmann::json::array({file_ref()});
@@ -784,6 +791,7 @@ TEST(ServerContract, ObjectDeletionUsesBoundedBatchSelectionsAndReportsPartialAp
     const auto document =
         axk::server::build_openapi_document(axk::server::embedded_openapi(), axk::app::make_operation_registry());
     const auto request = nlohmann::json{{"imageId", "image-1"},
+                                        {"documentId", "document-1"},
                                         {"expectedRevision", 4U},
                                         {"targetObjectIds", nlohmann::json::array({"program-1", "sample-1"})},
                                         {"referrerObjectIds", nlohmann::json::array()},
@@ -849,8 +857,8 @@ TEST(ServerContract, VolumeDeletionAndScopedPlacementRepairUseSeparateRevisionBo
         axk::server::build_openapi_document(axk::server::embedded_openapi(), axk::app::make_operation_registry());
     const auto targets = nlohmann::json::array(
         {{{"partitionIndex", 0U}, {"volumeName", "Samples"}}, {{"partitionIndex", 2U}, {"volumeName", "Programs"}}});
-    const auto deletion_request =
-        nlohmann::json{{"imageId", "image-1"}, {"expectedRevision", 4U}, {"targets", targets}};
+    const auto deletion_request = nlohmann::json{
+        {"imageId", "image-1"}, {"documentId", "document-1"}, {"expectedRevision", 4U}, {"targets", targets}};
     EXPECT_TRUE(
         axk::server::validate_openapi_value(document, "ImageVolumeDeletionInspectionRequest", deletion_request));
     auto invalid_partition = deletion_request;
@@ -876,14 +884,15 @@ TEST(ServerContract, VolumeDeletionAndScopedPlacementRepairUseSeparateRevisionBo
     const auto partition_scope = nlohmann::json{{"kind", "PARTITION"}, {"partitionIndex", 0U}};
     const auto volume_scope = nlohmann::json{{"kind", "VOLUME"}, {"partitionIndex", 0U}, {"volumeName", "Samples"}};
     for (const auto &scope : {partition_scope, volume_scope}) {
-        const auto request = nlohmann::json{{"imageId", "image-1"}, {"expectedRevision", 4U}, {"scope", scope}};
+        const auto request = nlohmann::json{
+            {"imageId", "image-1"}, {"documentId", "document-1"}, {"expectedRevision", 4U}, {"scope", scope}};
         EXPECT_TRUE(axk::server::validate_openapi_value(document, "ImagePlacementInspectionRequest", request));
         EXPECT_TRUE(axk::server::validate_openapi_value(document, "ImagePlacementRepairRequest", request));
     }
     auto invalid_scope = partition_scope;
     invalid_scope["volumeName"] = "Samples";
-    const auto invalid_request =
-        nlohmann::json{{"imageId", "image-1"}, {"expectedRevision", 4U}, {"scope", invalid_scope}};
+    const auto invalid_request = nlohmann::json{
+        {"imageId", "image-1"}, {"documentId", "document-1"}, {"expectedRevision", 4U}, {"scope", invalid_scope}};
     EXPECT_FALSE(axk::server::validate_openapi_value(document, "ImagePlacementInspectionRequest", invalid_request));
 
     const auto placement_inspection =
@@ -905,8 +914,10 @@ TEST(ServerContract, VolumeDeletionAndScopedPlacementRepairUseSeparateRevisionBo
 TEST(ServerContract, WaveDataOrphanInspectionIsVolumeScopedAndResponseBounded) {
     const auto document =
         axk::server::build_openapi_document(axk::server::embedded_openapi(), axk::app::make_operation_registry());
-    const auto request =
-        nlohmann::json{{"imageId", "image-1"}, {"expectedRevision", 4U}, {"contentScopeId", "content-volume-1"}};
+    const auto request = nlohmann::json{{"imageId", "image-1"},
+                                        {"documentId", "document-1"},
+                                        {"expectedRevision", 4U},
+                                        {"contentScopeId", "content-volume-1"}};
     EXPECT_TRUE(axk::server::validate_openapi_value(document, "ImageWaveDataOrphanInspectionRequest", request));
     auto missing_scope = request;
     missing_scope.erase("contentScopeId");
@@ -934,8 +945,10 @@ TEST(ServerContract, WaveDataOrphanInspectionIsVolumeScopedAndResponseBounded) {
 TEST(ServerContract, ProgramGenerationInspectionAndJobUseReviewedSelections) {
     const auto document =
         axk::server::build_openapi_document(axk::server::embedded_openapi(), axk::app::make_operation_registry());
-    const auto inspection_request =
-        nlohmann::json{{"imageId", "image-1"}, {"expectedRevision", 4U}, {"contentScopeId", "content-volume-1"}};
+    const auto inspection_request = nlohmann::json{{"imageId", "image-1"},
+                                                   {"documentId", "document-1"},
+                                                   {"expectedRevision", 4U},
+                                                   {"contentScopeId", "content-volume-1"}};
     EXPECT_TRUE(
         axk::server::validate_openapi_value(document, "ImageProgramGenerationInspectionRequest", inspection_request));
 
@@ -963,6 +976,7 @@ TEST(ServerContract, ProgramGenerationInspectionAndJobUseReviewedSelections) {
 
     const auto request = nlohmann::json{
         {"imageId", "image-1"},
+        {"documentId", "document-1"},
         {"expectedRevision", 4U},
         {"contentScopeId", "content-volume-1"},
         {"programs", nlohmann::json::array(
@@ -976,8 +990,10 @@ TEST(ServerContract, ProgramGenerationInspectionAndJobUseReviewedSelections) {
 TEST(ServerContract, ProgramAssignmentCleanupInspectionAndJobUseReviewedSelections) {
     const auto document =
         axk::server::build_openapi_document(axk::server::embedded_openapi(), axk::app::make_operation_registry());
-    const auto inspection_request =
-        nlohmann::json{{"imageId", "image-1"}, {"expectedRevision", 4U}, {"contentScopeId", "content-volume-1"}};
+    const auto inspection_request = nlohmann::json{{"imageId", "image-1"},
+                                                   {"documentId", "document-1"},
+                                                   {"expectedRevision", 4U},
+                                                   {"contentScopeId", "content-volume-1"}};
     EXPECT_TRUE(axk::server::validate_openapi_value(document, "ImageProgramAssignmentCleanupInspectionRequest",
                                                     inspection_request));
 
@@ -1011,6 +1027,7 @@ TEST(ServerContract, ProgramAssignmentCleanupInspectionAndJobUseReviewedSelectio
 
     const auto selection = nlohmann::json{{"programObjectId", "program-7"}, {"assignmentOrdinal", 3U}};
     const auto request = nlohmann::json{{"imageId", "image-1"},
+                                        {"documentId", "document-1"},
                                         {"expectedRevision", 4U},
                                         {"contentScopeId", "content-volume-1"},
                                         {"assignments", nlohmann::json::array({selection})}};
@@ -1107,11 +1124,9 @@ TEST(ServerContract, HardDiskCreationPlansAcceptExpandedProfileIdsAndBoundPartit
 
 TEST(ServerContract, MediaConversionRequestsAndTerminalResultsMatchTheirSchemas) {
     axk::server::OpenApiValidator validator;
-    const auto inspection_request = nlohmann::json{{"imageId", "image-one"},
-                                                   {"expectedRevision", 3U},
-                                                   {"format", "FAT12_FLOPPY"},
-                                                   {"partitionIndex", 0U},
-                                                   {"volumeDirectoryId", 17U}};
+    const auto inspection_request =
+        nlohmann::json{{"imageId", "image-one"},   {"documentId", "document-1"}, {"expectedRevision", 3U},
+                       {"format", "FAT12_FLOPPY"}, {"partitionIndex", 0U},       {"volumeDirectoryId", 17U}};
     EXPECT_TRUE(validator.validate("ImageSessionMediaConversionInspectionRequest", inspection_request));
     auto invalid_request = inspection_request;
     invalid_request.erase("volumeDirectoryId");
@@ -1401,6 +1416,7 @@ TEST(ServerContract, ImageSessionVolumeSelectorsUseExactContentIdentity) {
 
     const auto request = nlohmann::json{
         {"imageId", "image-1"},
+        {"documentId", "document-1"},
         {"expectedRevision", 1U},
         {"scopeId", "content-partition-1"},
         {"destination", {{"kind", "WORKSPACE"}, {"output", {{"rootId", "workspace"}, {"relativePath", "packages"}}}}}};

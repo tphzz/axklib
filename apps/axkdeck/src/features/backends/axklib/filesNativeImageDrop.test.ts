@@ -36,7 +36,14 @@ describe('native Files image drops through the backend wrapper', () => {
     it.each(['EX5 FAT16', 'FAT16'])(
         'keeps the File/Contents dialog open for %s instead of inspecting sampler objects',
         async (filesystemName) => {
-            const root = filesystemEntry({ id: 'root', kind: 'root', parentId: null, ancestorIds: [] });
+            const root = filesystemEntry({
+                sourceMemberId: 'source-1',
+                bindings: [],
+                id: 'root',
+                kind: 'root',
+                parentId: null,
+                ancestorIds: [],
+            });
             const file = filesystemEntry({ id: 'file', kind: 'file', name: 'SONG.S1A' });
             const controller = new FilesController({
                 inspect: async (query) => ({
@@ -92,7 +99,13 @@ describe('native Files image drops through the backend wrapper', () => {
                 observe: vi.fn(),
                 cancel: vi.fn(),
             };
-            const view = render(AxklibFilesView, { controller, sessionId: 1, imports, driver });
+            const view = render(AxklibFilesView, {
+                controller,
+                sessionId: 1,
+                documentId: 'document-a-series-source-1',
+                imports,
+                driver,
+            });
             const row = view.getByRole('row');
             Object.defineProperty(document, 'elementFromPoint', { configurable: true, value: () => row });
             const deviceDrop = vi.fn();

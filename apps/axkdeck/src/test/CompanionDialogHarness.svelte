@@ -5,7 +5,7 @@
     let busy = $state(false);
     let sources = $state<ImageLocation[]>(
         Array.from({ length: 24 }, (_, index) => ({
-            kind: 'axk-object-directory',
+            kind: 'server-directory',
             reference: { rootId: 'corpus', relativePath: `set/disk${index + 2}` },
             displayName: `disk${index + 2}`,
         })),

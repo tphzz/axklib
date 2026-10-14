@@ -16,6 +16,7 @@
 
     const query = new URLSearchParams(window.location.search);
     const imageId = query.get('imageId') ?? '';
+    const sourceMemberId = query.get('sourceMemberId') ?? '';
     const revision = Number(query.get('revision'));
     const partitionIndex = Number(query.get('partitionIndex'));
     const requestedPartitionName = query.get('partitionName') ?? '';
@@ -65,6 +66,7 @@
     onMount(async () => {
         if (
             !imageId ||
+            !sourceMemberId ||
             !Number.isSafeInteger(revision) ||
             revision < 0 ||
             !Number.isSafeInteger(partitionIndex) ||
@@ -86,7 +88,7 @@
             });
             map = await client.request<AllocationMap>(
                 'GET',
-                `/images/${encodeURIComponent(imageId)}/allocation-map?${parameters}`,
+                `/images/${encodeURIComponent(imageId)}/sources/${encodeURIComponent(sourceMemberId)}/allocation-map?${parameters}`,
             );
         } catch (reason) {
             error = describeError(reason);

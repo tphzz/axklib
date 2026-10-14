@@ -87,20 +87,22 @@ class SessionMediaConversionOperationsTest : public testing::Test {
 };
 
 TEST_F(SessionMediaConversionOperationsTest, InspectsAndExportsPartitionAndVolumeThroughTheSamePlan) {
-    const auto opened = images_->open({"workspace", "source.hds"}, "owner");
+    const auto opened = images_->open({{{"workspace", "source.hds"}}, {}}, "owner");
     ASSERT_TRUE(opened) << opened.error().message;
-    const auto roots = images_->content(opened->image_id, "owner", 32U);
+    const auto roots = images_->content({opened->image_id, "document-a-series-source-1"}, "owner", 32U);
     ASSERT_TRUE(roots) << roots.error().message;
     const auto partition = std::ranges::find(roots->items, "partition", &axk::app::ImageContentItem::kind);
     ASSERT_NE(partition, roots->items.end());
     ASSERT_TRUE(partition->partition_index);
-    const auto children = images_->content(opened->image_id, "owner", 32U, {}, partition->id);
+    const auto children =
+        images_->content({opened->image_id, "document-a-series-source-1"}, "owner", 32U, {}, partition->id);
     ASSERT_TRUE(children) << children.error().message;
     const auto volume = std::ranges::find(children->items, "volume", &axk::app::ImageContentItem::kind);
     ASSERT_NE(volume, children->items.end());
     ASSERT_TRUE(volume->volume_directory_id);
 
     const nlohmann::json iso_base{{"imageId", opened->image_id},
+                                  {"documentId", "document-a-series-source-1"},
                                   {"expectedRevision", opened->revision},
                                   {"format", "ISO9660"},
                                   {"partitionIndex", *partition->partition_index}};
@@ -126,6 +128,7 @@ TEST_F(SessionMediaConversionOperationsTest, InspectsAndExportsPartitionAndVolum
     EXPECT_EQ(iso->kind(), axk::MediaKind::iso9660);
 
     const nlohmann::json floppy_base{{"imageId", opened->image_id},
+                                     {"documentId", "document-a-series-source-1"},
                                      {"expectedRevision", opened->revision},
                                      {"format", "FAT12_FLOPPY"},
                                      {"partitionIndex", *partition->partition_index},
@@ -191,13 +194,14 @@ TEST_F(SessionMediaConversionOperationsTest, ExportsAnOversizedVolumeAsATypedMul
     const auto written = axk::write_hds_image(manifest, root_ / "long.hds");
     ASSERT_TRUE(written) << written.error().message;
 
-    const auto opened = images_->open({"workspace", "long.hds"}, "owner");
+    const auto opened = images_->open({{{"workspace", "long.hds"}}, {}}, "owner");
     ASSERT_TRUE(opened) << opened.error().message;
-    const auto roots = images_->content(opened->image_id, "owner", 32U);
+    const auto roots = images_->content({opened->image_id, "document-a-series-source-1"}, "owner", 32U);
     ASSERT_TRUE(roots) << roots.error().message;
     const auto partition = std::ranges::find(roots->items, "partition", &axk::app::ImageContentItem::kind);
     ASSERT_NE(partition, roots->items.end());
-    const auto children = images_->content(opened->image_id, "owner", 32U, {}, partition->id);
+    const auto children =
+        images_->content({opened->image_id, "document-a-series-source-1"}, "owner", 32U, {}, partition->id);
     ASSERT_TRUE(children) << children.error().message;
     const auto selected_volume = std::ranges::find(children->items, "volume", &axk::app::ImageContentItem::kind);
     ASSERT_NE(selected_volume, children->items.end());
@@ -205,6 +209,7 @@ TEST_F(SessionMediaConversionOperationsTest, ExportsAnOversizedVolumeAsATypedMul
     ASSERT_TRUE(selected_volume->volume_directory_id);
 
     const nlohmann::json base{{"imageId", opened->image_id},
+                              {"documentId", "document-a-series-source-1"},
                               {"expectedRevision", opened->revision},
                               {"format", "FAT12_FLOPPY"},
                               {"partitionIndex", *partition->partition_index},
@@ -239,44 +244,47 @@ TEST_F(SessionMediaConversionOperationsTest, ExportsAnOversizedVolumeAsATypedMul
     ASSERT_TRUE(sandbox_->publish_file({"workspace", "disk02.ima"}, false, second_disk));
 
     const auto final_member_opened =
-        images_->open({"workspace", "disk02.ima", axk::app::ImageSourceKind::file}, "owner");
+        images_->open({{{"workspace", "disk02.ima", axk::app::ImageSourceKind::file}}, {}}, "owner");
     ASSERT_TRUE(final_member_opened) << final_member_opened.error().message;
-    ASSERT_TRUE(final_member_opened->floppy_set);
-    EXPECT_EQ(final_member_opened->floppy_set->status, axk::app::ImageFloppySetStatus::incomplete);
-    EXPECT_FALSE(final_member_opened->floppy_set->next_required_index);
+    ASSERT_TRUE(final_member_opened->documents.at(0).floppy_set);
+    EXPECT_EQ(final_member_opened->documents.at(0).floppy_set->status, axk::app::ImageFloppySetStatus::incomplete);
+    EXPECT_FALSE(final_member_opened->documents.at(0).floppy_set->next_required_index);
     ASSERT_TRUE(images_->close(final_member_opened->image_id, "owner"));
 
-    const auto first_opened = images_->open({"workspace", "disk01.ima", axk::app::ImageSourceKind::file}, "owner");
+    const auto first_opened =
+        images_->open({{{"workspace", "disk01.ima", axk::app::ImageSourceKind::file}}, {}}, "owner");
     ASSERT_TRUE(first_opened) << first_opened.error().message;
-    ASSERT_TRUE(first_opened->floppy_set);
-    EXPECT_EQ(first_opened->floppy_set->status, axk::app::ImageFloppySetStatus::incomplete);
-    EXPECT_EQ(first_opened->floppy_set->next_required_index, 2U);
-    EXPECT_TRUE(first_opened->companion_sources.empty());
+    ASSERT_TRUE(first_opened->documents.at(0).floppy_set);
+    EXPECT_EQ(first_opened->documents.at(0).floppy_set->status, axk::app::ImageFloppySetStatus::incomplete);
+    EXPECT_EQ(first_opened->documents.at(0).floppy_set->next_required_index, 2U);
+    EXPECT_TRUE(first_opened->documents.at(0).companion_sources.empty());
 
     const auto rejected = images_->attach_companions(
-        first_opened->image_id, "owner", first_opened->revision,
+        {first_opened->image_id, "document-a-series-source-1"}, "owner", first_opened->revision,
         {axk::app::CompanionSelectionKind::sources, {{"workspace", "source.hds", axk::app::ImageSourceKind::file}}});
     ASSERT_FALSE(rejected);
     const auto unchanged = images_->inspect(first_opened->image_id, "owner");
     ASSERT_TRUE(unchanged) << unchanged.error().message;
     EXPECT_EQ(unchanged->revision, first_opened->revision);
-    EXPECT_TRUE(unchanged->companion_sources.empty());
+    EXPECT_TRUE(unchanged->documents.at(0).companion_sources.empty());
 
-    const auto completed = images_->attach_companions(first_opened->image_id, "owner", first_opened->revision,
-                                                      {axk::app::CompanionSelectionKind::immediate_siblings, {}});
+    const auto completed =
+        images_->attach_companions({first_opened->image_id, "document-a-series-source-1"}, "owner",
+                                   first_opened->revision, {axk::app::CompanionSelectionKind::immediate_siblings, {}});
     ASSERT_TRUE(completed) << completed.error().message;
-    EXPECT_EQ(completed->format, "fat12-set");
-    ASSERT_TRUE(completed->floppy_set);
-    EXPECT_EQ(completed->floppy_set->status, axk::app::ImageFloppySetStatus::complete);
-    EXPECT_FALSE(completed->floppy_set->next_required_index);
-    ASSERT_EQ(completed->companion_sources.size(), 1U);
-    EXPECT_EQ(completed->companion_sources.front(),
+    EXPECT_EQ(completed->documents.at(0).format, "fat12-set");
+    ASSERT_TRUE(completed->documents.at(0).floppy_set);
+    EXPECT_EQ(completed->documents.at(0).floppy_set->status, axk::app::ImageFloppySetStatus::complete);
+    EXPECT_FALSE(completed->documents.at(0).floppy_set->next_required_index);
+    ASSERT_EQ(completed->documents.at(0).companion_sources.size(), 1U);
+    EXPECT_EQ(completed->documents.at(0).companion_sources.front(),
               (axk::app::ImageSourceRef{"workspace", "disk02.ima", axk::app::ImageSourceKind::file}));
-    const auto completed_wave_data = images_->objects(completed->image_id, "owner", 32U, std::nullopt, "SMPL");
+    const auto completed_wave_data =
+        images_->objects({completed->image_id, "document-a-series-source-1"}, "owner", 32U, std::nullopt, "SMPL");
     ASSERT_TRUE(completed_wave_data) << completed_wave_data.error().message;
     ASSERT_EQ(completed_wave_data->items.size(), 1U);
-    const auto completed_audition =
-        images_->prepare_audition(completed->image_id, "owner", {completed_wave_data->items.front().id});
+    const auto completed_audition = images_->prepare_audition({completed->image_id, "document-a-series-source-1"},
+                                                              "owner", {completed_wave_data->items.front().id});
     ASSERT_TRUE(completed_audition) << completed_audition.error().message;
     EXPECT_GT(completed_audition->content_size_bytes, 44U);
 

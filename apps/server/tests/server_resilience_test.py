@@ -316,10 +316,10 @@ def exercise_constrained_server(server: Path, fixture: Path, root: Path) -> None
             "POST",
             "/api/v1/images",
             {
-                "source": {
+                "sources": [{
                     "kind": "FILE",
                     "file": {"rootId": "workspace", "relativePath": "fixture.hds"},
-                }
+                }]
             },
         )
         assert opened.status == 202, opened.content
@@ -338,10 +338,10 @@ def exercise_constrained_server(server: Path, fixture: Path, root: Path) -> None
             "POST",
             "/api/v1/images",
             {
-                "source": {
+                "sources": [{
                     "kind": "FILE",
                     "file": {"rootId": "workspace", "relativePath": "fixture.hds"},
-                }
+                }]
             },
         )
         assert full_sessions.status == 202, full_sessions.content

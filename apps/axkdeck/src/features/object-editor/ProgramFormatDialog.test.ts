@@ -15,6 +15,8 @@ async function setup(blocked = false) {
         ];
     }
     const detail = {
+        formatId: 'yamaha.a-series',
+        profile: 'a-series',
         image: { revision: 1 },
         object: { id: 'program', key: 'program', name: '033', type: 'PROG' },
         editing: null,

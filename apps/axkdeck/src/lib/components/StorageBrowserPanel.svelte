@@ -4,7 +4,6 @@
     import { userFacingMessage } from '../userFacingMessage';
     import { modal } from '../modal';
     import {
-        axkObjectDirectoryLocation,
         serverDirectoryLocation,
         serverFileLocation,
         type DirectoryRef,
@@ -27,6 +26,7 @@
         extensions?: string[];
         suggestedName?: string;
         multiple?: boolean;
+        selectionAction?: 'select' | 'add';
         initialDirectory?: DirectoryRef | null;
         initialFile?: FileRef | null;
         requireWritableDirectory?: boolean;
@@ -34,6 +34,7 @@
         onmanagelocations?: () => void;
         onselect: (selection: Exclude<ImageLocation, { kind: 'device' }> | DirectoryLocation) => void;
         onselectmany?: (selections: FileLocation[]) => void;
+        onselectsources?: (selections: ImageLocation[]) => void;
         oncancel: () => void;
     }
 
@@ -44,6 +45,7 @@
         extensions = [],
         suggestedName = '',
         multiple = false,
+        selectionAction = 'select',
         initialDirectory = null,
         initialFile = null,
         requireWritableDirectory = true,
@@ -198,7 +200,8 @@
             directory = listing.directory;
             entries = listing.entries;
             nextCursor = listing.nextCursor;
-            selectedFilePaths = [];
+            selectedFilePaths =
+                multiple && restored.activeOptionIndex !== null && rememberedFile ? [rememberedFile.relativePath] : [];
             activeOptionIndex = restored.activeOptionIndex ?? (listing.entries.some(entryIsVisible) ? 0 : -1);
             ondirectorychange?.(listing.directory);
             void revealActiveOption();
@@ -332,16 +335,20 @@
 
     async function openCurrentMediaSource(): Promise<void> {
         if (!activeRoot || !directory || loading || openingCurrentFolder) return;
+        if (selectionAction === 'add') {
+            selectCurrentDirectory();
+            return;
+        }
         openingCurrentFolder = true;
         error = '';
         try {
             const kind = await transport.inspectSandboxMediaSource(directory);
-            if (kind !== 'AXK_OBJECT_DIRECTORY') {
+            if (kind !== 'DIRECTORY') {
                 error = 'Current folder is not a recognized sampler image source';
                 return;
             }
             onselect(
-                axkObjectDirectoryLocation(
+                serverDirectoryLocation(
                     directory,
                     directory.relativePath
                         ? `${activeRoot.displayName}/${directory.relativePath}`
@@ -597,6 +604,7 @@
 {#if error}<p class="storage-picker-error" role="alert">{error}</p>{/if}
 
 <StoragePickerFooter
+    {selectionAction}
     {mode}
     hasDirectory={!!directory}
     hasMore={!!nextCursor}

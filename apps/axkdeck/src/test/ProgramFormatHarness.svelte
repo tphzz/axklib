@@ -104,6 +104,8 @@
             }));
         }
         return {
+            formatId: 'yamaha.a-series',
+            profile: 'a-series',
             image: { revision: writes + 1 },
             object: { id: program.objectId, key: object.key, type: 'PROG', name: '033' },
             editing: null,

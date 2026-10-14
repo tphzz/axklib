@@ -3,7 +3,15 @@ import { FilesController } from './controller.svelte';
 import { filesystemEntry } from '../../lib/testing/filesystem';
 
 async function setup() {
-    const root = filesystemEntry({ id: 'root', kind: 'root', parentId: null, path: '', ancestorIds: [] });
+    const root = filesystemEntry({
+        sourceMemberId: 'source-1',
+        bindings: [],
+        id: 'root',
+        kind: 'root',
+        parentId: null,
+        path: '',
+        ancestorIds: [],
+    });
     const folder = filesystemEntry();
     const entries = ['a', 'b', 'c'].map((name) =>
         filesystemEntry({
@@ -14,6 +22,8 @@ async function setup() {
         }),
     );
     const nested = filesystemEntry({
+        sourceMemberId: 'source-1',
+        bindings: [],
         id: 'nested',
         name: 'Nested',
         path: '/Documents/Nested',
@@ -64,7 +74,15 @@ async function setup() {
 
 describe('Files selection', () => {
     it('restores selections from later search pages without hiding them', async () => {
-        const root = filesystemEntry({ id: 'root', kind: 'root', parentId: null, path: '', ancestorIds: [] });
+        const root = filesystemEntry({
+            sourceMemberId: 'source-1',
+            bindings: [],
+            id: 'root',
+            kind: 'root',
+            parentId: null,
+            path: '',
+            ancestorIds: [],
+        });
         const entries = ['Item 1', 'Item 2'].map((name) =>
             filesystemEntry({ id: name, name, path: `/${name}`, kind: 'file' }),
         );
@@ -109,10 +127,21 @@ describe('Files selection', () => {
 
     it('isolates selections by root and rejects an entry from another root', async () => {
         const roots = ['one', 'two'].map((id) =>
-            filesystemEntry({ id, rootId: id, kind: 'root', parentId: null, path: '', ancestorIds: [] }),
+            filesystemEntry({
+                sourceMemberId: 'source-1',
+                bindings: [],
+                id,
+                rootId: id,
+                kind: 'root',
+                parentId: null,
+                path: '',
+                ancestorIds: [],
+            }),
         );
         const entries = roots.map((root) =>
             filesystemEntry({
+                sourceMemberId: 'source-1',
+                bindings: [],
                 id: `${root.id}-file`,
                 rootId: root.id,
                 parentId: root.id,

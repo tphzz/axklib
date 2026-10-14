@@ -13,10 +13,10 @@
 #include <vector>
 
 #include "axklib/audio.hpp"
+#include "axklib/conversion/tx16w_to_a_series/plan.hpp"
+#include "axklib/formats/tx16w/codec.hpp"
 #include "axklib/media.hpp"
 #include "axklib/object.hpp"
-#include "axklib/tx16w.hpp"
-#include "axklib/tx16w_a_series.hpp"
 #include "axklib/writer.hpp"
 
 namespace axk::alteration_internal {

@@ -3,6 +3,7 @@
     import { modal } from '../../lib/modal';
     import Icon from '../../lib/components/Icon.svelte';
     import StorageBrowserPanel from '../../lib/components/StorageBrowserPanel.svelte';
+    import OpenSourceImagePanel from './OpenSourceImagePanel.svelte';
     import DeviceTargetDetails from './DeviceTargetDetails.svelte';
     import { deviceTargetLabel } from './deviceTargetPresentation';
     import { useDevices } from '../physical-devices/workflow.svelte';
@@ -15,7 +16,7 @@
         async (location, prepare) => {
             if (!devices || location.kind !== 'device') return false;
             await devices.images.open(
-                location,
+                [location],
                 undefined,
                 prepare
                     ? async (candidate) => {
@@ -143,7 +144,7 @@
             hidden={workflow.tab !== 'Image'}
             inert={workflow.tab !== 'Image' || workflow.busy}
         >
-            <StorageBrowserPanel {...browser} active={workflow.tab === 'Image'} oncancel={() => void cancel()} />
+            <OpenSourceImagePanel {...browser} active={workflow.tab === 'Image'} oncancel={() => void cancel()} />
         </div>
         {#each ['Device', 'SCSI2SDv6', 'SCSI2SD XML'] as tab}
             <div

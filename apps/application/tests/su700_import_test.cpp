@@ -41,7 +41,7 @@ class Su700Import : public testing::Test {
         sandbox = std::make_unique<axk::app::Sandbox>(std::move(*created));
         sessions = std::make_unique<axk::app::ImageSessionManager>(*sandbox, 32U, 500U, std::chrono::minutes{15},
                                                                    std::chrono::steady_clock::now, &reservations);
-        const auto opened = sessions->open({"workspace", "image.hds"}, "owner");
+        const auto opened = sessions->open({{{"workspace", "image.hds"}}, {}}, "owner");
         ASSERT_TRUE(opened);
         image = *opened;
         const auto bytes = su700_floppy_bytes();
@@ -68,7 +68,7 @@ class Su700Import : public testing::Test {
                 axk::PutFilesystemFile{std::move(path), std::make_shared<axk::MemoryReader>(std::move(*data))});
         }
         axk::app::AlterationJournalStore journals{root / "seed-journals"};
-        const auto seeded = axk::app::apply_filesystem_edits(*sessions, journals, image.image_id, "owner",
+        const auto seeded = axk::app::apply_filesystem_edits(*sessions, journals, {image.image_id, "source-1"}, "owner",
                                                              image.revision, axk::PartitionIndex{0}, edits);
         ASSERT_TRUE(seeded) << seeded.error().message;
         image = *seeded;
@@ -89,6 +89,7 @@ class Su700Import : public testing::Test {
         return {{"source", {{"fileRef", {{"rootId", "workspace"}, {"relativePath", "source.img"}}}}},
                 {"destination",
                  {{"imageId", image.image_id},
+                  {"documentId", "document-a-series-source-1"},
                   {"expectedRevision", image.revision},
                   {"rootEntryId", root_id},
                   {"volumeName", "IMPORTED"}}},
@@ -177,7 +178,7 @@ TEST_F(Su700Import, ReadOnlyTargetsDoNotAdvertiseOrPlanImports) {
     sandbox = std::make_unique<axk::app::Sandbox>(std::move(*readonly));
     sessions = std::make_unique<axk::app::ImageSessionManager>(*sandbox, 32U, 500U, std::chrono::minutes{15},
                                                                std::chrono::steady_clock::now, &reservations);
-    const auto opened = sessions->open({"workspace", "image.hds"}, "owner");
+    const auto opened = sessions->open({{{"workspace", "image.hds"}}, {}}, "owner");
     ASSERT_TRUE(opened);
     image = *opened;
     const auto page = sessions->filesystem(image.image_id, "owner", image.revision);
@@ -223,6 +224,6 @@ TEST_F(Su700Import, RollsBackWhenSourceIdentityChangesDuringCommit) {
     EXPECT_TRUE(changed);
     EXPECT_EQ(result.error().code, "filesystem_input_changed");
     EXPECT_EQ(digest(), before);
-    EXPECT_TRUE(sessions->begin_read(image.image_id, "owner", image.revision));
+    EXPECT_TRUE(sessions->begin_source_read({image.image_id, "source-1"}, "owner", image.revision));
 }
 } // namespace

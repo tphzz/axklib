@@ -15,6 +15,12 @@ export interface WorkspacePresentation {
     selectionActions?: Snippet;
 }
 
+export interface DevicePresentationState {
+    lowerOpen: boolean;
+    setLowerOpen: (value: boolean) => void;
+    showObject: (objectId: string) => Promise<void>;
+}
+
 export interface WorkspaceBackend {
     id: string;
     label: string;

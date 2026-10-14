@@ -37,6 +37,10 @@ export interface ValidationSummary {
 export interface OpenedImage {
     sessionId: number;
     revision: number;
+    sources: components['schemas']['ImageSourceMember'][];
+    documents: NativeDocumentSummary[];
+    documentId: string | null;
+    discovery: components['schemas']['ImageDocumentDiscovery'];
     companionSources: ImageLocation[];
     floppySet: FloppySetSummary | null;
     tree: DiskTreeItem[];
@@ -69,6 +73,7 @@ export type VolumeImportDestination =
 
 export interface AllocationMapReference {
     imageId: string;
+    sourceMemberId: string;
     revision: number;
 }
 
@@ -223,7 +228,9 @@ export type RelationshipQuality = 'KNOWN' | 'LIKELY' | 'TENTATIVE' | 'UNKNOWN';
 export type SystemProgramContext = components['schemas']['SystemProgramContext'];
 export type SystemProgramContexts = components['schemas']['SystemProgramContexts'];
 export type SystemProgramPart = components['schemas']['SystemProgramPart'];
-export type ObjectDetail = components['schemas']['ImageObjectDetail'];
+export type ObjectDetail = import('../features/devices/a-series/types').ASeriesObjectDetail;
+export type NativeDocumentSummary = components['schemas']['ImageDocument'];
+export type NativeObjectDetail = components['schemas']['ImageObjectDetail'];
 
 export interface SamplerRelationship {
     id: string;
@@ -482,11 +489,17 @@ export interface ImageTransport
     readonly devices?: import('./httpDevices').DeviceService;
     sandboxRoots(): Promise<SandboxRoot[]>;
     sandboxDirectory(directory: DirectoryRef, cursor?: string): Promise<DirectoryListing>;
-    inspectSandboxMediaSource(directory: DirectoryRef): Promise<'AXK_OBJECT_DIRECTORY' | null>;
+    inspectSandboxMediaSource(directory: DirectoryRef): Promise<'DIRECTORY' | null>;
     createSandboxDirectory(parent: DirectoryRef, name: string): Promise<void>;
     renameSandboxEntry(entry: FileRef, name: string): Promise<void>;
     deleteSandboxEntry(entry: FileRef): Promise<void>;
-    openImage(source: ImageLocation, options?: ImageOpenOptions): Promise<OpenedImage>;
+    openImage(sources: ImageLocation[], options?: ImageOpenOptions): Promise<OpenedImage>;
+    selectDocument(sessionId: number, documentId: string | null): Promise<OpenedImage>;
+    resolveDocuments(sessionId: number, selectedFormats: string[]): Promise<OpenedImage>;
+    nativeContent(sessionId: number): Promise<components['schemas']['ImageContentItem'][]>;
+    nativeObjects(sessionId: number): Promise<components['schemas']['ImageObjectItem'][]>;
+    nativeRelationships(sessionId: number): Promise<components['schemas']['ImageRelationshipItem'][]>;
+    nativeObjectDetail(sessionId: number, objectId: string): Promise<NativeObjectDetail>;
     keepImageAlive(sessionId: number): Promise<void>;
     refreshImage(sessionId: number): Promise<OpenedImage>;
     attachCompanions(sessionId: number, selection: CompanionSelection): Promise<OpenedImage>;

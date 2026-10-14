@@ -225,7 +225,7 @@ std::string_view axk::app::directory_entry_kind_name(DirectoryEntryKind kind) no
 std::string_view axk::app::directory_media_source_kind_name(DirectoryMediaSourceKind kind) noexcept {
     switch (kind) {
     case DirectoryMediaSourceKind::axk_object_directory:
-        return "AXK_OBJECT_DIRECTORY";
+        return "DIRECTORY";
     }
     return "UNKNOWN";
 }

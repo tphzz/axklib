@@ -30,11 +30,10 @@ axk::app::Result<axk::app::ImageSourceRef> axk::app::image_source_ref_from_json(
             return ImageSourceRef{file.at("rootId").get<std::string>(), file.at("relativePath").get<std::string>(),
                                   ImageSourceKind::file};
         }
-        if (kind == "AXK_OBJECT_DIRECTORY") {
+        if (kind == "DIRECTORY") {
             const auto &directory = reference.at("directory");
             return ImageSourceRef{directory.at("rootId").get<std::string>(),
-                                  directory.at("relativePath").get<std::string>(),
-                                  ImageSourceKind::axk_object_directory};
+                                  directory.at("relativePath").get<std::string>(), ImageSourceKind::directory};
         }
         if (kind == "DEVICE") {
             const auto &device = reference.at("device");
@@ -45,8 +44,7 @@ axk::app::Result<axk::app::ImageSourceRef> axk::app::image_source_ref_from_json(
             return ImageSourceRef{{}, {}, ImageSourceKind::device, session, target};
         }
     } catch (const nlohmann::json::exception &) {
-        return std::unexpected(
-            Error{"invalid_request", "source must be one FILE, AXK_OBJECT_DIRECTORY or DEVICE reference"});
+        return std::unexpected(Error{"invalid_request", "source must be one FILE, DIRECTORY or DEVICE reference"});
     }
     return std::unexpected(Error{"invalid_request", "image source kind is unsupported"});
 }
@@ -58,11 +56,36 @@ nlohmann::json axk::app::image_source_ref_json(const ImageSourceRef &source) {
     if (source.kind == ImageSourceKind::file) {
         return {{"kind", "FILE"}, {"file", {{"rootId", source.root_id}, {"relativePath", source.relative_path}}}};
     }
-    return {{"kind", "AXK_OBJECT_DIRECTORY"},
-            {"directory", {{"rootId", source.root_id}, {"relativePath", source.relative_path}}}};
+    return {{"kind", "DIRECTORY"}, {"directory", {{"rootId", source.root_id}, {"relativePath", source.relative_path}}}};
 }
 
-nlohmann::json axk::app::image_session_summary_json(const ImageSessionSummary &summary) {
+axk::app::ImageDocumentRef axk::app::image_document_ref(const nlohmann::json &request) {
+    return {request.at("imageId").get<std::string>(), request.at("documentId").get<std::string>()};
+}
+
+axk::app::Result<axk::app::ImageOpenSources> axk::app::image_open_sources_from_json(const nlohmann::json &request) {
+    try {
+        if (!request.is_object() || request.contains("source"))
+            return std::unexpected(Error{"invalid_request", "Use an explicit sources array"});
+        const auto &sources = request.at("sources");
+        if (!sources.is_array() || sources.empty() || sources.size() > 32U)
+            return std::unexpected(Error{"invalid_request", "Choose between 1 and 32 sources"});
+        ImageOpenSources result;
+        for (const auto &value : sources) {
+            auto source = image_source_ref_from_json(value);
+            if (!source)
+                return std::unexpected(source.error());
+            result.sources.push_back(std::move(*source));
+        }
+        if (request.contains("selectedFormats"))
+            result.selected_formats = request.at("selectedFormats").get<std::vector<std::string>>();
+        return result;
+    } catch (const nlohmann::json::exception &) {
+        return std::unexpected(Error{"invalid_request", "sources must contain explicit source references"});
+    }
+}
+
+nlohmann::json axk::app::image_document_summary_json(const ImageDocumentSummary &summary) {
     nlohmann::json companion_sources = nlohmann::json::array();
     for (const auto &source : summary.companion_sources)
         companion_sources.push_back(image_source_ref_json(source));
@@ -78,9 +101,12 @@ nlohmann::json axk::app::image_session_summary_json(const ImageSessionSummary &s
                                                 ? nlohmann::json(*summary.floppy_set->next_required_index)
                                                 : nlohmann::json{}}};
     }
-    return {{"imageId", summary.image_id},
-            {"revision", summary.revision},
-            {"source", image_source_ref_json(summary.source)},
+    return {{"id", summary.id},
+            {"formatId", summary.format_id},
+            {"profile", summary.profile},
+            {"name", summary.name},
+            {"completeness", summary.completeness},
+            {"sourceMemberIds", summary.source_member_ids},
             {"companionSources", std::move(companion_sources)},
             {"floppySet", std::move(floppy_set)},
             {"format", summary.format},
@@ -93,4 +119,34 @@ nlohmann::json axk::app::image_session_summary_json(const ImageSessionSummary &s
               {"infoCount", summary.validation.info_count},
               {"warningCount", summary.validation.warning_count},
               {"errorCount", summary.validation.error_count}}}};
+}
+
+nlohmann::json axk::app::image_session_summary_json(const ImageSessionSummary &summary) {
+    auto sources = nlohmann::json::array();
+    for (const auto &source : summary.sources) {
+        auto diagnostics = nlohmann::json::array();
+        for (const auto &issue : source.diagnostics)
+            diagnostics.push_back(
+                {{"code", issue.code}, {"severity", issue.severity}, {"message", issue.message}, {"path", issue.path}});
+        sources.push_back({{"id", source.id},
+                           {"source", image_source_ref_json(source.source)},
+                           {"format", source.format},
+                           {"filesystemRootIds", source.filesystem_root_ids},
+                           {"diagnostics", std::move(diagnostics)}});
+    }
+    auto documents = nlohmann::json::array();
+    for (const auto &document : summary.documents)
+        documents.push_back(image_document_summary_json(document));
+    auto candidates = nlohmann::json::array();
+    for (const auto &candidate : summary.discovery.candidates)
+        candidates.push_back({{"formatId", candidate.format_id},
+                              {"state", candidate.state},
+                              {"sourceMemberIds", candidate.source_member_ids},
+                              {"diagnostics", candidate.diagnostics}});
+    return {{"imageId", summary.image_id},
+            {"revision", summary.revision},
+            {"sources", std::move(sources)},
+            {"documents", std::move(documents)},
+            {"discovery",
+             {{"selectionRequired", summary.discovery.selection_required}, {"candidates", std::move(candidates)}}}};
 }

@@ -5,11 +5,16 @@ import type { FilesController } from '../../files/controller.svelte';
 import type { FilesystemEntry } from '../../../lib/filesystem';
 import { browserUploadSource } from '../../../lib/clientUploadSource';
 import type { ClientFilesystemImportEntry } from '../../../lib/filesystemImport';
+import { filesystemEntry } from '../../../lib/testing/filesystem';
 
 function setup() {
     const volume = { id: 'semantic-volume', name: 'Not a filename' };
-    const parent = { id: 'directory', parentId: 'root', contentScopeId: volume.id } as FilesystemEntry;
-    const file = { id: 'file', parentId: parent.id, kind: 'file' } as FilesystemEntry;
+    const parent = filesystemEntry({
+        id: 'directory',
+        parentId: 'root',
+        bindings: [{ documentId: 'document-a', objectId: null, contentScopeId: volume.id }],
+    });
+    const file = filesystemEntry({ id: 'file', parentId: parent.id, kind: 'file' });
     const workflow = {
         available: true,
         request: null,
@@ -22,6 +27,7 @@ function setup() {
         openASeriesFloppy(
             workflow as unknown as FloppyImportWorkflow,
             controller as unknown as FilesController,
+            'document-a',
             entries,
             file,
         );

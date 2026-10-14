@@ -18,8 +18,9 @@ describe('FilesView native metadata', () => {
             kind: 'root',
             sizeBytes: null,
             childCount: 1,
-            objectId: null,
-            contentScopeId: null,
+            sourceMemberId: 'source-1',
+            bindings: [],
+
             interpretation: '',
             storage: '',
             issue: '',

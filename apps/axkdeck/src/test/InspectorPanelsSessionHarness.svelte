@@ -18,8 +18,9 @@
         kind: 'file',
         sizeBytes: 356,
         childCount: 0,
-        objectId: 'sample-first',
-        contentScopeId: null,
+        sourceMemberId: 'source-1',
+        bindings: [{ documentId: 'document-a-series-source-1', objectId: 'sample-first', contentScopeId: null }],
+
         interpretation: '',
         storage: 'Record 0',
         issue: '',

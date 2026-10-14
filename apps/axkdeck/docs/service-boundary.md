@@ -12,7 +12,7 @@ idempotent cancellation. Errors use a stable code/message/context envelope.
 Large audio is represented as a file or ranged resource transfer rather than an
 unbounded JSON payload.
 
-`GET /api/v1/images/{imageId}/objects/{objectId}` is the diagnostic object-detail
+`GET /api/v1/images/{imageId}/documents/{documentId}/objects/{objectId}` is the diagnostic object-detail
 read used by the inspector's JSON copy action. It projects the session's
 canonical decoded object, placement details, header fields, omissions, and all
 direct graph relationships. It deliberately omits PCM, sequence event payloads,
@@ -20,6 +20,14 @@ and opaque object bodies. This endpoint is not a portable-package model:
 portable packages remain the resolvable outbound closure used for transfer,
 while object detail also preserves incoming links, unresolved candidates, and
 field source details for one loaded object.
+
+Opening supplies an explicit `sources` array. A workspace retains admitted source
+members independently of its native `documents`. Files is workspace-scoped;
+native content, object IDs, relationships and operation capabilities are scoped
+to a selected document. Native jobs include `documentId`; storage allocation
+queries include `sourceMemberId`. Typed detail is discriminated by `formatId`.
+Document switching preserves presentation state but invalidates pending native
+reads and auditions. It never reuses a previous document's decoded objects.
 
 Waveform previews return one or two full stored-PCM envelopes. Every lane
 identifies its source Wave Data and carries its sample rate, stored frame count,

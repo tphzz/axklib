@@ -29,7 +29,7 @@ class ImageFilesystemTest : public testing::Test {
         ASSERT_TRUE(sandbox) << sandbox.error().message;
         sandbox_ = std::make_unique<axk::app::Sandbox>(std::move(*sandbox));
         sessions_ = std::make_unique<axk::app::ImageSessionManager>(*sandbox_);
-        const auto opened = sessions_->open({"fixtures", "HD00_512_single_sbnk_authored.hds"}, "owner");
+        const auto opened = sessions_->open({{{"fixtures", "HD00_512_single_sbnk_authored.hds"}}, {}}, "owner");
         ASSERT_TRUE(opened) << opened.error().message;
         id_ = opened->image_id;
     }
@@ -43,7 +43,7 @@ TEST_F(ImageFilesystemTest, ReadsPhysicalEntriesAndMapsObjectsWithoutDuplicating
     ASSERT_TRUE(roots) << roots.error().message;
     EXPECT_TRUE(roots->available);
     EXPECT_EQ(roots->filesystem_name, "Yamaha SFS");
-    EXPECT_EQ(roots->device_view, "a-series");
+    EXPECT_FALSE(roots->device_view);
     ASSERT_EQ(roots->root_capabilities.size(), roots->items.size());
     EXPECT_FALSE(roots->root_capabilities.front().create_directory);
     EXPECT_FALSE(roots->root_capabilities.front().put_file);
@@ -57,14 +57,17 @@ TEST_F(ImageFilesystemTest, ReadsPhysicalEntriesAndMapsObjectsWithoutDuplicating
         EXPECT_EQ(entry.root_id, root_id);
         EXPECT_FALSE(entry.ancestor_ids.empty());
     }
-    const auto objects = sessions_->objects(id_, "owner", 100U);
+    const auto objects = sessions_->objects({id_, "document-a-series-source-1"}, "owner", 100U);
     ASSERT_TRUE(objects);
     ASSERT_FALSE(objects->items.empty());
     for (const auto &object : objects->items) {
-        const auto mapped = sessions_->filesystem(id_, "owner", 1U, {.object_id = object.id});
+        const auto mapped = sessions_->filesystem(
+            id_, "owner", 1U, {.object_id = object.id, .document_id = "document-a-series-source-1"});
         ASSERT_TRUE(mapped);
         ASSERT_EQ(mapped->items.size(), 1U) << object.name;
-        EXPECT_EQ(mapped->items.front().object_id, object.id);
+        ASSERT_EQ(mapped->items.front().bindings.size(), 1U);
+        EXPECT_EQ(mapped->items.front().bindings.front().object_id, object.id);
+        EXPECT_EQ(mapped->items.front().bindings.front().document_id, "document-a-series-source-1");
         EXPECT_EQ(mapped->items.front().kind, "file");
         EXPECT_EQ(mapped->items.front().child_count, 0U);
         EXPECT_EQ(mapped->items.front().name, object.entry_name);
@@ -245,7 +248,7 @@ TEST(ImageFilesystemIndex, PreservesFatNamesAndNestedDirectoriesWithoutDeviceInt
     std::fill_n(bytes.begin() + 5U * 512U, 16U, std::byte{0x31});
     const auto media = axk::open_media(std::make_shared<axk::MemoryReader>(std::move(bytes)), "unknown.img");
     ASSERT_TRUE(media) << media.error().message;
-    const auto index = axk::app::detail::build_image_filesystem(*media, {}, {}, {}, {});
+    const auto index = axk::app::detail::build_image_filesystem(*media, {}, {});
     ASSERT_TRUE(index) << index.error().message;
     EXPECT_TRUE(index->available);
     EXPECT_FALSE(index->device_view);
@@ -277,6 +280,26 @@ TEST(ImageFilesystemIndex, PreservesFatNamesAndNestedDirectoriesWithoutDeviceInt
     EXPECT_FALSE(axk::app::detail::read_filesystem_range(*media, locator->second, 0U, 16U, cancellation.token()));
 }
 
+TEST(ImageFilesystemIndex, UsesAdapterBindingsWithoutInterpretingSamplerPayloads) {
+    const auto media = axk::open_media(std::make_shared<axk::MemoryReader>(nested_fat_fixture()), "bound.img");
+    ASSERT_TRUE(media) << media.error().message;
+    const auto &fat = std::get<axk::FatImage>(media->storage());
+    ASSERT_EQ(fat.files().size(), 1U);
+    axk::app::NativeFilesystemBindings bindings;
+    bindings.profile = "second-format";
+    bindings.offset_objects[fat.files().front().first_data_offset] = {"second-object"};
+    bindings.interpretations.emplace("second-object", "Native Wave");
+    const auto index = axk::app::detail::build_image_filesystem(*media, {}, bindings);
+    ASSERT_TRUE(index) << index.error().message;
+    EXPECT_EQ(index->device_view, "second-format");
+    EXPECT_EQ(index->entries.back().object_id, "second-object");
+    EXPECT_EQ(index->entries.back().interpretation, "Native Wave");
+    bindings.offset_objects[fat.files().front().first_data_offset].push_back("ambiguous-object");
+    const auto ambiguous = axk::app::detail::build_image_filesystem(*media, {}, bindings);
+    ASSERT_TRUE(ambiguous) << ambiguous.error().message;
+    EXPECT_FALSE(ambiguous->entries.back().object_id);
+}
+
 TEST(ImageFilesystemIndex, EmptyAuthoredSfsRetainsDeviceAuthoringDespiteSupportFiles) {
     struct TemporaryImage {
         std::filesystem::path path;
@@ -296,13 +319,28 @@ TEST(ImageFilesystemIndex, EmptyAuthoredSfsRetainsDeviceAuthoringDespiteSupportF
         ASSERT_TRUE(written) << written.error().message;
         const auto media = axk::open_media(temporary.path);
         ASSERT_TRUE(media) << media.error().message;
-        const auto index = axk::app::detail::build_image_filesystem(*media, {}, {}, {}, {});
+        const auto unbound = axk::app::detail::build_image_filesystem(*media, {}, {});
+        ASSERT_TRUE(unbound) << unbound.error().message;
+        EXPECT_FALSE(unbound->device_view);
+        axk::app::NativeFilesystemBindings bindings;
+        bindings.empty_sfs_profile = "a-series";
+        const auto index = axk::app::detail::build_image_filesystem(*media, {}, std::move(bindings));
         ASSERT_TRUE(index) << index.error().message;
         EXPECT_TRUE(index->available);
         EXPECT_EQ(index->device_view, "a-series");
         EXPECT_EQ(index->entries.front().raw_attributes, "SFS 0x94646972");
         EXPECT_TRUE(std::ranges::all_of(index->entries.front().attributes,
                                         [](const auto &attribute) { return attribute.summary.empty(); }));
+        auto sandbox = axk::app::Sandbox::create({{"generated", "Generated", temporary.path.parent_path(), true}});
+        ASSERT_TRUE(sandbox);
+        axk::app::ImageSessionManager sessions{*sandbox};
+        const auto session = sessions.open({{{"generated", temporary.path.filename().string()}}, {}}, "owner");
+        ASSERT_TRUE(session) << session.error().message;
+        const auto filesystem = sessions.filesystem(session->image_id, "owner", session->revision);
+        ASSERT_TRUE(filesystem) << filesystem.error().message;
+        EXPECT_FALSE(filesystem->device_view);
+        EXPECT_EQ(session->documents.at(0).profile, "a-series");
+        EXPECT_FALSE(session->documents.at(0).available_operations.empty());
     }
 }
 
@@ -312,7 +350,7 @@ TEST(ImageFilesystemIndex, ListsIsoSupportFilesAsPhysicalEntriesRatherThanProjec
     const std::vector<std::byte> expected{stored.begin(), stored.end()};
     const auto media = axk::open_media(std::make_shared<axk::MemoryReader>(std::move(bytes)), "stored.iso");
     ASSERT_TRUE(media) << media.error().message;
-    const auto index = axk::app::detail::build_image_filesystem(*media, {}, {}, {}, {});
+    const auto index = axk::app::detail::build_image_filesystem(*media, {}, {});
     ASSERT_TRUE(index) << index.error().message;
     EXPECT_EQ(index->filesystem_name, "ISO9660");
     const auto file = std::ranges::find(index->entries, "/GROUP/F001/F000", &axk::app::ImageFilesystemEntry::path);
@@ -365,7 +403,7 @@ TEST(ImageFilesystemIndex, DirectoryAliasesHaveDistinctDescendantIdentities) {
         alias[8U + i] = static_cast<std::byte>(name[i]);
     const auto media = axk::open_media(std::make_shared<axk::MemoryReader>(std::move(bytes)), "alias.hds");
     ASSERT_TRUE(media) << media.error().message;
-    const auto index = axk::app::detail::build_image_filesystem(*media, {}, {}, {}, {});
+    const auto index = axk::app::detail::build_image_filesystem(*media, {}, {});
     ASSERT_TRUE(index) << index.error().message;
     std::set<std::string> identities;
     std::size_t alias_children{};

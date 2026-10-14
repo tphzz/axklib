@@ -101,11 +101,19 @@ Result<MediaObject> assemble_smpl(std::vector<FloppyPendingObject *> parts, Flop
                                              "complete floppy set is missing Wave Data continuation bytes")};
         }
         auto object = parts.front()->object;
+        object.source_files.clear();
+        for (const auto *part : parts)
+            object.source_files.insert(object.source_files.end(), part->object.source_files.begin(),
+                                       part->object.source_files.end());
         object.key = std::format("fat12-floppy-set:SMPL:{}:{}", parts.front()->slot, object.decoded.header.name);
         return object;
     }
 
     auto object = unique.front()->object;
+    object.source_files.clear();
+    for (const auto *part : parts)
+        object.source_files.insert(object.source_files.end(), part->object.source_files.begin(),
+                                   part->object.source_files.end());
     if (object.raw_payload.empty()) {
         object.key = std::format("fat12-floppy-set:SMPL:{}:{}", unique.front()->slot, object.decoded.header.name);
         object.size = static_cast<std::uint64_t>(header_size) + total;
@@ -161,6 +169,9 @@ Result<std::vector<MediaObject>> assemble_floppy_objects(std::vector<FloppyPendi
                                              std::format("floppy members contain conflicting {} object '{}'",
                                                          detail::object_category(identity.first), identity.second),
                                              source_name)};
+        } else {
+            auto &files = result[found->second].source_files;
+            files.insert(files.end(), item.object.source_files.begin(), item.object.source_files.end());
         }
     }
     for (auto &[identity, parts] : smpl) {

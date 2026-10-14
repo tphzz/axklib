@@ -8,6 +8,8 @@
     import { serverFileLocation } from '../lib/storageLocations';
 
     const root = filesystemEntry({
+        sourceMemberId: 'source-1',
+        bindings: [],
         id: 'root',
         name: 'EX5 MO',
         path: '',
@@ -23,6 +25,8 @@
         folder,
         ...Array.from({ length: 80 }, (_, index) =>
             filesystemEntry({
+                sourceMemberId: 'source-1',
+                bindings: [],
                 id: `file-${index}`,
                 name: `F${String(index).padStart(3, '0')}.BIN`,
                 kind: 'file',
@@ -93,6 +97,8 @@
                 entries = [
                     ...entries,
                     filesystemEntry({
+                        sourceMemberId: 'source-1',
+                        bindings: [],
                         id: 'imported',
                         name,
                         kind: 'file',

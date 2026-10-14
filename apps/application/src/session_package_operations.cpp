@@ -1,3 +1,5 @@
+#include "axklib/application/formats/a_series/session_read.hpp"
+#include "axklib/application/image_session_contracts.hpp"
 #include "axklib/application/package_operations.hpp"
 
 #include <chrono>
@@ -63,7 +65,8 @@ axk::app::Result<void> axk::app::bind_session_package_operations(OperationRegist
                 const auto identity = parse_session_identity(input);
                 if (!identity)
                     return std::unexpected(identity.error());
-                auto session = images.begin_read(identity->first, context.owner_id, identity->second);
+                auto session = axk::app::formats::a_series::SessionReader::acquire(images, image_document_ref(input),
+                                                                                   context.owner_id, identity->second);
                 if (!session)
                     return std::unexpected(session.error());
                 if (session->media->kind() != axk::MediaKind::sfs) {
@@ -117,6 +120,8 @@ axk::app::Result<void> axk::app::bind_session_package_operations(OperationRegist
                             operation_error("package_plan_in_use", "package import plan is already being applied"));
                     }
                     if (found->second->image_id != identity->first ||
+                        found->second->document_id != session->document_id ||
+                        found->second->source_member_id != session->source_member_id ||
                         found->second->expected_revision != identity->second ||
                         found->second->package_set->inputs != sources) {
                         return std::unexpected(
@@ -221,12 +226,14 @@ axk::app::Result<void> axk::app::bind_session_package_operations(OperationRegist
                     if (auto verified = record->package_set->verify_sources(context.cancellation); !verified)
                         return std::unexpected(verified.error());
                 }
-                auto mutation = images.begin_mutation(record->image_id, context.owner_id, record->expected_revision,
-                                                      context.mutation_id);
+                auto mutation = images.begin_mutation({record->image_id, record->document_id}, context.owner_id,
+                                                      record->expected_revision, context.mutation_id);
                 if (!mutation)
                     return std::unexpected(mutation.error());
                 SessionMutationGuard mutation_guard{images, record->image_id, context.owner_id,
                                                     record->expected_revision};
+                if (mutation->source_member_id != record->source_member_id)
+                    return std::unexpected(operation_error("package_plan_stale", "Package plan source changed"));
 
                 auto current_snapshot = mutation->source.kind == ImageSourceKind::device
                                             ? Result<std::string>{"device:" + mutation->target->revision()}
@@ -308,7 +315,8 @@ axk::app::Result<void> axk::app::bind_session_package_operations(OperationRegist
                 const auto identity = parse_session_identity(input);
                 if (!identity)
                     return std::unexpected(identity.error());
-                auto session = images.begin_read(identity->first, context.owner_id, identity->second);
+                auto session = axk::app::formats::a_series::SessionReader::acquire(images, image_document_ref(input),
+                                                                                   context.owner_id, identity->second);
                 if (!session)
                     return std::unexpected(session.error());
 
@@ -318,7 +326,7 @@ axk::app::Result<void> axk::app::bind_session_package_operations(OperationRegist
                     return std::unexpected(roots.error());
                 auto built = axk::build_portable_package(*session->media, *roots, context.cancellation);
                 if (!built && built.error().code == axk::ErrorCode::object_missing &&
-                    session->source.kind == ImageSourceKind::axk_object_directory) {
+                    session->source.kind == ImageSourceKind::directory) {
                     return std::unexpected(operation_error("companion_disks_required",
                                                            "Wave Data continues on another sampler disk. Add extracted "
                                                            "companion disk folders to export it.",

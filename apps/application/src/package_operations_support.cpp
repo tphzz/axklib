@@ -1,3 +1,4 @@
+#include "axklib/application/formats/a_series/session_read.hpp"
 #include "package_operations_internal.hpp"
 
 #include <algorithm>
@@ -254,7 +255,7 @@ axk::app::Result<std::vector<axk::PackageRootSelector>> parse_roots(const Json &
 
 axk::app::Result<std::vector<axk::PackageRootSelector>> parse_session_export_roots(
     const Json &input, const std::unordered_map<std::string, std::string> &object_keys_by_id,
-    const std::unordered_map<std::string, axk::app::ImageVolumeScopeIdentity> &volume_scopes_by_id) {
+    const std::unordered_map<std::string, axk::app::formats::a_series::VolumeScopeIdentity> &volume_scopes_by_id) {
     try {
         const auto &values = input.at("roots");
         if (!values.is_array() || values.empty() || values.size() > 1024U)
@@ -650,6 +651,10 @@ axk::app::Result<std::pair<std::string, std::uint64_t>> parse_session_identity(c
 Json session_import_result(const SessionPackagePlanRecord &record, const axk::app::ImageSessionSummary &summary,
                            bool applied) {
     const auto plan = plan_json(record.plan, record.token, 0U);
+    std::size_t object_count{};
+    for (const auto &document : summary.documents)
+        if (document.id == record.document_id)
+            object_count = document.object_count;
     return {{"schemaVersion", plan.at("schemaVersion")},
             {"planId", plan.at("planId")},
             {"targetKind", plan.at("targetKind")},
@@ -659,8 +664,10 @@ Json session_import_result(const SessionPackagePlanRecord &record, const axk::ap
             {"programSlotPlacements", plan.at("programSlotPlacements")},
             {"allocation", plan.at("allocation")},
             {"imageId", record.image_id},
+            {"documentId", record.document_id},
+            {"sourceMemberId", record.source_member_id},
             {"revision", summary.revision},
-            {"objectCount", summary.object_count},
+            {"objectCount", object_count},
             {"applied", applied}};
 }
 

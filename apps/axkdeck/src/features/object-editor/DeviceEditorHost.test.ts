@@ -12,6 +12,8 @@ beforeEach(() => vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnV
 
 function detail(id: string): ObjectDetail {
     return {
+        formatId: 'yamaha.a-series',
+        profile: 'a-series',
         image: { revision: 1 },
         object: { id, key: id, name: `Sample ${id}` },
         formatConversion: sampleConversionFixture(),

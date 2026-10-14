@@ -720,7 +720,7 @@ TEST_F(DeviceSessions, OpeningAndSampleRenameDoNotReadUnrelatedPcm) {
         source.device_target_id = "disk";
         provider->storage->bytes_read = 0U;
         RecordedProgress progress;
-        const auto image = images.open(source, "owner", {}, &progress);
+        const auto image = images.open({{source}, {}}, "owner", {}, &progress);
         ASSERT_TRUE(image) << image.error().message;
         const auto open_bytes = provider->storage->bytes_read;
         EXPECT_LE(open_bytes, 4U * index_bytes + 64U * 1024U);
@@ -745,9 +745,12 @@ TEST_F(DeviceSessions, OpeningAndSampleRenameDoNotReadUnrelatedPcm) {
         OperationContext context{"owner", "request", {}, nullptr, {}, {}, "sample-rename"};
         context.diagnostic = [&](const auto &event) { diagnostics.push_back(event); };
         provider->storage->bytes_read = 0U;
-        const auto renamed = registry.invoke(
-            "images.alter",
-            {{"imageId", image->image_id}, {"expectedRevision", 1U}, {"manifest", {{"inline", manifest}}}}, context);
+        const auto renamed = registry.invoke("images.alter",
+                                             {{"imageId", image->image_id},
+                                              {"documentId", "document-a-series-source-1"},
+                                              {"expectedRevision", 1U},
+                                              {"manifest", {{"inline", manifest}}}},
+                                             context);
         ASSERT_TRUE(renamed) << renamed.error().message;
         const auto rename_bytes = provider->storage->bytes_read;
         EXPECT_LE(rename_bytes, 9U * index_bytes + 128U * 1024U);
@@ -766,7 +769,7 @@ TEST_F(DeviceSessions, OpeningAndSampleRenameDoNotReadUnrelatedPcm) {
         ASSERT_TRUE(commit->contains("postWriteReopenTimeUs"));
         EXPECT_GT(commit->at("postWriteReopenTimeUs").get<std::uint64_t>(), 0U);
         EXPECT_EQ(commit->at("deviceIo").at("verificationPasses").get<std::uint64_t>(), 4U);
-        const auto samples = images.objects(image->image_id, "owner", 100U, {}, "SBNK");
+        const auto samples = images.objects({image->image_id, "document-a-series-source-1"}, "owner", 100U, {}, "SBNK");
         ASSERT_TRUE(samples);
         ASSERT_EQ(samples->items.size(), 1U);
         EXPECT_EQ(samples->items.front().name, "Renamed");
@@ -799,9 +802,9 @@ TEST_F(DeviceSessions, SfsEditingUsesTheSameSessionPipelineWithoutCopyingTheDevi
     source.kind = ImageSourceKind::device;
     source.device_session_id = id;
     source.device_target_id = "disk";
-    const auto opened = images.open(source, "owner");
+    const auto opened = images.open({{source}, {}}, "owner");
     ASSERT_TRUE(opened) << opened.error().message;
-    EXPECT_EQ(opened->source.kind, ImageSourceKind::device);
+    EXPECT_EQ(opened->sources.at(0).source.kind, ImageSourceKind::device);
     ASSERT_TRUE(devices.authorize_writes(id, "disk", "owner", true));
     UploadStore uploads{directory / "uploads", 1024U, 1024U, 1U, 1024U, std::chrono::minutes{1}};
     AlterationJournalStore journals{directory / "file-journals"};
@@ -818,20 +821,28 @@ TEST_F(DeviceSessions, SfsEditingUsesTheSameSessionPipelineWithoutCopyingTheDevi
     provider->storage->fail_flush_once = true;
     auto rollback_context = context;
     rollback_context.mutation_id = "rolled-back-save";
-    const auto failed = registry.invoke(
-        "images.alter", {{"imageId", opened->image_id}, {"expectedRevision", 1U}, {"manifest", {{"inline", edit}}}},
-        rollback_context);
+    const auto failed = registry.invoke("images.alter",
+                                        {{"imageId", opened->image_id},
+                                         {"documentId", "document-a-series-source-1"},
+                                         {"expectedRevision", 1U},
+                                         {"manifest", {{"inline", edit}}}},
+                                        rollback_context);
     ASSERT_FALSE(failed);
     EXPECT_EQ(provider->storage->bytes, original_bytes);
-    const auto restored_samples = images.objects(opened->image_id, "owner", 100U, {}, "SBNK");
+    const auto restored_samples =
+        images.objects({opened->image_id, "document-a-series-source-1"}, "owner", 100U, {}, "SBNK");
     ASSERT_TRUE(restored_samples) << restored_samples.error().message;
     ASSERT_EQ(restored_samples->items.size(), 1U);
-    const auto restored_preview = images.preview(opened->image_id, "owner", restored_samples->items.front().id, 16U);
+    const auto restored_preview = images.preview({opened->image_id, "document-a-series-source-1"}, "owner",
+                                                 restored_samples->items.front().id, 16U);
     ASSERT_TRUE(restored_preview) << restored_preview.error().message;
     ASSERT_FALSE(restored_preview->lanes.empty());
-    const auto result = registry.invoke(
-        "images.alter", {{"imageId", opened->image_id}, {"expectedRevision", 1U}, {"manifest", {{"inline", edit}}}},
-        context);
+    const auto result = registry.invoke("images.alter",
+                                        {{"imageId", opened->image_id},
+                                         {"documentId", "document-a-series-source-1"},
+                                         {"expectedRevision", 1U},
+                                         {"manifest", {{"inline", edit}}}},
+                                        context);
     ASSERT_TRUE(result) << result.error().message;
     EXPECT_EQ(result->at("revision").get<std::uint64_t>(), 2U);
     const auto operations = devices.operations("owner");
@@ -841,10 +852,11 @@ TEST_F(DeviceSessions, SfsEditingUsesTheSameSessionPipelineWithoutCopyingTheDevi
         *operations, [](const auto &operation) { return operation.operation_id == "known-device-save"; });
     ASSERT_NE(saved, operations->end());
     EXPECT_EQ(saved->state, "committed");
-    const auto samples = images.objects(opened->image_id, "owner", 100U, {}, "SBNK");
+    const auto samples = images.objects({opened->image_id, "document-a-series-source-1"}, "owner", 100U, {}, "SBNK");
     ASSERT_TRUE(samples);
     ASSERT_EQ(samples->items.size(), 1U);
-    const auto detail = images.object_detail(opened->image_id, "owner", samples->items.front().id);
+    const auto detail =
+        images.object_detail({opened->image_id, "document-a-series-source-1"}, "owner", samples->items.front().id);
     ASSERT_TRUE(detail) << detail.error().message;
     const nlohmann::json parameters{
         {"schema_version", "1.0"},
@@ -856,27 +868,34 @@ TEST_F(DeviceSessions, SfsEditingUsesTheSameSessionPipelineWithoutCopyingTheDevi
                                                {"expected_payload_sha256", detail->at("editing").at("payloadSha256")},
                                                {"parameters", {{"level", 80U}}}}})}};
     context.mutation_id = "known-parameter-save";
-    const auto parameter_save = registry.invoke(
-        "images.alter",
-        {{"imageId", opened->image_id}, {"expectedRevision", 2U}, {"manifest", {{"inline", parameters}}}}, context);
+    const auto parameter_save = registry.invoke("images.alter",
+                                                {{"imageId", opened->image_id},
+                                                 {"documentId", "document-a-series-source-1"},
+                                                 {"expectedRevision", 2U},
+                                                 {"manifest", {{"inline", parameters}}}},
+                                                context);
     ASSERT_TRUE(parameter_save) << parameter_save.error().message;
     ASSERT_TRUE(images.close(opened->image_id, "owner"));
     ASSERT_TRUE(devices.close(id, "owner"));
     const auto reopened_id = open(devices);
     source.device_session_id = reopened_id;
-    const auto reopened = images.open(source, "owner");
+    const auto reopened = images.open({{source}, {}}, "owner");
     ASSERT_TRUE(reopened) << reopened.error().message;
-    const auto root = images.content(reopened->image_id, "owner", 100U);
+    const auto root = images.content({reopened->image_id, "document-a-series-source-1"}, "owner", 100U);
     ASSERT_TRUE(root);
-    const auto contents = images.content(reopened->image_id, "owner", 100U, {}, root->items.front().id);
+    const auto contents =
+        images.content({reopened->image_id, "document-a-series-source-1"}, "owner", 100U, {}, root->items.front().id);
     ASSERT_TRUE(contents);
     EXPECT_TRUE(std::ranges::any_of(contents->items, [](const auto &item) { return item.name == "Edited"; }));
-    const auto reopened_samples = images.objects(reopened->image_id, "owner", 100U, {}, "SBNK");
+    const auto reopened_samples =
+        images.objects({reopened->image_id, "document-a-series-source-1"}, "owner", 100U, {}, "SBNK");
     ASSERT_TRUE(reopened_samples);
     ASSERT_EQ(reopened_samples->items.size(), 1U);
-    const auto reopened_detail = images.object_detail(reopened->image_id, "owner", reopened_samples->items.front().id);
+    const auto reopened_detail = images.object_detail({reopened->image_id, "document-a-series-source-1"}, "owner",
+                                                      reopened_samples->items.front().id);
     ASSERT_TRUE(reopened_detail);
     EXPECT_EQ(reopened_detail->at("editing").at("parameters").at("level").get<unsigned>(), 80U);
-    EXPECT_TRUE(images.preview(reopened->image_id, "owner", reopened_samples->items.front().id, 16U));
+    EXPECT_TRUE(images.preview({reopened->image_id, "document-a-series-source-1"}, "owner",
+                               reopened_samples->items.front().id, 16U));
 }
 } // namespace

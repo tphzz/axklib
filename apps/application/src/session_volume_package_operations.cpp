@@ -1,4 +1,6 @@
 #include "axklib/application/session_volume_package_operations.hpp"
+#include "axklib/application/formats/a_series/session_read.hpp"
+#include "axklib/application/image_session_contracts.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -189,7 +191,7 @@ axk::app::Result<std::string> parse_scope_id(const Json &input) {
 }
 
 axk::app::Result<VolumeExportContext> resolve_context(const axk::app::ImageContentScope &content,
-                                                      const axk::app::ImageSessionRead &session) {
+                                                      const axk::app::formats::a_series::SessionRead &session) {
     if (content.item.kind != "partition")
         return std::unexpected(
             operation_error("content_scope_invalid", "volume package export requires a partition or CD-ROM group"));
@@ -294,26 +296,27 @@ axk::app::Result<void> axk::app::bind_session_volume_package_operations(Operatio
                                                                         ImageSessionManager &images,
                                                                         DownloadArchiveStore &downloads) {
     if (!registry.is_implemented("images.volume_package_export.inspect")) {
-        auto bound =
-            registry.bind("images.volume_package_export.inspect",
-                          [&images](const Json &input, const OperationContext &context) -> Result<Json> {
-                              auto identity = parse_identity(input);
-                              if (!identity)
-                                  return std::unexpected(identity.error());
-                              auto scope_id = parse_scope_id(input);
-                              if (!scope_id)
-                                  return std::unexpected(scope_id.error());
-                              auto content = images.content_scope(identity->first, context.owner_id, *scope_id);
-                              if (!content)
-                                  return std::unexpected(content.error());
-                              auto session = images.begin_read(identity->first, context.owner_id, identity->second);
-                              if (!session)
-                                  return std::unexpected(session.error());
-                              auto resolved = resolve_context(*content, *session);
-                              if (!resolved)
-                                  return std::unexpected(resolved.error());
-                              return inspection_json(*resolved);
-                          });
+        auto bound = registry.bind("images.volume_package_export.inspect",
+                                   [&images](const Json &input, const OperationContext &context) -> Result<Json> {
+                                       auto identity = parse_identity(input);
+                                       if (!identity)
+                                           return std::unexpected(identity.error());
+                                       auto scope_id = parse_scope_id(input);
+                                       if (!scope_id)
+                                           return std::unexpected(scope_id.error());
+                                       auto content =
+                                           images.content_scope(image_document_ref(input), context.owner_id, *scope_id);
+                                       if (!content)
+                                           return std::unexpected(content.error());
+                                       auto session = axk::app::formats::a_series::SessionReader::acquire(
+                                           images, image_document_ref(input), context.owner_id, identity->second);
+                                       if (!session)
+                                           return std::unexpected(session.error());
+                                       auto resolved = resolve_context(*content, *session);
+                                       if (!resolved)
+                                           return std::unexpected(resolved.error());
+                                       return inspection_json(*resolved);
+                                   });
         if (!bound)
             return bound;
     }
@@ -328,10 +331,11 @@ axk::app::Result<void> axk::app::bind_session_volume_package_operations(Operatio
             auto scope_id = parse_scope_id(input);
             if (!scope_id)
                 return std::unexpected(scope_id.error());
-            auto content = images.content_scope(identity->first, context.owner_id, *scope_id);
+            auto content = images.content_scope(image_document_ref(input), context.owner_id, *scope_id);
             if (!content)
                 return std::unexpected(content.error());
-            auto session = images.begin_read(identity->first, context.owner_id, identity->second);
+            auto session = axk::app::formats::a_series::SessionReader::acquire(images, image_document_ref(input),
+                                                                               context.owner_id, identity->second);
             if (!session)
                 return std::unexpected(session.error());
             auto resolved = resolve_context(*content, *session);

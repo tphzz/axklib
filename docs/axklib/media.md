@@ -95,7 +95,7 @@ generated group; both profiles are documented in [A-Series ISO9660 CD-ROM Images
 
 ## AXK object directory profile
 
-An `AXK_OBJECT_DIRECTORY` is either one flat host directory whose regular files
+A recognized A-series `DIRECTORY` source is either one flat host directory whose regular files
 contain `FSFSDEV3SPLX` Yamaha objects, or a bounded parent containing one level
 of such leaf directories. Object recognition, decoding, catalog construction,
 relationship resolution, preview, audition, and package export use the same

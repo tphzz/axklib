@@ -24,6 +24,8 @@ function setup() {
         status: vi.fn(),
     });
     const document = new ObjectEditorDocument(1, {
+        formatId: 'yamaha.a-series',
+        profile: 'a-series',
         image: { revision: 1 },
         object: { id: 'sample', key: 'sample', name: 'Sample', type: 'SBNK' },
         editing: {

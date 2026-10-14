@@ -4,6 +4,8 @@ import { sampleFormatFixture } from './sampleFormatFixture';
 export function mappingDetail(id: string, revision = 1): ObjectDetail {
     const bank = id === 'bank';
     return {
+        formatId: 'yamaha.a-series',
+        profile: 'a-series',
         image: { revision },
         object: { id, key: id, type: bank ? 'SBAC' : 'SBNK', name: id },
         relationships: bank

@@ -268,6 +268,7 @@ struct axk::app::Sandbox::NativeRoot {
 
 struct axk::app::SandboxTree::Implementation {
     NativeHandle root;
+    NativeIdentity root_identity;
     std::vector<SandboxTreeEntry> entries;
     std::vector<NativeIdentity> identities;
 };

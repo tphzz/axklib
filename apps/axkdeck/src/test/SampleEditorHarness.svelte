@@ -106,6 +106,8 @@
             delete group[keys.at(-1)!];
         }
         return {
+            formatId: 'yamaha.a-series',
+            profile: 'a-series',
             image: { revision: writes + 1 },
             object: {
                 id: name,

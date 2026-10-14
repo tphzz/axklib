@@ -143,8 +143,9 @@ Result<Json> run(const Json &request, const OperationContext &context, const San
     for (const auto &edit : reviewed->edits)
         if (const auto *put = std::get_if<PutFilesystemFile>(&edit))
             verification.reviewed_readers.push_back(put->contents);
-    auto updated = apply_filesystem_edits(images, journals, image_id, context.owner_id, revision, reviewed->partition,
-                                          reviewed->edits, context.cancellation, context.progress, verification);
+    auto updated = apply_filesystem_edits(images, journals, {image_id, reviewed->source_member_id}, context.owner_id,
+                                          revision, reviewed->partition, reviewed->edits, context.cancellation,
+                                          context.progress, verification);
     if (!updated)
         return std::unexpected(updated.error());
     return Json{{"imageId", image_id},

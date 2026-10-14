@@ -11,6 +11,7 @@
     let {
         controller,
         sessionId,
+        documentId,
         driver,
         imports,
         exports,
@@ -20,6 +21,7 @@
     }: {
         controller: FilesController;
         sessionId: number;
+        documentId: string | null;
         driver?: FilesystemMutationDriver;
         imports?: AxklibFilesystemImports;
         exports?: FilesystemExportActions;
@@ -45,7 +47,7 @@
             : null,
     );
     const imageImport = $derived(
-        imports?.floppy?.available
+        documentId && imports?.floppy?.available
             ? {
                   label: 'Import floppy...',
                   enabled: true,
@@ -53,7 +55,7 @@
                   open: (
                       entries?: import('../../../lib/filesystemImport').ClientFilesystemImportEntry[],
                       target?: FilesystemEntry,
-                  ) => openASeriesFloppy(imports!.floppy!, controller, entries, target),
+                  ) => openASeriesFloppy(imports!.floppy!, controller, documentId!, entries, target),
               }
             : workflow
               ? {
@@ -71,12 +73,12 @@
         view?.importRoot(root);
     }
     export function importCommands(root: FilesystemEntry) {
-        if (imports?.floppy?.available && !imports.floppy.request && !exportBlocked)
+        if (documentId && imports?.floppy?.available && !imports.floppy.request && !exportBlocked)
             return [
                 {
                     label: 'Import floppy...',
                     action: async () => {
-                        await openASeriesFloppy(imports!.floppy!, controller, undefined, root);
+                        await openASeriesFloppy(imports!.floppy!, controller, documentId!, undefined, root);
                     },
                 },
             ];

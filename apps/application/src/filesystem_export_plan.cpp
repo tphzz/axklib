@@ -36,7 +36,8 @@ std::string export_name(std::string value) {
 }
 } // namespace
 
-Result<FilesystemExportPlan> plan_filesystem_export(const MediaContainer &media, std::span<const std::string> entry_ids,
+Result<FilesystemExportPlan> plan_filesystem_export(const ImageFilesystemIndex &index,
+                                                    std::span<const std::string> entry_ids,
                                                     const CancellationToken &cancellation,
                                                     FilesystemExportLayout layout) {
     if (entry_ids.empty() || entry_ids.size() > 10000U)
@@ -45,9 +46,7 @@ Result<FilesystemExportPlan> plan_filesystem_export(const MediaContainer &media,
         return std::unexpected(Error{"invalid_request", "Filesystem entry identity exceeds the supported bounds"});
     if (auto checked = cancellation.check(); !checked)
         return std::unexpected(Error{"operation_cancelled", checked.error().message});
-    auto built = build_image_filesystem(media, {}, {}, {}, {});
-    if (!built)
-        return std::unexpected(built.error());
+    const auto *built = &index;
     if (!built->available)
         return std::unexpected(Error{"unsupported_operation", "This image has no filesystem view"});
     std::map<std::string, const ImageFilesystemEntry *> entries;

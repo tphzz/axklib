@@ -18,7 +18,7 @@
 
 namespace axk::app {
 Result<ImageSessionSummary>
-apply_filesystem_edits(ImageSessionManager &images, AlterationJournalStore &journals, std::string_view image_id,
+apply_filesystem_edits(ImageSessionManager &images, AlterationJournalStore &journals, const ImageSourceTarget &target,
                        std::string_view owner_id, std::uint64_t expected_revision, PartitionIndex partition,
                        std::span<const FilesystemEdit> edits, const CancellationToken &cancellation,
                        ProgressSink *progress, const FilesystemInputVerification &input_verification,
@@ -77,7 +77,7 @@ apply_filesystem_edits(ImageSessionManager &images, AlterationJournalStore &jour
         const auto admitted = enforce_volume_capacity_admission(*result, capacity_policy);
         return admitted ? Result<void>{} : std::unexpected{core_error(admitted.error())};
     };
-    return detail::apply_session_filesystem_mutation(images, journals, image_id, owner_id, expected_revision, partition,
+    return detail::apply_session_filesystem_mutation(images, journals, target, owner_id, expected_revision, partition,
                                                      prepare, verify_inputs, cancellation, progress, admit,
                                                      operation_id);
 }

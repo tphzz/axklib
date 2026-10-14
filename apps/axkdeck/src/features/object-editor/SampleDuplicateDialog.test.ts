@@ -13,6 +13,8 @@ const appStyles = readFileSync(resolve(process.cwd(), 'src/app.css'), 'utf8');
 
 function detail(): ObjectDetail {
     return {
+        formatId: 'yamaha.a-series',
+        profile: 'a-series',
         image: { revision: 1 },
         object: { id: 'source', key: 'source', name: 'Source' },
         editing: {

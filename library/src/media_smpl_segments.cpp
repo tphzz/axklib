@@ -101,6 +101,11 @@ Result<bool> assemble_smpl_segment_group(std::vector<MediaObject> &objects, std:
     assembled_object.decoded = std::move(decoded->object);
     assembled_object.raw_payload = std::move(assembled);
     assembled_object.decode_issue = std::move(decoded->issue);
+    for (const auto index : indices)
+        if (index != unique_indices.front())
+            assembled_object.source_files.insert(assembled_object.source_files.end(),
+                                                 objects[index].source_files.begin(),
+                                                 objects[index].source_files.end());
     return true;
 }
 } // namespace axk::detail

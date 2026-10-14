@@ -110,6 +110,7 @@ Result<detail::FloppyPendingObject> pending_object(const FatImage &member, Media
     if (entry == member.yamaha_catalog()->files.end())
         return std::unexpected{set_error(ErrorCode::container_invalid_geometry,
                                          std::format("floppy object '{}' is not cataloged", file->path))};
+    object.source_files = {{member.source_name(), file->path}};
     object.logical_path = entry->logical_path;
     object.scope_key = std::format("fat12-floppy-set:{}", member.disk_identity().set_name);
     object.raw_volume = member.disk_identity().set_name;

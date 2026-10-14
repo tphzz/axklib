@@ -5,6 +5,8 @@ import { FilesEditWorkflow } from './editWorkflow.svelte';
 
 const folder = filesystemEntry();
 const child = filesystemEntry({
+    sourceMemberId: 'source-1',
+    bindings: [],
     id: 'child',
     kind: 'file',
     name: 'A.BIN',

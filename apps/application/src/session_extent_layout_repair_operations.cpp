@@ -1,4 +1,5 @@
 #include "axklib/application/session_extent_layout_repair_operations.hpp"
+#include "axklib/application/image_session_contracts.hpp"
 
 #include <filesystem>
 #include <string>
@@ -143,7 +144,7 @@ axk::app::Result<void> axk::app::bind_session_extent_layout_repair_operations(Op
             const auto identity = parse_identity(input);
             if (!identity)
                 return std::unexpected(identity.error());
-            auto session = images.begin_read(identity->first, context.owner_id, identity->second);
+            auto session = images.begin_read(image_document_ref(input), context.owner_id, identity->second);
             if (!session)
                 return std::unexpected(session.error());
             if (session->source.kind != ImageSourceKind::file || session->media == nullptr)

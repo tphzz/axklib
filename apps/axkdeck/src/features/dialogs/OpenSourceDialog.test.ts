@@ -173,7 +173,7 @@ describe('Open dialog', () => {
             'SCSI2SD XML',
         ]);
         await fireEvent.click(await view.findByText('Yamaha images'));
-        await waitFor(() => expect(view.getByRole('button', { name: 'Open current folder' })).toBeTruthy());
+        await waitFor(() => expect(view.getByRole('button', { name: 'Add current folder' })).toBeTruthy());
         expect(service.list).not.toHaveBeenCalled();
         const device = view.getByRole('tab', { name: 'Device' });
         await waitFor(() => expect((device as HTMLButtonElement).disabled).toBe(false));
@@ -183,7 +183,7 @@ describe('Open dialog', () => {
         expect(view.queryByRole('option', { name: /Large card/ })).toBeNull();
         await fireEvent.keyDown(device, { key: 'ArrowLeft' });
         expect(view.getByRole('tab', { name: 'Image' }).getAttribute('aria-selected')).toBe('true');
-        expect(view.getByRole('button', { name: 'Open current folder' })).toBeTruthy();
+        expect(view.getByRole('button', { name: 'Add current folder' })).toBeTruthy();
     });
     it('keeps device tabs disabled with an accessible reason without a local backend', async () => {
         const view = render(OpenSourceHarness, { transport: storagePickerFixture() });

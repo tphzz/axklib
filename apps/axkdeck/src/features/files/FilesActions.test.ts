@@ -23,9 +23,20 @@ async function setup(
     importEnabled = false,
     imageImport?: FilesystemImageImporter,
 ) {
-    const root = filesystemEntry({ id: 'root', name: 'Disk', path: '', kind: 'root', parentId: null, ancestorIds: [] });
+    const root = filesystemEntry({
+        sourceMemberId: 'source-1',
+        bindings: [],
+        id: 'root',
+        name: 'Disk',
+        path: '',
+        kind: 'root',
+        parentId: null,
+        ancestorIds: [],
+    });
     const folder = filesystemEntry();
     const file = filesystemEntry({
+        sourceMemberId: 'source-1',
+        bindings: [],
         id: 'file',
         kind: 'file',
         name: 'File',

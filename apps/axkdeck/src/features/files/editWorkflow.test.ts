@@ -175,7 +175,14 @@ describe('Files edits', () => {
     it('confirms recursive deletion and removes overlapping descendants from the submitted batch', async () => {
         const { workflow, driver } = setup('delete');
         workflow.review!.entries.push(
-            filesystemEntry({ id: 'child', kind: 'file', parentId: 'folder', ancestorIds: ['root', 'folder'] }),
+            filesystemEntry({
+                sourceMemberId: 'source-1',
+                bindings: [],
+                id: 'child',
+                kind: 'file',
+                parentId: 'folder',
+                ancestorIds: ['root', 'folder'],
+            }),
         );
         await workflow.submit();
         expect(driver.execute).toHaveBeenCalledWith(

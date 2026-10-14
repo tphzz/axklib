@@ -169,7 +169,8 @@ Result<AxkObjectDirectory> AxkObjectDirectory::open(std::vector<AxkObjectDirecto
                                    bytes->size(),
                                    std::move(decoded->object),
                                    std::move(*bytes),
-                                   std::move(decoded->issue)});
+                                   std::move(decoded->issue),
+                                   {entry.source_file.value_or(MediaFileLocation{result.source_name_, entry.name})}});
     }
     if (result.objects_.empty()) {
         return std::unexpected{detail::media_error(

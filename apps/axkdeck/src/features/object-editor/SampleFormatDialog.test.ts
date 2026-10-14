@@ -17,6 +17,8 @@ async function setup(dirty = false, allowed = true, source: SampleStorageFormat 
             { key: 'coarse_tune', storedValue: 100, message: 'Outside the target range.' },
         ];
     const detail = {
+        formatId: 'yamaha.a-series',
+        profile: 'a-series',
         image: { revision: 1 },
         object: { id: 'sample', key: 'sample', name: 'Sample', type: bank ? 'SBAC' : 'SBNK' },
         formatConversion: conversion,

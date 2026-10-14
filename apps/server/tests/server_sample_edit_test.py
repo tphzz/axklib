@@ -70,18 +70,18 @@ def exercise(server: Path, fixture: Path, root: Path) -> None:
         opened = job(
             "/api/v1/images",
             {
-                "source": {
+                "sources": [{
                     "kind": "FILE",
                     "file": {"rootId": "workspace", "relativePath": "sample.hds"},
-                }
+                }]
             },
             "open",
         )
         image_id = opened["imageId"]
         base = f"/api/v1/images/{image_id}"
-        objects = get(f"{base}/objects?limit=100")["items"]
+        objects = get(f"{base}/documents/document-a-series-source-1/objects?limit=100")["items"]
         sample = next(item for item in objects if item["type"] == "SBNK")
-        detail_path = f"{base}/objects/{sample['id']}"
+        detail_path = f"{base}/documents/document-a-series-source-1/objects/{sample['id']}"
         detail = get(detail_path)
         assert detail["editing"]["editable"], detail
         for metadata in (
@@ -109,7 +109,7 @@ def exercise(server: Path, fixture: Path, root: Path) -> None:
 
         def alter(snapshot: Any, change: dict[str, Any]) -> Any:
             body = {
-                "imageId": image_id,
+                "documentId": "document-a-series-source-1", "imageId": image_id,
                 "expectedRevision": snapshot["image"]["revision"],
                 "manifest": {
                     "inline": {"schema_version": "1.0", "operations": [change]}
@@ -153,14 +153,14 @@ def exercise(server: Path, fixture: Path, root: Path) -> None:
         duplicate = operation(detail, "duplicate", "duplicate_sbnk", 42)
         duplicate["new_name"] = "Saved Copy"
         alter(detail, duplicate)
-        after = get(f"{base}/objects?limit=100")["items"]
+        after = get(f"{base}/documents/document-a-series-source-1/objects?limit=100")["items"]
         assert len(after) == len(objects) + 1
         copied = next(
             item
             for item in after
             if item["name"] == duplicate["new_name"] and item["type"] == "SBNK"
         )
-        copied_detail = get(f"{base}/objects/{copied['id']}")
+        copied_detail = get(f"{base}/documents/document-a-series-source-1/objects/{copied['id']}")
         assert copied_detail["editing"]["parameters"]["level"] == 42
         assert (
             copied_detail["editing"]["sources"] == source_detail["editing"]["sources"]
@@ -172,17 +172,17 @@ def exercise(server: Path, fixture: Path, root: Path) -> None:
         assert {item["id"] for item in after if item["type"] == "SMPL"} == {
             item["id"] for item in objects if item["type"] == "SMPL"
         }
-        copied_path = f"{base}/objects/{copied['id']}"
+        copied_path = f"{base}/documents/document-a-series-source-1/objects/{copied['id']}"
         competing = job(
             "/api/v1/images",
-            {"source": {"kind": "FILE", "file": {"rootId": "workspace", "relativePath": "sample.hds"}}},
+            {"sources": [{"kind": "FILE", "file": {"rootId": "workspace", "relativePath": "sample.hds"}}]},
             "open-competing-session",
         )
         rejected = operation(copied_detail, "blocked-conversion", "convert_sbnk_format", 42)
         del rejected["parameters"]
         rejected["target_format"] = "a3000_188"
         submitted = request(port, TOKEN, "POST", "/api/v1/image-session-alterations", {
-            "imageId": image_id,
+            "documentId": "document-a-series-source-1", "imageId": image_id,
             "expectedRevision": copied_detail["image"]["revision"],
             "manifest": {"inline": {"schema_version": "1.0", "operations": [rejected]}},
             "inputBindings": [],
@@ -208,7 +208,7 @@ def exercise(server: Path, fixture: Path, root: Path) -> None:
             assert copied_detail["editing"]["sources"] == source_detail["editing"]["sources"]
             stored = copied_detail["editing"]["sampleFormat"]
             assert stored["format"] == target.upper() and stored["parameterBytes"] == byte_count, stored
-            rows = get(f"{base}/objects?limit=100")["items"]
+            rows = get(f"{base}/documents/document-a-series-source-1/objects?limit=100")["items"]
             refreshed = next(item for item in rows if item["id"] == copied["id"])
             assert refreshed["sampleFormat"]["format"] == target.upper(), refreshed
         alter(copied_detail, operation(copied_detail, "save-converted", "update_sbnk_parameters", 43))
@@ -219,12 +219,12 @@ def exercise(server: Path, fixture: Path, root: Path) -> None:
                               "volume_name": current_sample["editing"]["volumeName"],
                               "sample_bank": {"name": "Format bank", "member_samples": [sample["name"]],
                                               "storage_format": "a4000_a5000_224"}})
-        bank = next(item for item in get(f"{base}/objects?limit=100")["items"] if item["name"] == "Format bank")
-        bank_path = f"{base}/objects/{bank['id']}"
+        bank = next(item for item in get(f"{base}/documents/document-a-series-source-1/objects?limit=100")["items"] if item["name"] == "Format bank")
+        bank_path = f"{base}/documents/document-a-series-source-1/objects/{bank['id']}"
         bank_detail = get(bank_path)
         assert bank_detail["editing"]["profile"] == "a-series/sample-bank"
         assert bank_detail["editing"]["bankOverrides"]["members"] == [{"name": sample["name"], "objectId": sample["id"]}]
-        members = {item["id"]: get(f"{base}/objects/{item['id']}")["formatConversion"]["payloadSha256"]
+        members = {item["id"]: get(f"{base}/documents/document-a-series-source-1/objects/{item['id']}")["formatConversion"]["payloadSha256"]
                    for item in after if item["type"] == "SBNK"}
         def relationship_values(snapshot: Any) -> Any:
             # Relationship IDs are revision-scoped; object identities and edge values must persist.
@@ -263,27 +263,27 @@ def exercise(server: Path, fixture: Path, root: Path) -> None:
                 assert next(unit for unit in editing["bankOverrides"]["units"] if unit["id"] == 33)["activeSelectors"] == ([33] if active else [])
                 assert relationship_values(bank_detail) == relationships
                 for member, digest in members.items():
-                    assert get(f"{base}/objects/{member}")["editing"]["payloadSha256"] == digest
+                    assert get(f"{base}/documents/document-a-series-source-1/objects/{member}")["editing"]["payloadSha256"] == digest
             for member, digest in members.items():
-                assert get(f"{base}/objects/{member}")["formatConversion"]["payloadSha256"] == digest
-            refreshed = next(item for item in get(f"{base}/objects?limit=100")["items"] if item["id"] == bank["id"])
+                assert get(f"{base}/documents/document-a-series-source-1/objects/{member}")["formatConversion"]["payloadSha256"] == digest
+            refreshed = next(item for item in get(f"{base}/documents/document-a-series-source-1/objects?limit=100")["items"] if item["id"] == bank["id"])
             assert refreshed["sampleFormat"]["format"] == target.upper()
         closed = request(port, TOKEN, "DELETE", base)
         assert closed.status == 200 and closed.json()["data"]["closed"] is True, (
             closed.content
         )
         # Seed only the disposable, closed image. Both stored bank formats must survive a real session reopen.
-        opened = job("/api/v1/images", {"source": {"kind": "FILE", "file": {
-            "rootId": "workspace", "relativePath": "sample.hds"}}}, "open-root-fixture")
+        opened = job("/api/v1/images", {"sources": [{"kind": "FILE", "file": {
+            "rootId": "workspace", "relativePath": "sample.hds"}}]}, "open-root-fixture")
         image_id = opened["imageId"]
         base = f"/api/v1/images/{image_id}"
         root_names = []
-        current_rows = get(f"{base}/objects?limit=100")["items"]
+        current_rows = get(f"{base}/documents/document-a-series-source-1/objects?limit=100")["items"]
         sample = next(row for row in current_rows if row["type"] == "SBNK" and row["name"] == sample["name"])
         for index, target in enumerate(("a3000_188", "a4000_a5000_224")):
             name = f"Root bank {index}"
             root_names.append(name)
-            snapshot = get(f"{base}/objects/{sample['id']}")
+            snapshot = get(f"{base}/documents/document-a-series-source-1/objects/{sample['id']}")
             alter(snapshot, {"id": f"insert-root-{index}", "type": "insert_sbac",
                              "partition_index": snapshot["editing"]["partitionIndex"],
                              "volume_name": snapshot["editing"]["volumeName"],
@@ -310,16 +310,16 @@ def exercise(server: Path, fixture: Path, root: Path) -> None:
             length = int.from_bytes(seeded[offset + length_field:offset + length_field + 4], "big") + 0x30
             original_banks[name] = bytes(seeded[offset:offset + length])
         image_path.write_bytes(seeded)
-        opened = job("/api/v1/images", {"source": {"kind": "FILE", "file": {
-            "rootId": "workspace", "relativePath": "sample.hds"}}}, "open-preserved-root")
+        opened = job("/api/v1/images", {"sources": [{"kind": "FILE", "file": {
+            "rootId": "workspace", "relativePath": "sample.hds"}}]}, "open-preserved-root")
         image_id = opened["imageId"]
         base = f"/api/v1/images/{image_id}"
-        root_rows = get(f"{base}/objects?limit=100")["items"]
-        unaffected = {(row["type"], row["name"]): get(f"{base}/objects/{row['id']}")["formatConversion"]["payloadSha256"]
+        root_rows = get(f"{base}/documents/document-a-series-source-1/objects?limit=100")["items"]
+        unaffected = {(row["type"], row["name"]): get(f"{base}/documents/document-a-series-source-1/objects/{row['id']}")["formatConversion"]["payloadSha256"]
                       for row in root_rows if row["type"] in ("SBNK", "SBAC") and row["name"] not in root_names}
         for index, name in enumerate(root_names):
             row = next(item for item in root_rows if item["name"] == name)
-            root_path = f"{base}/objects/{row['id']}"
+            root_path = f"{base}/documents/document-a-series-source-1/objects/{row['id']}"
             snapshot = get(root_path)
             edges = relationship_values(snapshot)
             editing = snapshot["editing"]
@@ -350,7 +350,7 @@ def exercise(server: Path, fixture: Path, root: Path) -> None:
                 identity = f"root-reject-{index}-{rejection}"
                 invalid = {**change, **forbidden, "id": identity,
                            "expected_payload_sha256": editing["payloadSha256"]}
-                body = {"imageId": image_id, "expectedRevision": snapshot["image"]["revision"],
+                body = {"documentId": "document-a-series-source-1", "imageId": image_id, "expectedRevision": snapshot["image"]["revision"],
                         "manifest": {"inline": {"schema_version": "1.0", "operations": [invalid]}}, "inputBindings": []}
                 response = request(port, TOKEN, "POST", "/api/v1/image-session-alterations", body,
                                    {"Idempotency-Key": identity})
@@ -361,11 +361,11 @@ def exercise(server: Path, fixture: Path, root: Path) -> None:
                 assert get(base)["revision"] == snapshot["image"]["revision"]
             assert not snapshot["formatConversion"]["formatConversions"][0]["allowed"]
         assert request(port, TOKEN, "DELETE", base).status == 200
-        reopened = job("/api/v1/images", {"source": {"kind": "FILE", "file": {
-            "rootId": "workspace", "relativePath": "sample.hds"}}}, "reopen-preserved-root")
+        reopened = job("/api/v1/images", {"sources": [{"kind": "FILE", "file": {
+            "rootId": "workspace", "relativePath": "sample.hds"}}]}, "reopen-preserved-root")
         base = f"/api/v1/images/{reopened['imageId']}"
-        for row in get(f"{base}/objects?limit=100")["items"]:
-            snapshot = get(f"{base}/objects/{row['id']}")
+        for row in get(f"{base}/documents/document-a-series-source-1/objects?limit=100")["items"]:
+            snapshot = get(f"{base}/documents/document-a-series-source-1/objects/{row['id']}")
             if row["name"] in root_names:
                 expected = bytearray(original_banks[row["name"]])
                 expected[0xE6] = 82

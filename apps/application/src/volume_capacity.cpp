@@ -1,4 +1,5 @@
 #include "axklib/application/volume_capacity.hpp"
+#include "axklib/application/image_session_contracts.hpp"
 
 #include <cstdint>
 #include <optional>
@@ -102,7 +103,8 @@ Result<void> bind_volume_capacity_operations(OperationRegistry &registry, ImageS
             const auto image = input.at("imageId").get<std::string>();
             const auto revision = input.at("expectedRevision").get<std::uint64_t>();
             const auto scope = input.at("contentScopeId").get<std::string>();
-            const auto result = images.volume_capacity(image, context.owner_id, revision, scope, context.cancellation);
+            const auto result = images.volume_capacity(image_document_ref(input), context.owner_id, revision, scope,
+                                                       context.cancellation);
             if (!result)
                 return std::unexpected{result.error()};
             return nlohmann::json{{"imageId", image},

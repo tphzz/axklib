@@ -7,12 +7,12 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
-#include "a_series_sample_editor.hpp"
 #include "axklib/bytes.hpp"
 #include "axklib/catalog.hpp"
 #include "axklib/object.hpp"
 #include "axklib/writer.hpp"
 #include "axklib/writer_internal.hpp"
+#include "formats/a_series/sample_editor.hpp"
 
 namespace {
 

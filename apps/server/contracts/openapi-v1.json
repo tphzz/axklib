@@ -125,6 +125,90 @@
         ],
         "type": "string"
       },
+      "ASeriesObjectDetail": {
+        "additionalProperties": false,
+        "properties": {
+          "editing": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ASeriesSampleEditor"
+              },
+              {
+                "$ref": "#/components/schemas/ASeriesProgramEditor"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "formatConversion": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ObjectFormatConversion"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "formatId": {
+            "const": "yamaha.a-series"
+          },
+          "image": {
+            "additionalProperties": false,
+            "properties": {
+              "documentId": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "format": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "imageId": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "revision": {
+                "minimum": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "imageId",
+              "revision",
+              "format",
+              "documentId"
+            ],
+            "type": "object"
+          },
+          "object": {
+            "$ref": "#/components/schemas/ImageObjectDetailObject"
+          },
+          "profile": {
+            "const": "a-series"
+          },
+          "relationships": {
+            "items": {
+              "$ref": "#/components/schemas/ImageObjectDetailRelationship"
+            },
+            "type": "array"
+          },
+          "schemaVersion": {
+            "const": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "image",
+          "object",
+          "relationships",
+          "formatId",
+          "profile"
+        ],
+        "type": "object"
+      },
       "ASeriesProgramEditor": {
         "additionalProperties": false,
         "properties": {
@@ -1613,6 +1697,10 @@
       "AuditionPrepareRequest": {
         "additionalProperties": false,
         "properties": {
+          "documentId": {
+            "minLength": 1,
+            "type": "string"
+          },
           "imageId": {
             "minLength": 1,
             "type": "string"
@@ -1638,7 +1726,8 @@
         },
         "required": [
           "imageId",
-          "objectIds"
+          "objectIds",
+          "documentId"
         ],
         "type": "object"
       },
@@ -4850,6 +4939,262 @@
         ],
         "type": "object"
       },
+      "ImageDocument": {
+        "additionalProperties": false,
+        "properties": {
+          "availableOperations": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "companionSources": {
+            "items": {
+              "$ref": "#/components/schemas/ImageSourceRef"
+            },
+            "maxItems": 31,
+            "type": "array",
+            "uniqueItems": true
+          },
+          "completeness": {
+            "enum": [
+              "COMPLETE",
+              "INCOMPLETE",
+              "INVALID"
+            ],
+            "type": "string"
+          },
+          "floppySet": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ImageFloppySet"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "format": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "formatId": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "objectCount": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "profile": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "relationshipCount": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "rootCount": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "sourceMemberIds": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "validation": {
+            "additionalProperties": false,
+            "properties": {
+              "errorCount": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "infoCount": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "valid": {
+                "type": "boolean"
+              },
+              "warningCount": {
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "valid",
+              "infoCount",
+              "warningCount",
+              "errorCount"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "id",
+          "formatId",
+          "profile",
+          "name",
+          "completeness",
+          "sourceMemberIds",
+          "companionSources",
+          "floppySet",
+          "format",
+          "availableOperations",
+          "rootCount",
+          "objectCount",
+          "relationshipCount",
+          "validation"
+        ],
+        "type": "object"
+      },
+      "ImageDocumentDiscovery": {
+        "additionalProperties": false,
+        "properties": {
+          "candidates": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "diagnostics": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "formatId": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "sourceMemberIds": {
+                  "items": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "state": {
+                  "enum": [
+                    "SUPPORTED",
+                    "INCOMPLETE",
+                    "LIMIT_EXCEEDED",
+                    "INVALID"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "formatId",
+                "state",
+                "sourceMemberIds",
+                "diagnostics"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "selectionRequired": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "selectionRequired",
+          "candidates"
+        ],
+        "type": "object"
+      },
+      "ImageDocumentPage": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ImageDocument"
+            },
+            "type": "array"
+          },
+          "nextCursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "totalCount": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "totalCount",
+          "nextCursor"
+        ],
+        "type": "object"
+      },
+      "ImageDocumentPageResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ImageDocumentPage"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ResponseMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "type": "object"
+      },
+      "ImageDocumentResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ImageDocument"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/ResponseMeta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "type": "object"
+      },
+      "ImageDocumentSelectionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "expectedRevision": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "selectedFormats": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "maxItems": 32,
+            "type": "array",
+            "uniqueItems": true
+          }
+        },
+        "required": [
+          "expectedRevision",
+          "selectedFormats"
+        ],
+        "type": "object"
+      },
       "ImageFilesystemAttribute": {
         "additionalProperties": false,
         "properties": {
@@ -4877,6 +5222,33 @@
           "value",
           "description",
           "summary"
+        ],
+        "type": "object"
+      },
+      "ImageFilesystemBinding": {
+        "additionalProperties": false,
+        "properties": {
+          "contentScopeId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "documentId": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "objectId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "documentId",
+          "objectId",
+          "contentScopeId"
         ],
         "type": "object"
       },
@@ -5087,15 +5459,15 @@
             },
             "type": "array"
           },
+          "bindings": {
+            "items": {
+              "$ref": "#/components/schemas/ImageFilesystemBinding"
+            },
+            "type": "array"
+          },
           "childCount": {
             "minimum": 0,
             "type": "integer"
-          },
-          "contentScopeId": {
-            "type": [
-              "string",
-              "null"
-            ]
           },
           "filesystemMetadata": {
             "type": "boolean"
@@ -5121,12 +5493,6 @@
           "name": {
             "type": "string"
           },
-          "objectId": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
           "parentId": {
             "type": [
               "string",
@@ -5149,6 +5515,10 @@
               "null"
             ]
           },
+          "sourceMemberId": {
+            "minLength": 1,
+            "type": "string"
+          },
           "storage": {
             "type": "string"
           }
@@ -5163,14 +5533,14 @@
           "kind",
           "sizeBytes",
           "childCount",
-          "objectId",
-          "contentScopeId",
           "interpretation",
           "storage",
           "issue",
           "filesystemMetadata",
           "rawAttributes",
-          "attributes"
+          "attributes",
+          "sourceMemberId",
+          "bindings"
         ],
         "type": "object"
       },
@@ -5662,6 +6032,10 @@
           "destination": {
             "$ref": "#/components/schemas/ImageSessionPackageImportDestination"
           },
+          "documentId": {
+            "minLength": 1,
+            "type": "string"
+          },
           "expectedRevision": {
             "minimum": 1,
             "type": "integer"
@@ -5712,7 +6086,8 @@
           "inspectionToken",
           "selectedObjectKeys",
           "acknowledgeSourceIssues",
-          "destination"
+          "destination",
+          "documentId"
         ],
         "type": "object"
       },
@@ -6136,6 +6511,10 @@
             "type": "array",
             "uniqueItems": true
           },
+          "documentId": {
+            "minLength": 1,
+            "type": "string"
+          },
           "expectedRevision": {
             "minimum": 1,
             "type": "integer"
@@ -6169,7 +6548,8 @@
           "expectedRevision",
           "targetObjectIds",
           "referrerObjectIds",
-          "cleanupObjectIds"
+          "cleanupObjectIds",
+          "documentId"
         ],
         "type": "object"
       },
@@ -6255,75 +6635,14 @@
         "type": "object"
       },
       "ImageObjectDetail": {
-        "additionalProperties": false,
-        "properties": {
-          "editing": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/ASeriesSampleEditor"
-              },
-              {
-                "$ref": "#/components/schemas/ASeriesProgramEditor"
-              },
-              {
-                "type": "null"
-              }
-            ]
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/ASeriesObjectDetail"
           },
-          "formatConversion": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/ObjectFormatConversion"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "image": {
-            "additionalProperties": false,
-            "properties": {
-              "format": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "imageId": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "revision": {
-                "minimum": 1,
-                "type": "integer"
-              }
-            },
-            "required": [
-              "imageId",
-              "revision",
-              "format"
-            ],
-            "type": "object"
-          },
-          "object": {
-            "$ref": "#/components/schemas/ImageObjectDetailObject"
-          },
-          "relationships": {
-            "items": {
-              "$ref": "#/components/schemas/ImageObjectDetailRelationship"
-            },
-            "type": "array"
-          },
-          "schemaVersion": {
-            "const": 1,
-            "type": "integer"
+          {
+            "$ref": "#/components/schemas/Tx16wObjectDetail"
           }
-        },
-        "required": [
-          "schemaVersion",
-          "image",
-          "object",
-          "relationships"
-        ],
-        "type": "object"
+        ]
       },
       "ImageObjectDetailDescriptor": {
         "additionalProperties": false,
@@ -6933,12 +7252,26 @@
       "ImageOpenRequest": {
         "additionalProperties": false,
         "properties": {
-          "source": {
-            "$ref": "#/components/schemas/ImageSourceRef"
+          "selectedFormats": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array",
+            "uniqueItems": true
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/ImageSourceRef"
+            },
+            "maxItems": 32,
+            "minItems": 1,
+            "type": "array",
+            "uniqueItems": true
           }
         },
         "required": [
-          "source"
+          "sources"
         ],
         "type": "object"
       },
@@ -7056,6 +7389,10 @@
       "ImagePlacementInspectionRequest": {
         "additionalProperties": false,
         "properties": {
+          "documentId": {
+            "minLength": 1,
+            "type": "string"
+          },
           "expectedRevision": {
             "minimum": 1,
             "type": "integer"
@@ -7077,7 +7414,8 @@
         "required": [
           "imageId",
           "expectedRevision",
-          "scope"
+          "scope",
+          "documentId"
         ],
         "type": "object"
       },
@@ -7128,6 +7466,10 @@
           "capacityPolicy": {
             "$ref": "#/components/schemas/VolumeCapacityPolicy"
           },
+          "documentId": {
+            "minLength": 1,
+            "type": "string"
+          },
           "expectedRevision": {
             "minimum": 1,
             "type": "integer"
@@ -7149,7 +7491,8 @@
         "required": [
           "imageId",
           "expectedRevision",
-          "scope"
+          "scope",
+          "documentId"
         ],
         "type": "object"
       },
@@ -7412,6 +7755,10 @@
             "minLength": 1,
             "type": "string"
           },
+          "documentId": {
+            "minLength": 1,
+            "type": "string"
+          },
           "expectedRevision": {
             "minimum": 1,
             "type": "integer"
@@ -7424,7 +7771,8 @@
         "required": [
           "imageId",
           "expectedRevision",
-          "contentScopeId"
+          "contentScopeId",
+          "documentId"
         ],
         "type": "object"
       },
@@ -7443,6 +7791,10 @@
             "minLength": 1,
             "type": "string"
           },
+          "documentId": {
+            "minLength": 1,
+            "type": "string"
+          },
           "expectedRevision": {
             "minimum": 1,
             "type": "integer"
@@ -7456,7 +7808,8 @@
           "imageId",
           "expectedRevision",
           "contentScopeId",
-          "assignments"
+          "assignments",
+          "documentId"
         ],
         "type": "object"
       },
@@ -7649,6 +8002,10 @@
             "minLength": 1,
             "type": "string"
           },
+          "documentId": {
+            "minLength": 1,
+            "type": "string"
+          },
           "expectedRevision": {
             "minimum": 1,
             "type": "integer"
@@ -7661,7 +8018,8 @@
         "required": [
           "imageId",
           "expectedRevision",
-          "contentScopeId"
+          "contentScopeId",
+          "documentId"
         ],
         "type": "object"
       },
@@ -7702,6 +8060,10 @@
             "minLength": 1,
             "type": "string"
           },
+          "documentId": {
+            "minLength": 1,
+            "type": "string"
+          },
           "expectedRevision": {
             "minimum": 1,
             "type": "integer"
@@ -7723,7 +8085,8 @@
           "imageId",
           "expectedRevision",
           "contentScopeId",
-          "programs"
+          "programs",
+          "documentId"
         ],
         "type": "object"
       },
@@ -7862,9 +8225,17 @@
               "KNOWN",
               "LIKELY",
               "TENTATIVE",
-              "UNKNOWN"
+              "UNKNOWN",
+              "RESOLVED",
+              "MISSING",
+              "AMBIGUOUS"
             ],
-            "type": "string"
+            "type": "string",
+            "x-axklib-application-enum": {
+              "AMBIGUOUS": "ambiguous",
+              "MISSING": "missing",
+              "RESOLVED": "resolved"
+            }
           },
           "receiveChannelDisplay": {
             "type": "string"
@@ -7947,98 +8318,36 @@
       "ImageSession": {
         "additionalProperties": false,
         "properties": {
-          "availableOperations": {
+          "discovery": {
+            "$ref": "#/components/schemas/ImageDocumentDiscovery"
+          },
+          "documents": {
             "items": {
-              "minLength": 1,
-              "type": "string"
+              "$ref": "#/components/schemas/ImageDocument"
             },
             "type": "array"
-          },
-          "companionSources": {
-            "items": {
-              "$ref": "#/components/schemas/ImageSourceRef"
-            },
-            "maxItems": 31,
-            "type": "array",
-            "uniqueItems": true
-          },
-          "floppySet": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/ImageFloppySet"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "format": {
-            "minLength": 1,
-            "type": "string"
           },
           "imageId": {
             "minLength": 1,
             "type": "string"
           },
-          "objectCount": {
-            "minimum": 0,
-            "type": "integer"
-          },
-          "relationshipCount": {
-            "minimum": 0,
-            "type": "integer"
-          },
           "revision": {
             "minimum": 1,
             "type": "integer"
           },
-          "rootCount": {
-            "minimum": 0,
-            "type": "integer"
-          },
-          "source": {
-            "$ref": "#/components/schemas/ImageSourceRef"
-          },
-          "validation": {
-            "additionalProperties": false,
-            "properties": {
-              "errorCount": {
-                "minimum": 0,
-                "type": "integer"
-              },
-              "infoCount": {
-                "minimum": 0,
-                "type": "integer"
-              },
-              "valid": {
-                "type": "boolean"
-              },
-              "warningCount": {
-                "minimum": 0,
-                "type": "integer"
-              }
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/ImageSourceMember"
             },
-            "required": [
-              "valid",
-              "infoCount",
-              "warningCount",
-              "errorCount"
-            ],
-            "type": "object"
+            "type": "array"
           }
         },
         "required": [
           "imageId",
           "revision",
-          "source",
-          "companionSources",
-          "floppySet",
-          "format",
-          "availableOperations",
-          "rootCount",
-          "objectCount",
-          "relationshipCount",
-          "validation"
+          "sources",
+          "documents",
+          "discovery"
         ],
         "type": "object"
       },
@@ -8070,6 +8379,10 @@
           "capacityPolicy": {
             "$ref": "#/components/schemas/VolumeCapacityPolicy"
           },
+          "documentId": {
+            "minLength": 1,
+            "type": "string"
+          },
           "expectedRevision": {
             "minimum": 1,
             "type": "integer"
@@ -8092,7 +8405,8 @@
         "required": [
           "imageId",
           "expectedRevision",
-          "manifest"
+          "manifest",
+          "documentId"
         ],
         "type": "object"
       },
@@ -8262,6 +8576,10 @@
       "ImageSessionAudioExportInspectionRequest": {
         "additionalProperties": false,
         "properties": {
+          "documentId": {
+            "minLength": 1,
+            "type": "string"
+          },
           "expectedRevision": {
             "minimum": 1,
             "type": "integer"
@@ -8287,7 +8605,8 @@
           "imageId",
           "expectedRevision",
           "selectionMode",
-          "roots"
+          "roots",
+          "documentId"
         ],
         "type": "object"
       },
@@ -8296,6 +8615,10 @@
         "properties": {
           "destination": {
             "$ref": "#/components/schemas/ImageSessionAudioExportDestination"
+          },
+          "documentId": {
+            "minLength": 1,
+            "type": "string"
           },
           "expectedRevision": {
             "minimum": 1,
@@ -8330,7 +8653,8 @@
           "selectionMode",
           "roots",
           "format",
-          "destination"
+          "destination",
+          "documentId"
         ],
         "type": "object"
       },
@@ -8450,6 +8774,10 @@
           "destination": {
             "$ref": "#/components/schemas/ImageSessionMediaConversionDestination"
           },
+          "documentId": {
+            "minLength": 1,
+            "type": "string"
+          },
           "expectedRevision": {
             "minimum": 1,
             "type": "integer"
@@ -8462,7 +8790,8 @@
         "required": [
           "imageId",
           "expectedRevision",
-          "destination"
+          "destination",
+          "documentId"
         ],
         "type": "object"
       },
@@ -8682,79 +9011,9 @@
           {
             "additionalProperties": false,
             "properties": {
-              "expectedRevision": {
-                "minimum": 1,
-                "type": "integer"
-              },
-              "format": {
-                "const": "ISO9660"
-              },
-              "imageId": {
+              "documentId": {
                 "minLength": 1,
                 "type": "string"
-              },
-              "isoVolumeId": {
-                "maxLength": 32,
-                "minLength": 1,
-                "type": "string"
-              },
-              "partitionIndex": {
-                "maximum": 255,
-                "minimum": 0,
-                "type": "integer"
-              }
-            },
-            "required": [
-              "imageId",
-              "expectedRevision",
-              "format",
-              "partitionIndex"
-            ],
-            "type": "object"
-          },
-          {
-            "additionalProperties": false,
-            "properties": {
-              "expectedRevision": {
-                "minimum": 1,
-                "type": "integer"
-              },
-              "format": {
-                "const": "FAT12_FLOPPY"
-              },
-              "imageId": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "partitionIndex": {
-                "maximum": 255,
-                "minimum": 0,
-                "type": "integer"
-              },
-              "volumeDirectoryId": {
-                "maximum": 4294967295,
-                "minimum": 0,
-                "type": "integer"
-              }
-            },
-            "required": [
-              "imageId",
-              "expectedRevision",
-              "format",
-              "partitionIndex",
-              "volumeDirectoryId"
-            ],
-            "type": "object"
-          }
-        ]
-      },
-      "ImageSessionMediaConversionRequest": {
-        "oneOf": [
-          {
-            "additionalProperties": false,
-            "properties": {
-              "destination": {
-                "$ref": "#/components/schemas/ImageSessionMediaConversionDestination"
               },
               "expectedRevision": {
                 "minimum": 1,
@@ -8783,15 +9042,16 @@
               "expectedRevision",
               "format",
               "partitionIndex",
-              "destination"
+              "documentId"
             ],
             "type": "object"
           },
           {
             "additionalProperties": false,
             "properties": {
-              "destination": {
-                "$ref": "#/components/schemas/ImageSessionMediaConversionDestination"
+              "documentId": {
+                "minLength": 1,
+                "type": "string"
               },
               "expectedRevision": {
                 "minimum": 1,
@@ -8821,7 +9081,96 @@
               "format",
               "partitionIndex",
               "volumeDirectoryId",
-              "destination"
+              "documentId"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "ImageSessionMediaConversionRequest": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "destination": {
+                "$ref": "#/components/schemas/ImageSessionMediaConversionDestination"
+              },
+              "documentId": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "expectedRevision": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "format": {
+                "const": "ISO9660"
+              },
+              "imageId": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "isoVolumeId": {
+                "maxLength": 32,
+                "minLength": 1,
+                "type": "string"
+              },
+              "partitionIndex": {
+                "maximum": 255,
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "imageId",
+              "expectedRevision",
+              "format",
+              "partitionIndex",
+              "destination",
+              "documentId"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "destination": {
+                "$ref": "#/components/schemas/ImageSessionMediaConversionDestination"
+              },
+              "documentId": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "expectedRevision": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "format": {
+                "const": "FAT12_FLOPPY"
+              },
+              "imageId": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "partitionIndex": {
+                "maximum": 255,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "volumeDirectoryId": {
+                "maximum": 4294967295,
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "imageId",
+              "expectedRevision",
+              "format",
+              "partitionIndex",
+              "volumeDirectoryId",
+              "destination",
+              "documentId"
             ],
             "type": "object"
           }
@@ -9013,6 +9362,10 @@
           "destination": {
             "$ref": "#/components/schemas/ImageSessionPackageExportDestination"
           },
+          "documentId": {
+            "minLength": 1,
+            "type": "string"
+          },
           "expectedRevision": {
             "minimum": 1,
             "type": "integer"
@@ -9035,7 +9388,8 @@
           "imageId",
           "expectedRevision",
           "roots",
-          "destination"
+          "destination",
+          "documentId"
         ],
         "type": "object"
       },
@@ -9410,6 +9764,10 @@
           "destination": {
             "$ref": "#/components/schemas/ImageSessionPackageImportDestination"
           },
+          "documentId": {
+            "minLength": 1,
+            "type": "string"
+          },
           "expectedRevision": {
             "minimum": 1,
             "type": "integer"
@@ -9457,7 +9815,8 @@
           "imageId",
           "expectedRevision",
           "packages",
-          "destination"
+          "destination",
+          "documentId"
         ],
         "type": "object"
       },
@@ -9478,6 +9837,10 @@
           },
           "applied": {
             "type": "boolean"
+          },
+          "documentId": {
+            "minLength": 1,
+            "type": "string"
           },
           "imageId": {
             "minLength": 1,
@@ -9510,6 +9873,10 @@
           "schemaVersion": {
             "const": "1.0"
           },
+          "sourceMemberId": {
+            "minLength": 1,
+            "type": "string"
+          },
           "targetKind": {
             "enum": [
               "SFS",
@@ -9539,7 +9906,9 @@
           "imageId",
           "revision",
           "objectCount",
-          "applied"
+          "applied",
+          "documentId",
+          "sourceMemberId"
         ],
         "type": "object"
       },
@@ -9660,6 +10029,10 @@
           "destination": {
             "$ref": "#/components/schemas/ImageSessionAudioExportDestination"
           },
+          "documentId": {
+            "minLength": 1,
+            "type": "string"
+          },
           "expectedRevision": {
             "minimum": 1,
             "type": "integer"
@@ -9683,7 +10056,8 @@
           "imageId",
           "expectedRevision",
           "objectIds",
-          "destination"
+          "destination",
+          "documentId"
         ],
         "type": "object"
       },
@@ -9834,6 +10208,10 @@
       "ImageSessionTx16wImportInspectionRequest": {
         "additionalProperties": false,
         "properties": {
+          "documentId": {
+            "minLength": 1,
+            "type": "string"
+          },
           "expectedRevision": {
             "minimum": 1,
             "type": "integer"
@@ -9865,7 +10243,8 @@
           "expectedRevision",
           "sources",
           "importMode",
-          "target"
+          "target",
+          "documentId"
         ],
         "type": "object"
       },
@@ -10286,31 +10665,9 @@
       "ImageSessionVolumeFloppyExportInspectionRequest": {
         "additionalProperties": false,
         "properties": {
-          "expectedRevision": {
-            "minimum": 1,
-            "type": "integer"
-          },
-          "imageId": {
+          "documentId": {
             "minLength": 1,
             "type": "string"
-          },
-          "scopeId": {
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "required": [
-          "imageId",
-          "expectedRevision",
-          "scopeId"
-        ],
-        "type": "object"
-      },
-      "ImageSessionVolumeFloppyExportRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "destination": {
-            "$ref": "#/components/schemas/ImageSessionVolumeFloppyExportDestination"
           },
           "expectedRevision": {
             "minimum": 1,
@@ -10329,7 +10686,39 @@
           "imageId",
           "expectedRevision",
           "scopeId",
-          "destination"
+          "documentId"
+        ],
+        "type": "object"
+      },
+      "ImageSessionVolumeFloppyExportRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "destination": {
+            "$ref": "#/components/schemas/ImageSessionVolumeFloppyExportDestination"
+          },
+          "documentId": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "expectedRevision": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "imageId": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "scopeId": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "imageId",
+          "expectedRevision",
+          "scopeId",
+          "destination",
+          "documentId"
         ],
         "type": "object"
       },
@@ -10690,31 +11079,9 @@
       "ImageSessionVolumePackageExportInspectionRequest": {
         "additionalProperties": false,
         "properties": {
-          "expectedRevision": {
-            "minimum": 1,
-            "type": "integer"
-          },
-          "imageId": {
+          "documentId": {
             "minLength": 1,
             "type": "string"
-          },
-          "scopeId": {
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "required": [
-          "imageId",
-          "expectedRevision",
-          "scopeId"
-        ],
-        "type": "object"
-      },
-      "ImageSessionVolumePackageExportRequest": {
-        "additionalProperties": false,
-        "properties": {
-          "destination": {
-            "$ref": "#/components/schemas/ImageSessionVolumePackageExportDestination"
           },
           "expectedRevision": {
             "minimum": 1,
@@ -10733,7 +11100,39 @@
           "imageId",
           "expectedRevision",
           "scopeId",
-          "destination"
+          "documentId"
+        ],
+        "type": "object"
+      },
+      "ImageSessionVolumePackageExportRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "destination": {
+            "$ref": "#/components/schemas/ImageSessionVolumePackageExportDestination"
+          },
+          "documentId": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "expectedRevision": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "imageId": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "scopeId": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "imageId",
+          "expectedRevision",
+          "scopeId",
+          "destination",
+          "documentId"
         ],
         "type": "object"
       },
@@ -10915,6 +11314,74 @@
         ],
         "type": "object"
       },
+      "ImageSourceMember": {
+        "additionalProperties": false,
+        "properties": {
+          "diagnostics": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "code": {
+                  "type": "string"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "path": {
+                  "type": "string"
+                },
+                "severity": {
+                  "enum": [
+                    "INFO",
+                    "WARNING",
+                    "ERROR"
+                  ],
+                  "type": "string",
+                  "x-axklib-application-enum": {
+                    "ERROR": "error",
+                    "INFO": "info",
+                    "WARNING": "warning"
+                  }
+                }
+              },
+              "required": [
+                "code",
+                "severity",
+                "message",
+                "path"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "filesystemRootIds": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "format": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/components/schemas/ImageSourceRef"
+          }
+        },
+        "required": [
+          "id",
+          "source",
+          "format",
+          "filesystemRootIds",
+          "diagnostics"
+        ],
+        "type": "object"
+      },
       "ImageSourceRef": {
         "oneOf": [
           {
@@ -10940,7 +11407,7 @@
                 "$ref": "#/components/schemas/DirectoryRef"
               },
               "kind": {
-                "const": "AXK_OBJECT_DIRECTORY"
+                "const": "DIRECTORY"
               }
             },
             "required": [
@@ -11087,6 +11554,10 @@
             "minLength": 1,
             "type": "string"
           },
+          "documentId": {
+            "minLength": 1,
+            "type": "string"
+          },
           "expectedRevision": {
             "minimum": 1,
             "type": "integer"
@@ -11099,7 +11570,8 @@
         "required": [
           "imageId",
           "expectedRevision",
-          "contentScopeId"
+          "contentScopeId",
+          "documentId"
         ],
         "type": "object"
       },
@@ -11151,6 +11623,10 @@
       "ImageVolumeDeletionInspectionRequest": {
         "additionalProperties": false,
         "properties": {
+          "documentId": {
+            "minLength": 1,
+            "type": "string"
+          },
           "expectedRevision": {
             "minimum": 1,
             "type": "integer"
@@ -11172,7 +11648,8 @@
         "required": [
           "imageId",
           "expectedRevision",
-          "targets"
+          "targets",
+          "documentId"
         ],
         "type": "object"
       },
@@ -11292,6 +11769,10 @@
             "minLength": 1,
             "type": "string"
           },
+          "documentId": {
+            "minLength": 1,
+            "type": "string"
+          },
           "expectedRevision": {
             "minimum": 1,
             "type": "integer"
@@ -11304,7 +11785,8 @@
         "required": [
           "imageId",
           "expectedRevision",
-          "contentScopeId"
+          "contentScopeId",
+          "documentId"
         ],
         "type": "object"
       },
@@ -11992,7 +12474,7 @@
             "properties": {
               "mediaSourceKind": {
                 "enum": [
-                  "AXK_OBJECT_DIRECTORY",
+                  "DIRECTORY",
                   null
                 ]
               }
@@ -12278,6 +12760,39 @@
         },
         "required": [
           "source"
+        ],
+        "type": "object"
+      },
+      "NativeSourceLocation": {
+        "additionalProperties": false,
+        "properties": {
+          "entryId": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "length": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "memberId": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "offset": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "rootId": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "memberId",
+          "rootId",
+          "entryId",
+          "offset",
+          "length"
         ],
         "type": "object"
       },
@@ -15714,6 +16229,289 @@
         ],
         "type": "object"
       },
+      "Tx16wObjectDetail": {
+        "additionalProperties": false,
+        "properties": {
+          "details": {
+            "$ref": "#/components/schemas/Tx16wObjectDetails"
+          },
+          "documentId": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "formatId": {
+            "const": "yamaha.tx16w"
+          },
+          "imageId": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "locations": {
+            "items": {
+              "$ref": "#/components/schemas/NativeSourceLocation"
+            },
+            "type": "array"
+          },
+          "name": {
+            "type": "string"
+          },
+          "objectId": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "profile": {
+            "const": "yamaha-native"
+          },
+          "revision": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "type": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "imageId",
+          "documentId",
+          "revision",
+          "formatId",
+          "profile",
+          "objectId",
+          "type",
+          "name",
+          "details",
+          "locations"
+        ],
+        "type": "object"
+      },
+      "Tx16wObjectDetails": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "attackFrames": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "looped": {
+                "type": "boolean"
+              },
+              "repeatFrames": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "sampleRate": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "type": {
+                "const": "wave"
+              }
+            },
+            "required": [
+              "type",
+              "sampleRate",
+              "attackFrames",
+              "repeatFrames",
+              "looped"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "regions": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "fade": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "highKey": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "lowKey": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "timbreSlot": {
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "timbreSlot",
+                    "lowKey",
+                    "highKey",
+                    "fade"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "slot": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "type": {
+                "const": "voice"
+              }
+            },
+            "required": [
+              "type",
+              "slot",
+              "regions"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "rootKey": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "slot": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "type": {
+                "const": "timbre"
+              },
+              "waveSlot": {
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "type",
+              "slot",
+              "waveSlot",
+              "rootKey"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "slot": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "type": {
+                "const": "performance"
+              },
+              "voices": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "alternativeGroup": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "audioOutput": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "detune": {
+                      "type": "number"
+                    },
+                    "receiveChannel": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "transpose": {
+                      "type": "number"
+                    },
+                    "voiceSlot": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "volume": {
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "receiveChannel",
+                    "voiceSlot",
+                    "alternativeGroup",
+                    "audioOutput",
+                    "volume",
+                    "detune",
+                    "transpose"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "type",
+              "slot",
+              "voices"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "type": {
+                "const": "setup"
+              },
+              "waves": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "slot": {
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "slot",
+                    "name"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "writeProtected": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "type",
+              "writeProtected",
+              "waves"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "type": {
+                "const": "opaque"
+              }
+            },
+            "required": [
+              "type",
+              "kind"
+            ],
+            "type": "object"
+          }
+        ]
+      },
       "Upload": {
         "additionalProperties": false,
         "properties": {
@@ -17330,6 +18128,7 @@
               "examples": {
                 "default": {
                   "value": {
+                    "documentId": "x",
                     "imageId": "x",
                     "objectIds": [
                       "x"
@@ -29858,6 +30657,7 @@
                       "partitionIndex": 0,
                       "volumeName": "x"
                     },
+                    "documentId": "x",
                     "expectedRevision": 1,
                     "imageId": "x",
                     "inspectionToken": "x",
@@ -30647,6 +31447,7 @@
                 "default": {
                   "value": {
                     "cleanupObjectIds": [],
+                    "documentId": "x",
                     "expectedRevision": 1,
                     "imageId": "x",
                     "referrerObjectIds": [],
@@ -31064,6 +31865,7 @@
                 "default": {
                   "value": {
                     "cleanupObjectIds": [],
+                    "documentId": "x",
                     "expectedRevision": 1,
                     "imageId": "x",
                     "referrerObjectIds": [],
@@ -31427,6 +32229,7 @@
               "examples": {
                 "default": {
                   "value": {
+                    "documentId": "x",
                     "expectedRevision": 1,
                     "imageId": "x",
                     "scope": {
@@ -31801,6 +32604,7 @@
               "examples": {
                 "default": {
                   "value": {
+                    "documentId": "x",
                     "expectedRevision": 1,
                     "imageId": "x",
                     "scope": {
@@ -32164,6 +32968,7 @@
               "examples": {
                 "default": {
                   "value": {
+                    "documentId": "x",
                     "expectedRevision": 1,
                     "imageId": "x",
                     "scope": {
@@ -32188,6 +32993,7 @@
                   "success": {
                     "value": {
                       "data": {
+                        "documentId": "x",
                         "expectedRevision": 1,
                         "imageId": "x",
                         "manifest": {
@@ -32202,6 +33008,7 @@
                   "warning": {
                     "value": {
                       "data": {
+                        "documentId": "x",
                         "expectedRevision": 1,
                         "imageId": "x",
                         "manifest": {
@@ -32527,6 +33334,7 @@
                 "default": {
                   "value": {
                     "contentScopeId": "x",
+                    "documentId": "x",
                     "expectedRevision": 1,
                     "imageId": "x"
                   }
@@ -32892,6 +33700,7 @@
                       }
                     ],
                     "contentScopeId": "x",
+                    "documentId": "x",
                     "expectedRevision": 1,
                     "imageId": "x"
                   }
@@ -33252,6 +34061,7 @@
                 "default": {
                   "value": {
                     "contentScopeId": "x",
+                    "documentId": "x",
                     "expectedRevision": 1,
                     "imageId": "x"
                   }
@@ -33613,6 +34423,7 @@
                 "default": {
                   "value": {
                     "contentScopeId": "x",
+                    "documentId": "x",
                     "expectedRevision": 1,
                     "imageId": "x",
                     "programs": [
@@ -33640,6 +34451,7 @@
                   "success": {
                     "value": {
                       "data": {
+                        "documentId": "x",
                         "expectedRevision": 1,
                         "imageId": "x",
                         "manifest": {
@@ -33654,6 +34466,7 @@
                   "warning": {
                     "value": {
                       "data": {
+                        "documentId": "x",
                         "expectedRevision": 1,
                         "imageId": "x",
                         "manifest": {
@@ -33979,6 +34792,7 @@
                 "default": {
                   "value": {
                     "contentScopeId": "x",
+                    "documentId": "x",
                     "expectedRevision": 1,
                     "imageId": "x",
                     "programs": [
@@ -34345,6 +35159,7 @@
               "examples": {
                 "default": {
                   "value": {
+                    "documentId": "x",
                     "expectedRevision": 1,
                     "imageId": "x",
                     "manifest": {
@@ -34710,6 +35525,7 @@
               "examples": {
                 "default": {
                   "value": {
+                    "documentId": "x",
                     "expectedRevision": 1,
                     "imageId": "x",
                     "manifest": {
@@ -35072,6 +35888,7 @@
               "examples": {
                 "default": {
                   "value": {
+                    "documentId": "x",
                     "expectedRevision": 1,
                     "imageId": "x",
                     "roots": [
@@ -35458,6 +36275,7 @@
                         "rootId": "x"
                       }
                     },
+                    "documentId": "x",
                     "expectedRevision": 1,
                     "format": "SFZ",
                     "imageId": "x",
@@ -35832,6 +36650,7 @@
                         "rootId": "x"
                       }
                     },
+                    "documentId": "x",
                     "expectedRevision": 1,
                     "imageId": "x"
                   }
@@ -36191,6 +37010,7 @@
               "examples": {
                 "default": {
                   "value": {
+                    "documentId": "x",
                     "expectedRevision": 1,
                     "format": "ISO9660",
                     "imageId": "x",
@@ -36582,6 +37402,7 @@
                         "rootId": "x"
                       }
                     },
+                    "documentId": "x",
                     "expectedRevision": 1,
                     "format": "ISO9660",
                     "imageId": "x",
@@ -36950,6 +37771,7 @@
                         "rootId": "x"
                       }
                     },
+                    "documentId": "x",
                     "expectedRevision": 1,
                     "imageId": "x",
                     "roots": [
@@ -37669,6 +38491,7 @@
                       "partitionIndex": 0,
                       "volumeName": "x"
                     },
+                    "documentId": "x",
                     "expectedRevision": 1,
                     "imageId": "x",
                     "packages": [
@@ -38468,6 +39291,7 @@
                         "rootId": "x"
                       }
                     },
+                    "documentId": "x",
                     "expectedRevision": 1,
                     "imageId": "x",
                     "objectIds": [
@@ -38830,6 +39654,7 @@
               "examples": {
                 "default": {
                   "value": {
+                    "documentId": "x",
                     "expectedRevision": 1,
                     "imageId": "x",
                     "importMode": "HIERARCHY",
@@ -39239,6 +40064,7 @@
               "examples": {
                 "default": {
                   "value": {
+                    "documentId": "x",
                     "expectedRevision": 1,
                     "imageId": "x",
                     "scopeId": "x"
@@ -39621,6 +40447,7 @@
                         "rootId": "x"
                       }
                     },
+                    "documentId": "x",
                     "expectedRevision": 1,
                     "imageId": "x",
                     "scopeId": "x"
@@ -39981,6 +40808,7 @@
               "examples": {
                 "default": {
                   "value": {
+                    "documentId": "x",
                     "expectedRevision": 1,
                     "imageId": "x",
                     "scopeId": "x"
@@ -40379,6 +41207,7 @@
                         "rootId": "x"
                       }
                     },
+                    "documentId": "x",
                     "expectedRevision": 1,
                     "imageId": "x",
                     "scopeId": "x"
@@ -40740,6 +41569,7 @@
                 "default": {
                   "value": {
                     "contentScopeId": "x",
+                    "documentId": "x",
                     "expectedRevision": 1,
                     "imageId": "x"
                   }
@@ -41168,6 +41998,7 @@
               "examples": {
                 "default": {
                   "value": {
+                    "documentId": "x",
                     "expectedRevision": 1,
                     "imageId": "x",
                     "targets": [
@@ -41545,6 +42376,7 @@
                 "default": {
                   "value": {
                     "contentScopeId": "x",
+                    "documentId": "x",
                     "expectedRevision": 1,
                     "imageId": "x"
                   }
@@ -41903,13 +42735,15 @@
               "examples": {
                 "default": {
                   "value": {
-                    "source": {
-                      "file": {
-                        "relativePath": "x",
-                        "rootId": "x"
-                      },
-                      "kind": "FILE"
-                    }
+                    "sources": [
+                      {
+                        "file": {
+                          "relativePath": "x",
+                          "rootId": "x"
+                        },
+                        "kind": "FILE"
+                      }
+                    ]
                   }
                 }
               },
@@ -42366,19 +43200,19 @@
         }
       ]
     },
-    "/images/{imageId}/allocation-map": {
+    "/images/{imageId}/documents": {
       "get": {
-        "operationId": "images.allocationMap",
+        "operationId": "images.documents",
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ImageAllocationMapResponse"
+                  "$ref": "#/components/schemas/ImageDocumentPageResponse"
                 }
               }
             },
-            "description": "Revision-pinned SFS partition cluster allocation map",
+            "description": "Current document resource",
             "headers": {
               "X-Request-Id": {
                 "$ref": "#/components/headers/XRequestId"
@@ -42426,33 +43260,157 @@
           }
         },
         {
-          "in": "query",
-          "name": "partitionIndex",
-          "required": true,
-          "schema": {
-            "maximum": 7,
-            "minimum": 0,
-            "type": "integer"
-          }
+          "$ref": "#/components/parameters/PageLimit"
         },
         {
-          "in": "query",
-          "name": "expectedRevision",
-          "required": true,
-          "schema": {
-            "minimum": 1,
-            "type": "integer"
+          "$ref": "#/components/parameters/PageCursor"
+        }
+      ],
+      "post": {
+        "operationId": "images.documents.select",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImageDocumentSelectionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageSessionResponse"
+                }
+              }
+            },
+            "description": "Current document resource",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Request could not be completed",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
           }
         }
-      ]
+      }
     },
-    "/images/{imageId}/companions": {
+    "/images/{imageId}/documents/{documentId}": {
+      "get": {
+        "operationId": "images.document",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageDocumentResponse"
+                }
+              }
+            },
+            "description": "Current document resource",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Request could not be completed",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          }
+        }
+      },
       "parameters": [
         {
           "in": "path",
           "name": "imageId",
           "required": true,
           "schema": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        {
+          "in": "path",
+          "name": "documentId",
+          "required": true,
+          "schema": {
+            "minLength": 1,
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "/images/{imageId}/documents/{documentId}/companions": {
+      "parameters": [
+        {
+          "in": "path",
+          "name": "imageId",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "in": "path",
+          "name": "documentId",
+          "required": true,
+          "schema": {
+            "minLength": 1,
             "type": "string"
           }
         }
@@ -42572,7 +43530,7 @@
         }
       }
     },
-    "/images/{imageId}/content": {
+    "/images/{imageId}/documents/{documentId}/content": {
       "get": {
         "operationId": "images.content",
         "responses": {
@@ -42643,6 +43601,568 @@
         },
         {
           "$ref": "#/components/parameters/PageCursor"
+        },
+        {
+          "in": "path",
+          "name": "documentId",
+          "required": true,
+          "schema": {
+            "minLength": 1,
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "/images/{imageId}/documents/{documentId}/objects": {
+      "get": {
+        "operationId": "images.objects",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageObjectPageResponse"
+                }
+              }
+            },
+            "description": "Bounded decoded object metadata page",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Request could not be completed",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "imageId",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "in": "query",
+          "name": "type",
+          "schema": {
+            "maxLength": 16,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        {
+          "description": "Semantic content node whose contained descendant objects define the query scope. Reference-only descendants are excluded.",
+          "in": "query",
+          "name": "scopeId",
+          "schema": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        {
+          "$ref": "#/components/parameters/PageLimit"
+        },
+        {
+          "$ref": "#/components/parameters/PageCursor"
+        },
+        {
+          "in": "path",
+          "name": "documentId",
+          "required": true,
+          "schema": {
+            "minLength": 1,
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "/images/{imageId}/documents/{documentId}/objects/{objectId}": {
+      "get": {
+        "operationId": "images.object",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageObjectDetailResponse"
+                }
+              }
+            },
+            "description": "Complete decoded object metadata and direct relationships without content payload bytes",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Image object not found",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Request could not be completed",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "imageId",
+          "required": true,
+          "schema": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        {
+          "in": "path",
+          "name": "objectId",
+          "required": true,
+          "schema": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        {
+          "in": "path",
+          "name": "documentId",
+          "required": true,
+          "schema": {
+            "minLength": 1,
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "/images/{imageId}/documents/{documentId}/preview": {
+      "get": {
+        "operationId": "images.preview",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImagePreviewResponse"
+                }
+              }
+            },
+            "description": "Bounded physical Wave Data or Sample playback-window min/max lanes",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Request could not be completed",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "imageId",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "in": "query",
+          "name": "objectId",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "in": "query",
+          "name": "bins",
+          "required": true,
+          "schema": {
+            "maximum": 4096,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        {
+          "in": "path",
+          "name": "documentId",
+          "required": true,
+          "schema": {
+            "minLength": 1,
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "/images/{imageId}/documents/{documentId}/relationships": {
+      "get": {
+        "operationId": "images.relationships",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageRelationshipPageResponse"
+                }
+              }
+            },
+            "description": "Bounded relationship page using session-local object IDs",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Request could not be completed",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "imageId",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "description": "Semantic content node whose contained descendant objects define the query scope. Reference-only descendants are excluded.",
+          "in": "query",
+          "name": "scopeId",
+          "schema": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        {
+          "description": "Session-local source object identifier.",
+          "in": "query",
+          "name": "sourceObjectId",
+          "schema": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        {
+          "description": "Session-local resolved target object identifier.",
+          "in": "query",
+          "name": "targetObjectId",
+          "schema": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        {
+          "description": "Exact relationship type.",
+          "in": "query",
+          "name": "type",
+          "schema": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        {
+          "$ref": "#/components/parameters/PageLimit"
+        },
+        {
+          "$ref": "#/components/parameters/PageCursor"
+        },
+        {
+          "in": "path",
+          "name": "documentId",
+          "required": true,
+          "schema": {
+            "minLength": 1,
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "/images/{imageId}/documents/{documentId}/system-program-contexts": {
+      "get": {
+        "operationId": "images.systemProgramContexts",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemProgramContextsResponse"
+                }
+              }
+            },
+            "description": "Independent partition-level SYSTEM and SYSTEM2 receive, Program Mode, and Multi Part contexts",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Request could not be completed",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "imageId",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "in": "query",
+          "name": "partitionIndex",
+          "required": true,
+          "schema": {
+            "maximum": 7,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        {
+          "in": "path",
+          "name": "documentId",
+          "required": true,
+          "schema": {
+            "minLength": 1,
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "/images/{imageId}/documents/{documentId}/validation/issues": {
+      "get": {
+        "operationId": "images.validation.issues",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImageValidationPageResponse"
+                }
+              }
+            },
+            "description": "Bounded validation issue page",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Request could not be completed",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          }
+        }
+      },
+      "parameters": [
+        {
+          "in": "path",
+          "name": "imageId",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        },
+        {
+          "$ref": "#/components/parameters/PageLimit"
+        },
+        {
+          "$ref": "#/components/parameters/PageCursor"
+        },
+        {
+          "in": "path",
+          "name": "documentId",
+          "required": true,
+          "schema": {
+            "minLength": 1,
+            "type": "string"
+          }
         }
       ]
     },
@@ -42791,134 +44311,30 @@
         },
         {
           "$ref": "#/components/parameters/PageLimit"
+        },
+        {
+          "in": "query",
+          "name": "documentId",
+          "schema": {
+            "minLength": 1,
+            "type": "string"
+          }
         }
       ]
     },
-    "/images/{imageId}/objects": {
+    "/images/{imageId}/sources/{sourceMemberId}/allocation-map": {
       "get": {
-        "operationId": "images.objects",
+        "operationId": "images.allocationMap",
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ImageObjectPageResponse"
+                  "$ref": "#/components/schemas/ImageAllocationMapResponse"
                 }
               }
             },
-            "description": "Bounded decoded object metadata page",
-            "headers": {
-              "X-Request-Id": {
-                "$ref": "#/components/headers/XRequestId"
-              }
-            }
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "examples": {
-                  "default": {
-                    "value": {
-                      "error": {
-                        "code": "invalid_request",
-                        "context": {},
-                        "message": "request could not be processed",
-                        "requestId": "request-1",
-                        "retryable": false
-                      }
-                    }
-                  }
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Request could not be completed",
-            "headers": {
-              "X-Request-Id": {
-                "$ref": "#/components/headers/XRequestId"
-              }
-            }
-          }
-        }
-      },
-      "parameters": [
-        {
-          "in": "path",
-          "name": "imageId",
-          "required": true,
-          "schema": {
-            "type": "string"
-          }
-        },
-        {
-          "in": "query",
-          "name": "type",
-          "schema": {
-            "maxLength": 16,
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        {
-          "description": "Semantic content node whose contained descendant objects define the query scope. Reference-only descendants are excluded.",
-          "in": "query",
-          "name": "scopeId",
-          "schema": {
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        {
-          "$ref": "#/components/parameters/PageLimit"
-        },
-        {
-          "$ref": "#/components/parameters/PageCursor"
-        }
-      ]
-    },
-    "/images/{imageId}/objects/{objectId}": {
-      "get": {
-        "operationId": "images.object",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ImageObjectDetailResponse"
-                }
-              }
-            },
-            "description": "Complete decoded object metadata and direct relationships without content payload bytes",
-            "headers": {
-              "X-Request-Id": {
-                "$ref": "#/components/headers/XRequestId"
-              }
-            }
-          },
-          "404": {
-            "content": {
-              "application/json": {
-                "examples": {
-                  "default": {
-                    "value": {
-                      "error": {
-                        "code": "invalid_request",
-                        "context": {},
-                        "message": "request could not be processed",
-                        "requestId": "request-1",
-                        "retryable": false
-                      }
-                    }
-                  }
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Image object not found",
+            "description": "Revision-pinned SFS partition cluster allocation map",
             "headers": {
               "X-Request-Id": {
                 "$ref": "#/components/headers/XRequestId"
@@ -42962,256 +44378,6 @@
           "required": true,
           "schema": {
             "minLength": 1,
-            "type": "string"
-          }
-        },
-        {
-          "in": "path",
-          "name": "objectId",
-          "required": true,
-          "schema": {
-            "minLength": 1,
-            "type": "string"
-          }
-        }
-      ]
-    },
-    "/images/{imageId}/preview": {
-      "get": {
-        "operationId": "images.preview",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ImagePreviewResponse"
-                }
-              }
-            },
-            "description": "Bounded physical Wave Data or Sample playback-window min/max lanes",
-            "headers": {
-              "X-Request-Id": {
-                "$ref": "#/components/headers/XRequestId"
-              }
-            }
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "examples": {
-                  "default": {
-                    "value": {
-                      "error": {
-                        "code": "invalid_request",
-                        "context": {},
-                        "message": "request could not be processed",
-                        "requestId": "request-1",
-                        "retryable": false
-                      }
-                    }
-                  }
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Request could not be completed",
-            "headers": {
-              "X-Request-Id": {
-                "$ref": "#/components/headers/XRequestId"
-              }
-            }
-          }
-        }
-      },
-      "parameters": [
-        {
-          "in": "path",
-          "name": "imageId",
-          "required": true,
-          "schema": {
-            "type": "string"
-          }
-        },
-        {
-          "in": "query",
-          "name": "objectId",
-          "required": true,
-          "schema": {
-            "type": "string"
-          }
-        },
-        {
-          "in": "query",
-          "name": "bins",
-          "required": true,
-          "schema": {
-            "maximum": 4096,
-            "minimum": 1,
-            "type": "integer"
-          }
-        }
-      ]
-    },
-    "/images/{imageId}/relationships": {
-      "get": {
-        "operationId": "images.relationships",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ImageRelationshipPageResponse"
-                }
-              }
-            },
-            "description": "Bounded relationship page using session-local object IDs",
-            "headers": {
-              "X-Request-Id": {
-                "$ref": "#/components/headers/XRequestId"
-              }
-            }
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "examples": {
-                  "default": {
-                    "value": {
-                      "error": {
-                        "code": "invalid_request",
-                        "context": {},
-                        "message": "request could not be processed",
-                        "requestId": "request-1",
-                        "retryable": false
-                      }
-                    }
-                  }
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Request could not be completed",
-            "headers": {
-              "X-Request-Id": {
-                "$ref": "#/components/headers/XRequestId"
-              }
-            }
-          }
-        }
-      },
-      "parameters": [
-        {
-          "in": "path",
-          "name": "imageId",
-          "required": true,
-          "schema": {
-            "type": "string"
-          }
-        },
-        {
-          "description": "Semantic content node whose contained descendant objects define the query scope. Reference-only descendants are excluded.",
-          "in": "query",
-          "name": "scopeId",
-          "schema": {
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        {
-          "description": "Session-local source object identifier.",
-          "in": "query",
-          "name": "sourceObjectId",
-          "schema": {
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        {
-          "description": "Session-local resolved target object identifier.",
-          "in": "query",
-          "name": "targetObjectId",
-          "schema": {
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        {
-          "description": "Exact relationship type.",
-          "in": "query",
-          "name": "type",
-          "schema": {
-            "maxLength": 64,
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        {
-          "$ref": "#/components/parameters/PageLimit"
-        },
-        {
-          "$ref": "#/components/parameters/PageCursor"
-        }
-      ]
-    },
-    "/images/{imageId}/system-program-contexts": {
-      "get": {
-        "operationId": "images.systemProgramContexts",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SystemProgramContextsResponse"
-                }
-              }
-            },
-            "description": "Independent partition-level SYSTEM and SYSTEM2 receive, Program Mode, and Multi Part contexts",
-            "headers": {
-              "X-Request-Id": {
-                "$ref": "#/components/headers/XRequestId"
-              }
-            }
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "examples": {
-                  "default": {
-                    "value": {
-                      "error": {
-                        "code": "invalid_request",
-                        "context": {},
-                        "message": "request could not be processed",
-                        "requestId": "request-1",
-                        "retryable": false
-                      }
-                    }
-                  }
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Request could not be completed",
-            "headers": {
-              "X-Request-Id": {
-                "$ref": "#/components/headers/XRequestId"
-              }
-            }
-          }
-        }
-      },
-      "parameters": [
-        {
-          "in": "path",
-          "name": "imageId",
-          "required": true,
-          "schema": {
             "type": "string"
           }
         },
@@ -43224,72 +44390,24 @@
             "minimum": 0,
             "type": "integer"
           }
-        }
-      ]
-    },
-    "/images/{imageId}/validation/issues": {
-      "get": {
-        "operationId": "images.validation.issues",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ImageValidationPageResponse"
-                }
-              }
-            },
-            "description": "Bounded validation issue page",
-            "headers": {
-              "X-Request-Id": {
-                "$ref": "#/components/headers/XRequestId"
-              }
-            }
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "examples": {
-                  "default": {
-                    "value": {
-                      "error": {
-                        "code": "invalid_request",
-                        "context": {},
-                        "message": "request could not be processed",
-                        "requestId": "request-1",
-                        "retryable": false
-                      }
-                    }
-                  }
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Request could not be completed",
-            "headers": {
-              "X-Request-Id": {
-                "$ref": "#/components/headers/XRequestId"
-              }
-            }
-          }
-        }
-      },
-      "parameters": [
+        },
         {
-          "in": "path",
-          "name": "imageId",
+          "in": "query",
+          "name": "expectedRevision",
           "required": true,
           "schema": {
-            "type": "string"
+            "minimum": 1,
+            "type": "integer"
           }
         },
         {
-          "$ref": "#/components/parameters/PageLimit"
-        },
-        {
-          "$ref": "#/components/parameters/PageCursor"
+          "in": "path",
+          "name": "sourceMemberId",
+          "required": true,
+          "schema": {
+            "minLength": 1,
+            "type": "string"
+          }
         }
       ]
     },

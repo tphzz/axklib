@@ -51,7 +51,7 @@ describe('audio import native manifest contract', () => {
                 },
             ];
             const result = audioImportRequest(
-                'image',
+                { imageId: 'image', documentId: 'document-a-series-source-1' },
                 1,
                 { kind: createVolume ? 'CREATE_VOLUME' : 'EXISTING_VOLUME', partitionIndex: 0, volumeName: 'Imported' },
                 items,

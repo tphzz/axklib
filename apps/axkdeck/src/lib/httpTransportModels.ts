@@ -9,19 +9,8 @@ import type {
 } from './transport';
 import type { DiskTreeItem } from './types';
 
-export interface ApiImageSummary {
-    imageId: string;
-    revision: number;
-    source: components['schemas']['ImageSourceRef'];
-    companionSources: components['schemas']['ImageSourceRef'][];
-    floppySet: components['schemas']['ImageFloppySet'] | null;
-    format: string;
-    rootCount: number;
-    objectCount: number;
-    relationshipCount: number;
-    availableOperations?: string[];
-    validation: { valid: boolean; infoCount: number; warningCount: number; errorCount: number };
-}
+export type ApiImageSummary = components['schemas']['ImageSession'];
+export type ApiDocumentSummary = components['schemas']['ImageDocument'];
 
 export type ApiContentItem = components['schemas']['ImageContentItem'];
 export type ApiObjectItem = components['schemas']['ImageObjectItem'];
@@ -50,6 +39,9 @@ export interface SessionState {
     remoteId: string;
     revision: number;
     source: ImageLocation;
+    sources: ImageLocation[];
+    summary: ApiImageSummary;
+    documentId: string | null;
     contentCursors: Map<string, Map<number, string | null>>;
     contentItems: Map<string, DiskTreeItem>;
     objectCursors: Map<string, Map<number, string | null>>;
@@ -160,15 +152,15 @@ function relationshipQuality(value: string): RelationshipQuality {
     }
 }
 
-export function validationSummary(summary: ApiImageSummary): ValidationSummary {
-    const validation = summary.validation;
+export function validationSummary(summary: ApiDocumentSummary | null): ValidationSummary {
+    const validation = summary?.validation ?? { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 };
     return {
         valid: validation.valid,
         issueCount: validation.infoCount + validation.warningCount + validation.errorCount,
         errorCount: validation.errorCount,
         warningCount: validation.warningCount,
-        objectCount: summary.objectCount,
-        relationshipCount: summary.relationshipCount,
+        objectCount: summary?.objectCount ?? 0,
+        relationshipCount: summary?.relationshipCount ?? 0,
     };
 }
 

@@ -38,6 +38,8 @@
             group[keys.at(-1)!] = field.boolean ? false : (field.options?.[0]?.value ?? Math.max(0, field.min));
         }
         return {
+            formatId: 'yamaha.a-series',
+            profile: 'a-series',
             image: { revision: 1 },
             object: { id, key: id, name: names[id], type: bank ? 'SBAC' : 'SBNK' },
             formatConversion: sampleConversionFixture(format),

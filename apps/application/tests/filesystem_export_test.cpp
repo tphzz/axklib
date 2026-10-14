@@ -55,7 +55,7 @@ class FilesystemExport : public testing::Test {
         sandbox = std::make_unique<axk::app::Sandbox>(std::move(*created));
         sessions = std::make_unique<axk::app::ImageSessionManager>(*sandbox, 32U, 500U, std::chrono::minutes{15},
                                                                    std::chrono::steady_clock::now, &reservations);
-        const auto opened = sessions->open({"workspace", "image.hds"}, "owner");
+        const auto opened = sessions->open({{{"workspace", "image.hds"}}, {}}, "owner");
         ASSERT_TRUE(opened) << opened.error().message;
         image_id = opened->image_id;
         const auto roots = sessions->filesystem(image_id, "owner", 1U);
@@ -155,7 +155,7 @@ TEST_F(FilesystemExport, CancelsDuringStreamingOrBeforePublicationWithoutPartial
         ASSERT_FALSE(result);
         EXPECT_EQ(result.error().code, "operation_cancelled");
         EXPECT_FALSE(std::filesystem::exists(root / "cancelled"));
-        EXPECT_TRUE(sessions->begin_read(image_id, "owner", 1U));
+        EXPECT_TRUE(sessions->begin_source_read({image_id, "source-1"}, "owner", 1U));
     }
 }
 
@@ -187,7 +187,7 @@ TEST_F(FilesystemExport, ReviewsHostNamesAndRejectsCollisionsBeforePublication) 
     const auto written =
         axk::write_sfs_file_edits(root / "blank.hds", root / "names.hds", axk::PartitionIndex{0}, edits);
     ASSERT_TRUE(written) << written.error().message;
-    const auto opened = sessions->open({"workspace", "names.hds"}, "owner");
+    const auto opened = sessions->open({{{"workspace", "names.hds"}}, {}}, "owner");
     ASSERT_TRUE(opened);
     const auto roots = sessions->filesystem(opened->image_id, "owner", 1U);
     ASSERT_TRUE(roots);
@@ -216,8 +216,11 @@ TEST_F(FilesystemExport, JobsInspectAndExportToWorkspaceOrOwnedDownload) {
                                              std::chrono::minutes{10}};
     ASSERT_TRUE(axk::app::bind_filesystem_export_operations(registry, *sandbox, *sessions, downloads));
     const axk::app::OperationContext context{"owner", "export-test", {}, nullptr, {}};
-    nlohmann::json request{
-        {"imageId", image_id}, {"expectedRevision", 1U}, {"entryIds", selection()}, {"layout", "SELECTED_ENTRIES"}};
+    nlohmann::json request{{"imageId", image_id},
+                           {"documentId", "document-a-series-source-1"},
+                           {"expectedRevision", 1U},
+                           {"entryIds", selection()},
+                           {"layout", "SELECTED_ENTRIES"}};
     const auto inspected = registry.invoke("images.filesystem.export.inspect", request, context);
     ASSERT_TRUE(inspected) << inspected.error().message;
     EXPECT_EQ(inspected->at("totalBytes"), 10001U);
@@ -273,6 +276,7 @@ TEST_F(FilesystemExport, FolderExportUsesTheChosenDestinationAsTheSelectedDirect
     ASSERT_NE(directory, entries->items.end());
     nlohmann::json request{
         {"imageId", image_id},
+        {"documentId", "document-a-series-source-1"},
         {"expectedRevision", 1U},
         {"entryIds", {directory->id}},
         {"layout", "EXPORT_FOLDER"},
@@ -345,6 +349,7 @@ TEST_F(FilesystemExport, DownloadCancellationAfterTheLastPayloadDoesNotRetainAnA
     ASSERT_TRUE(entries);
     ASSERT_EQ(entries->items.size(), 1U);
     const nlohmann::json request{{"imageId", image_id},
+                                 {"documentId", "document-a-series-source-1"},
                                  {"expectedRevision", 1U},
                                  {"layout", "SELECTED_ENTRIES"},
                                  {"entryIds", {entries->items.front().id}},

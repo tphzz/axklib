@@ -317,7 +317,7 @@ export class AxklibHttpApiClient {
         return this.request('POST', '/files/list', input);
     }
 
-    async inspectMediaSource(directory: DirectoryRef): Promise<'AXK_OBJECT_DIRECTORY' | null> {
+    async inspectMediaSource(directory: DirectoryRef): Promise<'DIRECTORY' | null> {
         const result = await this.request<components['schemas']['MediaSourceInspectResponse']['data']>(
             'POST',
             '/files/media-source/inspect',

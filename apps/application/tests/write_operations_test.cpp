@@ -2,6 +2,7 @@
 #include <array>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -10,7 +11,10 @@
 #include <ranges>
 #include <span>
 #include <string>
+#include <string_view>
+#include <system_error>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -25,6 +29,7 @@
 #include "axklib/application/write_operations.hpp"
 #include "axklib/audio.hpp"
 #include "axklib/catalog.hpp"
+#include "axklib/filesystem_edit.hpp"
 #include "axklib/sfs.hpp"
 #include "axklib/sfs_repair.hpp"
 #include "axklib/writer.hpp"
@@ -349,11 +354,12 @@ TEST_F(WriteOperationsTest, SessionExtentLayoutRepairPublishesAValidatedCopyWith
     patch_index_be32(source, *volume_root, 0x12U, volume_root->extents.front().byte_count + 1U);
     const auto source_bytes = read_bytes(source);
 
-    const auto opened = images_->open({"workspace", "extent-repair.hds"}, "owner");
+    const auto opened = images_->open({{{"workspace", "extent-repair.hds"}}, {}}, "owner");
     ASSERT_TRUE(opened) << opened.error().message;
     const auto repaired =
         registry_.invoke("images.extent_layout.repair",
                          {{"imageId", opened->image_id},
+                          {"documentId", "document-a-series-source-1"},
                           {"expectedRevision", opened->revision},
                           {"destination",
                            {{"kind", "WORKSPACE"},
@@ -974,10 +980,10 @@ TEST_F(WriteOperationsTest, FrozenCapacityInspectionRejectsMalformedCandidate) {
 }
 
 TEST_F(WriteOperationsTest, SessionAlterationCommitsInPlaceAndRefreshesTheExistingSession) {
-    const auto opened = images_->open({"workspace", "fixture.hds"}, "owner");
+    const auto opened = images_->open({{{"workspace", "fixture.hds"}}, {}}, "owner");
     ASSERT_TRUE(opened) << opened.error().message;
     ASSERT_EQ(opened->revision, 1U);
-    const auto objects_before = images_->objects(opened->image_id, "owner", 100U);
+    const auto objects_before = images_->objects({opened->image_id, "document-a-series-source-1"}, "owner", 100U);
     ASSERT_TRUE(objects_before) << objects_before.error().message;
 
     std::vector<nlohmann::json> diagnostics;
@@ -991,10 +997,12 @@ TEST_F(WriteOperationsTest, SessionAlterationCommitsInPlaceAndRefreshesTheExisti
                                                {"volume_name", "New Volume"},
                                                {"new_volume_name", "Renamed Volume"}}})},
     };
-    const auto altered = registry_.invoke(
-        "images.alter",
-        {{"imageId", opened->image_id}, {"expectedRevision", opened->revision}, {"manifest", {{"inline", manifest}}}},
-        mutation_context);
+    const auto altered = registry_.invoke("images.alter",
+                                          {{"imageId", opened->image_id},
+                                           {"documentId", "document-a-series-source-1"},
+                                           {"expectedRevision", opened->revision},
+                                           {"manifest", {{"inline", manifest}}}},
+                                          mutation_context);
     ASSERT_TRUE(altered) << altered.error().message;
     EXPECT_EQ(altered->at("imageId"), opened->image_id);
     EXPECT_EQ(altered->at("revision"), 2U);
@@ -1003,13 +1011,14 @@ TEST_F(WriteOperationsTest, SessionAlterationCommitsInPlaceAndRefreshesTheExisti
     const auto inspected = images_->inspect(opened->image_id, "owner");
     ASSERT_TRUE(inspected) << inspected.error().message;
     EXPECT_EQ(inspected->revision, 2U);
-    const auto roots = images_->content(opened->image_id, "owner", 100U);
+    const auto roots = images_->content({opened->image_id, "document-a-series-source-1"}, "owner", 100U);
     ASSERT_TRUE(roots) << roots.error().message;
     ASSERT_EQ(roots->items.size(), 1U);
-    const auto volumes = images_->content(opened->image_id, "owner", 100U, std::nullopt, roots->items.front().id);
+    const auto volumes = images_->content({opened->image_id, "document-a-series-source-1"}, "owner", 100U, std::nullopt,
+                                          roots->items.front().id);
     ASSERT_TRUE(volumes) << volumes.error().message;
     EXPECT_TRUE(std::ranges::contains(volumes->items, "Renamed Volume", &axk::app::ImageContentItem::name));
-    const auto objects_after = images_->objects(opened->image_id, "owner", 100U);
+    const auto objects_after = images_->objects({opened->image_id, "document-a-series-source-1"}, "owner", 100U);
     ASSERT_TRUE(objects_after) << objects_after.error().message;
     ASSERT_EQ(objects_after->items.size(), objects_before->items.size());
     for (const auto &before : objects_before->items) {
@@ -1027,21 +1036,110 @@ TEST_F(WriteOperationsTest, SessionAlterationCommitsInPlaceAndRefreshesTheExisti
     EXPECT_GT(planning->at("patchCount").get<std::size_t>(), 0U);
     EXPECT_LT(planning->at("patchBytes").get<std::uint64_t>(), planning->at("imageBytes").get<std::uint64_t>());
 
-    const auto stale = registry_.invoke(
-        "images.alter", {{"imageId", opened->image_id}, {"expectedRevision", 1U}, {"manifest", {{"inline", manifest}}}},
-        context());
+    const auto stale = registry_.invoke("images.alter",
+                                        {{"imageId", opened->image_id},
+                                         {"documentId", "document-a-series-source-1"},
+                                         {"expectedRevision", 1U},
+                                         {"manifest", {{"inline", manifest}}}},
+                                        context());
     ASSERT_FALSE(stale);
     EXPECT_EQ(stale.error().code, "image_revision_stale");
+}
+
+TEST_F(WriteOperationsTest, ScopedAlterationWritesTheSecondMemberAndPreservesOtherNativeDocuments) {
+    std::filesystem::copy_file(root_ / "fixture.hds", root_ / "second.hds");
+    std::vector<char> wave(35U);
+    std::ranges::copy(std::string_view{"LM8953"}, wave.begin());
+    wave[22] = static_cast<char>(0xc9);
+    wave[23] = wave[24] = 2;
+    {
+        std::ofstream output{root_ / "TONE.W01", std::ios::binary};
+        output.write(wave.data(), static_cast<std::streamsize>(wave.size()));
+        ASSERT_TRUE(output);
+    }
+    const auto original = read_bytes(root_ / "fixture.hds");
+    const auto original_wave = read_bytes(root_ / "TONE.W01");
+    const auto opened = images_->open(
+        {{{"workspace", "fixture.hds"}, {"workspace", "second.hds"}, {"workspace", "TONE.W01"}}, {}}, "owner");
+    ASSERT_TRUE(opened) << opened.error().message;
+    ASSERT_EQ(opened->documents.size(), 3U);
+    const axk::app::ImageDocumentRef target{opened->image_id, "document-a-series-source-2"};
+    const axk::app::ImageDocumentRef tx{opened->image_id, "document-tx16w"};
+    const auto tx_before = images_->objects(tx, "owner", 100U);
+    ASSERT_TRUE(tx_before);
+    const nlohmann::json manifest{{"schema_version", "1.0"},
+                                  {"operations", nlohmann::json::array({{{"id", "rename"},
+                                                                         {"type", "rename_volume"},
+                                                                         {"partition_index", 0U},
+                                                                         {"volume_name", "New Volume"},
+                                                                         {"new_volume_name", "Second Only"}}})}};
+    const auto result = registry_.invoke("images.alter",
+                                         {{"imageId", target.image_id},
+                                          {"documentId", target.document_id},
+                                          {"expectedRevision", 1U},
+                                          {"manifest", {{"inline", manifest}}}},
+                                         context());
+    ASSERT_TRUE(result) << result.error().message;
+    EXPECT_TRUE(result->at("applied").get<bool>());
+    EXPECT_EQ(result->at("revision"), 2U);
+    EXPECT_EQ(read_bytes(root_ / "fixture.hds"), original);
+    EXPECT_EQ(read_bytes(root_ / "TONE.W01"), original_wave);
+    EXPECT_NE(read_bytes(root_ / "second.hds"), original);
+    const auto selected = images_->objects(target, "owner", 100U);
+    ASSERT_TRUE(selected) << selected.error().message;
+    ASSERT_FALSE(selected->items.empty());
+    EXPECT_EQ(selected->items.front().volume_name, "Second Only");
+    const auto tx_after = images_->objects(tx, "owner", 100U);
+    ASSERT_TRUE(tx_after) << tx_after.error().message;
+    ASSERT_EQ(tx_after->items.size(), tx_before->items.size());
+    ASSERT_FALSE(tx_after->items.empty());
+    EXPECT_EQ(tx_after->items.front().id, tx_before->items.front().id);
+    EXPECT_FALSE(images_->begin_read(tx, "owner", 1U));
+}
+
+TEST_F(WriteOperationsTest, CommittedDeletionMayRemoveTheNativeDocumentAndRetainFiles) {
+    const auto destination = root_ / "files-only-after-delete.hds";
+    const std::array<axk::FilesystemEdit, 1U> edits{
+        axk::PutFilesystemFile{{"README"}, std::make_shared<axk::MemoryReader>(std::vector<std::byte>{std::byte{1}})}};
+    ASSERT_TRUE(axk::write_sfs_file_edits(root_ / "fixture.hds", destination, axk::PartitionIndex{0}, edits));
+    const auto opened = images_->open({{{"workspace", "files-only-after-delete.hds"}}, {}}, "owner");
+    ASSERT_TRUE(opened) << opened.error().message;
+    ASSERT_EQ(opened->documents.size(), 1U);
+    const nlohmann::json manifest = {
+        {"schema_version", "1.0"},
+        {"operations",
+         nlohmann::json::array(
+             {{{"id", "delete"}, {"type", "delete_volume"}, {"partition_index", 0U}, {"volume_name", "New Volume"}}})}};
+    const auto result = registry_.invoke("images.alter",
+                                         {{"imageId", opened->image_id},
+                                          {"documentId", opened->documents.front().id},
+                                          {"expectedRevision", opened->revision},
+                                          {"manifest", {{"inline", manifest}}}},
+                                         context());
+    ASSERT_TRUE(result) << result.error().message;
+    EXPECT_EQ(result->at("revision"), 2U);
+    EXPECT_EQ(result->at("objectCount"), 0U);
+    EXPECT_TRUE(result->at("applied").get<bool>());
+    EXPECT_TRUE(result->at("validation").at("valid").get<bool>());
+    const auto refreshed = images_->inspect(opened->image_id, "owner");
+    ASSERT_TRUE(refreshed) << refreshed.error().message;
+    EXPECT_EQ(refreshed->revision, 2U);
+    EXPECT_TRUE(refreshed->documents.empty());
+    const auto filesystem = images_->filesystem(opened->image_id, "owner", 2U);
+    ASSERT_TRUE(filesystem) << filesystem.error().message;
+    EXPECT_TRUE(filesystem->available);
+    EXPECT_FALSE(images_->objects({opened->image_id, opened->documents.front().id}, "owner", 100U));
 }
 
 TEST_F(WriteOperationsTest, SessionVolumeDeletionInspectionAcceptsMultipleVolumeTargets) {
     write_tone(root_ / "batch-delete.wav");
     ASSERT_TRUE(
         axk::write_hds_image(all_action_source_manifest(root_ / "batch-delete.wav"), root_ / "batch-delete.hds"));
-    const auto opened = images_->open({"workspace", "batch-delete.hds"}, "owner");
+    const auto opened = images_->open({{{"workspace", "batch-delete.hds"}}, {}}, "owner");
     ASSERT_TRUE(opened) << opened.error().message;
     const nlohmann::json request = {
         {"imageId", opened->image_id},
+        {"documentId", "document-a-series-source-1"},
         {"expectedRevision", opened->revision},
         {"targets", nlohmann::json::array({{{"partitionIndex", 0U}, {"volumeName", "Volume"}},
                                            {{"partitionIndex", 0U}, {"volumeName", "Delete Volume"}}})}};
@@ -1065,7 +1163,7 @@ TEST_F(WriteOperationsTest, SessionAlterationDeletesMultipleVolumesAtomically) {
     const axk::HdsBuildManifest build{
         "1.0", 4U * 1024U * 1024U, {{"hd1", {std::move(first), std::move(second), std::move(survivor)}}}};
     ASSERT_TRUE(axk::write_hds_image(build, root_ / "batch-delete-session.hds"));
-    const auto opened = images_->open({"workspace", "batch-delete-session.hds"}, "owner");
+    const auto opened = images_->open({{{"workspace", "batch-delete-session.hds"}}, {}}, "owner");
     ASSERT_TRUE(opened) << opened.error().message;
     const nlohmann::json manifest = {
         {"schema_version", "1.0"},
@@ -1075,17 +1173,20 @@ TEST_F(WriteOperationsTest, SessionAlterationDeletesMultipleVolumesAtomically) {
               {{"id", "second"}, {"type", "delete_volume"}, {"partition_index", 0U}, {"volume_name", "Second"}}})},
     };
 
-    const auto altered = registry_.invoke(
-        "images.alter",
-        {{"imageId", opened->image_id}, {"expectedRevision", opened->revision}, {"manifest", {{"inline", manifest}}}},
-        context());
+    const auto altered = registry_.invoke("images.alter",
+                                          {{"imageId", opened->image_id},
+                                           {"documentId", "document-a-series-source-1"},
+                                           {"expectedRevision", opened->revision},
+                                           {"manifest", {{"inline", manifest}}}},
+                                          context());
 
     ASSERT_TRUE(altered) << altered.error().message;
     EXPECT_EQ(altered->at("revision"), 2U);
-    const auto roots = images_->content(opened->image_id, "owner", 100U);
+    const auto roots = images_->content({opened->image_id, "document-a-series-source-1"}, "owner", 100U);
     ASSERT_TRUE(roots) << roots.error().message;
     ASSERT_EQ(roots->items.size(), 1U);
-    const auto volumes = images_->content(opened->image_id, "owner", 100U, std::nullopt, roots->items.front().id);
+    const auto volumes = images_->content({opened->image_id, "document-a-series-source-1"}, "owner", 100U, std::nullopt,
+                                          roots->items.front().id);
     ASSERT_TRUE(volumes) << volumes.error().message;
     EXPECT_TRUE(std::ranges::contains(volumes->items, "Survivor", &axk::app::ImageContentItem::name));
     EXPECT_FALSE(std::ranges::contains(volumes->items, "First", &axk::app::ImageContentItem::name));
@@ -1122,10 +1223,11 @@ TEST_F(WriteOperationsTest, SessionVolumePlacementRepairMakesDeletionSafe) {
     ASSERT_EQ(missing->placement_resolution, axk::PlacementResolution::missing);
     const auto payload_before = missing->raw_payload;
 
-    const auto opened = images_->open({"workspace", "placement-repair.hds"}, "owner");
+    const auto opened = images_->open({{{"workspace", "placement-repair.hds"}}, {}}, "owner");
     ASSERT_TRUE(opened) << opened.error().message;
     const nlohmann::json request = {
         {"imageId", opened->image_id},
+        {"documentId", "document-a-series-source-1"},
         {"expectedRevision", opened->revision},
         {"targets", nlohmann::json::array({{{"partitionIndex", 0U}, {"volumeName", "Samples"}}})}};
     const auto inspected = registry_.invoke("images.volume_deletion.inspect", request, context());
@@ -1149,6 +1251,7 @@ TEST_F(WriteOperationsTest, SessionVolumePlacementRepairMakesDeletionSafe) {
 
     const nlohmann::json placement_request = {
         {"imageId", opened->image_id},
+        {"documentId", "document-a-series-source-1"},
         {"expectedRevision", opened->revision},
         {"scope", {{"kind", "VOLUME"}, {"partitionIndex", 0U}, {"volumeName", "Samples"}}},
     };
@@ -1219,10 +1322,11 @@ TEST_F(WriteOperationsTest, SessionPartitionPlacementRepairRecoversOwnerlessWave
     patch_index_be32(source, *waveform_directory, 6U, 64U);
     patch_index_be32(source, *waveform_directory, 0x12U, 64U);
 
-    const auto opened = images_->open({"workspace", "partition-placement-repair.hds"}, "owner");
+    const auto opened = images_->open({{{"workspace", "partition-placement-repair.hds"}}, {}}, "owner");
     ASSERT_TRUE(opened) << opened.error().message;
     const nlohmann::json request = {
         {"imageId", opened->image_id},
+        {"documentId", "document-a-series-source-1"},
         {"expectedRevision", opened->revision},
         {"scope", {{"kind", "PARTITION"}, {"partitionIndex", 0U}}},
     };
@@ -1258,31 +1362,36 @@ TEST_F(WriteOperationsTest, SessionPartitionPlacementRepairRecoversOwnerlessWave
 }
 
 TEST_F(WriteOperationsTest, SessionObjectDeletionInspectsAndCommitsTheReviewedClosure) {
-    const auto opened = images_->open({"workspace", "fixture.hds"}, "owner");
+    const auto opened = images_->open({{{"workspace", "fixture.hds"}}, {}}, "owner");
     ASSERT_TRUE(opened) << opened.error().message;
-    const auto roots = images_->content(opened->image_id, "owner", 100U);
+    const auto roots = images_->content({opened->image_id, "document-a-series-source-1"}, "owner", 100U);
     ASSERT_TRUE(roots) << roots.error().message;
     ASSERT_EQ(roots->items.size(), 1U);
-    const auto volumes = images_->content(opened->image_id, "owner", 100U, std::nullopt, roots->items.front().id);
+    const auto volumes = images_->content({opened->image_id, "document-a-series-source-1"}, "owner", 100U, std::nullopt,
+                                          roots->items.front().id);
     ASSERT_TRUE(volumes) << volumes.error().message;
     const auto volume = std::ranges::find(volumes->items, "volume", &axk::app::ImageContentItem::kind);
     ASSERT_NE(volume, volumes->items.end());
-    const auto orphans = registry_.invoke(
-        "images.deletion.orphans.inspect",
-        {{"imageId", opened->image_id}, {"expectedRevision", opened->revision}, {"contentScopeId", volume->id}},
-        context());
+    const auto orphans = registry_.invoke("images.deletion.orphans.inspect",
+                                          {{"imageId", opened->image_id},
+                                           {"documentId", "document-a-series-source-1"},
+                                           {"expectedRevision", opened->revision},
+                                           {"contentScopeId", volume->id}},
+                                          context());
     ASSERT_TRUE(orphans) << orphans.error().message;
     EXPECT_EQ(orphans->at("contentScopeId"), volume->id);
     EXPECT_EQ(orphans->at("totalCandidateCount"), orphans->at("candidates").size());
 
-    const auto samples = images_->objects(opened->image_id, "owner", 100U, std::nullopt, "SBNK");
+    const auto samples =
+        images_->objects({opened->image_id, "document-a-series-source-1"}, "owner", 100U, std::nullopt, "SBNK");
     ASSERT_TRUE(samples) << samples.error().message;
     const auto sample = std::ranges::find(samples->items, "sine wave", &axk::app::ImageObjectItem::name);
     ASSERT_NE(sample, samples->items.end());
-    const auto object_count = opened->object_count;
+    const auto object_count = opened->documents.at(0).object_count;
 
     const auto inspection = registry_.invoke("images.deletion.inspect",
                                              {{"imageId", opened->image_id},
+                                              {"documentId", "document-a-series-source-1"},
                                               {"expectedRevision", opened->revision},
                                               {"targetObjectIds", nlohmann::json::array({sample->id})},
                                               {"referrerObjectIds", nlohmann::json::array()},
@@ -1305,6 +1414,7 @@ TEST_F(WriteOperationsTest, SessionObjectDeletionInspectsAndCommitsTheReviewedCl
     auto moved_registry = std::move(registry_);
     const auto deleted = moved_registry.invoke("images.delete",
                                                {{"imageId", opened->image_id},
+                                                {"documentId", "document-a-series-source-1"},
                                                 {"expectedRevision", opened->revision},
                                                 {"targetObjectIds", nlohmann::json::array({sample->id})},
                                                 {"referrerObjectIds", nlohmann::json::array()},
@@ -1318,7 +1428,7 @@ TEST_F(WriteOperationsTest, SessionObjectDeletionInspectsAndCommitsTheReviewedCl
     EXPECT_GT(deleted->at("freedClusters").get<std::uint64_t>(), 0U);
     EXPECT_EQ(deleted->at("objectCount"), object_count - 2U);
 
-    const auto remaining = images_->objects(opened->image_id, "owner", 100U);
+    const auto remaining = images_->objects({opened->image_id, "document-a-series-source-1"}, "owner", 100U);
     ASSERT_TRUE(remaining) << remaining.error().message;
     EXPECT_FALSE(std::ranges::contains(remaining->items, sample->id, &axk::app::ImageObjectItem::id));
     EXPECT_FALSE(std::ranges::contains(remaining->items, included.front(), &axk::app::ImageObjectItem::id));
@@ -1329,19 +1439,22 @@ TEST_F(WriteOperationsTest, SessionProgramGenerationInspectsAndCommitsSamplerCon
     const auto written = axk::write_hds_image(all_action_source_manifest(root_ / "program-generation.wav"),
                                               root_ / "program-generation.hds");
     ASSERT_TRUE(written) << written.error().message;
-    const auto opened = images_->open({"workspace", "program-generation.hds"}, "owner");
+    const auto opened = images_->open({{{"workspace", "program-generation.hds"}}, {}}, "owner");
     ASSERT_TRUE(opened) << opened.error().message;
-    const auto roots = images_->content(opened->image_id, "owner", 100U);
+    const auto roots = images_->content({opened->image_id, "document-a-series-source-1"}, "owner", 100U);
     ASSERT_TRUE(roots) << roots.error().message;
-    const auto volumes = images_->content(opened->image_id, "owner", 100U, std::nullopt, roots->items.front().id);
+    const auto volumes = images_->content({opened->image_id, "document-a-series-source-1"}, "owner", 100U, std::nullopt,
+                                          roots->items.front().id);
     ASSERT_TRUE(volumes) << volumes.error().message;
     const auto volume = std::ranges::find(volumes->items, "volume", &axk::app::ImageContentItem::kind);
     ASSERT_NE(volume, volumes->items.end());
 
-    const auto inspection = registry_.invoke(
-        "images.programs.generate.inspect",
-        {{"imageId", opened->image_id}, {"expectedRevision", opened->revision}, {"contentScopeId", volume->id}},
-        context());
+    const auto inspection = registry_.invoke("images.programs.generate.inspect",
+                                             {{"imageId", opened->image_id},
+                                              {"documentId", "document-a-series-source-1"},
+                                              {"expectedRevision", opened->revision},
+                                              {"contentScopeId", volume->id}},
+                                             context());
     ASSERT_TRUE(inspection) << inspection.error().message;
     ASSERT_FALSE(inspection->at("candidates").empty());
     const auto &candidate = inspection->at("candidates").front();
@@ -1351,6 +1464,7 @@ TEST_F(WriteOperationsTest, SessionProgramGenerationInspectsAndCommitsSamplerCon
     const auto prepared =
         registry_.invoke("images.programs.generate.prepare",
                          {{"imageId", opened->image_id},
+                          {"documentId", "document-a-series-source-1"},
                           {"expectedRevision", opened->revision},
                           {"contentScopeId", volume->id},
                           {"programs", nlohmann::json::array({{{"targetObjectId", candidate.at("targetObjectId")},
@@ -1369,6 +1483,7 @@ TEST_F(WriteOperationsTest, SessionProgramGenerationInspectsAndCommitsSamplerCon
     const auto generated =
         registry_.invoke("images.programs.generate",
                          {{"imageId", opened->image_id},
+                          {"documentId", "document-a-series-source-1"},
                           {"expectedRevision", opened->revision},
                           {"contentScopeId", volume->id},
                           {"programs", nlohmann::json::array({{{"targetObjectId", candidate.at("targetObjectId")},
@@ -1381,7 +1496,8 @@ TEST_F(WriteOperationsTest, SessionProgramGenerationInspectsAndCommitsSamplerCon
     ASSERT_EQ(generated->at("createdPrograms").size(), 1U);
     EXPECT_EQ(generated->at("createdPrograms").front().at("targetObjectId"), candidate.at("targetObjectId"));
 
-    const auto programs = images_->objects(opened->image_id, "owner", 128U, std::nullopt, "PROG");
+    const auto programs =
+        images_->objects({opened->image_id, "document-a-series-source-1"}, "owner", 128U, std::nullopt, "PROG");
     ASSERT_TRUE(programs) << programs.error().message;
     const auto generated_slot = std::format("{:03}", candidate.at("programNumber").get<unsigned int>());
     EXPECT_NE(std::ranges::find(programs->items, generated_slot, &axk::app::ImageObjectItem::entry_name),
@@ -1395,19 +1511,22 @@ TEST_F(WriteOperationsTest, SessionProgramAssignmentCleanupInspectsAndCommitsRev
     ASSERT_TRUE(written) << written.error().message;
     patch_program_assignment_name(path, "127", 0U, "Missing Bank");
 
-    const auto opened = images_->open({"workspace", "program-cleanup.hds"}, "owner");
+    const auto opened = images_->open({{{"workspace", "program-cleanup.hds"}}, {}}, "owner");
     ASSERT_TRUE(opened) << opened.error().message;
-    const auto roots = images_->content(opened->image_id, "owner", 100U);
+    const auto roots = images_->content({opened->image_id, "document-a-series-source-1"}, "owner", 100U);
     ASSERT_TRUE(roots);
-    const auto volumes = images_->content(opened->image_id, "owner", 100U, std::nullopt, roots->items.front().id);
+    const auto volumes = images_->content({opened->image_id, "document-a-series-source-1"}, "owner", 100U, std::nullopt,
+                                          roots->items.front().id);
     ASSERT_TRUE(volumes);
     const auto volume = std::ranges::find(volumes->items, "Volume", &axk::app::ImageContentItem::name);
     ASSERT_NE(volume, volumes->items.end());
 
-    const auto inspection = registry_.invoke(
-        "images.program_assignments.cleanup.inspect",
-        {{"imageId", opened->image_id}, {"expectedRevision", opened->revision}, {"contentScopeId", volume->id}},
-        context());
+    const auto inspection = registry_.invoke("images.program_assignments.cleanup.inspect",
+                                             {{"imageId", opened->image_id},
+                                              {"documentId", "document-a-series-source-1"},
+                                              {"expectedRevision", opened->revision},
+                                              {"contentScopeId", volume->id}},
+                                             context());
     ASSERT_TRUE(inspection) << inspection.error().message;
     ASSERT_EQ(inspection->at("candidates").size(), 1U);
     const auto &candidate = inspection->at("candidates").front();
@@ -1418,6 +1537,7 @@ TEST_F(WriteOperationsTest, SessionProgramAssignmentCleanupInspectsAndCommitsRev
     const auto cleaned = registry_.invoke(
         "images.program_assignments.cleanup",
         {{"imageId", opened->image_id},
+         {"documentId", "document-a-series-source-1"},
          {"expectedRevision", opened->revision},
          {"contentScopeId", volume->id},
          {"assignments", nlohmann::json::array({{{"programObjectId", candidate.at("programObjectId")},
@@ -1428,17 +1548,20 @@ TEST_F(WriteOperationsTest, SessionProgramAssignmentCleanupInspectsAndCommitsRev
     EXPECT_EQ(cleaned->at("revision"), 2U);
     ASSERT_EQ(cleaned->at("cleanedAssignments").size(), 1U);
 
-    const auto refreshed_roots = images_->content(opened->image_id, "owner", 100U);
+    const auto refreshed_roots = images_->content({opened->image_id, "document-a-series-source-1"}, "owner", 100U);
     ASSERT_TRUE(refreshed_roots);
-    const auto refreshed_volumes =
-        images_->content(opened->image_id, "owner", 100U, std::nullopt, refreshed_roots->items.front().id);
+    const auto refreshed_volumes = images_->content({opened->image_id, "document-a-series-source-1"}, "owner", 100U,
+                                                    std::nullopt, refreshed_roots->items.front().id);
     ASSERT_TRUE(refreshed_volumes);
     const auto refreshed_volume =
         std::ranges::find(refreshed_volumes->items, "Volume", &axk::app::ImageContentItem::name);
     ASSERT_NE(refreshed_volume, refreshed_volumes->items.end());
-    const auto after = registry_.invoke(
-        "images.program_assignments.cleanup.inspect",
-        {{"imageId", opened->image_id}, {"expectedRevision", 2U}, {"contentScopeId", refreshed_volume->id}}, context());
+    const auto after = registry_.invoke("images.program_assignments.cleanup.inspect",
+                                        {{"imageId", opened->image_id},
+                                         {"documentId", "document-a-series-source-1"},
+                                         {"expectedRevision", 2U},
+                                         {"contentScopeId", refreshed_volume->id}},
+                                        context());
     ASSERT_TRUE(after) << after.error().message;
     EXPECT_TRUE(after->at("candidates").empty());
 }

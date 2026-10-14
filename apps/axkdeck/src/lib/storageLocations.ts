@@ -17,12 +17,6 @@ export interface ServerDirectoryLocation {
     displayName: string;
 }
 
-export interface AxkObjectDirectoryLocation {
-    kind: 'axk-object-directory';
-    reference: DirectoryRef;
-    displayName: string;
-}
-
 export interface DeviceLocation {
     kind: 'device';
     reference: { sessionId: string; targetId: string };
@@ -44,7 +38,7 @@ export interface ClientUploadLocation {
 
 export type FileLocation = ServerFileLocation;
 export type DirectoryLocation = ServerDirectoryLocation;
-export type ImageLocation = FileLocation | AxkObjectDirectoryLocation | DeviceLocation;
+export type ImageLocation = FileLocation | ServerDirectoryLocation | DeviceLocation;
 export type InputFileLocation = FileLocation | ClientUploadLocation;
 
 export interface SandboxRoot {
@@ -73,14 +67,6 @@ export function serverFileLocation(reference: FileRef, displayName?: string): Se
 export function serverDirectoryLocation(reference: DirectoryRef, displayName?: string): ServerDirectoryLocation {
     return {
         kind: 'server-directory',
-        reference,
-        displayName: displayName ?? (reference.relativePath || reference.rootId),
-    };
-}
-
-export function axkObjectDirectoryLocation(reference: DirectoryRef, displayName?: string): AxkObjectDirectoryLocation {
-    return {
-        kind: 'axk-object-directory',
         reference,
         displayName: displayName ?? (reference.relativePath || reference.rootId),
     };

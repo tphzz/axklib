@@ -6,6 +6,7 @@ import type { FilesystemEntry } from '../../../lib/filesystem';
 export async function openASeriesFloppy(
     workflow: FloppyImportWorkflow,
     controller: FilesController,
+    documentId: string,
     entries?: ClientFilesystemImportEntry[],
     target?: FilesystemEntry,
 ): Promise<boolean> {
@@ -25,7 +26,8 @@ export async function openASeriesFloppy(
     const visited = new Set<string>();
     while (entry && !visited.has(entry.id)) {
         visited.add(entry.id);
-        const item = scopes.find((scope) => scope.id === entry!.contentScopeId);
+        const bindings = entry.bindings.filter((binding) => binding.documentId === documentId);
+        const item = scopes.find((scope) => bindings.some((binding) => scope.id === binding.contentScopeId));
         if (item) {
             if (controller.revision !== revision) throw new Error('The destination changed. Choose it again.');
             if (entries)

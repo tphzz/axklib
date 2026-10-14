@@ -7,6 +7,8 @@ import { ObjectEditorDocument } from './workflow.svelte';
 
 function detail(id: string, parameters: Record<string, unknown> = { level: 100 }): ObjectDetail {
     return {
+        formatId: 'yamaha.a-series',
+        profile: 'a-series',
         image: { revision: 1 },
         object: { id, key: id, name: `Sample ${id}` },
         editing: {

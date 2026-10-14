@@ -71,7 +71,7 @@
     };
     const images = {
         location: null as ImageLocation | null,
-        open: async (location: ImageLocation, _preferred: unknown, prepare?: ImageSessionPreparation) => {
+        open: async ([location]: ImageLocation[], _preferred: unknown, prepare?: ImageSessionPreparation) => {
             await prepare?.({ sessionId: 1, format: 'sfs' } as OpenedImage);
             images.location = location;
             calls += 'open ';
@@ -104,7 +104,8 @@
         {transport}
         mode="media-source"
         extensions={['hds', 'iso']}
-        onselect={() => {
+        onselect={() => {}}
+        onselectsources={() => {
             opening = false;
             calls += 'image ';
         }}

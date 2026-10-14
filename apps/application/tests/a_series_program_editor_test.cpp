@@ -11,8 +11,6 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
-#include "a_series_program_context.hpp"
-#include "a_series_program_editor.hpp"
 #include "axklib/application/program_editor.hpp"
 #include "axklib/bytes.hpp"
 #include "axklib/catalog.hpp"
@@ -21,6 +19,8 @@
 #include "axklib/package_archive.hpp"
 #include "axklib/writer.hpp"
 #include "axklib/writer_internal.hpp"
+#include "formats/a_series/program_context.hpp"
+#include "formats/a_series/program_editor.hpp"
 
 namespace {
 
@@ -291,8 +291,8 @@ TEST(ProgramEditorSnapshot, ContextUsesResolvedIdsAndExcludesOtherVolumesWithout
     sample.object = axk::decode_object(*sample_bytes).value();
     auto outside = sample;
     outside.placement->volume_directory = axk::SfsId{99U};
-    std::unordered_map<std::string, axk::ObjectSnapshot> objects{
-        {"program", program}, {"sample", sample}, {"outside", outside}};
+    std::unordered_map<std::string, const axk::ObjectSnapshot *> objects{
+        {"program", &program}, {"sample", &sample}, {"outside", &outside}};
     axk::app::ImageRelationshipItem assignment;
     assignment.source_object_id = "program";
     assignment.target_object_id = "sample";
@@ -329,7 +329,7 @@ TEST(ProgramEditorSnapshot, PreservedBankRootSelectorDoesNotBecomeAPreviewOverri
         bank.key = "bank";
         bank.raw_payload = *bytes;
         bank.object = axk::decode_object(*bytes).value();
-        std::unordered_map<std::string, axk::ObjectSnapshot> objects{{"program", program}, {"bank", bank}};
+        std::unordered_map<std::string, const axk::ObjectSnapshot *> objects{{"program", &program}, {"bank", &bank}};
         nlohmann::ordered_json editor = axk::app::detail::a_series_program_editor(program, program.raw_payload, true);
         axk::app::detail::add_program_editing_context(editor, "program", objects, {});
         ASSERT_EQ(editor["targets"].size(), 1U);
@@ -337,7 +337,7 @@ TEST(ProgramEditorSnapshot, PreservedBankRootSelectorDoesNotBecomeAPreviewOverri
         EXPECT_TRUE(target["available"].get<bool>());
         EXPECT_EQ(target["values"]["root_key"].get<unsigned>(), 67U);
         EXPECT_TRUE(target["overrideKeys"].empty());
-        std::get<axk::CurrentSbac>(objects.at("bank").object.payload).override_enable_words[0] |= 1U;
+        std::get<axk::CurrentSbac>(bank.object.payload).override_enable_words[0] |= 1U;
         axk::app::detail::add_program_editing_context(editor, "program", objects, {});
         EXPECT_FALSE(editor["targets"][0]["available"].get<bool>());
     }

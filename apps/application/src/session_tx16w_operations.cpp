@@ -1,4 +1,6 @@
 #include "axklib/application/session_tx16w_operations.hpp"
+#include "axklib/application/formats/a_series/session_read.hpp"
+#include "axklib/application/image_session_contracts.hpp"
 
 #include <charconv>
 #include <memory>
@@ -12,10 +14,10 @@
 #include <nlohmann/json.hpp>
 
 #include "axklib/catalog.hpp"
+#include "axklib/conversion/tx16w_to_a_series/plan.hpp"
+#include "axklib/formats/tx16w/codec.hpp"
 #include "axklib/media.hpp"
 #include "axklib/object.hpp"
-#include "axklib/tx16w.hpp"
-#include "axklib/tx16w_a_series.hpp"
 
 namespace {
 
@@ -107,9 +109,9 @@ axk::app::Result<axk::tx16w::Inspection> inspect_disks(std::span<const ResolvedD
     return std::move(*inspection);
 }
 
-axk::app::Result<axk::tx16w::a_series::TargetInventory> target_inventory(const axk::app::ImageSessionRead &session,
-                                                                         std::uint8_t partition_index,
-                                                                         std::string_view volume_name) {
+axk::app::Result<axk::tx16w::a_series::TargetInventory>
+target_inventory(const axk::app::formats::a_series::SessionRead &session, std::uint8_t partition_index,
+                 std::string_view volume_name) {
     const auto volume_exists = std::ranges::any_of(session.volume_scopes_by_id, [&](const auto &entry) {
         return entry.second.partition_index == partition_index && entry.second.display_name == volume_name;
     });
@@ -251,7 +253,8 @@ axk::app::Result<void> axk::app::bind_session_tx16w_operations(OperationRegistry
                 const auto &target = input.at("target");
                 const auto partition_index = target.at("partitionIndex").get<std::uint8_t>();
                 const auto volume_name = target.at("volumeName").get<std::string>();
-                auto session = images.begin_read(image_id, context.owner_id, revision);
+                auto session = axk::app::formats::a_series::SessionReader::acquire(images, image_document_ref(input),
+                                                                                   context.owner_id, revision);
                 if (!session)
                     return std::unexpected(session.error());
                 if (session->media == nullptr || session->media->kind() != axk::MediaKind::sfs) {

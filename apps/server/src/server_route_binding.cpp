@@ -77,40 +77,53 @@ void ServerApplication::register_infrastructure_routes() {
              },
          .image = [this](const crow::request &request,
                          const std::string &image_id) { return image_response(request, image_id); },
-         .attach_companions =
-             [this](const crow::request &request, const std::string &image_id) {
-                 return attach_companions_response(request, image_id);
+         .image_documents = [this](const crow::request &request,
+                                   const std::string &image_id) { return image_documents_response(request, image_id); },
+         .image_document =
+             [this](const crow::request &request, const std::string &image_id, const std::string &document_id) {
+                 return image_document_response(request, image_id, document_id);
              },
-         .image_content = [this](const crow::request &request,
-                                 const std::string &image_id) { return image_content_response(request, image_id); },
+         .attach_companions =
+             [this](const crow::request &request, const std::string &image_id, const std::string &document_id) {
+                 return attach_companions_response(request, image_id, document_id);
+             },
+         .image_content =
+             [this](const crow::request &request, const std::string &image_id, const std::string &document_id) {
+                 return image_content_response(request, image_id, document_id);
+             },
          .image_filesystem =
              [this](const crow::request &request, const std::string &image_id) {
                  return image_filesystem_response(request, image_id);
              },
-         .image_objects = [this](const crow::request &request,
-                                 const std::string &image_id) { return image_objects_response(request, image_id); },
+         .image_objects =
+             [this](const crow::request &request, const std::string &image_id, const std::string &document_id) {
+                 return image_objects_response(request, image_id, document_id);
+             },
          .image_object =
-             [this](const crow::request &request, const std::string &image_id, const std::string &object_id) {
-                 return image_object_response(request, image_id, object_id);
+             [this](const crow::request &request, const std::string &image_id, const std::string &document_id,
+                    const std::string &object_id) {
+                 return image_object_response(request, image_id, document_id, object_id);
              },
          .image_relationships =
-             [this](const crow::request &request, const std::string &image_id) {
-                 return image_relationships_response(request, image_id);
+             [this](const crow::request &request, const std::string &image_id, const std::string &document_id) {
+                 return image_relationships_response(request, image_id, document_id);
              },
          .image_system_program_contexts =
-             [this](const crow::request &request, const std::string &image_id) {
-                 return image_system_program_contexts_response(request, image_id);
+             [this](const crow::request &request, const std::string &image_id, const std::string &document_id) {
+                 return image_system_program_contexts_response(request, image_id, document_id);
              },
          .image_allocation_map =
-             [this](const crow::request &request, const std::string &image_id) {
-                 return image_allocation_map_response(request, image_id);
+             [this](const crow::request &request, const std::string &image_id, const std::string &member_id) {
+                 return image_allocation_map_response(request, image_id, member_id);
              },
          .image_validation =
-             [this](const crow::request &request, const std::string &image_id) {
-                 return image_validation_response(request, image_id);
+             [this](const crow::request &request, const std::string &image_id, const std::string &document_id) {
+                 return image_validation_response(request, image_id, document_id);
              },
-         .image_preview = [this](const crow::request &request,
-                                 const std::string &image_id) { return image_preview_response(request, image_id); },
+         .image_preview =
+             [this](const crow::request &request, const std::string &image_id, const std::string &document_id) {
+                 return image_preview_response(request, image_id, document_id);
+             },
          .audition_content =
              [this](const crow::request &request, const std::string &audition_id) {
                  return audition_content_response(request, audition_id);

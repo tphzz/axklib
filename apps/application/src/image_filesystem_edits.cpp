@@ -30,17 +30,9 @@ Result<ResolvedImageFilesystemEdits>
 ImageSessionManager::resolve_filesystem_edits(std::string_view image_id, std::string_view owner_id,
                                               std::uint64_t expected_revision,
                                               std::span<const ImageFilesystemEdit> edits) {
-    const auto session = implementation_->owned(image_id, owner_id);
-    if (!session)
-        return std::unexpected(session.error());
-    const auto &state = *session;
-    const std::scoped_lock lock{state->access_mutex};
-    if (state->revision != expected_revision)
-        return std::unexpected(session_error("image_revision_stale", "image session revision changed", true));
-    if (state->mutating || !state->media)
-        return std::unexpected(session_error("entry_in_use", "image session is not readable", true));
-    if (const auto unchanged = state->verify_source_unchanged(); !unchanged)
-        return std::unexpected(unchanged.error());
+    auto read = begin_filesystem_read(image_id, owner_id, expected_revision);
+    if (!read)
+        return std::unexpected(read.error());
     if (edits.empty() || edits.size() > 10000U)
         return std::unexpected(session_error("invalid_request", "Choose between 1 and 10000 filesystem changes"));
     std::string move_destination;
@@ -58,14 +50,7 @@ ImageSessionManager::resolve_filesystem_edits(std::string_view image_id, std::st
             return std::holds_alternative<RenameImageFilesystemEntry>(edit);
         }))
         return std::unexpected(session_error("invalid_request", "Rename requires a single-entry edit request"));
-    if (!state->filesystem_index) {
-        auto index = detail::build_image_filesystem(*state->media, state->source_reader, state->snapshots_by_id,
-                                                    state->descriptors_by_id, state->content);
-        if (!index)
-            return std::unexpected(index.error());
-        state->filesystem_index = std::move(*index);
-    }
-    const auto &index = *state->filesystem_index;
+    const auto &index = *read->filesystem;
     if (index.edit_partitions.empty())
         return std::unexpected(
             session_error("unsupported_operation", "Raw editing is unavailable for this filesystem"));
@@ -88,10 +73,12 @@ ImageSessionManager::resolve_filesystem_edits(std::string_view image_id, std::st
                 if (!selected)
                     return std::unexpected(selected.error());
                 const auto &entry = *selected->entry;
-                if (!result.edits.empty() && result.partition != selected->partition)
+                if (!result.edits.empty() &&
+                    (result.partition != selected->partition || result.source_member_id != entry.source_member_id))
                     return std::unexpected(
                         session_error("invalid_request", "Choose entries from one filesystem partition"));
                 result.partition = selected->partition;
+                result.source_member_id = entry.source_member_id;
                 if constexpr (removing || renaming || moving) {
                     if (!entry.parent_id)
                         return std::unexpected(session_error("filesystem_entry_protected",
@@ -112,7 +99,8 @@ ImageSessionManager::resolve_filesystem_edits(std::string_view image_id, std::st
                     auto destination = paths.resolve(request.destination_parent_entry_id);
                     if (!destination)
                         return std::unexpected(destination.error());
-                    if (destination->partition != selected->partition || destination->entry->kind == "file")
+                    if (destination->partition != selected->partition || destination->entry->kind == "file" ||
+                        destination->entry->source_member_id != entry.source_member_id)
                         return std::unexpected(
                             session_error("invalid_request", "Choose a directory in the same partition"));
                     const auto capability = std::ranges::find(index.root_capabilities, entry.root_id,

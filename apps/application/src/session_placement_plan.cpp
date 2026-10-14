@@ -1,4 +1,5 @@
 #include "session_placement_plan.hpp"
+#include "axklib/application/formats/a_series/session_read.hpp"
 
 #include <algorithm>
 #include <array>
@@ -74,7 +75,8 @@ std::size_t PlacementRepairPlan::repair_object_count() const noexcept {
     return result;
 }
 
-Result<PlacementRepairPlan> plan_placement_repair(const ImageSessionRead &session, PlacementRepairScope scope,
+Result<PlacementRepairPlan> plan_placement_repair(const axk::app::formats::a_series::SessionRead &session,
+                                                  PlacementRepairScope scope,
                                                   std::optional<std::string> recovery_volume_name) {
     const auto *container = session.media == nullptr ? nullptr : std::get_if<Container>(&session.media->storage());
     if (container == nullptr ||

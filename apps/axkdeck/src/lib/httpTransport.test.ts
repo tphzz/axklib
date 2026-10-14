@@ -1,12 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { HttpImageTransport } from './httpTransport';
-import {
-    axkObjectDirectoryLocation,
-    clientUploadLocation,
-    serverDirectoryLocation,
-    serverFileLocation,
-} from './storageLocations';
+import { serverDirectoryLocation, clientUploadLocation, serverFileLocation } from './storageLocations';
 import type { FileLocation } from './storageLocations';
 
 const serverFile = (relativePath: string) => serverFileLocation({ rootId: 'workspace', relativePath });
@@ -154,27 +149,52 @@ describe('HttpImageTransport', () => {
                 expect((init?.headers as Record<string, string>).Authorization).toBe('Bearer secret');
                 if (url.pathname.endsWith('/images') && init?.method === 'POST') {
                     expect(JSON.parse(String(init.body))).toEqual({
-                        source: {
-                            kind: 'FILE',
-                            file: { rootId: 'workspace', relativePath: 'images/test.hds' },
-                        },
+                        sources: [
+                            {
+                                kind: 'FILE',
+                                file: { rootId: 'workspace', relativePath: 'images/test.hds' },
+                            },
+                        ],
                     });
                     return completedImageOpen({
                         imageId: 'image-remote',
-                        source: {
-                            kind: 'FILE',
-                            file: { rootId: 'workspace', relativePath: 'images/test.hds' },
-                        },
-                        companionSources: [],
-                        floppySet: null,
-                        format: 'sfs',
-                        rootCount: 1,
-                        objectCount: 2,
-                        relationshipCount: 1,
-                        validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                        sources: [
+                            {
+                                id: 'source-1',
+                                source: {
+                                    kind: 'FILE',
+                                    file: { rootId: 'workspace', relativePath: 'images/test.hds' },
+                                },
+                                format: 'sfs',
+                                filesystemRootIds: ['source-1:sfs-0'],
+                                diagnostics: [],
+                            },
+                        ],
+                        documents: [
+                            {
+                                id: 'document-a-series-source-1',
+                                formatId: 'yamaha.a-series',
+                                profile: 'a-series',
+                                name: 'A-series',
+                                completeness: 'COMPLETE',
+                                sourceMemberIds: ['source-1'],
+                                format: 'sfs',
+                                floppySet: null,
+                                companionSources: [],
+                                validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                                rootCount: 1,
+                                objectCount: 2,
+                                relationshipCount: 1,
+                                availableOperations: [],
+                            },
+                        ],
+                        discovery: { selectionRequired: false, candidates: [] },
                     });
                 }
-                if (url.pathname.endsWith('/images/image-remote/content') && !url.searchParams.has('parentId')) {
+                if (
+                    url.pathname.endsWith('/images/image-remote/documents/document-a-series-source-1/content') &&
+                    !url.searchParams.has('parentId')
+                ) {
                     return json({
                         items: [
                             {
@@ -197,7 +217,7 @@ describe('HttpImageTransport', () => {
                         nextCursor: null,
                     });
                 }
-                if (url.pathname.endsWith('/images/image-remote/content')) {
+                if (url.pathname.endsWith('/images/image-remote/documents/document-a-series-source-1/content')) {
                     expect(url.searchParams.get('parentId')).toBe('partition-1');
                     return json({
                         items: [
@@ -217,15 +237,27 @@ describe('HttpImageTransport', () => {
                         nextCursor: null,
                     });
                 }
-                if (url.pathname.endsWith('/images/image-remote/objects/object-1')) {
+                if (
+                    url.pathname.endsWith('/images/image-remote/documents/document-a-series-source-1/objects/object-1')
+                ) {
                     return json({
+                        formatId: 'yamaha.a-series',
+                        profile: 'a-series',
                         schemaVersion: 1,
-                        image: { imageId: 'image-remote', revision: 1, format: 'sfs' },
+                        image: {
+                            documentId: 'document-a-series-source-1',
+                            imageId: 'image-remote',
+                            revision: 1,
+                            format: 'sfs',
+                        },
                         object: { id: 'object-1', type: 'SMPL', name: 'Tone' },
                         relationships: [{ id: 'relationship-1', selectedObjectRoles: ['SOURCE'] }],
                     });
                 }
-                if (url.pathname.endsWith('/images/image-remote/objects') && !url.searchParams.has('cursor')) {
+                if (
+                    url.pathname.endsWith('/images/image-remote/documents/document-a-series-source-1/objects') &&
+                    !url.searchParams.has('cursor')
+                ) {
                     expect(url.searchParams.get('type')).toBe('SMPL');
                     expect(url.searchParams.get('scopeId')).toBe('volume-1');
                     return json({
@@ -255,7 +287,7 @@ describe('HttpImageTransport', () => {
                         nextCursor: 'objects-next',
                     });
                 }
-                if (url.pathname.endsWith('/images/image-remote/objects')) {
+                if (url.pathname.endsWith('/images/image-remote/documents/document-a-series-source-1/objects')) {
                     expect(url.searchParams.get('cursor')).toBe('objects-next');
                     return json({ items: [], totalCount: 2, nextCursor: null });
                 }
@@ -263,17 +295,37 @@ describe('HttpImageTransport', () => {
                     return json({
                         imageId: 'image-remote',
                         revision: 1,
-                        source: {
-                            kind: 'FILE',
-                            file: { rootId: 'workspace', relativePath: 'images/test.hds' },
-                        },
-                        companionSources: [],
-                        floppySet: null,
-                        format: 'sfs',
-                        rootCount: 1,
-                        objectCount: 2,
-                        relationshipCount: 1,
-                        validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                        sources: [
+                            {
+                                id: 'source-1',
+                                source: {
+                                    kind: 'FILE',
+                                    file: { rootId: 'workspace', relativePath: 'images/test.hds' },
+                                },
+                                format: 'sfs',
+                                filesystemRootIds: ['source-1:sfs-0'],
+                                diagnostics: [],
+                            },
+                        ],
+                        documents: [
+                            {
+                                id: 'document-a-series-source-1',
+                                formatId: 'yamaha.a-series',
+                                profile: 'a-series',
+                                name: 'A-series',
+                                completeness: 'COMPLETE',
+                                sourceMemberIds: ['source-1'],
+                                format: 'sfs',
+                                floppySet: null,
+                                companionSources: [],
+                                validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                                rootCount: 1,
+                                objectCount: 2,
+                                relationshipCount: 1,
+                                availableOperations: [],
+                            },
+                        ],
+                        discovery: { selectionRequired: false, candidates: [] },
                     });
                 }
                 if (url.pathname.endsWith('/images/image-remote') && init?.method === 'DELETE') {
@@ -288,7 +340,7 @@ describe('HttpImageTransport', () => {
             bearerToken: 'secret',
             mode: 'remote',
         });
-        const opened = await transport.openImage(serverFile('images/test.hds'));
+        const opened = await transport.openImage([serverFile('images/test.hds')]);
         expect(opened).toMatchObject({ sessionId: 1, objectTotalCount: 0, initialVolume: { id: 'volume-1' } });
         expect(opened.tree[0]?.children?.[0]).toMatchObject({
             id: 'partition-1',
@@ -396,23 +448,42 @@ describe('HttpImageTransport', () => {
                         result: {
                             imageId: 'image-progress',
                             revision: 1,
-                            source: {
-                                kind: 'FILE',
-                                file: { rootId: 'workspace', relativePath: 'images/progress.hds' },
-                            },
-                            companionSources: [],
-                            floppySet: null,
-                            format: 'sfs',
-                            availableOperations: ['images.content'],
-                            rootCount: 0,
-                            objectCount: 0,
-                            relationshipCount: 0,
-                            validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                            sources: [
+                                {
+                                    id: 'source-1',
+                                    source: {
+                                        kind: 'FILE',
+                                        file: { rootId: 'workspace', relativePath: 'images/progress.hds' },
+                                    },
+                                    format: 'sfs',
+                                    filesystemRootIds: ['source-1:sfs-0'],
+                                    diagnostics: [],
+                                },
+                            ],
+                            documents: [
+                                {
+                                    id: 'document-a-series-source-1',
+                                    formatId: 'yamaha.a-series',
+                                    profile: 'a-series',
+                                    name: 'A-series',
+                                    completeness: 'COMPLETE',
+                                    sourceMemberIds: ['source-1'],
+                                    format: 'sfs',
+                                    floppySet: null,
+                                    companionSources: [],
+                                    validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                                    rootCount: 0,
+                                    objectCount: 0,
+                                    relationshipCount: 0,
+                                    availableOperations: ['images.content'],
+                                },
+                            ],
+                            discovery: { selectionRequired: false, candidates: [] },
                         },
                         error: null,
                     });
                 }
-                if (url.pathname.endsWith('/images/image-progress/content')) {
+                if (url.pathname.endsWith('/images/image-progress/documents/document-a-series-source-1/content')) {
                     return json({ items: [], totalCount: 0, nextCursor: null });
                 }
                 throw new Error(`unexpected request ${init?.method} ${url}`);
@@ -425,7 +496,7 @@ describe('HttpImageTransport', () => {
         });
         const updates: string[] = [];
 
-        await transport.openImage(serverFile('images/progress.hds'), {
+        await transport.openImage([serverFile('images/progress.hds')], {
             onUpdate: (job) => updates.push(`${job.status}:${job.progress?.label ?? ''}`),
         });
 
@@ -439,29 +510,50 @@ describe('HttpImageTransport', () => {
                 const url = new URL(String(input));
                 if (url.pathname.endsWith('/images') && init?.method === 'POST') {
                     expect(JSON.parse(String(init.body))).toEqual({
-                        source: {
-                            kind: 'AXK_OBJECT_DIRECTORY',
-                            directory: { rootId: 'workspace', relativePath: 'unpacked/volume' },
-                        },
+                        sources: [
+                            {
+                                kind: 'DIRECTORY',
+                                directory: { rootId: 'workspace', relativePath: 'unpacked/volume' },
+                            },
+                        ],
                     });
                     return completedImageOpen({
                         imageId: 'directory-image',
                         revision: 1,
-                        source: {
-                            kind: 'AXK_OBJECT_DIRECTORY',
-                            directory: { rootId: 'workspace', relativePath: 'unpacked/volume' },
-                        },
-                        companionSources: [],
-                        floppySet: null,
-                        format: 'axk-object-directory',
-                        availableOperations: ['images.content', 'images.objects', 'images.package.export'],
-                        rootCount: 0,
-                        objectCount: 0,
-                        relationshipCount: 0,
-                        validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                        sources: [
+                            {
+                                id: 'source-1',
+                                source: {
+                                    kind: 'DIRECTORY',
+                                    directory: { rootId: 'workspace', relativePath: 'unpacked/volume' },
+                                },
+                                format: 'axk-object-directory',
+                                filesystemRootIds: ['source-1:sfs-0'],
+                                diagnostics: [],
+                            },
+                        ],
+                        documents: [
+                            {
+                                id: 'document-a-series-source-1',
+                                formatId: 'yamaha.a-series',
+                                profile: 'a-series',
+                                name: 'A-series',
+                                completeness: 'COMPLETE',
+                                sourceMemberIds: ['source-1'],
+                                format: 'axk-object-directory',
+                                floppySet: null,
+                                companionSources: [],
+                                validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                                rootCount: 0,
+                                objectCount: 0,
+                                relationshipCount: 0,
+                                availableOperations: ['images.content', 'images.objects', 'images.package.export'],
+                            },
+                        ],
+                        discovery: { selectionRequired: false, candidates: [] },
                     });
                 }
-                if (url.pathname.endsWith('/images/directory-image/content')) {
+                if (url.pathname.endsWith('/images/directory-image/documents/document-a-series-source-1/content')) {
                     return json({ items: [], totalCount: 0, nextCursor: null });
                 }
                 throw new Error(`unexpected request ${init?.method} ${url}`);
@@ -473,9 +565,9 @@ describe('HttpImageTransport', () => {
             bearerToken: 'secret',
             mode: 'remote',
         });
-        const opened = await transport.openImage(
-            axkObjectDirectoryLocation({ rootId: 'workspace', relativePath: 'unpacked/volume' }),
-        );
+        const opened = await transport.openImage([
+            serverDirectoryLocation({ rootId: 'workspace', relativePath: 'unpacked/volume' }),
+        ]);
         expect(opened).toMatchObject({
             sessionId: 1,
             companionSources: [],
@@ -495,45 +587,83 @@ describe('HttpImageTransport', () => {
                     return completedImageOpen({
                         imageId: 'directory-image',
                         revision: 1,
-                        source: {
-                            kind: 'AXK_OBJECT_DIRECTORY',
-                            directory: { rootId: 'workspace', relativePath: 'set/DISK2' },
-                        },
-                        companionSources: [],
-                        floppySet: null,
-                        format: 'axk-object-directory',
-                        availableOperations: ['images.content'],
-                        rootCount: 0,
-                        objectCount: 1,
-                        relationshipCount: 0,
-                        validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                        sources: [
+                            {
+                                id: 'source-1',
+                                source: {
+                                    kind: 'DIRECTORY',
+                                    directory: { rootId: 'workspace', relativePath: 'set/DISK2' },
+                                },
+                                format: 'axk-object-directory',
+                                filesystemRootIds: ['source-1:sfs-0'],
+                                diagnostics: [],
+                            },
+                        ],
+                        documents: [
+                            {
+                                id: 'document-a-series-source-1',
+                                formatId: 'yamaha.a-series',
+                                profile: 'a-series',
+                                name: 'A-series',
+                                completeness: 'COMPLETE',
+                                sourceMemberIds: ['source-1'],
+                                format: 'axk-object-directory',
+                                floppySet: null,
+                                companionSources: [],
+                                validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                                rootCount: 0,
+                                objectCount: 1,
+                                relationshipCount: 0,
+                                availableOperations: ['images.content'],
+                            },
+                        ],
+                        discovery: { selectionRequired: false, candidates: [] },
                     });
                 }
-                if (url.pathname.endsWith('/images/directory-image/companions')) {
+                if (url.pathname.endsWith('/images/directory-image/documents/document-a-series-source-1/companions')) {
                     requests.push({ path: url.pathname, body: JSON.parse(String(init?.body)) });
                     return json({
                         imageId: 'directory-image',
                         revision: 2,
-                        source: {
-                            kind: 'AXK_OBJECT_DIRECTORY',
-                            directory: { rootId: 'workspace', relativePath: 'set/DISK2' },
-                        },
-                        companionSources: [
+                        sources: [
                             {
-                                kind: 'AXK_OBJECT_DIRECTORY',
-                                directory: { rootId: 'workspace', relativePath: 'set/DISK1' },
+                                id: 'source-1',
+                                source: {
+                                    kind: 'DIRECTORY',
+                                    directory: { rootId: 'workspace', relativePath: 'set/DISK2' },
+                                },
+                                format: 'axk-object-directory',
+                                filesystemRootIds: ['source-1:sfs-0'],
+                                diagnostics: [],
                             },
                         ],
-                        floppySet: null,
-                        format: 'axk-object-directory',
-                        availableOperations: ['images.content'],
-                        rootCount: 0,
-                        objectCount: 1,
-                        relationshipCount: 0,
-                        validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                        documents: [
+                            {
+                                id: 'document-a-series-source-1',
+                                formatId: 'yamaha.a-series',
+                                profile: 'a-series',
+                                name: 'A-series',
+                                completeness: 'COMPLETE',
+                                sourceMemberIds: ['source-1'],
+                                format: 'axk-object-directory',
+                                floppySet: null,
+                                companionSources: [
+                                    {
+                                        kind: 'DIRECTORY',
+                                        directory: { rootId: 'workspace', relativePath: 'set/DISK1' },
+                                    },
+                                ],
+                                validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                                rootCount: 0,
+                                objectCount: 1,
+                                relationshipCount: 0,
+                                availableOperations: ['images.content'],
+                            },
+                        ],
+                        discovery: { selectionRequired: false, candidates: [] },
                     });
                 }
-                if (url.pathname.endsWith('/images/directory-image/content')) {
+                if (url.pathname.endsWith('/images/directory-image/documents/document-a-series-source-1/content')) {
                     return json({ items: [], totalCount: 0, nextCursor: null });
                 }
                 throw new Error(`unexpected request ${init?.method} ${url}`);
@@ -545,19 +675,19 @@ describe('HttpImageTransport', () => {
             bearerToken: 'secret',
             mode: 'remote',
         });
-        const opened = await transport.openImage(
-            axkObjectDirectoryLocation({ rootId: 'workspace', relativePath: 'set/DISK2' }),
-        );
+        const opened = await transport.openImage([
+            serverDirectoryLocation({ rootId: 'workspace', relativePath: 'set/DISK2' }),
+        ]);
         const attached = await transport.attachCompanions(opened.sessionId, {
             kind: 'sources',
-            sources: [axkObjectDirectoryLocation({ rootId: 'workspace', relativePath: 'set/DISK1' })],
+            sources: [serverDirectoryLocation({ rootId: 'workspace', relativePath: 'set/DISK1' })],
         });
 
         expect(attached).toMatchObject({
             sessionId: opened.sessionId,
             companionSources: [
                 {
-                    kind: 'axk-object-directory',
+                    kind: 'server-directory',
                     reference: { rootId: 'workspace', relativePath: 'set/DISK1' },
                     displayName: 'set/DISK1',
                 },
@@ -566,14 +696,14 @@ describe('HttpImageTransport', () => {
         });
         expect(requests).toEqual([
             {
-                path: '/api/v1/images/directory-image/companions',
+                path: '/api/v1/images/directory-image/documents/document-a-series-source-1/companions',
                 body: {
                     expectedRevision: 1,
                     selection: {
                         kind: 'SOURCES',
                         sources: [
                             {
-                                kind: 'AXK_OBJECT_DIRECTORY',
+                                kind: 'DIRECTORY',
                                 directory: { rootId: 'workspace', relativePath: 'set/DISK1' },
                             },
                         ],
@@ -1064,44 +1194,82 @@ describe('HttpImageTransport', () => {
                     return completedImageOpen({
                         imageId: 'image-retained',
                         revision: 1,
-                        source: {
-                            kind: 'FILE',
-                            file: { rootId: 'workspace', relativePath: 'images/base.hds' },
-                        },
-                        companionSources: [],
-                        floppySet: null,
-                        format: 'sfs',
-                        rootCount: 0,
-                        objectCount: 0,
-                        relationshipCount: 0,
-                        availableOperations: [
-                            'images.alter.volumes',
-                            'images.alter.partitions',
-                            'images.alter.objects',
+                        sources: [
+                            {
+                                id: 'source-1',
+                                source: {
+                                    kind: 'FILE',
+                                    file: { rootId: 'workspace', relativePath: 'images/base.hds' },
+                                },
+                                format: 'sfs',
+                                filesystemRootIds: ['source-1:sfs-0'],
+                                diagnostics: [],
+                            },
                         ],
-                        validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                        documents: [
+                            {
+                                id: 'document-a-series-source-1',
+                                formatId: 'yamaha.a-series',
+                                profile: 'a-series',
+                                name: 'A-series',
+                                completeness: 'COMPLETE',
+                                sourceMemberIds: ['source-1'],
+                                format: 'sfs',
+                                floppySet: null,
+                                companionSources: [],
+                                validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                                rootCount: 0,
+                                objectCount: 0,
+                                relationshipCount: 0,
+                                availableOperations: [
+                                    'images.alter.volumes',
+                                    'images.alter.partitions',
+                                    'images.alter.objects',
+                                ],
+                            },
+                        ],
+                        discovery: { selectionRequired: false, candidates: [] },
                     });
                 }
                 if (url.pathname.endsWith('/images/image-retained') && init?.method !== 'POST') {
                     return json({
                         imageId: 'image-retained',
                         revision: 2,
-                        source: {
-                            kind: 'FILE',
-                            file: { rootId: 'workspace', relativePath: 'images/base.hds' },
-                        },
-                        companionSources: [],
-                        floppySet: null,
-                        format: 'sfs',
-                        rootCount: 0,
-                        objectCount: 0,
-                        relationshipCount: 0,
-                        availableOperations: [
-                            'images.alter.volumes',
-                            'images.alter.partitions',
-                            'images.alter.objects',
+                        sources: [
+                            {
+                                id: 'source-1',
+                                source: {
+                                    kind: 'FILE',
+                                    file: { rootId: 'workspace', relativePath: 'images/base.hds' },
+                                },
+                                format: 'sfs',
+                                filesystemRootIds: ['source-1:sfs-0'],
+                                diagnostics: [],
+                            },
                         ],
-                        validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                        documents: [
+                            {
+                                id: 'document-a-series-source-1',
+                                formatId: 'yamaha.a-series',
+                                profile: 'a-series',
+                                name: 'A-series',
+                                completeness: 'COMPLETE',
+                                sourceMemberIds: ['source-1'],
+                                format: 'sfs',
+                                floppySet: null,
+                                companionSources: [],
+                                validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                                rootCount: 0,
+                                objectCount: 0,
+                                relationshipCount: 0,
+                                availableOperations: [
+                                    'images.alter.volumes',
+                                    'images.alter.partitions',
+                                    'images.alter.objects',
+                                ],
+                            },
+                        ],
+                        discovery: { selectionRequired: false, candidates: [] },
                     });
                 }
                 if (url.pathname.endsWith('/content')) {
@@ -1132,7 +1300,7 @@ describe('HttpImageTransport', () => {
             mode: 'remote',
         });
         const source = serverFile('images/base.hds');
-        const opened = await transport.openImage(source);
+        const opened = await transport.openImage([source]);
         await transport.startVolumeMutations(opened.sessionId, [
             {
                 kind: 'add',
@@ -1199,6 +1367,7 @@ describe('HttpImageTransport', () => {
 
         expect(alterationBodies).toEqual([
             {
+                documentId: 'document-a-series-source-1',
                 imageId: 'image-retained',
                 expectedRevision: 1,
                 manifest: {
@@ -1217,6 +1386,7 @@ describe('HttpImageTransport', () => {
                 inputBindings: [],
             },
             {
+                documentId: 'document-a-series-source-1',
                 imageId: 'image-retained',
                 expectedRevision: 2,
                 manifest: {
@@ -1236,6 +1406,7 @@ describe('HttpImageTransport', () => {
                 inputBindings: [],
             },
             {
+                documentId: 'document-a-series-source-1',
                 imageId: 'image-retained',
                 expectedRevision: 2,
                 manifest: {
@@ -1260,6 +1431,7 @@ describe('HttpImageTransport', () => {
                 inputBindings: [],
             },
             {
+                documentId: 'document-a-series-source-1',
                 imageId: 'image-retained',
                 expectedRevision: 2,
                 manifest: {
@@ -1279,6 +1451,7 @@ describe('HttpImageTransport', () => {
                 inputBindings: [],
             },
             {
+                documentId: 'document-a-series-source-1',
                 imageId: 'image-retained',
                 expectedRevision: 2,
                 manifest: {
@@ -1299,6 +1472,7 @@ describe('HttpImageTransport', () => {
                 inputBindings: [],
             },
             {
+                documentId: 'document-a-series-source-1',
                 imageId: 'image-retained',
                 expectedRevision: 2,
                 manifest: {
@@ -1319,6 +1493,7 @@ describe('HttpImageTransport', () => {
                 inputBindings: [],
             },
             {
+                documentId: 'document-a-series-source-1',
                 imageId: 'image-retained',
                 expectedRevision: 2,
                 manifest: {
@@ -1339,6 +1514,7 @@ describe('HttpImageTransport', () => {
                 inputBindings: [],
             },
             {
+                documentId: 'document-a-series-source-1',
                 imageId: 'image-retained',
                 expectedRevision: 2,
                 manifest: {
@@ -1427,22 +1603,41 @@ describe('HttpImageTransport', () => {
                     return completedImageOpen({
                         imageId: 'image-repair',
                         revision: 4,
-                        source: {
-                            kind: 'FILE',
-                            file: { rootId: 'workspace', relativePath: 'images/base.hds' },
-                        },
-                        companionSources: [],
-                        floppySet: null,
-                        format: 'sfs',
-                        rootCount: 0,
-                        objectCount: 2,
-                        relationshipCount: 1,
-                        availableOperations: [
-                            'images.alter.volumes',
-                            'images.placement.inspect',
-                            'images.placement.repair',
+                        sources: [
+                            {
+                                id: 'source-1',
+                                source: {
+                                    kind: 'FILE',
+                                    file: { rootId: 'workspace', relativePath: 'images/base.hds' },
+                                },
+                                format: 'sfs',
+                                filesystemRootIds: ['source-1:sfs-0'],
+                                diagnostics: [],
+                            },
                         ],
-                        validation: { valid: false, infoCount: 0, warningCount: 1, errorCount: 0 },
+                        documents: [
+                            {
+                                id: 'document-a-series-source-1',
+                                formatId: 'yamaha.a-series',
+                                profile: 'a-series',
+                                name: 'A-series',
+                                completeness: 'COMPLETE',
+                                sourceMemberIds: ['source-1'],
+                                format: 'sfs',
+                                floppySet: null,
+                                companionSources: [],
+                                validation: { valid: false, infoCount: 0, warningCount: 1, errorCount: 0 },
+                                rootCount: 0,
+                                objectCount: 2,
+                                relationshipCount: 1,
+                                availableOperations: [
+                                    'images.alter.volumes',
+                                    'images.placement.inspect',
+                                    'images.placement.repair',
+                                ],
+                            },
+                        ],
+                        discovery: { selectionRequired: false, candidates: [] },
                     });
                 }
                 if (url.pathname.endsWith('/content')) {
@@ -1488,6 +1683,7 @@ describe('HttpImageTransport', () => {
                 if (url.pathname.endsWith('/image-placement-repair-preparations')) {
                     bodies.set('prepare', JSON.parse(String(init?.body)));
                     return json({
+                        documentId: 'document-a-series-source-1',
                         imageId: 'image-repair',
                         expectedRevision: 4,
                         manifest: { schemaVersion: '1.0', operations: [] },
@@ -1517,7 +1713,7 @@ describe('HttpImageTransport', () => {
             bearerToken: 'secret',
             mode: 'remote',
         });
-        const opened = await transport.openImage(serverFile('images/base.hds'));
+        const opened = await transport.openImage([serverFile('images/base.hds')]);
         const deletionTargets = [{ partitionIndex: 0, volumeName: 'Samples' }];
         const deletion = await transport.inspectVolumeDeletion(opened.sessionId, deletionTargets);
         expect(deletion).toMatchObject({ canDelete: false, crossingRelationshipCount: 1 });
@@ -1527,17 +1723,20 @@ describe('HttpImageTransport', () => {
         const repair = await transport.startPlacementRepair(opened.sessionId, scope);
         expect(repair).toMatchObject({ kind: 'images.alter', status: 'queued' });
         expect(bodies.get('inspect')).toEqual({
+            documentId: 'document-a-series-source-1',
             imageId: 'image-repair',
             expectedRevision: 4,
             targets: deletionTargets,
         });
         expect(bodies.get('placementInspect')).toEqual({
+            documentId: 'document-a-series-source-1',
             imageId: 'image-repair',
             expectedRevision: 4,
             scope,
         });
         expect(bodies.get('prepare')).toEqual(bodies.get('placementInspect'));
         expect(bodies.get('repair')).toEqual({
+            documentId: 'document-a-series-source-1',
             imageId: 'image-repair',
             expectedRevision: 4,
             manifest: { schemaVersion: '1.0', operations: [] },
@@ -1586,18 +1785,37 @@ describe('HttpImageTransport', () => {
                     return completedImageOpen({
                         imageId: 'image-delete',
                         revision: 7,
-                        source: {
-                            kind: 'FILE',
-                            file: { rootId: 'workspace', relativePath: 'images/base.hds' },
-                        },
-                        companionSources: [],
-                        floppySet: null,
-                        format: 'sfs',
-                        rootCount: 0,
-                        objectCount: 3,
-                        relationshipCount: 2,
-                        availableOperations: ['images.alter.objects'],
-                        validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                        sources: [
+                            {
+                                id: 'source-1',
+                                source: {
+                                    kind: 'FILE',
+                                    file: { rootId: 'workspace', relativePath: 'images/base.hds' },
+                                },
+                                format: 'sfs',
+                                filesystemRootIds: ['source-1:sfs-0'],
+                                diagnostics: [],
+                            },
+                        ],
+                        documents: [
+                            {
+                                id: 'document-a-series-source-1',
+                                formatId: 'yamaha.a-series',
+                                profile: 'a-series',
+                                name: 'A-series',
+                                completeness: 'COMPLETE',
+                                sourceMemberIds: ['source-1'],
+                                format: 'sfs',
+                                floppySet: null,
+                                companionSources: [],
+                                validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                                rootCount: 0,
+                                objectCount: 3,
+                                relationshipCount: 2,
+                                availableOperations: ['images.alter.objects'],
+                            },
+                        ],
+                        discovery: { selectionRequired: false, candidates: [] },
                     });
                 }
                 if (url.pathname.endsWith('/content')) {
@@ -1676,7 +1894,7 @@ describe('HttpImageTransport', () => {
             bearerToken: 'secret',
             mode: 'remote',
         });
-        const opened = await transport.openImage(serverFile('images/base.hds'));
+        const opened = await transport.openImage([serverFile('images/base.hds')]);
         expect(opened.objectDeletionAvailable).toBe(true);
 
         const inspection = await transport.inspectObjectDeletion(
@@ -1694,6 +1912,7 @@ describe('HttpImageTransport', () => {
         expect(job).toMatchObject({ kind: 'images.delete', status: 'queued' });
 
         const expected = {
+            documentId: 'document-a-series-source-1',
             imageId: 'image-delete',
             expectedRevision: 7,
             targetObjectIds: ['object-sample'],
@@ -1734,18 +1953,37 @@ describe('HttpImageTransport', () => {
                     return completedImageOpen({
                         imageId: 'image-cleanup',
                         revision: 11,
-                        source: {
-                            kind: 'FILE',
-                            file: { rootId: 'workspace', relativePath: 'images/base.hds' },
-                        },
-                        companionSources: [],
-                        floppySet: null,
-                        format: 'sfs',
-                        rootCount: 0,
-                        objectCount: 1,
-                        relationshipCount: 0,
-                        availableOperations: ['images.deletion.orphans.inspect'],
-                        validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                        sources: [
+                            {
+                                id: 'source-1',
+                                source: {
+                                    kind: 'FILE',
+                                    file: { rootId: 'workspace', relativePath: 'images/base.hds' },
+                                },
+                                format: 'sfs',
+                                filesystemRootIds: ['source-1:sfs-0'],
+                                diagnostics: [],
+                            },
+                        ],
+                        documents: [
+                            {
+                                id: 'document-a-series-source-1',
+                                formatId: 'yamaha.a-series',
+                                profile: 'a-series',
+                                name: 'A-series',
+                                completeness: 'COMPLETE',
+                                sourceMemberIds: ['source-1'],
+                                format: 'sfs',
+                                floppySet: null,
+                                companionSources: [],
+                                validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                                rootCount: 0,
+                                objectCount: 1,
+                                relationshipCount: 0,
+                                availableOperations: ['images.deletion.orphans.inspect'],
+                            },
+                        ],
+                        discovery: { selectionRequired: false, candidates: [] },
                     });
                 }
                 if (url.pathname.endsWith('/content')) {
@@ -1782,7 +2020,7 @@ describe('HttpImageTransport', () => {
             bearerToken: 'secret',
             mode: 'remote',
         });
-        const opened = await transport.openImage(serverFile('images/base.hds'));
+        const opened = await transport.openImage([serverFile('images/base.hds')]);
         expect(opened.waveDataCleanupAvailable).toBe(true);
 
         const inspection = await transport.inspectWaveDataOrphans(opened.sessionId, 'volume-7');
@@ -1792,6 +2030,7 @@ describe('HttpImageTransport', () => {
             candidates: [{ objectId: 'object-wave', objectName: 'Unused Wave' }],
         });
         expect(inspectionBody).toEqual({
+            documentId: 'document-a-series-source-1',
             imageId: 'image-cleanup',
             expectedRevision: 11,
             contentScopeId: 'volume-7',
@@ -1852,18 +2091,37 @@ describe('HttpImageTransport', () => {
                     return completedImageOpen({
                         imageId: 'image-programs',
                         revision: 5,
-                        source: {
-                            kind: 'FILE',
-                            file: { rootId: 'workspace', relativePath: 'images/base.hds' },
-                        },
-                        companionSources: [],
-                        floppySet: null,
-                        format: 'sfs',
-                        rootCount: 0,
-                        objectCount: 2,
-                        relationshipCount: 1,
-                        availableOperations: ['images.programs.generate.inspect', 'images.programs.generate'],
-                        validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                        sources: [
+                            {
+                                id: 'source-1',
+                                source: {
+                                    kind: 'FILE',
+                                    file: { rootId: 'workspace', relativePath: 'images/base.hds' },
+                                },
+                                format: 'sfs',
+                                filesystemRootIds: ['source-1:sfs-0'],
+                                diagnostics: [],
+                            },
+                        ],
+                        documents: [
+                            {
+                                id: 'document-a-series-source-1',
+                                formatId: 'yamaha.a-series',
+                                profile: 'a-series',
+                                name: 'A-series',
+                                completeness: 'COMPLETE',
+                                sourceMemberIds: ['source-1'],
+                                format: 'sfs',
+                                floppySet: null,
+                                companionSources: [],
+                                validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                                rootCount: 0,
+                                objectCount: 2,
+                                relationshipCount: 1,
+                                availableOperations: ['images.programs.generate.inspect', 'images.programs.generate'],
+                            },
+                        ],
+                        discovery: { selectionRequired: false, candidates: [] },
                     });
                 }
                 if (url.pathname.endsWith('/content')) {
@@ -1892,6 +2150,7 @@ describe('HttpImageTransport', () => {
                 if (url.pathname.endsWith('/image-program-generation-preparations')) {
                     bodies.set('prepare', JSON.parse(String(init?.body)));
                     return json({
+                        documentId: 'document-a-series-source-1',
                         imageId: 'image-programs',
                         expectedRevision: 5,
                         manifest: { schemaVersion: '1.0', operations: [] },
@@ -1921,7 +2180,7 @@ describe('HttpImageTransport', () => {
             bearerToken: 'secret',
             mode: 'remote',
         });
-        const opened = await transport.openImage(serverFile('images/base.hds'));
+        const opened = await transport.openImage([serverFile('images/base.hds')]);
         expect(opened.programGenerationAvailable).toBe(true);
 
         const inspection = await transport.inspectProgramGeneration(opened.sessionId, 'volume-1');
@@ -1932,17 +2191,20 @@ describe('HttpImageTransport', () => {
         const job = await transport.startProgramGeneration(opened.sessionId, 'volume-1', programs);
         expect(job).toMatchObject({ kind: 'images.alter', status: 'queued' });
         expect(bodies.get('inspect')).toEqual({
+            documentId: 'document-a-series-source-1',
             imageId: 'image-programs',
             expectedRevision: 5,
             contentScopeId: 'volume-1',
         });
         expect(bodies.get('prepare')).toEqual({
+            documentId: 'document-a-series-source-1',
             imageId: 'image-programs',
             expectedRevision: 5,
             contentScopeId: 'volume-1',
             programs,
         });
         expect(bodies.get('generate')).toEqual({
+            documentId: 'document-a-series-source-1',
             imageId: 'image-programs',
             expectedRevision: 5,
             manifest: { schemaVersion: '1.0', operations: [] },
@@ -1991,21 +2253,40 @@ describe('HttpImageTransport', () => {
                     return completedImageOpen({
                         imageId: 'image-cleanup',
                         revision: 6,
-                        source: {
-                            kind: 'FILE',
-                            file: { rootId: 'workspace', relativePath: 'images/base.hds' },
-                        },
-                        companionSources: [],
-                        floppySet: null,
-                        format: 'sfs',
-                        rootCount: 0,
-                        objectCount: 1,
-                        relationshipCount: 1,
-                        availableOperations: [
-                            'images.program_assignments.cleanup.inspect',
-                            'images.program_assignments.cleanup',
+                        sources: [
+                            {
+                                id: 'source-1',
+                                source: {
+                                    kind: 'FILE',
+                                    file: { rootId: 'workspace', relativePath: 'images/base.hds' },
+                                },
+                                format: 'sfs',
+                                filesystemRootIds: ['source-1:sfs-0'],
+                                diagnostics: [],
+                            },
                         ],
-                        validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                        documents: [
+                            {
+                                id: 'document-a-series-source-1',
+                                formatId: 'yamaha.a-series',
+                                profile: 'a-series',
+                                name: 'A-series',
+                                completeness: 'COMPLETE',
+                                sourceMemberIds: ['source-1'],
+                                format: 'sfs',
+                                floppySet: null,
+                                companionSources: [],
+                                validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                                rootCount: 0,
+                                objectCount: 1,
+                                relationshipCount: 1,
+                                availableOperations: [
+                                    'images.program_assignments.cleanup.inspect',
+                                    'images.program_assignments.cleanup',
+                                ],
+                            },
+                        ],
+                        discovery: { selectionRequired: false, candidates: [] },
                     });
                 }
                 if (url.pathname.endsWith('/content')) {
@@ -2058,7 +2339,7 @@ describe('HttpImageTransport', () => {
             bearerToken: 'secret',
             mode: 'remote',
         });
-        const opened = await transport.openImage(serverFile('images/base.hds'));
+        const opened = await transport.openImage([serverFile('images/base.hds')]);
         expect(opened.programAssignmentCleanupAvailable).toBe(true);
 
         const inspection = await transport.inspectProgramAssignmentCleanup(opened.sessionId, 'volume-1');
@@ -2069,11 +2350,13 @@ describe('HttpImageTransport', () => {
         const job = await transport.startProgramAssignmentCleanup(opened.sessionId, 'volume-1', assignments);
         expect(job).toMatchObject({ kind: 'images.program_assignments.cleanup', status: 'queued' });
         expect(bodies.get('inspect')).toEqual({
+            documentId: 'document-a-series-source-1',
             imageId: 'image-cleanup',
             expectedRevision: 6,
             contentScopeId: 'volume-1',
         });
         expect(bodies.get('cleanup')).toEqual({
+            documentId: 'document-a-series-source-1',
             imageId: 'image-cleanup',
             expectedRevision: 6,
             contentScopeId: 'volume-1',
@@ -2111,18 +2394,37 @@ describe('HttpImageTransport', () => {
                     return completedImageOpen({
                         imageId: 'image-audio',
                         revision: 1,
-                        source: {
-                            kind: 'FILE',
-                            file: { rootId: 'workspace', relativePath: 'images/base.hds' },
-                        },
-                        companionSources: [],
-                        floppySet: null,
-                        format: 'sfs',
-                        rootCount: 0,
-                        objectCount: 0,
-                        relationshipCount: 0,
-                        availableOperations: ['images.alter.volumes'],
-                        validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                        sources: [
+                            {
+                                id: 'source-1',
+                                source: {
+                                    kind: 'FILE',
+                                    file: { rootId: 'workspace', relativePath: 'images/base.hds' },
+                                },
+                                format: 'sfs',
+                                filesystemRootIds: ['source-1:sfs-0'],
+                                diagnostics: [],
+                            },
+                        ],
+                        documents: [
+                            {
+                                id: 'document-a-series-source-1',
+                                formatId: 'yamaha.a-series',
+                                profile: 'a-series',
+                                name: 'A-series',
+                                completeness: 'COMPLETE',
+                                sourceMemberIds: ['source-1'],
+                                format: 'sfs',
+                                floppySet: null,
+                                companionSources: [],
+                                validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                                rootCount: 0,
+                                objectCount: 0,
+                                relationshipCount: 0,
+                                availableOperations: ['images.alter.volumes'],
+                            },
+                        ],
+                        discovery: { selectionRequired: false, candidates: [] },
                     });
                 }
                 if (url.pathname.endsWith('/content')) {
@@ -2154,7 +2456,7 @@ describe('HttpImageTransport', () => {
         });
         const mono = clientUploadLocation({ uploadId: 'upload-mono' }, 'AUDIO', 'mono.wav');
         const stereo = serverFile('audio/stereo.flac');
-        const opened = await transport.openImage(serverFile('images/base.hds'));
+        const opened = await transport.openImage([serverFile('images/base.hds')]);
         const job = await transport.startAudioImport(
             opened.sessionId,
             { kind: 'EXISTING_VOLUME', partitionIndex: 3, volumeName: 'Imported' },
@@ -2195,6 +2497,7 @@ describe('HttpImageTransport', () => {
 
         expect(job).toMatchObject({ jobId: 2, kind: 'images.alter', status: 'queued' });
         expect(alterationBody).toEqual({
+            documentId: 'document-a-series-source-1',
             imageId: 'image-audio',
             expectedRevision: 1,
             manifest: {
@@ -2334,18 +2637,37 @@ describe('HttpImageTransport', () => {
                     return completedImageOpen({
                         imageId: 'image-midi',
                         revision: 4,
-                        source: {
-                            kind: 'FILE',
-                            file: { rootId: 'workspace', relativePath: 'images/base.hds' },
-                        },
-                        companionSources: [],
-                        floppySet: null,
-                        format: 'sfs',
-                        rootCount: 0,
-                        objectCount: 0,
-                        relationshipCount: 0,
-                        availableOperations: ['images.alter.objects'],
-                        validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                        sources: [
+                            {
+                                id: 'source-1',
+                                source: {
+                                    kind: 'FILE',
+                                    file: { rootId: 'workspace', relativePath: 'images/base.hds' },
+                                },
+                                format: 'sfs',
+                                filesystemRootIds: ['source-1:sfs-0'],
+                                diagnostics: [],
+                            },
+                        ],
+                        documents: [
+                            {
+                                id: 'document-a-series-source-1',
+                                formatId: 'yamaha.a-series',
+                                profile: 'a-series',
+                                name: 'A-series',
+                                completeness: 'COMPLETE',
+                                sourceMemberIds: ['source-1'],
+                                format: 'sfs',
+                                floppySet: null,
+                                companionSources: [],
+                                validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                                rootCount: 0,
+                                objectCount: 0,
+                                relationshipCount: 0,
+                                availableOperations: ['images.alter.objects'],
+                            },
+                        ],
+                        discovery: { selectionRequired: false, candidates: [] },
                     });
                 }
                 if (url.pathname.endsWith('/content')) {
@@ -2377,7 +2699,7 @@ describe('HttpImageTransport', () => {
         });
         const uploaded = clientUploadLocation({ uploadId: 'upload-midi' }, 'MIDI', 'Intro.mid');
         const workspace = serverFile('midi/Ending.midi');
-        const opened = await transport.openImage(serverFile('images/base.hds'));
+        const opened = await transport.openImage([serverFile('images/base.hds')]);
         await transport.startSequenceImport(
             opened.sessionId,
             { kind: 'EXISTING_VOLUME', partitionIndex: 2, volumeName: 'Songs' },
@@ -2389,6 +2711,7 @@ describe('HttpImageTransport', () => {
         );
 
         expect(alterationBody).toEqual({
+            documentId: 'document-a-series-source-1',
             imageId: 'image-midi',
             expectedRevision: 4,
             manifest: {
@@ -2437,7 +2760,7 @@ describe('HttpImageTransport', () => {
             mode: 'remote',
         });
         const desktopPath = { kind: 'native-file', path: 'C:\\Users\\example\\disk.hds' } as unknown as FileLocation;
-        await expect(transport.openImage(desktopPath)).rejects.toThrow('server sandbox file selection');
+        await expect(transport.openImage([desktopPath])).rejects.toThrow('Select one to 32 files or folders');
     });
 
     it('binds a temporary manifest upload directly without materializing a sandbox copy', async () => {
@@ -2897,27 +3220,46 @@ describe('HttpImageTransport', () => {
                     return completedImageOpen({
                         imageId: 'image-package',
                         revision: 7,
-                        source: {
-                            kind: 'FILE',
-                            file: { rootId: 'workspace', relativePath: 'images/base.hds' },
-                        },
-                        companionSources: [],
-                        floppySet: null,
-                        format: 'sfs',
-                        rootCount: 1,
-                        objectCount: 2,
-                        relationshipCount: 1,
-                        availableOperations: [
-                            'images.package.import',
-                            'images.package.export',
-                            'images.volume_package_export',
-                            'images.volume_floppy_export',
-                            'images.audio_export',
+                        sources: [
+                            {
+                                id: 'source-1',
+                                source: {
+                                    kind: 'FILE',
+                                    file: { rootId: 'workspace', relativePath: 'images/base.hds' },
+                                },
+                                format: 'sfs',
+                                filesystemRootIds: ['source-1:sfs-0'],
+                                diagnostics: [],
+                            },
                         ],
-                        validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                        documents: [
+                            {
+                                id: 'document-a-series-source-1',
+                                formatId: 'yamaha.a-series',
+                                profile: 'a-series',
+                                name: 'A-series',
+                                completeness: 'COMPLETE',
+                                sourceMemberIds: ['source-1'],
+                                format: 'sfs',
+                                floppySet: null,
+                                companionSources: [],
+                                validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                                rootCount: 1,
+                                objectCount: 2,
+                                relationshipCount: 1,
+                                availableOperations: [
+                                    'images.package.import',
+                                    'images.package.export',
+                                    'images.volume_package_export',
+                                    'images.volume_floppy_export',
+                                    'images.audio_export',
+                                ],
+                            },
+                        ],
+                        discovery: { selectionRequired: false, candidates: [] },
                     });
                 }
-                if (url.pathname.endsWith('/images/image-package/content')) {
+                if (url.pathname.endsWith('/images/image-package/documents/document-a-series-source-1/content')) {
                     return json({ items: [], totalCount: 0, nextCursor: null });
                 }
                 if (url.pathname.endsWith('/image-session-package-import-plans')) {
@@ -3052,7 +3394,7 @@ describe('HttpImageTransport', () => {
             bearerToken: 'secret',
             mode: 'remote',
         });
-        const opened = await transport.openImage(serverFile('images/base.hds'));
+        const opened = await transport.openImage([serverFile('images/base.hds')]);
         expect(opened).toMatchObject({
             packageImportAvailable: true,
             packageExportAvailable: true,
@@ -3139,6 +3481,7 @@ describe('HttpImageTransport', () => {
 
         const planRequests = requests.filter((request) => request.path.endsWith('image-session-package-import-plans'));
         expect(planRequests[0]?.body).toEqual({
+            documentId: 'document-a-series-source-1',
             imageId: 'image-package',
             expectedRevision: 7,
             packages: [{ fileRef: { rootId: 'workspace', relativePath: 'packages/drums.axkvol' } }],
@@ -3148,6 +3491,7 @@ describe('HttpImageTransport', () => {
             opaqueSequenceDecisions: [],
         });
         expect(planRequests[1]?.body).toEqual({
+            documentId: 'document-a-series-source-1',
             imageId: 'image-package',
             expectedRevision: 7,
             packages: [{ fileRef: { rootId: 'workspace', relativePath: 'packages/drums.axkvol' } }],
@@ -3158,6 +3502,7 @@ describe('HttpImageTransport', () => {
             opaqueSequenceDecisions: [],
         });
         expect(requests.find((request) => request.path.endsWith('image-session-package-exports'))?.body).toEqual({
+            documentId: 'document-a-series-source-1',
             imageId: 'image-package',
             expectedRevision: 7,
             roots: [
@@ -3168,9 +3513,15 @@ describe('HttpImageTransport', () => {
         });
         expect(
             requests.find((request) => request.path.endsWith('image-session-volume-package-export-inspections'))?.body,
-        ).toEqual({ imageId: 'image-package', expectedRevision: 7, scopeId: 'content-partition-0' });
+        ).toEqual({
+            documentId: 'document-a-series-source-1',
+            imageId: 'image-package',
+            expectedRevision: 7,
+            scopeId: 'content-partition-0',
+        });
         expect(requests.find((request) => request.path.endsWith('image-session-volume-package-exports'))?.body).toEqual(
             {
+                documentId: 'document-a-series-source-1',
                 imageId: 'image-package',
                 expectedRevision: 7,
                 scopeId: 'content-partition-0',
@@ -3180,12 +3531,14 @@ describe('HttpImageTransport', () => {
         expect(
             requests.find((request) => request.path.endsWith('image-session-audio-export-inspections'))?.body,
         ).toEqual({
+            documentId: 'document-a-series-source-1',
             imageId: 'image-package',
             expectedRevision: 7,
             selectionMode: 'DEPENDENCY_CLOSURE',
             roots: [{ kind: 'SBAC', objectId: 'object-bank' }],
         });
         expect(requests.find((request) => request.path.endsWith('image-session-audio-exports'))?.body).toEqual({
+            documentId: 'document-a-series-source-1',
             imageId: 'image-package',
             expectedRevision: 7,
             selectionMode: 'DEPENDENCY_CLOSURE',
@@ -3207,23 +3560,43 @@ describe('HttpImageTransport', () => {
                 if (url.pathname.endsWith('/images') && init?.method === 'POST') {
                     return completedImageOpen({
                         imageId: 'image-remote',
-                        source: {
-                            kind: 'FILE',
-                            file: { rootId: 'workspace', relativePath: 'images/base.hds' },
-                        },
-                        companionSources: [],
-                        floppySet: null,
-                        format: 'sfs',
-                        rootCount: 1,
-                        objectCount: 1,
-                        relationshipCount: 0,
-                        validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                        sources: [
+                            {
+                                id: 'source-1',
+                                source: {
+                                    kind: 'FILE',
+                                    file: { rootId: 'workspace', relativePath: 'images/base.hds' },
+                                },
+                                format: 'sfs',
+                                filesystemRootIds: ['source-1:sfs-0'],
+                                diagnostics: [],
+                            },
+                        ],
+                        documents: [
+                            {
+                                id: 'document-a-series-source-1',
+                                formatId: 'yamaha.a-series',
+                                profile: 'a-series',
+                                name: 'A-series',
+                                completeness: 'COMPLETE',
+                                sourceMemberIds: ['source-1'],
+                                format: 'sfs',
+                                floppySet: null,
+                                companionSources: [],
+                                validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                                rootCount: 1,
+                                objectCount: 1,
+                                relationshipCount: 0,
+                                availableOperations: [],
+                            },
+                        ],
+                        discovery: { selectionRequired: false, candidates: [] },
                     });
                 }
-                if (url.pathname.endsWith('/images/image-remote/content')) {
+                if (url.pathname.endsWith('/images/image-remote/documents/document-a-series-source-1/content')) {
                     return json({ items: [], totalCount: 0, nextCursor: null });
                 }
-                if (url.pathname.endsWith('/images/image-remote/objects')) {
+                if (url.pathname.endsWith('/images/image-remote/documents/document-a-series-source-1/objects')) {
                     return json({ items: [], totalCount: 0, nextCursor: null });
                 }
                 if (url.pathname.endsWith('/system/capabilities')) {
@@ -3370,7 +3743,7 @@ describe('HttpImageTransport', () => {
             bearerToken: 'remote-secret',
             mode: 'remote',
         });
-        const opened = await transport.openImage(serverFile('images/base.hds'));
+        const opened = await transport.openImage([serverFile('images/base.hds')]);
         const audio = clientUploadLocation({ uploadId: 'audio-upload' }, 'AUDIO', 'tone.wav');
         await expect(
             transport.planAlter(

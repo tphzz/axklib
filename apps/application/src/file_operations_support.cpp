@@ -92,11 +92,11 @@ axk::app::Result<InfoRequest> parse_info_request(const Json &input) {
                 const auto &file = source.at("file");
                 result.sources.push_back({file.at("rootId").get<std::string>(),
                                           file.at("relativePath").get<std::string>(), axk::app::ImageSourceKind::file});
-            } else if (kind == "AXK_OBJECT_DIRECTORY") {
+            } else if (kind == "DIRECTORY") {
                 const auto &directory = source.at("directory");
                 result.sources.push_back({directory.at("rootId").get<std::string>(),
                                           directory.at("relativePath").get<std::string>(),
-                                          axk::app::ImageSourceKind::axk_object_directory});
+                                          axk::app::ImageSourceKind::directory});
             } else {
                 return std::unexpected(operation_error("invalid_request", "info source kind is unsupported"));
             }

@@ -19,6 +19,13 @@ axk::app::Result<axk::app::SandboxTree> axk::app::Sandbox::open_tree(const Direc
 #endif
     if (!opened_root)
         return std::unexpected(opened_root.error());
+#if defined(_WIN32)
+    auto root_identity = native_identity(opened_root->get(), reference.relative_path);
+#else
+    auto root_identity = native_identity(**opened_root, reference.relative_path);
+#endif
+    if (!root_identity)
+        return std::unexpected(root_identity.error());
 
     struct PendingDirectory {
         std::filesystem::path relative;
@@ -224,12 +231,32 @@ axk::app::Result<axk::app::SandboxTree> axk::app::Sandbox::open_tree(const Direc
     }
     std::ranges::sort(collected, {}, [](const auto &value) { return value.entry.relative_path; });
     auto implementation = std::make_unique<SandboxTree::Implementation>();
+    implementation->root_identity = *root_identity;
     implementation->root = std::move(*opened_root);
     implementation->entries.reserve(collected.size());
     implementation->identities.reserve(collected.size());
     for (auto &value : collected) {
+        value.entry.revision = revision_token(value.identity);
         implementation->entries.push_back(std::move(value.entry));
         implementation->identities.push_back(std::move(value.identity));
     }
     return SandboxTree{std::move(implementation)};
+}
+
+std::string axk::app::SandboxTree::revision() const {
+    return implementation_ ? revision_token(implementation_->root_identity) : std::string{};
+}
+
+axk::app::Result<void> axk::app::SandboxTree::verify_same_tree(const SandboxTree &current) const {
+    if (!implementation_ || !current.implementation_ ||
+        !same_file_revision(implementation_->root_identity, current.implementation_->root_identity) ||
+        !std::ranges::equal(implementation_->identities, current.implementation_->identities, same_file_revision) ||
+        !std::ranges::equal(
+            implementation_->entries, current.implementation_->entries, [](const auto &left, const auto &right) {
+                return left.relative_path == right.relative_path && left.kind == right.kind && left.size == right.size;
+            })) {
+        return std::unexpected(
+            Error{"image_source_changed", "Directory identity or membership changed after admission"});
+    }
+    return {};
 }

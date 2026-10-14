@@ -29,11 +29,18 @@ crow::response ServerApplication::image_filesystem_response(const crow::request 
                                           .object_id = value("objectId"),
                                           .content_scope_id = value("contentScopeId"),
                                           .offset = static_cast<std::size_t>(*offset),
-                                          .limit = static_cast<std::size_t>(*limit)});
+                                          .limit = static_cast<std::size_t>(*limit),
+                                          .document_id = value("documentId")});
     if (!page)
         return error_response(status_for_error(page.error(), 400), page.error(), id);
     Json items = Json::array();
     for (const auto &entry : page->items) {
+        Json bindings = Json::array();
+        for (const auto &binding : entry.bindings)
+            bindings.push_back(
+                {{"documentId", binding.document_id},
+                 {"objectId", binding.object_id ? Json(*binding.object_id) : Json{}},
+                 {"contentScopeId", binding.content_scope_id ? Json(*binding.content_scope_id) : Json{}}});
         Json attributes = Json::array();
         for (const auto &attribute : entry.attributes)
             attributes.push_back({{"code", attribute.code},
@@ -53,8 +60,8 @@ crow::response ServerApplication::image_filesystem_response(const crow::request 
                                                               : "FILE"},
                          {"sizeBytes", entry.size_bytes ? Json(*entry.size_bytes) : Json{}},
                          {"childCount", entry.child_count},
-                         {"objectId", entry.object_id ? Json(*entry.object_id) : Json{}},
-                         {"contentScopeId", entry.content_scope_id ? Json(*entry.content_scope_id) : Json{}},
+                         {"sourceMemberId", entry.source_member_id},
+                         {"bindings", std::move(bindings)},
                          {"interpretation", entry.interpretation},
                          {"storage", entry.storage},
                          {"filesystemMetadata", entry.filesystem_metadata},

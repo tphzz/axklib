@@ -17,6 +17,7 @@ namespace axk::server::detail {
 using RequestRoute = std::function<crow::response(const crow::request &)>;
 using ItemRoute = std::function<crow::response(const crow::request &, std::string)>;
 using SubItemRoute = std::function<crow::response(const crow::request &, std::string, std::string)>;
+using DocumentObjectRoute = std::function<crow::response(const crow::request &, std::string, std::string, std::string)>;
 using ResponseRoute = std::function<void(const crow::request &, crow::response &)>;
 using ItemResponseRoute = std::function<void(const crow::request &, crow::response &, std::string)>;
 
@@ -47,16 +48,18 @@ struct FileRoutes {
     ResponseRoute file_content;
     ItemResponseRoute download_archive_content;
     ItemRoute image;
-    ItemRoute attach_companions;
-    ItemRoute image_content;
+    ItemRoute image_documents;
+    SubItemRoute image_document;
+    SubItemRoute attach_companions;
+    SubItemRoute image_content;
     ItemRoute image_filesystem;
-    ItemRoute image_objects;
-    SubItemRoute image_object;
-    ItemRoute image_relationships;
-    ItemRoute image_system_program_contexts;
-    ItemRoute image_allocation_map;
-    ItemRoute image_validation;
-    ItemRoute image_preview;
+    SubItemRoute image_objects;
+    DocumentObjectRoute image_object;
+    SubItemRoute image_relationships;
+    SubItemRoute image_system_program_contexts;
+    SubItemRoute image_allocation_map;
+    SubItemRoute image_validation;
+    SubItemRoute image_preview;
     ItemRoute audition_content;
     ItemRoute delete_audition;
     RequestRoute uploads;

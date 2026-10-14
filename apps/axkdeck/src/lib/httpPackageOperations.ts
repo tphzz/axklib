@@ -1,3 +1,4 @@
+import { documentTarget } from './httpNativeDocuments';
 import type { components } from './generated/axklibApiV1';
 import type { CapacityPolicy } from './importCapacity';
 import type { FloppyPlanRequest, FloppyInputLocation } from './floppyImport';
@@ -49,7 +50,7 @@ export class HttpPackageOperations {
         const session = this.imageSessions.get(sessionId);
         const result = await this.client.invoke<ImageSessionPackageImportPlan>('images.floppy_import.plan', {
             ...request,
-            imageId: session.remoteId,
+            ...documentTarget(session),
             expectedRevision: session.revision,
         });
         if (this.jobs.isJob(result)) throw new Error('Floppy planning unexpectedly returned a job');
@@ -122,7 +123,7 @@ export class HttpPackageOperations {
     ): Promise<ImageSessionPackageImportPlan> {
         const session = this.imageSessions.get(sessionId);
         const result = await this.client.invoke<ImageSessionPackageImportPlan>('images.package_import.plan', {
-            imageId: session.remoteId,
+            ...documentTarget(session),
             expectedRevision: session.revision,
             packages: sources.map((source) => serverInput(source)),
             destination,
@@ -160,7 +161,7 @@ export class HttpPackageOperations {
         const job = await this.client.invoke<never>(
             'images.package_export',
             {
-                imageId: session.remoteId,
+                ...documentTarget(session),
                 expectedRevision: session.revision,
                 roots,
                 destination,
@@ -178,7 +179,7 @@ export class HttpPackageOperations {
         const session = this.imageSessions.get(sessionId);
         const result = await this.client.invoke<ImageSessionVolumePackageExportInspection>(
             'images.volume_package_export.inspect',
-            { imageId: session.remoteId, expectedRevision: session.revision, scopeId },
+            { ...documentTarget(session), expectedRevision: session.revision, scopeId },
         );
         if (this.jobs.isJob(result)) {
             throw new Error('images.volume_package_export.inspect unexpectedly returned a job');
@@ -194,7 +195,7 @@ export class HttpPackageOperations {
         const session = this.imageSessions.get(sessionId);
         const job = await this.client.invoke<never>(
             'images.volume_package_export',
-            { imageId: session.remoteId, expectedRevision: session.revision, scopeId, destination },
+            { ...documentTarget(session), expectedRevision: session.revision, scopeId, destination },
             { idempotencyKey: randomIdempotencyKey() },
         );
         if (!this.jobs.isJob(job)) throw new Error('images.volume_package_export did not return a job');
@@ -208,7 +209,7 @@ export class HttpPackageOperations {
         const session = this.imageSessions.get(sessionId);
         const result = await this.client.invoke<ImageSessionVolumeFloppyExportInspection>(
             'images.volume_floppy_export.inspect',
-            { imageId: session.remoteId, expectedRevision: session.revision, scopeId },
+            { ...documentTarget(session), expectedRevision: session.revision, scopeId },
         );
         if (this.jobs.isJob(result)) {
             throw new Error('images.volume_floppy_export.inspect unexpectedly returned a job');
@@ -224,7 +225,7 @@ export class HttpPackageOperations {
         const session = this.imageSessions.get(sessionId);
         const job = await this.client.invoke<never>(
             'images.volume_floppy_export',
-            { imageId: session.remoteId, expectedRevision: session.revision, scopeId, destination },
+            { ...documentTarget(session), expectedRevision: session.revision, scopeId, destination },
             { idempotencyKey: randomIdempotencyKey() },
         );
         if (!this.jobs.isJob(job)) throw new Error('images.volume_floppy_export did not return a job');
@@ -238,7 +239,7 @@ export class HttpPackageOperations {
     ): Promise<ImageSessionAudioExportInspection> {
         const session = this.imageSessions.get(sessionId);
         const result = await this.client.invoke<ImageSessionAudioExportInspection>('images.audio_export.inspect', {
-            imageId: session.remoteId,
+            ...documentTarget(session),
             expectedRevision: session.revision,
             roots,
             selectionMode,
@@ -258,7 +259,7 @@ export class HttpPackageOperations {
         const job = await this.client.invoke<never>(
             'images.audio_export',
             {
-                imageId: session.remoteId,
+                ...documentTarget(session),
                 expectedRevision: session.revision,
                 roots,
                 selectionMode,
@@ -280,7 +281,7 @@ export class HttpPackageOperations {
         const job = await this.client.invoke<never>(
             'images.sequence_export',
             {
-                imageId: session.remoteId,
+                ...documentTarget(session),
                 expectedRevision: session.revision,
                 objectIds,
                 destination,
@@ -299,7 +300,7 @@ export class HttpPackageOperations {
         const result = await this.client.invoke<ImageSessionMediaConversionInspection>(
             'images.media_conversion.inspect',
             {
-                imageId: session.remoteId,
+                ...documentTarget(session),
                 expectedRevision: session.revision,
                 ...selection,
             },
@@ -317,7 +318,7 @@ export class HttpPackageOperations {
         const job = await this.client.invoke<never>(
             'images.media_conversion',
             {
-                imageId: session.remoteId,
+                ...documentTarget(session),
                 expectedRevision: session.revision,
                 ...selection,
                 destination,

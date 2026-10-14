@@ -1,5 +1,6 @@
 <script lang="ts">
-    import { onDestroy, onMount, type Snippet } from 'svelte';
+    import { onDestroy, onMount, untrack, type Snippet } from 'svelte';
+    import { retainWorkspaceScroll, shellViewState, type ShellViewState } from './viewMemory';
     import Icon from '../../lib/components/Icon.svelte';
     import LayoutControls from '../../lib/components/LayoutControls.svelte';
     import { useASeriesPreferences } from '../../lib/aSeriesPreferences.svelte';
@@ -14,6 +15,8 @@
         mode: WorkspaceMode;
         presentation: WorkspacePresentation;
         imageActions: Snippet;
+        documentSelector?: Snippet;
+        viewState?: ShellViewState;
         imageName?: string;
         context?: string;
         status?: string;
@@ -25,6 +28,7 @@
         interfaceScaling?: InterfaceScaleController | null;
         isDesktop?: boolean;
         onmodechange: (mode: WorkspaceMode) => void;
+        onlowerchange?: (open: boolean) => void;
         onabout?: () => void;
         onconnection?: () => void;
     }
@@ -32,6 +36,8 @@
         mode,
         presentation,
         imageActions,
+        documentSelector,
+        viewState = shellViewState(),
         imageName = '',
         context = '',
         status = '',
@@ -43,11 +49,13 @@
         interfaceScaling = null,
         isDesktop = false,
         onmodechange,
+        onlowerchange,
         onabout = () => undefined,
         onconnection = () => undefined,
     }: Props = $props();
-    let sidebarOpen = $state(true);
-    let splitRatio = $state<number | null>(null);
+    const retained = untrack(() => viewState);
+    let sidebarOpen = $state(retained.sidebarOpen);
+    let splitRatio = $state<number | null>(retained.splitRatio);
     let stageHeight = $state(0);
     let mainStage: HTMLElement;
     let scale = $state<InterfaceScaleState | null>(null);
@@ -74,8 +82,9 @@
         return () => observer.disconnect();
     });
     onDestroy(() => {
+        retained.sidebarOpen = sidebarOpen;
+        retained.splitRatio = splitRatio;
         unsubscribe?.();
-        void interfaceScaling?.dispose();
     });
     function resize(clientY: number): void {
         const bounds = mainStage.getBoundingClientRect();
@@ -98,6 +107,7 @@
 </script>
 
 <div
+    use:retainWorkspaceScroll={retained}
     class="app-shell modular-shell"
     class:sidebar-closed={!sidebarOpen}
     class:inspector-closed={!inspectorOpen || !presentation.inspector}
@@ -108,7 +118,8 @@
             <span class="brand-mark"><Icon name="waveform" size={20} /></span><strong>axkdeck</strong>
         </button>
         <div class="workspace-image-context">
-            <strong title={imageName}>{imageName}</strong><small>{context}</small>
+            <div class="source-context"><strong title={imageName}>{imageName}</strong><small>{context}</small></div>
+            {#if documentSelector}{@render documentSelector()}{/if}
         </div>
         <div class="global-controls">
             {#if isDesktop}<button
@@ -133,7 +144,10 @@
                 {inspectorOpen}
                 interfaceScale={scale}
                 ontogglelibrary={() => (sidebarOpen = !sidebarOpen)}
-                ontoggleeditor={() => (lowerOpen = !lowerOpen)}
+                ontoggleeditor={() => {
+                    lowerOpen = !lowerOpen;
+                    onlowerchange?.(lowerOpen);
+                }}
                 ontoggleinspector={() => (inspectorOpen = !inspectorOpen)}
                 oninterfacescalechange={(value) => void interfaceScaling?.setMode(value)}
             />
@@ -216,6 +230,7 @@
 <style>
     .modular-shell {
         --workspace-accent: #dc8b35;
+        grid-template-rows: auto minmax(0, 1fr) var(--density-status-bar);
     }
     .modular-shell[data-workspace-mode='files'] {
         --workspace-accent: #58bdb4;
@@ -223,6 +238,7 @@
     .app-header {
         border-bottom: 2px solid var(--workspace-accent);
         column-gap: 8px;
+        min-height: var(--density-app-header);
     }
     .workspace-image-context {
         display: grid;
@@ -235,6 +251,12 @@
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
+    }
+    .source-context {
+        display: flex;
+        align-items: baseline;
+        gap: 6px;
+        min-width: 0;
     }
     .workspace-image-context small {
         font-size: 9px;
@@ -306,14 +328,28 @@
         grid-column: 3;
     }
     @media (max-width: 850px) {
+        .modular-shell {
+            min-width: 0;
+            grid-template-columns: var(--library-column-width) minmax(0, 1fr);
+        }
+        .modular-shell.sidebar-closed {
+            grid-template-columns: minmax(0, 1fr);
+        }
         .workspace-inspector {
             display: none;
         }
-        .workspace-image-context {
+        .source-context {
             display: none;
         }
         .app-header {
-            grid-template-columns: var(--library-column-width) 1fr auto;
+            grid-template-columns: minmax(0, 1fr) auto auto;
+            height: auto;
+            min-height: 48px;
+        }
+        .workspace-image-context {
+            grid-row: 2;
+            grid-column: 1 / -1;
+            padding: 0 8px 6px;
         }
         .global-controls {
             grid-column: 2;
@@ -321,6 +357,11 @@
         }
         .workspace-mode-switch {
             grid-column: 3;
+        }
+    }
+    @media (max-width: 540px) {
+        .modular-shell {
+            --library-column-width: 140px;
         }
     }
 </style>

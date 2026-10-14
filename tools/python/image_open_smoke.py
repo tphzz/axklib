@@ -48,8 +48,14 @@ def load_manifest(path: Path, *, maximum_cases: int = 16) -> list[dict[str, Any]
         relative = Path(case["path"])
         if relative.is_absolute() or ".." in relative.parts:
             raise ValueError("case path must stay inside its corpus root")
-        if case.get("sourceKind", "FILE") not in {"FILE", "AXK_OBJECT_DIRECTORY"}:
+        if case.get("sourceKind", "FILE") not in {"FILE", "DIRECTORY"}:
             raise ValueError("unsupported image source kind")
+        additional = case.get("additionalSources", [])
+        if not isinstance(additional, list) or len(additional) > 31 or any(
+            not isinstance(name, str) or not name or Path(name).name != name or name in {".", ".."}
+            for name in additional
+        ):
+            raise ValueError("additional sources must contain at most 31 sibling names")
         steps = case.get("companionSteps", [])
         if not isinstance(steps, list) or len(steps) > 31:
             raise ValueError("companion steps must contain at most 31 members")
@@ -86,19 +92,20 @@ def check_image(
     reject_invalid: bool = True,
     source_kind: str = "FILE",
     companion_steps: list[dict[str, Any]] | None = None,
+    additional_sources: list[str] | None = None,
 ) -> dict[str, Any]:
     submitted = require_status(
         client.request(
             "POST",
             "/images",
             {
-                "source": {
+                "sources": [{
                     "kind": source_kind,
                     "file" if source_kind == "FILE" else "directory": {
                         "rootId": "corpus",
-                        "relativePath": relative_path,
+                        "relativePath": name,
                     },
-                }
+                } for name in [relative_path, *(additional_sources or [])]]
             },
         ),
         202,
@@ -109,6 +116,23 @@ def check_image(
     image_path = f"/images/{summary['imageId']}"
     requests = 0
     deadline = time.monotonic() + traversal_seconds
+
+    def selected_document() -> dict[str, Any] | None:
+        documents = summary["documents"]
+        if expected["deviceView"] is None:
+            if documents:
+                raise RuntimeError("Files-only source unexpectedly exposes native documents")
+            return None
+        candidates = [item for item in documents if item["profile"] == expected["deviceView"]]
+        if len(candidates) != 1:
+            raise RuntimeError("expected exactly one native document for the requested profile")
+        return dict(candidates[0])
+
+    def native_path() -> str:
+        document = selected_document()
+        if document is None:
+            raise RuntimeError("no native document available")
+        return f"/documents/{document['id']}"
 
     def get(suffix: str, query: dict[str, Any]) -> dict[str, Any]:
         nonlocal requests
@@ -126,7 +150,7 @@ def check_image(
             raise RuntimeError("completed job and current image summary differ")
         attached: list[dict[str, Any]] = []
         for step in companion_steps or []:
-            if summary.get("floppySet", {}).get("nextRequiredIndex") != step["beforeNextIndex"]:
+            if (selected_document() or {}).get("floppySet", {}).get("nextRequiredIndex") != step["beforeNextIndex"]:
                 raise RuntimeError("initial/partial disk-set requirement differs")
             requests += 1
             if requests > maximum_requests or time.monotonic() > deadline:
@@ -134,7 +158,7 @@ def check_image(
             summary = require_status(
                 client.request(
                     "POST",
-                    f"{image_path}/companions",
+                    f"{image_path}{native_path()}/companions",
                     {
                         "expectedRevision": summary["revision"],
                         "selection": {
@@ -156,27 +180,33 @@ def check_image(
             )["data"]
             if get("", {}) != summary:
                 raise RuntimeError("attached and current image summaries differ")
-            state = summary.get("floppySet", {})
+            state = (selected_document() or {}).get("floppySet", {})
             if (
                 state.get("status") != step["status"]
                 or state.get("nextRequiredIndex") != step["nextRequiredIndex"]
             ):
                 raise RuntimeError("attached disk-set status differs")
             attached.append({"path": step["path"], "floppySet": state})
-        if summary["format"] != expected["format"]:
-            raise RuntimeError(f"format: expected {expected['format']}, got {summary['format']}")
-        invalid = not summary["validation"]["valid"] or summary["validation"]["errorCount"]
+        document = selected_document()
+        image_format = document["format"] if document else summary["sources"][0]["format"]
+        if image_format != expected["format"]:
+            raise RuntimeError(f"format: expected {expected['format']}, got {image_format}")
+        validation = dict(document["validation"]) if document else {"valid": True, "errorCount": 0, "warningCount": 0, "infoCount": 0}
+        validation_issues = [issue for member in summary["sources"] for issue in member["diagnostics"]]
+        for issue in validation_issues:
+            validation[{"ERROR": "errorCount", "WARNING": "warningCount", "INFO": "infoCount"}[issue["severity"]]] += 1
+        validation["valid"] = validation["errorCount"] == 0
+        invalid = not validation["valid"]
         if reject_invalid and invalid:
-            raise RuntimeError(f"image validation failed: {summary['validation']}")
-        validation_issues: list[dict[str, Any]] = []
-        if invalid or summary["validation"].get("warningCount", 0):
+            raise RuntimeError(f"image validation failed: {validation}")
+        if document and (invalid or validation.get("warningCount", 0)):
             issue_cursor: str | None = None
             issue_cursors: set[str] = set()
             while True:
                 issue_query: dict[str, Any] = {"limit": 200}
                 if issue_cursor is not None:
                     issue_query["cursor"] = issue_cursor
-                issue_page = get("/validation/issues", issue_query)
+                issue_page = get(native_path() + "/validation/issues", issue_query)
                 validation_issues.extend(issue_page["items"])
                 if len(validation_issues) > maximum_entries:
                     raise RuntimeError("validation issue limit exceeded")
@@ -213,7 +243,7 @@ def check_image(
                     or page["revision"] != summary["revision"]
                 ):
                     raise RuntimeError("filesystem unavailable or revision changed")
-                for field in ("filesystemName", "deviceView"):
+                for field in ("filesystemName",):
                     if page[field] != expected[field]:
                         raise RuntimeError(
                             f"{field}: expected {expected[field]!r}, got {page[field]!r}"
@@ -241,6 +271,10 @@ def check_image(
                     if entry["id"] in seen or entry["parentId"] != parent:
                         raise RuntimeError("duplicate filesystem entry or incorrect parent")
                     seen.add(entry["id"])
+                    if entry["sourceMemberId"] not in {member["id"] for member in summary["sources"]}:
+                        raise RuntimeError("filesystem entry has an unknown source member")
+                    if any(binding["documentId"] not in {item["id"] for item in summary["documents"]} for binding in entry["bindings"]):
+                        raise RuntimeError("filesystem binding has an unknown native document")
                     names.add(entry["name"])
                     if entry.get("filesystemMetadata"):
                         metadata.add(entry["name"])
@@ -278,7 +312,7 @@ def check_image(
                         query["parentId"] = parent
                     if cursor is not None:
                         query["cursor"] = cursor
-                    page = get("/content", query)
+                    page = get(native_path() + "/content", query)
                     for item in page["items"]:
                         if item["id"] in device_seen:
                             raise RuntimeError("duplicate Device content node")
@@ -295,10 +329,10 @@ def check_image(
                         raise RuntimeError("Device pagination did not progress")
                     cursors.add(cursor)
             device_nodes = len(device_seen)
-            if not device_nodes or summary["objectCount"] == 0:
+            if not device_nodes or not document or document["objectCount"] == 0:
                 raise RuntimeError("expected nonempty Device view")
-        if "objectCount" in expected and summary["objectCount"] != expected["objectCount"]:
-            raise RuntimeError(f"object count differs: {summary['objectCount']}")
+        if "objectCount" in expected and (document or {}).get("objectCount", 0) != expected["objectCount"]:
+            raise RuntimeError("object count differs")
         if expected.get("objects"):
             found_objects: set[tuple[str, str]] = set()
             object_cursor: str | None = None
@@ -307,7 +341,7 @@ def check_image(
                 query = {"limit": 200}
                 if object_cursor is not None:
                     query["cursor"] = object_cursor
-                page = get("/objects", query)
+                page = get(native_path() + "/objects", query)
                 found_objects.update((item["type"], item["name"]) for item in page["items"])
                 if len(found_objects) > maximum_entries:
                     raise RuntimeError("object limit exceeded")
@@ -320,16 +354,18 @@ def check_image(
             if not {(item["type"], item["name"]) for item in expected["objects"]} <= found_objects:
                 raise RuntimeError("expected companion objects are missing")
         return {
-            "format": summary["format"],
+            "format": image_format,
+            "sourceMembers": summary["sources"],
+            "documents": summary["documents"],
             "filesystemName": expected["filesystemName"],
             "deviceView": expected["deviceView"],
             "files": file_count,
             "filesystemEntries": len(seen),
             "deviceNodes": device_nodes,
             "requests": requests,
-            "floppySet": summary.get("floppySet"),
+            "floppySet": (document or {}).get("floppySet"),
             "companionSteps": attached,
-            "validation": summary.get("validation"),
+            "validation": validation,
             "validationIssues": validation_issues,
         }
     finally:
@@ -379,8 +415,10 @@ def run_case(
     reject_invalid: bool = True,
     source_kind: str = "FILE",
     companion_steps: list[dict[str, Any]] | None = None,
+    additional_sources: list[str] | None = None,
 ) -> dict[str, Any]:
-    sources = [source, *(source.parent / step["path"] for step in companion_steps or [])]
+    sources = [source, *(source.parent / step["path"] for step in companion_steps or []),
+               *(source.parent / name for name in additional_sources or [])]
     if any(
         item.is_symlink() or item.resolve().parent != source.parent.resolve() for item in sources
     ):
@@ -447,6 +485,7 @@ def run_case(
                 reject_invalid=reject_invalid,
                 source_kind=source_kind,
                 companion_steps=companion_steps,
+                additional_sources=additional_sources,
             )
             require_status(client.request("POST", "/system/shutdown"), 202, "server shutdown")
             process.wait(timeout=5)
@@ -523,6 +562,7 @@ def main() -> int:
                             log,
                             source_kind=case.get("sourceKind", "FILE"),
                             companion_steps=case.get("companionSteps"),
+                            additional_sources=case.get("additionalSources"),
                         ),
                         status="passed",
                     )

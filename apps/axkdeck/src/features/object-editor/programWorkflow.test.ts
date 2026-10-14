@@ -28,6 +28,8 @@ function detail(revision = 1, payloadSha256 = 'a'.repeat(64)): ObjectDetail {
         values: { level: 100 },
     };
     return {
+        formatId: 'yamaha.a-series',
+        profile: 'a-series',
         image: { revision },
         object: { id: 'program', key: 'program', name: '033', type: 'PROG' },
         editing,

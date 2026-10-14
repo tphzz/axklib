@@ -78,7 +78,8 @@ Json map_json(const app::ImageAllocationMap &map, std::string_view image_id, std
 } // namespace
 
 crow::response ServerApplication::image_allocation_map_response(const crow::request &request,
-                                                                const std::string &image_id) {
+                                                                const std::string &image_id,
+                                                                const std::string &member_id) {
     const auto id = request_id(request);
     if (auto denied = guard(request, id))
         return std::move(*denied);
@@ -92,8 +93,8 @@ crow::response ServerApplication::image_allocation_map_response(const crow::requ
             {"invalid_allocation_map_request", "partitionIndex from 0 through 7 and expectedRevision are required"},
             id);
     }
-    const auto map =
-        images_.allocation_map(image_id, request_owner(request), *revision, static_cast<std::uint8_t>(*partition));
+    const auto map = images_.allocation_map({image_id, member_id}, request_owner(request), *revision,
+                                            static_cast<std::uint8_t>(*partition));
     if (!map)
         return error_response(status_for_error(map.error()), map.error(), id);
     return json_response(200, {{"data", map_json(*map, image_id, *revision)}, {"meta", {{"requestId", id}}}}, id);

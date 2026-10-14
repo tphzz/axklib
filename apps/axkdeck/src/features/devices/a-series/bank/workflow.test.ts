@@ -12,6 +12,8 @@ describe('bank editing lifecycle', () => {
         let revision = 1;
         const detail = (): ObjectDetail =>
             ({
+                formatId: 'yamaha.a-series',
+                profile: 'a-series',
                 image: { revision },
                 object: { id: 'bank', name: 'Bank', key: 'bank', type: 'SBAC' },
                 editing: {

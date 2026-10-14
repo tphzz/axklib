@@ -4,9 +4,19 @@ import { filesystemEntry } from '../../lib/testing/filesystem';
 import { FilesController } from './controller.svelte';
 
 function fixture() {
-    const root = filesystemEntry({ id: 'root', kind: 'root', path: '', parentId: null, ancestorIds: [] });
+    const root = filesystemEntry({
+        sourceMemberId: 'source-1',
+        bindings: [],
+        id: 'root',
+        kind: 'root',
+        path: '',
+        parentId: null,
+        ancestorIds: [],
+    });
     const folder = filesystemEntry({ id: 'folder', name: 'Folder', path: '/Folder' });
     const nested = filesystemEntry({
+        sourceMemberId: 'source-1',
+        bindings: [],
         id: 'nested',
         name: 'Nested',
         path: '/Folder/Nested',
@@ -14,6 +24,8 @@ function fixture() {
         ancestorIds: ['root', folder.id],
     });
     const file = filesystemEntry({
+        sourceMemberId: 'source-1',
+        bindings: [],
         id: 'file',
         name: 'File',
         path: '/Folder/Nested/File',

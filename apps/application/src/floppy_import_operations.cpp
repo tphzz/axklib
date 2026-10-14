@@ -1,4 +1,6 @@
 #include "floppy_import_operations.hpp"
+#include "axklib/application/formats/a_series/session_read.hpp"
+#include "axklib/application/image_session_contracts.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -14,9 +16,9 @@
 #include <vector>
 
 #include "axklib/application/secure_random.hpp"
+#include "axklib/conversion/tx16w_to_a_series/source.hpp"
 #include "axklib/floppy_import.hpp"
 #include "axklib/su700.hpp"
-#include "axklib/tx16w.hpp"
 #include "content_digest.hpp"
 #include "filesystem_inputs.hpp"
 #include "floppy_import_directories.hpp"
@@ -321,7 +323,8 @@ Result<void> bind_floppy_import_operations(OperationRegistry &registry, const Sa
                     const auto identity = parse_session_identity(request);
                     if (!identity)
                         return std::unexpected(identity.error());
-                    auto session = images.begin_read(identity->first, context.owner_id, identity->second);
+                    auto session = axk::app::formats::a_series::SessionReader::acquire(
+                        images, image_document_ref(request), context.owner_id, identity->second);
                     if (!session)
                         return std::unexpected(session.error());
                     if (session->media->kind() != MediaKind::sfs)

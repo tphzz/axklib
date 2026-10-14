@@ -39,6 +39,8 @@ function setup(initiallySelected = ['A', 'B'], format: SampleStorageFormat = 'A3
         objectDetail: vi.fn(
             async (_: number, id: string) =>
                 ({
+                    formatId: 'yamaha.a-series',
+                    profile: 'a-series',
                     image: { revision: 1 },
                     object: { id, key: id, name: `Sample ${id}` },
                     formatConversion: sampleConversionFixture(format),

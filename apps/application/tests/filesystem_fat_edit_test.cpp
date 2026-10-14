@@ -79,7 +79,7 @@ class FatFilesystemEdits : public testing::TestWithParam<std::string> {
         sandbox = std::make_unique<axk::app::Sandbox>(std::move(*created));
         sessions = std::make_unique<axk::app::ImageSessionManager>(*sandbox, 32U, 500U, std::chrono::minutes{15},
                                                                    std::chrono::steady_clock::now, &reservations);
-        auto result = sessions->open({"workspace", "image.hda"}, "owner");
+        auto result = sessions->open({{{"workspace", "image.hda"}}, {}}, "owner");
         ASSERT_TRUE(result) << result.error().message;
         opened = std::move(*result);
     }
@@ -101,20 +101,22 @@ class FatFilesystemEdits : public testing::TestWithParam<std::string> {
     axk::app::Result<axk::app::ImageSessionSummary>
     apply(axk::app::AlterationJournalStore &journals, const axk::CancellationToken &cancellation = {},
           const std::function<axk::app::Result<void>()> &validate = {}) {
-        return axk::app::apply_filesystem_edits(*sessions, journals, opened.image_id, "owner", opened.revision,
-                                                partition, edits(), cancellation, nullptr, {{}, validate});
+        return axk::app::apply_filesystem_edits(*sessions, journals, {opened.image_id, "source-1"}, "owner",
+                                                opened.revision, partition, edits(), cancellation, nullptr,
+                                                {{}, validate});
     }
 };
 
 TEST_P(FatFilesystemEdits, RejectsSystemParameterEditsAndReleasesMutationAccess) {
     const auto before = digest();
     axk::app::AlterationJournalStore journals{root / "journals"};
-    const auto result = axk::app::apply_system_file(*sessions, journals, opened.image_id, "owner", opened.revision,
-                                                    partition, {}, axk::ASeriesModel::a4000);
+    const auto result =
+        axk::app::apply_system_file(*sessions, journals, {opened.image_id, "document-a-series-source-1"}, "owner",
+                                    opened.revision, partition, {}, axk::ASeriesModel::a4000);
     ASSERT_FALSE(result);
-    EXPECT_EQ(result.error().code, "image_mutation_unsupported");
+    EXPECT_EQ(result.error().code, "document_not_found");
     EXPECT_EQ(digest(), before);
-    const auto read = sessions->begin_read(opened.image_id, "owner", opened.revision);
+    const auto read = sessions->begin_source_read({opened.image_id, "source-1"}, "owner", opened.revision);
     EXPECT_TRUE(read);
 }
 
@@ -178,7 +180,7 @@ TEST_P(FatFilesystemEdits, ImportsSelectedFloppyContentsAndTheRawImageWithoutCha
     EXPECT_EQ(committed->at("revision"), opened.revision + 1U);
     EXPECT_TRUE(committed->at("warnings").empty());
     EXPECT_EQ(axk::app::detail::file_sha256(root / "workspace/disk.ima").value(), original_digest);
-    const auto read = sessions->begin_read(opened.image_id, "owner", opened.revision + 1U);
+    const auto read = sessions->begin_source_read({opened.image_id, "source-1"}, "owner", opened.revision + 1U);
     ASSERT_TRUE(read);
     const auto *fat = std::get_if<axk::FatImage>(&read->media->storage());
     if (const auto *disk = std::get_if<axk::FatDiskImage>(&read->media->storage()))
@@ -259,15 +261,15 @@ TEST_P(FatFilesystemEdits, CancellingAPartiallyWrittenMoveRestoresBothDirectorie
                                               127U};
     const std::vector<axk::FilesystemEdit> moves{axk::MoveFilesystemEntry{{"NEW", "DATA.BIN"}, {}},
                                                  axk::MoveFilesystemEntry{{"NEW", "EMPTY.BIN"}, {}}};
-    const auto cancelled = axk::app::apply_filesystem_edits(*sessions, journals, opened.image_id, "owner",
+    const auto cancelled = axk::app::apply_filesystem_edits(*sessions, journals, {opened.image_id, "source-1"}, "owner",
                                                             seeded->revision, partition, moves, cancellation.token());
     ASSERT_FALSE(cancelled);
     EXPECT_TRUE(reached);
     EXPECT_EQ(cancelled.error().code, "operation_cancelled");
     EXPECT_EQ(digest(), before);
     EXPECT_TRUE(journals.storage_ready());
-    EXPECT_TRUE(sessions->begin_read(opened.image_id, "owner", seeded->revision));
-    const auto retried = axk::app::apply_filesystem_edits(*sessions, journals, opened.image_id, "owner",
+    EXPECT_TRUE(sessions->begin_source_read({opened.image_id, "source-1"}, "owner", seeded->revision));
+    const auto retried = axk::app::apply_filesystem_edits(*sessions, journals, {opened.image_id, "source-1"}, "owner",
                                                           seeded->revision, partition, moves);
     ASSERT_TRUE(retried) << retried.error().message;
     EXPECT_EQ(retried->revision, seeded->revision + 1U);
@@ -327,7 +329,7 @@ TEST_P(FatFilesystemEdits, RenamesPopulatedDirectoriesThroughTheRegisteredJobWit
 TEST_P(FatFilesystemEdits, ComputesContentFingerprintsOnDemandAndInvalidatesAfterEdits) {
     const auto before = digest();
     {
-        auto read = sessions->begin_read(opened.image_id, "owner", opened.revision);
+        auto read = sessions->begin_source_read({opened.image_id, "source-1"}, "owner", opened.revision);
         ASSERT_TRUE(read);
         ASSERT_EQ(read->content_fingerprint({}).value(), before);
         EXPECT_EQ(read->content_fingerprint({}).value(), before);
@@ -338,7 +340,7 @@ TEST_P(FatFilesystemEdits, ComputesContentFingerprintsOnDemandAndInvalidatesAfte
     axk::app::AlterationJournalStore journals{root / "journals"};
     auto changed = apply(journals);
     ASSERT_TRUE(changed) << changed.error().message;
-    auto read = sessions->begin_read(opened.image_id, "owner", changed->revision);
+    auto read = sessions->begin_source_read({opened.image_id, "source-1"}, "owner", changed->revision);
     ASSERT_TRUE(read);
     const auto after = read->content_fingerprint({});
     ASSERT_TRUE(after);
@@ -362,12 +364,12 @@ TEST_P(FatFilesystemEdits, DelegatesReviewedInputsButRetainsDefaultDigestChecks)
     };
     auto input = std::make_shared<CountingReader>();
     std::filesystem::copy_file(root / "workspace/image.hda", root / "workspace/second.hda");
-    const auto second = sessions->open({"workspace", "second.hda"}, "owner");
+    const auto second = sessions->open({{{"workspace", "second.hda"}}, {}}, "owner");
     ASSERT_TRUE(second);
     axk::app::AlterationJournalStore journals{root / "journals"};
     const std::vector<axk::FilesystemEdit> first{axk::PutFilesystemFile{{"FIRST.BIN"}, input}};
-    auto changed = axk::app::apply_filesystem_edits(*sessions, journals, opened.image_id, "owner", opened.revision,
-                                                    partition, first);
+    auto changed = axk::app::apply_filesystem_edits(*sessions, journals, {opened.image_id, "source-1"}, "owner",
+                                                    opened.revision, partition, first);
     ASSERT_TRUE(changed) << changed.error().message;
     const auto default_bytes = input->bytes_read;
     input->bytes_read = 0U;
@@ -376,15 +378,15 @@ TEST_P(FatFilesystemEdits, DelegatesReviewedInputsButRetainsDefaultDigestChecks)
                                                              ++verification_count;
                                                              return {};
                                                          }};
-    changed = axk::app::apply_filesystem_edits(*sessions, journals, second->image_id, "owner", second->revision,
-                                               partition, first, {}, nullptr, verified);
+    changed = axk::app::apply_filesystem_edits(*sessions, journals, {second->image_id, "source-1"}, "owner",
+                                               second->revision, partition, first, {}, nullptr, verified);
     ASSERT_TRUE(changed) << changed.error().message;
     EXPECT_EQ(verification_count, 2U);
     EXPECT_EQ(default_bytes, input->bytes_read + 3U * input->size());
     EXPECT_GE(input->bytes_read, input->size());
     const auto invalid =
-        axk::app::apply_filesystem_edits(*sessions, journals, second->image_id, "owner", changed->revision, partition,
-                                         first, {}, nullptr, {{input}, {}});
+        axk::app::apply_filesystem_edits(*sessions, journals, {second->image_id, "source-1"}, "owner",
+                                         changed->revision, partition, first, {}, nullptr, {{input}, {}});
     ASSERT_FALSE(invalid);
     EXPECT_EQ(invalid.error().code, "invalid_request");
 }
@@ -411,13 +413,13 @@ TEST_P(FatFilesystemEdits, CancellationDuringCommitRefreshRestoresTheOriginalRev
     const auto before = digest();
     axk::app::AlterationJournalStore journals{root / "journals"};
     const auto changed =
-        axk::app::apply_filesystem_edits(*sessions, journals, opened.image_id, "owner", opened.revision, partition,
-                                         edits(), progress.cancellation.token(), &progress);
+        axk::app::apply_filesystem_edits(*sessions, journals, {opened.image_id, "source-1"}, "owner", opened.revision,
+                                         partition, edits(), progress.cancellation.token(), &progress);
     ASSERT_FALSE(changed);
     EXPECT_EQ(changed.error().code, "operation_cancelled");
     EXPECT_EQ(digest(), before);
     EXPECT_TRUE(journals.storage_ready());
-    auto read = sessions->begin_read(opened.image_id, "owner", opened.revision);
+    auto read = sessions->begin_source_read({opened.image_id, "source-1"}, "owner", opened.revision);
     ASSERT_TRUE(read);
     EXPECT_EQ(read->content_fingerprint({}).value(), before);
 }
@@ -437,32 +439,31 @@ TEST_P(FatFilesystemEdits, PrewriteSourceChangesDoNotRefreshAStaleSession) {
     progress.path = root / "workspace/image.hda";
     const auto before = digest();
     axk::app::AlterationJournalStore journals{root / "journals"};
-    const auto changed = axk::app::apply_filesystem_edits(*sessions, journals, opened.image_id, "owner",
+    const auto changed = axk::app::apply_filesystem_edits(*sessions, journals, {opened.image_id, "source-1"}, "owner",
                                                           opened.revision, partition, edits(), {}, &progress);
     ASSERT_FALSE(changed);
     EXPECT_EQ(changed.error().code, "image_source_changed");
     EXPECT_EQ(digest(), before);
     EXPECT_TRUE(journals.storage_ready());
-    EXPECT_FALSE(sessions->begin_read(opened.image_id, "owner", opened.revision));
+    EXPECT_FALSE(sessions->begin_source_read({opened.image_id, "source-1"}, "owner", opened.revision));
 }
 
 TEST_P(FatFilesystemEdits, PublishesRawEditsWithoutEnablingSamplerObjectMutations) {
     if (GetParam() == "ex5-mo-capacity") {
-        EXPECT_EQ(opened.validation.warning_count, 1U);
-        const auto issues = sessions->validation_issues(opened.image_id, "owner", 20U);
-        ASSERT_TRUE(issues);
-        ASSERT_EQ(issues->items.size(), 1U);
-        EXPECT_EQ(issues->items[0].code, "EX5_CAPACITY_EXCEEDS_IMAGE");
+        const auto &issues = opened.sources.at(0).diagnostics;
+        ASSERT_EQ(issues.size(), 1U);
+        EXPECT_EQ(issues[0].severity, "warning");
+        EXPECT_EQ(issues[0].code, "EX5_CAPACITY_EXCEEDS_IMAGE");
     }
-    EXPECT_FALSE(sessions->begin_mutation(opened.image_id, "owner", opened.revision));
+    EXPECT_FALSE(sessions->begin_mutation({opened.image_id, "document-a-series-source-1"}, "owner", opened.revision));
     axk::app::AlterationJournalStore journals{root / "journals"};
     const auto result = apply(journals);
     ASSERT_TRUE(result) << result.error().message;
     EXPECT_EQ(result->revision, opened.revision + 1U);
     EXPECT_EQ(std::filesystem::file_size(root / "workspace/image.hda"), original.size());
     if (GetParam() == "ex5-mo-capacity")
-        EXPECT_EQ(result->validation.warning_count, 1U);
-    const auto read = sessions->begin_read(opened.image_id, "owner", result->revision);
+        EXPECT_EQ(result->sources.at(0).diagnostics.size(), 1U);
+    const auto read = sessions->begin_source_read({opened.image_id, "source-1"}, "owner", result->revision);
     ASSERT_TRUE(read) << read.error().message;
     const auto *fat = std::get_if<axk::FatImage>(&read->media->storage());
     if (const auto *disk = std::get_if<axk::FatDiskImage>(&read->media->storage())) {
@@ -508,7 +509,7 @@ TEST_P(FatFilesystemEdits, CancelledPartialCommitRollsBackAndCanBeRetriedAtTheSa
     EXPECT_EQ(digest(), before);
     EXPECT_TRUE(journals.storage_ready());
     {
-        EXPECT_TRUE(sessions->begin_read(opened.image_id, "owner", opened.revision));
+        EXPECT_TRUE(sessions->begin_source_read({opened.image_id, "source-1"}, "owner", opened.revision));
     }
     const auto retry = apply(journals);
     EXPECT_TRUE(retry) << retry.error().message;
@@ -532,8 +533,8 @@ TEST_P(FatFilesystemEdits, FailedPostWriteValidationRollsBackAndCanBeRetried) {
 
 TEST_P(FatFilesystemEdits, RejectsExternallyChangedSourceAndOtherOwners) {
     axk::app::AlterationJournalStore journals{root / "journals"};
-    EXPECT_FALSE(axk::app::apply_filesystem_edits(*sessions, journals, opened.image_id, "other", opened.revision,
-                                                  partition, edits()));
+    EXPECT_FALSE(axk::app::apply_filesystem_edits(*sessions, journals, {opened.image_id, "source-1"}, "other",
+                                                  opened.revision, partition, edits()));
     const auto path = root / "workspace/image.hda";
     std::filesystem::last_write_time(path, std::filesystem::last_write_time(path) + std::chrono::seconds{1});
     const auto before = digest();
@@ -560,7 +561,7 @@ TEST_P(FatFilesystemEdits, InterruptedPartialWriteRecoversBeforeOpeningANewSessi
     EXPECT_TRUE(recovered.storage_ready());
     sessions = std::make_unique<axk::app::ImageSessionManager>(*sandbox, 32U, 500U, std::chrono::minutes{15},
                                                                std::chrono::steady_clock::now, &reservations);
-    const auto reopened = sessions->open({"workspace", "image.hda"}, "owner");
+    const auto reopened = sessions->open({{{"workspace", "image.hda"}}, {}}, "owner");
     ASSERT_TRUE(reopened) << reopened.error().message;
     opened = *reopened;
     const auto retry = apply(recovered);
@@ -678,7 +679,7 @@ TEST_P(FatFilesystemEdits, UnsafeFatRemainsReadableWithoutAdvertisingOrResolving
     }
     sessions = std::make_unique<axk::app::ImageSessionManager>(*sandbox, 32U, 500U, std::chrono::minutes{15},
                                                                std::chrono::steady_clock::now, &reservations);
-    const auto result = sessions->open({"workspace", "image.hda"}, "owner");
+    const auto result = sessions->open({{{"workspace", "image.hda"}}, {}}, "owner");
     ASSERT_TRUE(result) << result.error().message;
     const auto roots = sessions->filesystem(result->image_id, "owner", result->revision);
     ASSERT_TRUE(roots) << roots.error().message;
@@ -707,7 +708,7 @@ TEST_P(FatFilesystemEdits, ReadOnlyWorkspaceDoesNotAdvertiseWrites) {
     sandbox = std::make_unique<axk::app::Sandbox>(std::move(*read_only));
     sessions = std::make_unique<axk::app::ImageSessionManager>(*sandbox, 32U, 500U, std::chrono::minutes{15},
                                                                std::chrono::steady_clock::now, &reservations);
-    const auto result = sessions->open({"workspace", "image.hda"}, "owner");
+    const auto result = sessions->open({{{"workspace", "image.hda"}}, {}}, "owner");
     ASSERT_TRUE(result);
     const auto roots = sessions->filesystem(result->image_id, "owner", result->revision);
     ASSERT_TRUE(roots);

@@ -1,3 +1,4 @@
+import { nativeWorkspaceFixture } from '../../test/nativeWorkspaceFixture';
 import { describe, expect, it, vi } from 'vitest';
 import { ImageSessionController } from './actions';
 import type { ImageLocation } from '../../lib/storageLocations';
@@ -16,6 +17,7 @@ const secondLocation: ImageLocation = {
 
 function opened(sessionId: number): OpenedImage {
     return {
+        ...nativeWorkspaceFixture(),
         sessionId,
         allocationInspectionAvailable: false,
         revision: 1,
@@ -65,13 +67,13 @@ describe('ImageSessionController', () => {
             async () => undefined,
             () => undefined,
         );
-        await controller.open(firstLocation);
+        await controller.open([firstLocation]);
         const prepare = vi.fn(async (candidate: OpenedImage) => {
             expect(candidate.sessionId).toBe(2);
             expect(controller.snapshot().sessionId).toBe(1);
             expect(closeImage).not.toHaveBeenCalled();
         });
-        await expect(controller.open(secondLocation, undefined, prepare)).resolves.toMatchObject({
+        await expect(controller.open([secondLocation], undefined, prepare)).resolves.toMatchObject({
             sessionId: 2,
             objectRenameAvailable: true,
         });
@@ -94,16 +96,16 @@ describe('ImageSessionController', () => {
             async () => undefined,
             () => undefined,
         );
-        await controller.open(firstLocation);
+        await controller.open([firstLocation]);
         await expect(
-            controller.open(secondLocation, undefined, async () => {
+            controller.open([secondLocation], undefined, async () => {
                 throw new Error('Permission declined');
             }),
         ).rejects.toThrow('Permission declined');
         expect(controller.snapshot()).toMatchObject({ sessionId: 1, location: firstLocation, opening: false });
         expect(closeImage).toHaveBeenCalledWith(2);
         expect(closeImage).not.toHaveBeenCalledWith(1);
-        await expect(controller.open(secondLocation, undefined, async () => {})).rejects.toThrow('Refresh failed');
+        await expect(controller.open([secondLocation], undefined, async () => {})).rejects.toThrow('Refresh failed');
         expect(controller.snapshot().sessionId).toBe(1);
     });
 
@@ -121,9 +123,9 @@ describe('ImageSessionController', () => {
             async () => undefined,
             () => undefined,
         );
-        await controller.open(firstLocation);
+        await controller.open([firstLocation]);
         const prepare = vi.fn(() => new Promise<void>((resolve) => (finish = resolve)));
-        const opening = controller.open(secondLocation, undefined, prepare);
+        const opening = controller.open([secondLocation], undefined, prepare);
         await vi.waitFor(() => expect(prepare).toHaveBeenCalledOnce());
         controller.cancelOpen();
         finish();
@@ -145,7 +147,7 @@ describe('ImageSessionController', () => {
         const prepare = vi.fn(async () => {
             throw new Error('Denied');
         });
-        await expect(controller.open(secondLocation, undefined, prepare)).rejects.toThrow('Cleanup failed');
+        await expect(controller.open([secondLocation], undefined, prepare)).rejects.toThrow('Cleanup failed');
         closeImage.mockResolvedValue(undefined);
         await controller.cleanupOpen();
         expect(closeImage).toHaveBeenCalledTimes(2);
@@ -167,7 +169,7 @@ describe('ImageSessionController', () => {
         );
 
         await expect(controller.keepAlive()).resolves.toBe(false);
-        await controller.open(firstLocation);
+        await controller.open([firstLocation]);
         await expect(controller.keepAlive()).resolves.toBe(true);
         expect(keepImageAlive).toHaveBeenCalledOnce();
         expect(keepImageAlive).toHaveBeenCalledWith(7);
@@ -191,8 +193,8 @@ describe('ImageSessionController', () => {
             () => undefined,
         );
 
-        const first = controller.open(firstLocation);
-        await expect(controller.open(secondLocation)).resolves.toMatchObject({ sessionId: 2 });
+        const first = controller.open([firstLocation]);
+        await expect(controller.open([secondLocation])).resolves.toMatchObject({ sessionId: 2 });
         resolveFirst?.(opened(1));
         await expect(first).resolves.toBeNull();
         expect(closeImage).toHaveBeenCalledWith(1);
@@ -212,7 +214,7 @@ describe('ImageSessionController', () => {
             invalidate,
             () => undefined,
         );
-        await controller.open(firstLocation);
+        await controller.open([firstLocation]);
 
         await controller.dispose();
         expect(invalidate).toHaveBeenCalledWith(9);
@@ -244,9 +246,9 @@ describe('ImageSessionController', () => {
             async () => undefined,
             () => undefined,
         );
-        await controller.open(firstLocation);
+        await controller.open([firstLocation]);
 
-        const replacement = controller.open(secondLocation);
+        const replacement = controller.open([secondLocation]);
         controller.cancelOpen();
 
         await expect(replacement).rejects.toMatchObject({ name: 'AbortError' });

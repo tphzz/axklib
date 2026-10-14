@@ -3,8 +3,10 @@ import type { ObjectDetail } from './transport';
 import { copyObjectDetailToClipboard, serializeObjectDetail } from './objectDetailClipboard';
 
 const detail: ObjectDetail = {
+    formatId: 'yamaha.a-series',
+    profile: 'a-series',
     schemaVersion: 1,
-    image: { imageId: 'image-1', revision: 3, format: 'sfs' },
+    image: { documentId: 'document-a-series-source-1', imageId: 'image-1', revision: 3, format: 'sfs' },
     object: {
         sampleFormat: null,
         programFormat: null,

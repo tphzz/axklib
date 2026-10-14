@@ -12,6 +12,12 @@
 
 namespace axk::app {
 
+struct ImageFilesystemBinding {
+    std::string document_id;
+    std::optional<std::string> object_id;
+    std::optional<std::string> content_scope_id;
+};
+
 struct ImageFilesystemAttribute {
     std::string code;
     std::string label;
@@ -39,6 +45,8 @@ struct ImageFilesystemEntry {
     bool filesystem_metadata{};
     std::string raw_attributes;
     std::vector<ImageFilesystemAttribute> attributes;
+    std::string source_member_id{};
+    std::vector<ImageFilesystemBinding> bindings{};
 };
 
 struct ImageFilesystemQuery {
@@ -50,6 +58,7 @@ struct ImageFilesystemQuery {
     std::string content_scope_id{};
     std::size_t offset{};
     std::size_t limit{200U};
+    std::string document_id{};
 };
 
 struct ImageFilesystemRootCapabilities {
@@ -107,6 +116,7 @@ using ImageFilesystemEdit =
 struct ResolvedImageFilesystemEdits {
     PartitionIndex partition;
     std::vector<FilesystemEdit> edits;
+    std::string source_member_id{};
 };
 
 } // namespace axk::app

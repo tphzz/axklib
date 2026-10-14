@@ -44,6 +44,8 @@ afterEach(() => vi.unstubAllGlobals());
 
 function setup() {
     let current = {
+        formatId: 'yamaha.a-series',
+        profile: 'a-series',
         image: { revision: 1 },
         object: { id: 'sample', key: 'sample', name: 'Sample' },
         editing: {

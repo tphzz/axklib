@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { nativeWorkspaceFixture } from './nativeWorkspaceFixture';
     import { onMount } from 'svelte';
     import FilesInspector from '../features/files/FilesInspector.svelte';
     import InspectorModeFooter from '../lib/components/InspectorModeFooter.svelte';
@@ -83,8 +84,9 @@
         kind: 'file',
         sizeBytes: 356,
         childCount: 0,
-        objectId: 'sample',
-        contentScopeId: null,
+        sourceMemberId: 'source-1',
+        bindings: [{ documentId: 'document-a-series-source-1', objectId: 'sample', contentScopeId: null }],
+
         interpretation: '',
         storage: `Record ${config.version}`,
         issue: 'Constructed fixture issue stays visible outside collapsed sections.',
@@ -121,7 +123,11 @@
 >
     {#if config.shown}
         {#if config.kind === 'files'}
-            <FilesInspector {entry} canShowDevice onshowdevice={(id) => (navigation = `device:${id}`)} />
+            <FilesInspector
+                {entry}
+                documents={nativeWorkspaceFixture().documents}
+                onshowdevice={(binding) => (navigation = `device:${binding.objectId}`)}
+            />
         {:else}
             <ObjectInspector
                 {selection}

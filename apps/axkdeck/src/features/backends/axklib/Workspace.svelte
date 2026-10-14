@@ -1,601 +1,192 @@
 <script lang="ts">
-    import InspectorModeFooter from '../../../lib/components/InspectorModeFooter.svelte';
-    import { tick, untrack } from 'svelte';
-    import type { LaneQueries } from '../../audition/workflow.svelte';
-    import AboutDialog from '../../../lib/components/AboutDialog.svelte';
-    import AuditionBar from '../../../lib/components/AuditionBar.svelte';
-    import SampleCollection from './SampleCollection.svelte';
-    import Icon from '../../../lib/components/Icon.svelte';
-    import ImageNavigator from '../../../lib/components/ImageNavigator.svelte';
-    import DeviceLowerZone from '../../object-editor/DeviceLowerZone.svelte';
-    import ObjectInspector from '../../../lib/components/ObjectInspector.svelte';
-    import VolumeInspector from '../../../lib/components/VolumeInspector.svelte';
-    import { provideVolumeCapacity } from '../../../lib/volumeCapacity.svelte';
-    import { capacitySelection } from '../../../lib/capacitySelection';
-    import ObjectWorkspace from '../../../lib/components/ObjectWorkspace.svelte';
-    import type { ProgramPresentation } from '../../../lib/components/ProgramWorkspace.svelte';
-    import ProgramCollection from './ProgramCollection.svelte';
-    import PackageSelectionControls from '../../../lib/components/PackageSelectionControls.svelte';
-    import SequenceWorkspace from '../../sequence/SequenceWorkspace.svelte';
-    import type { SystemProgramContexts, SystemProgramPart } from '../../../lib/transport';
-    import type {
-        DiskTreeItem,
-        PackageExportObject,
-        Program,
-        SampleStructureItem,
-        WaveDataItem,
-        WorkspaceView,
-    } from '../../../lib/types';
-    import { revealCollectionObject } from '../../../lib/collectionNavigation';
-    import { desktopBuildInfo, type DesktopBuildInfo, type DesktopBuildInfoState } from '../../../lib/desktopBuildInfo';
-    import { copySessionObjectMetadata } from '../../../lib/objectDetailClipboard';
-    import { userFacingMessage } from '../../../lib/userFacingMessage';
-
+    import { onDestroy, tick, untrack } from 'svelte';
     import WorkspaceShell from '../../workspace/WorkspaceShell.svelte';
-    import type { WorkspaceMode } from '../../workspace/contracts';
-    import ImageActions from '../../../lib/components/ImageActions.svelte';
+    import DocumentSelector from '../../workspace/DocumentSelector.svelte';
+    import ASeriesPresentation from '../../devices/a-series/Presentation.svelte';
+    import Tx16wPresentation from '../../devices/tx16w/Presentation.svelte';
+    import type { DevicePresentationState, WorkspaceMode, WorkspacePresentation } from '../../workspace/contracts';
+    import type { WorkspaceProps } from './workspaceProps';
     import { FilesController } from '../../files/controller.svelte';
     import FilesView from './AxklibFilesView.svelte';
     import FilesNavigation from '../../files/FilesNavigation.svelte';
     import FilesInspector from '../../files/FilesInspector.svelte';
     import FilesExportCoordinator from '../../files/FilesExportCoordinator.svelte';
+    import ImageActions from '../../../lib/components/ImageActions.svelte';
+    import AboutDialog from '../../../lib/components/AboutDialog.svelte';
+    import { desktopBuildInfo, type DesktopBuildInfoState } from '../../../lib/desktopBuildInfo';
+    import type { FilesystemEntry, FilesystemBinding } from '../../../lib/filesystem';
+    import { userFacingMessage } from '../../../lib/userFacingMessage';
+    import { ViewMemory, shellViewState } from '../../workspace/viewMemory';
 
-    import type { WorkspaceProps } from './workspaceProps';
-
-    let {
-        mode = $bindable('device'),
-        revision = 0,
-        transport,
-        filesMutations,
-        filesExports,
-        filesImports,
-        interfaceScaling = null,
-        isDesktop,
-        workspaceTabs,
-        workspaceView,
-        inspectorOpen = $bindable(true),
-        imageLocation,
-        sourceItems,
-        selectedSource,
-        selectedVolumeIds,
-        imageOpening,
-        sessionId,
-        catalog,
-        audition,
-        mutation,
-        audioImport,
-        sequenceImport,
-        importAudio,
-        importMidi,
-        programs,
-        sampleBanks,
-        samples,
-        waveData,
-        sequences,
-        bankMembers,
-        bankMemberWaveData,
-        sampleWaveData,
-        activeCollectionObjectId,
-        inspectorSelection,
-        editorSelection,
-        sourceStatus,
-        packageSelection,
-        objectDeletionAvailable,
-        waveDataCleanupAvailable,
-        programGenerationAvailable,
-        programAssignmentCleanupAvailable,
-        packageImportAvailable,
-        packageExportAvailable,
-        volumePackageExportAvailable,
-        volumeFloppyExportAvailable,
-        audioExportAvailable,
-        sequenceExportAvailable,
-        mediaConversionAvailable,
-        allocationInspectionAvailable,
-        samplerOrderingEnabled: enabled = false,
-        openConnectionSettings,
-        openImage,
-        createImage,
-        closeImage,
-        showImageIntegrity,
-        manageLocations,
-        selectSource,
-        selectSourceForContext,
-        imageAction,
-        selectWorkspace,
-        exportPackage,
-        exportAudio,
-        exportWav,
-        exportMidi,
-        deleteObjects,
-        cleanupWaveData,
-        generatePrograms,
-        cleanupProgramAssignments,
-        clearSelection,
-        selectionChanged,
-        selectionLimit,
-        setStatus,
-    }: WorkspaceProps = $props();
-
-    let mainStage: HTMLElement;
-    const capacity = provideVolumeCapacity(() => ({ transport, sessionId, revision, enabled, selectedSource }));
-    const capacitySelect = capacitySelection(capacity, () => audition);
-    let lowerOpen = $state(false);
-    let programPresentation = $state<ProgramPresentation>('single');
-    let selectedMultiPart = $state<SystemProgramPart | null>(null);
-    let observedSessionId = $state<number | null>(null);
-    let observedVolumeId = $state('');
-    let observedSystemProgramContexts = $state<SystemProgramContexts | null>(null);
-    let aboutDialogOpen = $state(false);
-    let aboutBuildInfoState = $state<DesktopBuildInfoState>({ status: 'loading' });
-    let cachedDesktopBuildInfo: DesktopBuildInfo | null = null;
-    let desktopBuildInfoRequest: Promise<DesktopBuildInfo> | null = null;
-    const lowerPanelAvailable = $derived(workspaceView !== 'wave-data' && workspaceView !== 'sequences');
-    const auditionAvailable = $derived(workspaceView !== 'programs' && workspaceView !== 'sequences');
-    const multiPartEditorContext = $derived(
-        programPresentation === 'multi' && selectedMultiPart
-            ? {
-                  partLabel: selectedMultiPart.partLabel,
-                  programNumber: selectedMultiPart.programNumber,
-              }
-            : null,
+    let { mode = $bindable('files'), inspectorOpen = $bindable(true), ...workspace }: WorkspaceProps = $props();
+    const document = $derived(workspace.documents.find((item) => item.id === workspace.documentId));
+    const filesDriver = $derived(
+        workspace.sessionId !== null ? workspace.filesMutations?.(workspace.sessionId) : undefined,
     );
-
-    $effect(() => {
-        if (sessionId === observedSessionId) return;
-        observedSessionId = sessionId;
-        programPresentation = 'single';
-        selectedMultiPart = null;
-    });
-
-    $effect(() => {
-        if (catalog.activeVolumeId === observedVolumeId) return;
-        observedVolumeId = catalog.activeVolumeId;
-        selectedMultiPart = null;
-    });
-
-    $effect(() => {
-        if (catalog.systemProgramContexts === observedSystemProgramContexts) return;
-        observedSystemProgramContexts = catalog.systemProgramContexts;
-        selectedMultiPart = null;
-    });
-
-    function changeProgramPresentation(value: ProgramPresentation): void {
-        programPresentation = value;
-        clearSelection();
-        if (value === 'single') selectedMultiPart = null;
-    }
-
-    function selectSingleProgram(program: Program): void {
-        capacity.showObject();
-        lowerOpen = true;
-        selectedMultiPart = null;
-        audition.selectProgram(program);
-    }
-
-    function selectMultiPart(part: SystemProgramPart, program: Program | null): void {
-        capacity.showObject();
-        selectedMultiPart = part;
-        clearSelection();
-        if (program) {
-            lowerOpen = true;
-            audition.selectProgram(program);
-            return;
-        }
-        catalog.selectedProgramId = '';
-        catalog.inspectorObjectId = '';
-        catalog.editorObjectIds.programs = '';
-    }
-
-    async function navigateInspectorRelationship(objectId: string, focusTarget: boolean): Promise<void> {
-        clearSelection();
-        const view = await audition.navigateToObject(objectId);
-        if (!view) return;
-        if (view === 'programs') {
-            lowerOpen = true;
-            programPresentation = 'single';
-            selectedMultiPart = null;
-        }
-        await revealCollectionObject(mainStage, view, objectId, 'center', focusTarget);
-    }
-
-    async function copyInspectorMetadata(objectId: string): Promise<void> {
-        await copySessionObjectMetadata(transport, sessionId, objectId, setStatus);
-    }
-
-    async function openAbout(): Promise<void> {
-        aboutDialogOpen = true;
-        if (cachedDesktopBuildInfo) {
-            aboutBuildInfoState = { status: 'ready', buildInfo: cachedDesktopBuildInfo };
-            return;
-        }
-
-        aboutBuildInfoState = { status: 'loading' };
-        desktopBuildInfoRequest ??= desktopBuildInfo();
-        try {
-            cachedDesktopBuildInfo = await desktopBuildInfoRequest;
-            aboutBuildInfoState = { status: 'ready', buildInfo: cachedDesktopBuildInfo };
-        } catch {
-            desktopBuildInfoRequest = null;
-            aboutBuildInfoState = { status: 'error' };
-        }
-    }
-
+    const exportDriver = $derived(
+        workspace.sessionId !== null ? workspace.filesExports?.(workspace.sessionId) : undefined,
+    );
+    const importDriver = $derived(
+        workspace.sessionId !== null ? workspace.filesImports?.(workspace.sessionId) : undefined,
+    );
     let files = $state<FilesController | null>(null);
-    const filesDriver = $derived(sessionId !== null ? filesMutations?.(sessionId) : undefined);
-    const exportDriver = $derived(sessionId !== null ? filesExports?.(sessionId) : undefined);
-    const importDriver = $derived(sessionId !== null ? filesImports?.(sessionId) : undefined);
+    let previousSession: number | null = null;
     let fileExporter = $state<FilesExportCoordinator>();
     let fileView = $state<{
-        importRoot(root: import('../../../lib/filesystem').FilesystemEntry): void;
-        importCommands(
-            root: import('../../../lib/filesystem').FilesystemEntry,
-        ): { label: string; action: () => void }[];
+        importRoot(root: FilesystemEntry): void;
+        importCommands(root: FilesystemEntry): { label: string; action: () => void }[];
         isBusy(): boolean;
     }>();
-    const exportFiles = (entries: import('../../../lib/filesystem').FilesystemEntry[]) =>
-        fileExporter?.open(files?.revision ?? 0, entries);
-    let previousSession = $state<number | null>(null);
-    let revealEntry = $state<import('../../../lib/filesystem').FilesystemEntry | null>(null);
+    let activePresentation = $state<{
+        showObject(id: string): Promise<void>;
+        contentScopeId?(): string;
+        showScope?(id: string): void;
+    }>();
+    let revealEntry = $state<FilesystemEntry | null>(null);
+    let about = $state<DesktopBuildInfoState | null>(null);
+    let buildInfo: ReturnType<typeof desktopBuildInfo> | undefined;
     let mappingGeneration = 0;
     let modeGeneration = 0;
-    let deviceScroll: { view: WorkspaceView; scope: string; offsets: number[] } | null = null;
-    const deviceScrollers = () => [
-        ...mainStage.querySelectorAll<HTMLElement>('[data-navigation-list], .tree-scroll, .inspector-body'),
-    ];
-    function captureDeviceScroll(): void {
-        if (mode === 'device')
-            deviceScroll = {
-                view: workspaceView,
-                scope: selectedSource.id,
-                offsets: deviceScrollers().map((node) => node.scrollTop),
-            };
-    }
+    let previousDocument: string | null = null;
+    const memory = new ViewMemory();
+    const remember = $derived(memory.forDocument(workspace.sessionId, workspace.documentId));
+    const rememberFiles = $derived(memory.forDocument(workspace.sessionId, null));
+    const exportFiles = (entries: FilesystemEntry[]) => fileExporter?.open(files?.revision ?? 0, entries);
+    const fileDiagnostics = $derived(
+        workspace.sources.find((source) => source.id === (files?.selected ?? files?.root)?.sourceMemberId)
+            ?.diagnostics ?? [],
+    );
+    onDestroy(() => {
+        void workspace.interfaceScaling?.dispose();
+    });
+
     $effect(() => {
-        const currentSession = sessionId;
-        const currentRevision = revision;
-        modeGeneration += 1;
-        if (currentSession === null || currentRevision === 0) {
+        const sessionId = workspace.sessionId;
+        const revision = workspace.revision;
+        ++modeGeneration;
+        if (sessionId === null || !revision) {
             files = null;
             previousSession = null;
             return;
         }
-        const sameSession = untrack(() => previousSession === currentSession);
-        if (!sameSession) deviceScroll = null;
-        const context = untrack(() => (sameSession ? files?.capture() : undefined));
-        previousSession = currentSession;
-        const controller = new FilesController({ inspect: (query) => transport.filesystem(currentSession, query) });
-        files = controller;
-        let active = true;
-        void controller.initialize(context).then(() => {
-            if (!active || !controller.initialized) return;
-            if (!sameSession || !controller.deviceView)
-                mode = controller.deviceView === 'a-series' ? 'device' : 'files';
+        const context = untrack(() => (previousSession === sessionId ? files?.capture() : undefined));
+        previousSession = sessionId;
+        const controller = new FilesController({
+            inspect: (query) => workspace.transport.filesystem(sessionId, query),
         });
-        return () => {
-            active = false;
-            controller.dispose();
-        };
+        files = controller;
+        void controller.initialize(context);
+        return () => controller.dispose();
+    });
+    $effect(() => {
+        const id = workspace.documentId;
+        if (id !== previousDocument) {
+            previousDocument = id;
+            mode = id ? 'device' : 'files';
+            ++modeGeneration;
+        }
+        if (!id) mode = 'files';
     });
     $effect(() => {
         const controller = files;
-        const objectId = catalog.inspectorObjectId;
+        const session = workspace.sessionId;
+        const documentId = workspace.documentId;
+        const objectId = workspace.catalog.inspectorObjectId;
         const token = ++mappingGeneration;
         revealEntry = null;
-        if (!controller?.initialized || !controller.available || !objectId) return;
+        if (!controller?.initialized || !documentId || !objectId || document?.formatId !== 'yamaha.a-series') return;
         void controller
-            .lookup({ objectId })
+            .lookup({ objectId, documentId })
             .then((entry) => {
-                if (token === mappingGeneration && files === controller) revealEntry = entry;
+                if (token === mappingGeneration && workspace.sessionId === session && controller === files)
+                    revealEntry = entry;
             })
             .catch(() => undefined);
     });
-    async function changeMode(next: WorkspaceMode): Promise<void> {
+    async function changeMode(next: WorkspaceMode, synchronizeRoot = true): Promise<void> {
+        if (next === mode || (next === 'device' && !document)) return;
         const controller = files;
         const token = ++modeGeneration;
-        if (next === mode) return;
+        const documentId = workspace.documentId;
         if (next === 'files') {
-            if (!controller || (!controller.available && !controller.error)) return;
-            if (!controller.initialized) {
-                captureDeviceScroll();
-                void audition.stop();
-                clearSelection();
-                mode = next;
-                return;
+            const scope = activePresentation?.contentScopeId?.();
+            if (synchronizeRoot && scope && documentId && controller?.initialized) {
+                const entry = await controller.lookup({ contentScopeId: scope, documentId }).catch(() => null);
+                if (token !== modeGeneration || controller !== files) return;
+                if (entry) await controller.chooseRoot(entry.rootId);
             }
-            const entry = await controller.lookup({ contentScopeId: selectedSource.id }).catch(() => null);
-            if (controller !== files || token !== modeGeneration) return;
-            if (entry) await controller.chooseRoot(entry.rootId);
-            if (controller !== files || token !== modeGeneration) return;
-            captureDeviceScroll();
-            void audition.stop();
-            clearSelection();
-        } else {
-            if (files?.deviceView !== 'a-series') return;
-            const scope = files.root?.contentScopeId;
-            if (scope) {
-                const find = (items: DiskTreeItem[]): DiskTreeItem | undefined => {
-                    for (const item of items) {
-                        if (item.id === scope) return item;
-                        const child = find(item.children ?? []);
-                        if (child) return child;
-                    }
-                    return undefined;
-                };
-                const item = find(sourceItems);
-                if (item && item.id !== selectedSource.id && item.partitionIndex !== selectedSource.partitionIndex)
-                    selectSource(item, 'replace', []);
-            }
+            await workspace.audition.stop();
+            if (token !== modeGeneration || documentId !== workspace.documentId) return;
+            workspace.clearSelection();
+        } else if (synchronizeRoot) {
+            const binding = controller?.root?.bindings.find(
+                (item) => item.documentId === documentId && item.contentScopeId,
+            );
+            if (binding?.contentScopeId) activePresentation?.showScope?.(binding.contentScopeId);
         }
         mode = next;
-        if (next === 'device') {
+    }
+    async function revealInFiles(objectId?: string): Promise<void> {
+        const controller = files;
+        const documentId = workspace.documentId;
+        const token = ++modeGeneration;
+        if (!controller || !documentId) return;
+        const entry = objectId ? await controller.lookup({ objectId, documentId }).catch(() => null) : revealEntry;
+        if (!entry || token !== modeGeneration || controller !== files || workspace.documentId !== documentId) return;
+        if ((await controller.reveal(entry)) && token === modeGeneration && workspace.documentId === documentId)
+            await changeMode('files', false);
+    }
+    async function showInDevice(binding: FilesystemBinding): Promise<void> {
+        if (workspace.documentSwitchBlocked || fileView?.isBusy() || fileExporter?.isOpen()) return;
+        const session = workspace.sessionId;
+        try {
+            await workspace.selectDocument(binding.documentId);
+            if (workspace.sessionId !== session || workspace.documentId !== binding.documentId) return;
+            mode = 'device';
             await tick();
-            if (
-                controller === files &&
-                token === modeGeneration &&
-                deviceScroll?.view === workspaceView &&
-                deviceScroll.scope === selectedSource.id
-            )
-                deviceScrollers().forEach((node, index) => (node.scrollTop = deviceScroll?.offsets[index] ?? 0));
+            if (workspace.sessionId !== session || workspace.documentId !== binding.documentId) return;
+            if (binding.objectId) await activePresentation?.showObject(binding.objectId);
+            else if (binding.contentScopeId) activePresentation?.showScope?.(binding.contentScopeId);
+        } catch (reason) {
+            workspace.setStatus(userFacingMessage(reason));
         }
     }
-    async function showInDevice(objectId: string): Promise<void> {
-        if (files?.deviceView !== 'a-series') return;
-        mode = 'device';
-        await navigateInspectorRelationship(objectId, true);
-    }
-    async function revealInFiles(): Promise<void> {
-        if (!files || !revealEntry) return;
-        const controller = files;
-        const token = ++modeGeneration;
-        if (!(await controller.reveal(revealEntry)) || controller !== files || token !== modeGeneration) return;
-        captureDeviceScroll();
-        void audition.stop();
-        clearSelection();
-        mode = 'files';
+    async function openAbout(): Promise<void> {
+        about = { status: 'loading' };
+        try {
+            const info = await (buildInfo ??= desktopBuildInfo());
+            if (about) about = { status: 'ready', buildInfo: info };
+        } catch {
+            if (about) about = { status: 'error' };
+        }
     }
 </script>
 
 {#snippet imageActions()}
     <ImageActions
-        image={imageLocation}
-        opening={imageOpening}
-        storageLocationsAvailable={transport.storageMode === 'server'}
-        onopen={openImage}
-        oncreate={createImage}
-        onclose={closeImage}
-        onintegrity={showImageIntegrity}
-        onmanagelocations={manageLocations}
+        image={workspace.imageLocation}
+        opening={workspace.imageOpening}
+        storageLocationsAvailable={workspace.transport.storageMode === 'server'}
+        onopen={workspace.openImage}
+        oncreate={workspace.createImage}
+        onclose={workspace.closeImage}
+        onintegrity={workspace.showImageIntegrity}
+        onmanagelocations={workspace.manageLocations}
     />
 {/snippet}
-{#snippet deviceNavigation()}
-    <ImageNavigator
-        navigationOnly
-        image={imageLocation}
-        items={sourceItems}
-        selectedId={selectedSource.id}
-        {selectedVolumeIds}
-        opening={imageOpening}
-        storageLocationsAvailable={transport.storageMode === 'server'}
-        onopen={openImage}
-        oncreate={createImage}
-        onclose={closeImage}
-        onintegrity={showImageIntegrity}
-        onmanagelocations={manageLocations}
-        onselect={selectSource}
-        oncontextselect={selectSourceForContext}
-        volumeActionsEnabled={mutation.volumeAvailable}
-        partitionActionsEnabled={mutation.partitionAvailable}
-        packageImportEnabled={packageImportAvailable}
-        packageExportEnabled={packageExportAvailable}
-        volumePackageExportEnabled={volumePackageExportAvailable}
-        volumeFloppyExportEnabled={volumeFloppyExportAvailable}
-        audioExportEnabled={audioExportAvailable}
-        mediaConversionEnabled={mediaConversionAvailable}
-        allocationInspectionEnabled={allocationInspectionAvailable}
-        samplerOrderingEnabled={enabled}
-        onimageaction={imageAction}
-        onloadchildren={(parentId, offset, limit) =>
-            sessionId === null
-                ? Promise.resolve({ items: [], totalCount: 0 })
-                : transport.contentChildren(sessionId, parentId, offset, limit)}
+{#snippet documents()}
+    <DocumentSelector
+        documents={workspace.documents}
+        selected={workspace.documentId}
+        discovery={workspace.discovery}
+        disabled={workspace.documentSwitchBlocked ||
+            workspace.switchingDocument ||
+            workspace.imageOpening ||
+            Boolean(fileView?.isBusy()) ||
+            Boolean(fileExporter?.isOpen())}
+        onselect={workspace.selectDocument}
+        onresolve={workspace.resolveDocuments}
     />
-{/snippet}
-{#snippet deviceContent()}
-    {#if workspaceView === 'sample-banks' || workspaceView === 'samples'}
-        <SampleCollection
-            {sessionId}
-            {revision}
-            bind:lowerOpen
-            view={workspaceView}
-            {sampleBanks}
-            samples={workspaceView === 'sample-banks' ? bankMembers : samples}
-            waveData={workspaceView === 'sample-banks' ? bankMemberWaveData : sampleWaveData}
-            activeSampleBankId={workspaceView === 'sample-banks' ? catalog.selectedBankId : ''}
-            activeSampleId={workspaceView === 'sample-banks' ? catalog.selectedBankMemberId : catalog.selectedSampleId}
-            activeWaveDataId={workspaceView === 'sample-banks'
-                ? catalog.selectedBankWaveDataId
-                : catalog.selectedSampleWaveDataId}
-            queries={audition.laneQueries[workspaceView]}
-            showOnlyStandaloneSamples={audition.showOnlyStandaloneSamples}
-            onshowonlystandalonechange={(checked) => audition.updateShowOnlyStandaloneSamples(checked)}
-            onquerychange={(lane: keyof LaneQueries, value) => audition.updateLaneQuery(workspaceView, lane, value)}
-            onsamplebankselect={capacitySelect.bank}
-            onsampleselect={workspaceView === 'sample-banks' ? capacitySelect.member : capacitySelect.sample}
-            onwavedataselect={capacitySelect.wave}
-            onplaysamplebank={(item) => void audition.playSampleBank(item)}
-            onplaysample={(item) => void audition.playSample(item)}
-            onplaywavedata={(item) => void audition.playContainedWaveData(item)}
-            onstop={() => void audition.stop()}
-            onimportaudio={importAudio}
-            playingSampleBankId={audition.playingSampleBankId}
-            playingObjectId={audition.state.status === 'playing' ? audition.state.objectId : null}
-            preparingObjectId={audition.state.status === 'preparing' ? audition.state.objectId : null}
-            auditionableSampleIds={audition.auditionableSampleObjectIds}
-            auditionableSampleBankIds={audition.auditionableSampleBankObjectIds}
-            stereoSampleIds={audition.stereoSampleObjectIds}
-            objectRenameAvailable={mutation.objectRenameAvailable}
-            onrenameobject={(target) => mutation.requestObjectRename(target)}
-            sampleBankAssignmentAvailable={mutation.objectRenameAvailable}
-            onassignsamplebank={(selectedSamples) => mutation.requestSampleBankAssignment(selectedSamples)}
-            {objectDeletionAvailable}
-            ondeleteobjects={deleteObjects}
-            {packageExportAvailable}
-            onexportobjects={exportPackage}
-            {audioExportAvailable}
-            onexportaudio={exportAudio}
-            onexportwav={exportWav}
-            selection={packageSelection}
-            onselectionchange={selectionChanged}
-            onselectionlimit={selectionLimit}
-        />
-    {:else if workspaceView === 'sequences'}
-        <SequenceWorkspace
-            {sequences}
-            activeObjectId={activeCollectionObjectId}
-            query={audition.laneQueries.sequences.primary}
-            onquerychange={(value) => audition.updateLaneQuery('sequences', 'primary', value)}
-            onselect={(item) => {
-                capacity.showObject();
-                catalog.selectedSequenceId = item.objectId;
-                catalog.inspectorObjectId = item.objectId;
-                catalog.editorObjectIds.sequences = item.objectId;
-            }}
-            objectRenameAvailable={mutation.objectRenameAvailable}
-            onrenameobject={(target) => mutation.requestObjectRename(target)}
-            {objectDeletionAvailable}
-            ondeleteobjects={deleteObjects}
-            {packageExportAvailable}
-            onexportobjects={exportPackage}
-            {sequenceExportAvailable}
-            onexportmidi={exportMidi}
-            sequenceImportAvailable={sequenceImport.dropAvailable()}
-            onimportmidi={importMidi}
-            selection={packageSelection}
-            onselectionchange={selectionChanged}
-            onselectionlimit={selectionLimit}
-        />
-    {:else if workspaceView === 'programs'}
-        <ProgramCollection
-            {programs}
-            {sessionId}
-            {catalog}
-            presentation={programPresentation}
-            selectedPartNumber={selectedMultiPart?.partNumber ?? null}
-            activeObjectId={activeCollectionObjectId}
-            query={audition.laneQueries.programs.primary}
-            onquerychange={(value) => audition.updateLaneQuery('programs', 'primary', value)}
-            onpresentationchange={changeProgramPresentation}
-            onprogramselect={selectSingleProgram}
-            onpartselect={selectMultiPart}
-            objectRenameAvailable={mutation.objectRenameAvailable}
-            onrenameobject={(target) => mutation.requestObjectRename(target)}
-            {objectDeletionAvailable}
-            ondeleteobjects={deleteObjects}
-            programGenerationAvailable={programGenerationAvailable && catalog.activeVolumeId !== ''}
-            onprogramgeneration={generatePrograms}
-            programAssignmentCleanupAvailable={programAssignmentCleanupAvailable && catalog.activeVolumeId !== ''}
-            onprogramassignmentcleanup={cleanupProgramAssignments}
-            {packageExportAvailable}
-            onexportobjects={exportPackage}
-            selection={packageSelection}
-            onselectionchange={selectionChanged}
-            onselectionlimit={selectionLimit}
-        />
-    {:else}
-        <ObjectWorkspace
-            {programs}
-            {waveData}
-            view={workspaceView}
-            activeObjectId={activeCollectionObjectId}
-            query={audition.laneQueries[workspaceView].primary}
-            onquerychange={(value) => audition.updateLaneQuery(workspaceView, 'primary', value)}
-            onprogramselect={selectSingleProgram}
-            onwavedataselect={capacitySelect.wave}
-            onpreviewrequest={(item, bins) => audition.requestWaveformPreview(item, bins)}
-            onplay={(item) => void audition.playWaveData(item)}
-            onprefetch={(item) => audition.prefetchObject(item.objectKey)}
-            onstop={() => void audition.stop()}
-            onseek={(item, ratio) => audition.seekWaveData(item, ratio)}
-            playingObjectId={audition.state.status === 'playing' ? audition.state.objectId : null}
-            preparingObjectId={audition.state.status === 'preparing' ? audition.state.objectId : null}
-            playheadFrame={audition.state.playheadFrame}
-            objectRenameAvailable={mutation.objectRenameAvailable}
-            onrenameobject={(target) => mutation.requestObjectRename(target)}
-            {objectDeletionAvailable}
-            ondeleteobjects={deleteObjects}
-            waveDataCleanupAvailable={waveDataCleanupAvailable && catalog.activeVolumeId !== ''}
-            oncleanupwavedata={cleanupWaveData}
-            programGenerationAvailable={programGenerationAvailable && catalog.activeVolumeId !== ''}
-            onprogramgeneration={generatePrograms}
-            {packageExportAvailable}
-            onexportobjects={exportPackage}
-            {audioExportAvailable}
-            onexportaudio={exportAudio}
-            onexportwav={exportWav}
-            selection={packageSelection}
-            onselectionchange={selectionChanged}
-            onselectionlimit={selectionLimit}
-        />
-    {/if}
-{/snippet}
-{#snippet devicePlayback()}
-    <AuditionBar
-        available={auditionAvailable}
-        autoplay={audition.autoplay}
-        state={audition.state}
-        label={audition.label}
-        onautoplaychange={(enabled) => (audition.autoplay = enabled)}
-    />
-{/snippet}
-{#snippet deviceLower()}
-    <DeviceLowerZone
-        {sessionId}
-        selection={editorSelection}
-        multiPartContext={multiPartEditorContext}
-        assignmentQuery={audition.laneQueries.programs.secondary}
-        onassignmentquerychange={(value) => (audition.laneQueries.programs.secondary = value)}
-        onassignmentselect={(row) => audition.selectAssignment(row)}
-    />
-{/snippet}
-{#snippet deviceInspector()}
-    <div class="device-inspector-zone">
-        {#if capacity.selectedVolume && enabled}
-            <VolumeInspector item={capacity.selectedVolume} />
-        {:else}<ObjectInspector
-                selection={inspectorSelection}
-                playingObjectId={audition.state.status === 'playing' ? audition.state.objectId : null}
-                playheadFrame={audition.state.playheadFrame}
-                onrelationshipnavigate={(objectId, focusTarget) =>
-                    void navigateInspectorRelationship(objectId, focusTarget)}
-                onmetadatacopy={copyInspectorMetadata}
-            />{/if}
-
-        {#if revealEntry}<InspectorModeFooter mode="files" onclick={() => void revealInFiles()} />{/if}
-    </div>
-{/snippet}
-{#snippet deviceTabs()}
-    <nav class="workspace-tabs" aria-label="Workspace views">
-        {#each workspaceTabs as tab (tab.id)}
-            <button class:active={workspaceView === tab.id} type="button" onclick={() => selectWorkspace(tab.id)}>
-                <Icon name={tab.icon} size={16} /><span>{tab.label}</span>
-            </button>
-        {/each}
-    </nav>
-{/snippet}
-{#snippet deviceActions()}
-    {#if (packageExportAvailable || audioExportAvailable || sequenceExportAvailable || objectDeletionAvailable) && packageSelection.items.length > 0}
-        <PackageSelectionControls
-            count={packageSelection.items.length}
-            onexportpackage={packageExportAvailable ? () => exportPackage(packageSelection.items) : undefined}
-            onexportsfz={audioExportAvailable ? () => exportAudio(packageSelection.items) : undefined}
-            onexportmidi={sequenceExportAvailable && packageSelection.items.every((item) => item.kind === 'SEQU')
-                ? () => exportMidi(packageSelection.items as PackageExportObject[])
-                : undefined}
-            ondelete={objectDeletionAvailable ? () => deleteObjects(packageSelection.items) : undefined}
-            onclear={clearSelection}
-        />
-    {/if}
 {/snippet}
 {#snippet fileNavigation()}
     {#if files}<FilesNavigation
@@ -607,94 +198,95 @@
         />{/if}
 {/snippet}
 {#snippet fileContent()}
-    {#if files}{#key sessionId}<FilesView
+    {#if files}{#key workspace.sessionId}<FilesView
                 bind:this={fileView}
                 controller={files}
-                sessionId={sessionId!}
+                sessionId={workspace.sessionId!}
+                documentId={workspace.documentId}
                 driver={filesDriver}
                 imports={importDriver}
                 exports={exportDriver}
                 onexport={exportDriver ? exportFiles : undefined}
                 exportBlocked={fileExporter?.isOpen()}
-                {setStatus}
-            />{/key}{:else}<p class="empty-copy">No image open</p>{/if}
+                setStatus={workspace.setStatus}
+            />{/key}
+    {:else}<p class="empty-copy">No source set open</p>{/if}
 {/snippet}
 {#snippet fileInspector()}
     {#if files}<FilesInspector
             entry={files.selected ?? files.root}
-            canShowDevice={files.deviceView === 'a-series'}
-            interpretationLabel={(
-                { PROG: 'Program', SBAC: 'Sample Bank', SBNK: 'Sample', SMPL: 'Wave Data', SEQU: 'Sequence' } as Record<
-                    string,
-                    string
-                >
-            )[files.selected?.interpretation ?? '']}
-            onshowdevice={(id) => void showInDevice(id)}
+            documents={workspace.documents}
+            diagnostics={fileDiagnostics}
+            onshowdevice={(binding) => void showInDevice(binding)}
         />{/if}
 {/snippet}
+{#snippet emptyDevice()}
+    <p class="empty-copy">No native document selected</p>
+{/snippet}
+{#snippet shell(presentation: WorkspacePresentation, state: DevicePresentationState)}
+    {#key mode}
+        <WorkspaceShell
+            {mode}
+            {imageActions}
+            documentSelector={documents}
+            viewState={(mode === 'files' ? rememberFiles : remember)('shell', shellViewState)}
+            interfaceScaling={workspace.interfaceScaling}
+            isDesktop={workspace.isDesktop}
+            bind:inspectorOpen
+            lowerOpen={state.lowerOpen}
+            onlowerchange={state.setLowerOpen}
+            imageName={workspace.imageLocation?.displayName.split(/[\\/]/).at(-1) ?? ''}
+            context={document?.name ?? `${workspace.sources.length} sources`}
+            status={workspace.switchingDocument
+                ? 'Opening native document'
+                : mode === 'device'
+                  ? workspace.sourceStatus
+                  : files?.error || (files?.busy ? 'Reading filesystem' : 'Files')}
+            count={mode === 'device' ? `${document?.objectCount ?? 0} objects` : `${files?.rows.length ?? 0} entries`}
+            deviceAvailable={Boolean(document)}
+            filesAvailable={Boolean(files?.available || files?.error)}
+            onmodechange={(value) => void changeMode(value)}
+            onabout={openAbout}
+            onconnection={workspace.openConnectionSettings}
+            presentation={mode === 'device'
+                ? presentation
+                : { navigation: fileNavigation, content: fileContent, inspector: fileInspector }}
+        />
+    {/key}
+{/snippet}
 
-<div bind:this={mainStage} class="backend-workspace">
-    <WorkspaceShell
-        {mode}
-        {imageActions}
-        {interfaceScaling}
-        {isDesktop}
-        bind:inspectorOpen
-        bind:lowerOpen
-        imageName={imageLocation?.displayName.split(/[\\/]/).at(-1) ?? ''}
-        context={files?.filesystemName ?? ''}
-        status={mode === 'device'
-            ? sourceStatus
-            : files?.error ||
-              (files?.busy
-                  ? 'Reading filesystem'
-                  : filesDriver && files?.capabilities?.createDirectory
-                    ? 'Files · Writable'
-                    : 'Files · Read only')}
-        count={mode === 'device' ? `${catalog.objectCount} objects` : `${files?.rows.length ?? 0} entries`}
-        deviceAvailable={sessionId === null || !files?.initialized || files.deviceView === 'a-series'}
-        filesAvailable={Boolean(files?.initialized && files.available) || Boolean(files?.error)}
-        onmodechange={(value) => void changeMode(value)}
-        onabout={openAbout}
-        onconnection={openConnectionSettings}
-        presentation={mode === 'device'
-            ? {
-                  navigation: deviceNavigation,
-                  content: deviceContent,
-                  inspector: deviceInspector,
-                  lower: lowerPanelAvailable ? deviceLower : undefined,
-                  lowerPreferredHeight:
-                      editorSelection?.kind === 'sample' || editorSelection?.kind === 'sample-bank' ? 360 : undefined,
-                  tabs: deviceTabs,
-                  playback: auditionAvailable ? devicePlayback : undefined,
-                  selectionActions: deviceActions,
-              }
-            : { navigation: fileNavigation, content: fileContent, inspector: fileInspector }}
-    />
-</div>
-{#if aboutDialogOpen}<AboutDialog state={aboutBuildInfoState} onclose={() => (aboutDialogOpen = false)} />{/if}
-{#if exportDriver}{#key sessionId}<FilesExportCoordinator
+{#key `${workspace.sessionId}:${workspace.documentId}`}
+    {#if document?.formatId === 'yamaha.a-series'}
+        <ASeriesPresentation
+            bind:this={activePresentation}
+            {workspace}
+            {remember}
+            canRevealFiles={Boolean(revealEntry)}
+            onrevealFiles={() => void revealInFiles()}
+            children={shell}
+        />
+    {:else if document?.formatId === 'yamaha.tx16w'}
+        <Tx16wPresentation
+            bind:this={activePresentation}
+            transport={workspace.transport}
+            sessionId={workspace.sessionId!}
+            revision={workspace.revision ?? 0}
+            {document}
+            {remember}
+            sources={workspace.sources}
+            onrevealFiles={(id) => void revealInFiles(id)}
+            children={shell}
+        />
+    {:else}
+        {@render shell(
+            { navigation: emptyDevice, content: emptyDevice },
+            { lowerOpen: false, setLowerOpen: () => undefined, showObject: async () => undefined },
+        )}
+    {/if}
+{/key}
+{#if about}<AboutDialog state={about} onclose={() => (about = null)} />{/if}
+{#if exportDriver}{#key workspace.sessionId}<FilesExportCoordinator
             driver={exportDriver}
-            {setStatus}
+            setStatus={workspace.setStatus}
             bind:this={fileExporter}
         />{/key}{/if}
-
-<style>
-    .backend-workspace {
-        display: contents;
-    }
-    .device-inspector-zone {
-        display: flex;
-        flex-direction: column;
-        min-height: 0;
-        min-width: 0;
-        overflow: hidden;
-        border-left: 1px solid var(--color-border);
-        background: var(--color-panel);
-    }
-    .device-inspector-zone :global(.inspector) {
-        flex: 1;
-        min-height: 0;
-        border: 0;
-    }
-</style>

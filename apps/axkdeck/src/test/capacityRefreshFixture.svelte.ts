@@ -1,3 +1,4 @@
+import { nativeWorkspaceFixture } from './nativeWorkspaceFixture';
 import { CatalogWorkflow } from '../features/catalog/workflow.svelte';
 import { ImageSessionWorkflow } from '../features/image-session/workflow.svelte';
 import type { PickerController } from '../features/dialogs/picker';
@@ -31,6 +32,7 @@ export function capacityRefreshFixture() {
         sizeBytes: revision * 1024,
     });
     const opened = (): OpenedImage => ({
+        ...nativeWorkspaceFixture(),
         sessionId: 1,
         revision,
         companionSources: [],
@@ -145,11 +147,13 @@ export function capacityRefreshFixture() {
             hold = value;
         },
         async open() {
-            await workflow.open({
-                kind: 'server-file',
-                displayName: 'test.hds',
-                reference: { rootId: 'root', relativePath: 'test.hds' },
-            });
+            await workflow.open([
+                {
+                    kind: 'server-file',
+                    displayName: 'test.hds',
+                    reference: { rootId: 'root', relativePath: 'test.hds' },
+                },
+            ]);
         },
         async refresh(next: typeof scenario = 'FITS', destination = 'foo', retainId = false) {
             revision++;
@@ -168,6 +172,10 @@ export function capacityRefreshFixture() {
         },
         get props(): WorkspaceProps {
             return {
+                ...nativeWorkspaceFixture(),
+                switchingDocument: false,
+                selectDocument: async () => undefined,
+                resolveDocuments: async () => undefined,
                 transport,
                 isDesktop: false,
                 workspaceTabs: [{ id: 'programs', label: 'Programs', icon: 'music' }],

@@ -68,10 +68,10 @@ TEST_P(FilesystemExportProfile, ExportsFragmentedRawBytesThroughTheProfileLocato
     axk::app::PathReservationCoordinator reservations;
     axk::app::ImageSessionManager sessions{
         *sandbox, 32U, 500U, std::chrono::minutes{15}, std::chrono::steady_clock::now, &reservations};
-    const auto opened = sessions.open({"workspace", "source.hda"}, "owner");
+    const auto opened = sessions.open({{{"workspace", "source.hda"}}, {}}, "owner");
     ASSERT_TRUE(opened) << opened.error().message;
     {
-        const auto read = sessions.begin_read(opened->image_id, "owner", 1U);
+        const auto read = sessions.begin_source_read({opened->image_id, "source-1"}, "owner", 1U);
         ASSERT_TRUE(read);
         if (profile != "mbr") {
             const auto *fat = std::get_if<axk::FatImage>(&read->media->storage());

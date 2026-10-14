@@ -8,7 +8,16 @@ import type { FilesystemMutationDriver } from '../../lib/filesystem';
 afterEach(cleanup);
 
 async function setup() {
-    const root = filesystemEntry({ id: 'root', name: 'Disk', path: '', kind: 'root', parentId: null, ancestorIds: [] });
+    const root = filesystemEntry({
+        sourceMemberId: 'source-1',
+        bindings: [],
+        id: 'root',
+        name: 'Disk',
+        path: '',
+        kind: 'root',
+        parentId: null,
+        ancestorIds: [],
+    });
     const files = ['A', 'B', 'C', 'D'].map((name) =>
         filesystemEntry({ id: name, name, path: `/${name}`, kind: 'file' }),
     );

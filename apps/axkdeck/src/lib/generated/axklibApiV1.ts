@@ -1296,11 +1296,11 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    '/images/{imageId}/allocation-map': {
+    '/images/{imageId}/documents': {
         parameters: {
-            query: {
-                expectedRevision: number;
-                partitionIndex: number;
+            query?: {
+                cursor?: components['parameters']['PageCursor'];
+                limit?: components['parameters']['PageLimit'];
             };
             header?: never;
             path: {
@@ -1308,7 +1308,26 @@ export interface paths {
             };
             cookie?: never;
         };
-        get: operations['images.allocationMap'];
+        get: operations['images.documents'];
+        put?: never;
+        post: operations['images.documents.select'];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    '/images/{imageId}/documents/{documentId}': {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                documentId: string;
+                imageId: string;
+            };
+            cookie?: never;
+        };
+        get: operations['images.document'];
         put?: never;
         post?: never;
         delete?: never;
@@ -1317,11 +1336,12 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    '/images/{imageId}/companions': {
+    '/images/{imageId}/documents/{documentId}/companions': {
         parameters: {
             query?: never;
             header?: never;
             path: {
+                documentId: string;
                 imageId: string;
             };
             cookie?: never;
@@ -1335,7 +1355,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    '/images/{imageId}/content': {
+    '/images/{imageId}/documents/{documentId}/content': {
         parameters: {
             query?: {
                 cursor?: components['parameters']['PageCursor'];
@@ -1344,6 +1364,7 @@ export interface paths {
             };
             header?: never;
             path: {
+                documentId: string;
                 imageId: string;
             };
             cookie?: never;
@@ -1357,10 +1378,151 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    '/images/{imageId}/documents/{documentId}/objects': {
+        parameters: {
+            query?: {
+                cursor?: components['parameters']['PageCursor'];
+                limit?: components['parameters']['PageLimit'];
+                /** @description Semantic content node whose contained descendant objects define the query scope. Reference-only descendants are excluded. */
+                scopeId?: string;
+                type?: string;
+            };
+            header?: never;
+            path: {
+                documentId: string;
+                imageId: string;
+            };
+            cookie?: never;
+        };
+        get: operations['images.objects'];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    '/images/{imageId}/documents/{documentId}/objects/{objectId}': {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                documentId: string;
+                imageId: string;
+                objectId: string;
+            };
+            cookie?: never;
+        };
+        get: operations['images.object'];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    '/images/{imageId}/documents/{documentId}/preview': {
+        parameters: {
+            query: {
+                bins: number;
+                objectId: string;
+            };
+            header?: never;
+            path: {
+                documentId: string;
+                imageId: string;
+            };
+            cookie?: never;
+        };
+        get: operations['images.preview'];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    '/images/{imageId}/documents/{documentId}/relationships': {
+        parameters: {
+            query?: {
+                cursor?: components['parameters']['PageCursor'];
+                limit?: components['parameters']['PageLimit'];
+                /** @description Semantic content node whose contained descendant objects define the query scope. Reference-only descendants are excluded. */
+                scopeId?: string;
+                /** @description Session-local source object identifier. */
+                sourceObjectId?: string;
+                /** @description Session-local resolved target object identifier. */
+                targetObjectId?: string;
+                /** @description Exact relationship type. */
+                type?: string;
+            };
+            header?: never;
+            path: {
+                documentId: string;
+                imageId: string;
+            };
+            cookie?: never;
+        };
+        get: operations['images.relationships'];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    '/images/{imageId}/documents/{documentId}/system-program-contexts': {
+        parameters: {
+            query: {
+                partitionIndex: number;
+            };
+            header?: never;
+            path: {
+                documentId: string;
+                imageId: string;
+            };
+            cookie?: never;
+        };
+        get: operations['images.systemProgramContexts'];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    '/images/{imageId}/documents/{documentId}/validation/issues': {
+        parameters: {
+            query?: {
+                cursor?: components['parameters']['PageCursor'];
+                limit?: components['parameters']['PageLimit'];
+            };
+            header?: never;
+            path: {
+                documentId: string;
+                imageId: string;
+            };
+            cookie?: never;
+        };
+        get: operations['images.validation.issues'];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     '/images/{imageId}/filesystem': {
         parameters: {
             query: {
                 contentScopeId?: string;
+                documentId?: string;
                 entryId?: string;
                 expectedRevision: number;
                 limit?: components['parameters']['PageLimit'];
@@ -1385,132 +1547,20 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    '/images/{imageId}/objects': {
-        parameters: {
-            query?: {
-                cursor?: components['parameters']['PageCursor'];
-                limit?: components['parameters']['PageLimit'];
-                /** @description Semantic content node whose contained descendant objects define the query scope. Reference-only descendants are excluded. */
-                scopeId?: string;
-                type?: string;
-            };
-            header?: never;
-            path: {
-                imageId: string;
-            };
-            cookie?: never;
-        };
-        get: operations['images.objects'];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    '/images/{imageId}/objects/{objectId}': {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                imageId: string;
-                objectId: string;
-            };
-            cookie?: never;
-        };
-        get: operations['images.object'];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    '/images/{imageId}/preview': {
+    '/images/{imageId}/sources/{sourceMemberId}/allocation-map': {
         parameters: {
             query: {
-                bins: number;
-                objectId: string;
-            };
-            header?: never;
-            path: {
-                imageId: string;
-            };
-            cookie?: never;
-        };
-        get: operations['images.preview'];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    '/images/{imageId}/relationships': {
-        parameters: {
-            query?: {
-                cursor?: components['parameters']['PageCursor'];
-                limit?: components['parameters']['PageLimit'];
-                /** @description Semantic content node whose contained descendant objects define the query scope. Reference-only descendants are excluded. */
-                scopeId?: string;
-                /** @description Session-local source object identifier. */
-                sourceObjectId?: string;
-                /** @description Session-local resolved target object identifier. */
-                targetObjectId?: string;
-                /** @description Exact relationship type. */
-                type?: string;
-            };
-            header?: never;
-            path: {
-                imageId: string;
-            };
-            cookie?: never;
-        };
-        get: operations['images.relationships'];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    '/images/{imageId}/system-program-contexts': {
-        parameters: {
-            query: {
+                expectedRevision: number;
                 partitionIndex: number;
             };
             header?: never;
             path: {
                 imageId: string;
+                sourceMemberId: string;
             };
             cookie?: never;
         };
-        get: operations['images.systemProgramContexts'];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    '/images/{imageId}/validation/issues': {
-        parameters: {
-            query?: {
-                cursor?: components['parameters']['PageCursor'];
-                limit?: components['parameters']['PageLimit'];
-            };
-            header?: never;
-            path: {
-                imageId: string;
-            };
-            cookie?: never;
-        };
-        get: operations['images.validation.issues'];
+        get: operations['images.allocationMap'];
         put?: never;
         post?: never;
         delete?: never;
@@ -2213,6 +2263,25 @@ export interface components {
         };
         /** @enum {string} */
         ASeriesLoadTarget: 'A3000' | 'A4000_A5000';
+        ASeriesObjectDetail: {
+            editing?:
+                components['schemas']['ASeriesSampleEditor'] | components['schemas']['ASeriesProgramEditor'] | null;
+            formatConversion?: components['schemas']['ObjectFormatConversion'] | null;
+            /** @constant */
+            formatId: 'yamaha.a-series';
+            image: {
+                documentId: string;
+                format: string;
+                imageId: string;
+                revision: number;
+            };
+            object: components['schemas']['ImageObjectDetailObject'];
+            /** @constant */
+            profile: 'a-series';
+            relationships: components['schemas']['ImageObjectDetailRelationship'][];
+            /** @constant */
+            schemaVersion: 1;
+        };
         ASeriesProgramEditor: {
             assignments: {
                 /** @enum {unknown} */
@@ -2488,6 +2557,7 @@ export interface components {
             wavSizeBytes: number;
         };
         AuditionPrepareRequest: {
+            documentId: string;
             imageId: string;
             objectIds: string[];
             /**
@@ -3246,6 +3316,55 @@ export interface components {
             data: components['schemas']['ImageContentPage'];
             meta: components['schemas']['ResponseMeta'];
         };
+        ImageDocument: {
+            availableOperations: string[];
+            companionSources: components['schemas']['ImageSourceRef'][];
+            /** @enum {string} */
+            completeness: 'COMPLETE' | 'INCOMPLETE' | 'INVALID';
+            floppySet: components['schemas']['ImageFloppySet'] | null;
+            format: string;
+            formatId: string;
+            id: string;
+            name: string;
+            objectCount: number;
+            profile: string;
+            relationshipCount: number;
+            rootCount: number;
+            sourceMemberIds: string[];
+            validation: {
+                errorCount: number;
+                infoCount: number;
+                valid: boolean;
+                warningCount: number;
+            };
+        };
+        ImageDocumentDiscovery: {
+            candidates: {
+                diagnostics: string[];
+                formatId: string;
+                sourceMemberIds: string[];
+                /** @enum {string} */
+                state: 'SUPPORTED' | 'INCOMPLETE' | 'LIMIT_EXCEEDED' | 'INVALID';
+            }[];
+            selectionRequired: boolean;
+        };
+        ImageDocumentPage: {
+            items: components['schemas']['ImageDocument'][];
+            nextCursor: string | null;
+            totalCount: number;
+        };
+        ImageDocumentPageResponse: {
+            data: components['schemas']['ImageDocumentPage'];
+            meta: components['schemas']['ResponseMeta'];
+        };
+        ImageDocumentResponse: {
+            data: components['schemas']['ImageDocument'];
+            meta: components['schemas']['ResponseMeta'];
+        };
+        ImageDocumentSelectionRequest: {
+            expectedRevision: number;
+            selectedFormats: string[];
+        };
         ImageFilesystemAttribute: {
             /** @description Stable native attribute identity, independent of display text. */
             code: string;
@@ -3254,6 +3373,11 @@ export interface components {
             /** @description Compact display text. Empty for storage-only attributes. */
             summary: string;
             value: string;
+        };
+        ImageFilesystemBinding: {
+            contentScopeId: string | null;
+            documentId: string;
+            objectId: string | null;
         };
         ImageFilesystemEdit:
             | {
@@ -3309,8 +3433,8 @@ export interface components {
         ImageFilesystemEntry: {
             ancestorIds: string[];
             attributes: components['schemas']['ImageFilesystemAttribute'][];
+            bindings: components['schemas']['ImageFilesystemBinding'][];
             childCount: number;
-            contentScopeId: string | null;
             filesystemMetadata: boolean;
             id: string;
             interpretation: string;
@@ -3318,12 +3442,12 @@ export interface components {
             /** @enum {string} */
             kind: 'ROOT' | 'PARTITION' | 'DIRECTORY' | 'FILE';
             name: string;
-            objectId: string | null;
             parentId: string | null;
             path: string;
             rawAttributes: string;
             rootId: string;
             sizeBytes: number | null;
+            sourceMemberId: string;
             storage: string;
         };
         ImageFilesystemExportDestination:
@@ -3430,6 +3554,7 @@ export interface components {
             acknowledgeSourceIssues: boolean;
             capacityPolicy?: components['schemas']['VolumeCapacityPolicy'];
             destination: components['schemas']['ImageSessionPackageImportDestination'];
+            documentId: string;
             expectedRevision: number;
             imageId: string;
             inspectionToken: string;
@@ -3518,6 +3643,7 @@ export interface components {
         };
         ImageObjectDeletionRequest: {
             cleanupObjectIds: string[];
+            documentId: string;
             expectedRevision: number;
             imageId: string;
             referrerObjectIds: string[];
@@ -3541,20 +3667,7 @@ export interface components {
             validation: components['schemas']['ImageBuildResult']['validation'];
             warnings: components['schemas']['Issue'][];
         };
-        ImageObjectDetail: {
-            editing?:
-                components['schemas']['ASeriesSampleEditor'] | components['schemas']['ASeriesProgramEditor'] | null;
-            formatConversion?: components['schemas']['ObjectFormatConversion'] | null;
-            image: {
-                format: string;
-                imageId: string;
-                revision: number;
-            };
-            object: components['schemas']['ImageObjectDetailObject'];
-            relationships: components['schemas']['ImageObjectDetailRelationship'][];
-            /** @constant */
-            schemaVersion: 1;
-        };
+        ImageObjectDetail: components['schemas']['ASeriesObjectDetail'] | components['schemas']['Tx16wObjectDetail'];
         ImageObjectDetailDescriptor: {
             dataOffsetBytes: number;
             groupLabel: string;
@@ -3675,7 +3788,8 @@ export interface components {
             meta: components['schemas']['ResponseMeta'];
         };
         ImageOpenRequest: {
-            source: components['schemas']['ImageSourceRef'];
+            selectedFormats?: string[];
+            sources: components['schemas']['ImageSourceRef'][];
         };
         ImagePartitionCapacity: {
             allocatedClusters: number;
@@ -3702,6 +3816,7 @@ export interface components {
             scope: components['schemas']['ImagePlacementScope'];
         };
         ImagePlacementInspectionRequest: {
+            documentId: string;
             expectedRevision: number;
             imageId: string;
             recoveryVolumeName?: string;
@@ -3719,6 +3834,7 @@ export interface components {
         };
         ImagePlacementRepairRequest: {
             capacityPolicy?: components['schemas']['VolumeCapacityPolicy'];
+            documentId: string;
             expectedRevision: number;
             imageId: string;
             recoveryVolumeName?: string;
@@ -3781,12 +3897,14 @@ export interface components {
         };
         ImageProgramAssignmentCleanupInspectionRequest: {
             contentScopeId: string;
+            documentId: string;
             expectedRevision: number;
             imageId: string;
         };
         ImageProgramAssignmentCleanupRequest: {
             assignments: components['schemas']['ImageProgramAssignmentCleanupSelection'][];
             contentScopeId: string;
+            documentId: string;
             expectedRevision: number;
             imageId: string;
         };
@@ -3829,6 +3947,7 @@ export interface components {
         };
         ImageProgramGenerationInspectionRequest: {
             contentScopeId: string;
+            documentId: string;
             expectedRevision: number;
             imageId: string;
         };
@@ -3840,6 +3959,7 @@ export interface components {
         ImageProgramGenerationRequest: {
             capacityPolicy?: components['schemas']['VolumeCapacityPolicy'];
             contentScopeId: string;
+            documentId: string;
             expectedRevision: number;
             imageId: string;
             programs: components['schemas']['ImageProgramGenerationSelection'][];
@@ -3874,7 +3994,7 @@ export interface components {
             id: string;
             notes: string[];
             /** @enum {string} */
-            quality: 'KNOWN' | 'LIKELY' | 'TENTATIVE' | 'UNKNOWN';
+            quality: 'KNOWN' | 'LIKELY' | 'TENTATIVE' | 'UNKNOWN' | 'RESOLVED' | 'MISSING' | 'AMBIGUOUS';
             receiveChannelDisplay: string;
             sourceObjectId: string;
             targetObjectId: string | null;
@@ -3890,22 +4010,11 @@ export interface components {
             meta: components['schemas']['ResponseMeta'];
         };
         ImageSession: {
-            availableOperations: string[];
-            companionSources: components['schemas']['ImageSourceRef'][];
-            floppySet: components['schemas']['ImageFloppySet'] | null;
-            format: string;
+            discovery: components['schemas']['ImageDocumentDiscovery'];
+            documents: components['schemas']['ImageDocument'][];
             imageId: string;
-            objectCount: number;
-            relationshipCount: number;
             revision: number;
-            rootCount: number;
-            source: components['schemas']['ImageSourceRef'];
-            validation: {
-                errorCount: number;
-                infoCount: number;
-                valid: boolean;
-                warningCount: number;
-            };
+            sources: components['schemas']['ImageSourceMember'][];
         };
         ImageSessionAlterationInspection: {
             capacity: components['schemas']['VolumeCapacityAdmission'];
@@ -3914,6 +4023,7 @@ export interface components {
         };
         ImageSessionAlterationRequest: {
             capacityPolicy?: components['schemas']['VolumeCapacityPolicy'];
+            documentId: string;
             expectedRevision: number;
             imageId: string;
             inputBindings?: components['schemas']['InputBinding'][];
@@ -3959,6 +4069,7 @@ export interface components {
             wavFileCount: number;
         };
         ImageSessionAudioExportInspectionRequest: {
+            documentId: string;
             expectedRevision: number;
             imageId: string;
             roots: components['schemas']['ImageSessionExportRoot'][];
@@ -3966,6 +4077,7 @@ export interface components {
         };
         ImageSessionAudioExportRequest: {
             destination: components['schemas']['ImageSessionAudioExportDestination'];
+            documentId: string;
             expectedRevision: number;
             /** @enum {unknown} */
             format: 'SFZ' | 'WAV';
@@ -3999,6 +4111,7 @@ export interface components {
               };
         ImageSessionExtentLayoutRepairRequest: {
             destination: components['schemas']['ImageSessionMediaConversionDestination'];
+            documentId: string;
             expectedRevision: number;
             imageId: string;
         };
@@ -4051,6 +4164,7 @@ export interface components {
         };
         ImageSessionMediaConversionInspectionRequest:
             | {
+                  documentId: string;
                   expectedRevision: number;
                   /** @constant */
                   format: 'ISO9660';
@@ -4059,6 +4173,7 @@ export interface components {
                   partitionIndex: number;
               }
             | {
+                  documentId: string;
                   expectedRevision: number;
                   /** @constant */
                   format: 'FAT12_FLOPPY';
@@ -4069,6 +4184,7 @@ export interface components {
         ImageSessionMediaConversionRequest:
             | {
                   destination: components['schemas']['ImageSessionMediaConversionDestination'];
+                  documentId: string;
                   expectedRevision: number;
                   /** @constant */
                   format: 'ISO9660';
@@ -4078,6 +4194,7 @@ export interface components {
               }
             | {
                   destination: components['schemas']['ImageSessionMediaConversionDestination'];
+                  documentId: string;
                   expectedRevision: number;
                   /** @constant */
                   format: 'FAT12_FLOPPY';
@@ -4129,6 +4246,7 @@ export interface components {
               };
         ImageSessionPackageExportRequest: {
             destination: components['schemas']['ImageSessionPackageExportDestination'];
+            documentId: string;
             expectedRevision: number;
             imageId: string;
             roots: components['schemas']['ImageSessionExportRoot'][];
@@ -4214,6 +4332,7 @@ export interface components {
         ImageSessionPackageImportPlanRequest: {
             capacityPolicy?: components['schemas']['VolumeCapacityPolicy'];
             destination: components['schemas']['ImageSessionPackageImportDestination'];
+            documentId: string;
             expectedRevision: number;
             imageId: string;
             opaqueSequenceDecisions?: components['schemas']['PackageOpaqueSequenceDecision'][];
@@ -4227,6 +4346,7 @@ export interface components {
             actions: components['schemas']['PackageImportAction'][];
             allocation: components['schemas']['PackageAllocationEstimate'][];
             applied: boolean;
+            documentId: string;
             imageId: string;
             objectCount: number;
             planId: string;
@@ -4235,6 +4355,7 @@ export interface components {
             revision: number;
             /** @constant */
             schemaVersion: '1.0';
+            sourceMemberId: string;
             /** @enum {unknown} */
             targetKind: 'SFS' | 'FAT12_FLOPPY' | 'ISO9660';
             targetSnapshotId: string;
@@ -4265,6 +4386,7 @@ export interface components {
         };
         ImageSessionSequenceExportRequest: {
             destination: components['schemas']['ImageSessionAudioExportDestination'];
+            documentId: string;
             expectedRevision: number;
             imageId: string;
             objectIds: string[];
@@ -4300,6 +4422,7 @@ export interface components {
             valid: boolean;
         };
         ImageSessionTx16wImportInspectionRequest: {
+            documentId: string;
             expectedRevision: number;
             imageId: string;
             /** @enum {unknown} */
@@ -4391,12 +4514,14 @@ export interface components {
             volumeDirectoryId: number;
         };
         ImageSessionVolumeFloppyExportInspectionRequest: {
+            documentId: string;
             expectedRevision: number;
             imageId: string;
             scopeId: string;
         };
         ImageSessionVolumeFloppyExportRequest: {
             destination: components['schemas']['ImageSessionVolumeFloppyExportDestination'];
+            documentId: string;
             expectedRevision: number;
             imageId: string;
             scopeId: string;
@@ -4473,12 +4598,14 @@ export interface components {
             volumeDirectoryId: number;
         };
         ImageSessionVolumePackageExportInspectionRequest: {
+            documentId: string;
             expectedRevision: number;
             imageId: string;
             scopeId: string;
         };
         ImageSessionVolumePackageExportRequest: {
             destination: components['schemas']['ImageSessionVolumePackageExportDestination'];
+            documentId: string;
             expectedRevision: number;
             imageId: string;
             scopeId: string;
@@ -4513,6 +4640,19 @@ export interface components {
             status: 'EXPORTED' | 'SKIPPED_EMPTY' | 'FAILED';
             volumeDirectoryId: number;
         };
+        ImageSourceMember: {
+            diagnostics: {
+                code: string;
+                message: string;
+                path: string;
+                /** @enum {string} */
+                severity: 'INFO' | 'WARNING' | 'ERROR';
+            }[];
+            filesystemRootIds: string[];
+            format: string;
+            id: string;
+            source: components['schemas']['ImageSourceRef'];
+        };
         ImageSourceRef:
             | {
                   file: components['schemas']['FileRef'];
@@ -4522,7 +4662,7 @@ export interface components {
             | {
                   directory: components['schemas']['DirectoryRef'];
                   /** @constant */
-                  kind: 'AXK_OBJECT_DIRECTORY';
+                  kind: 'DIRECTORY';
               }
             | {
                   device: {
@@ -4555,6 +4695,7 @@ export interface components {
         };
         ImageVolumeCapacityInspectionRequest: {
             contentScopeId: string;
+            documentId: string;
             expectedRevision: number;
             imageId: string;
         };
@@ -4567,6 +4708,7 @@ export interface components {
             targets: components['schemas']['ImageVolumeDeletionTarget'][];
         };
         ImageVolumeDeletionInspectionRequest: {
+            documentId: string;
             expectedRevision: number;
             imageId: string;
             targets: components['schemas']['ImageVolumeDeletionTarget'][];
@@ -4596,6 +4738,7 @@ export interface components {
         };
         ImageWaveDataOrphanInspectionRequest: {
             contentScopeId: string;
+            documentId: string;
             expectedRevision: number;
             imageId: string;
         };
@@ -4748,7 +4891,7 @@ export interface components {
         MediaSourceInspectResponse: {
             data: {
                 /** @enum {unknown} */
-                mediaSourceKind: 'AXK_OBJECT_DIRECTORY' | null;
+                mediaSourceKind: 'DIRECTORY' | null;
             };
             meta: components['schemas']['ResponseMeta'];
         };
@@ -4807,6 +4950,13 @@ export interface components {
         };
         MidiInspectionRequest: {
             source: components['schemas']['InputRef'];
+        };
+        NativeSourceLocation: {
+            entryId: string;
+            length: number;
+            memberId: string;
+            offset: number;
+            rootId: string;
         };
         ObjectFormatConversion:
             components['schemas']['SampleObjectFormatConversion'] | components['schemas']['ProgramFormatConversion'];
@@ -5531,6 +5681,75 @@ export interface components {
             partNumber: number;
             programNumber: number;
         };
+        Tx16wObjectDetail: {
+            details: components['schemas']['Tx16wObjectDetails'];
+            documentId: string;
+            /** @constant */
+            formatId: 'yamaha.tx16w';
+            imageId: string;
+            locations: components['schemas']['NativeSourceLocation'][];
+            name: string;
+            objectId: string;
+            /** @constant */
+            profile: 'yamaha-native';
+            revision: number;
+            type: string;
+        };
+        Tx16wObjectDetails:
+            | {
+                  attackFrames: number;
+                  looped: boolean;
+                  repeatFrames: number;
+                  sampleRate: number;
+                  /** @constant */
+                  type: 'wave';
+              }
+            | {
+                  regions: {
+                      fade: number;
+                      highKey: number;
+                      lowKey: number;
+                      timbreSlot: number;
+                  }[];
+                  slot: number;
+                  /** @constant */
+                  type: 'voice';
+              }
+            | {
+                  rootKey: number;
+                  slot: number;
+                  /** @constant */
+                  type: 'timbre';
+                  waveSlot: number;
+              }
+            | {
+                  slot: number;
+                  /** @constant */
+                  type: 'performance';
+                  voices: {
+                      alternativeGroup: number;
+                      audioOutput: number;
+                      detune: number;
+                      receiveChannel: number;
+                      transpose: number;
+                      voiceSlot: number;
+                      volume: number;
+                  }[];
+              }
+            | {
+                  /** @constant */
+                  type: 'setup';
+                  waves: {
+                      name: string;
+                      slot: number;
+                  }[];
+                  writeProtected: boolean;
+              }
+            | {
+                  kind: string;
+                  /** @constant */
+                  type: 'opaque';
+              };
         Upload: {
             declaredSize: number;
             expiresInSeconds: number;
@@ -14143,11 +14362,11 @@ export interface operations {
             };
         };
     };
-    'images.allocationMap': {
+    'images.documents': {
         parameters: {
-            query: {
-                expectedRevision: number;
-                partitionIndex: number;
+            query?: {
+                cursor?: components['parameters']['PageCursor'];
+                limit?: components['parameters']['PageLimit'];
             };
             header?: never;
             path: {
@@ -14157,14 +14376,88 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Revision-pinned SFS partition cluster allocation map */
+            /** @description Current document resource */
             200: {
                 headers: {
                     'X-Request-Id': components['headers']['XRequestId'];
                     [name: string]: unknown;
                 };
                 content: {
-                    'application/json': components['schemas']['ImageAllocationMapResponse'];
+                    'application/json': components['schemas']['ImageDocumentPageResponse'];
+                };
+            };
+            /** @description Request could not be completed */
+            default: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+        };
+    };
+    'images.documents.select': {
+        parameters: {
+            query?: {
+                cursor?: components['parameters']['PageCursor'];
+                limit?: components['parameters']['PageLimit'];
+            };
+            header?: never;
+            path: {
+                imageId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                'application/json': components['schemas']['ImageDocumentSelectionRequest'];
+            };
+        };
+        responses: {
+            /** @description Current document resource */
+            200: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ImageSessionResponse'];
+                };
+            };
+            /** @description Request could not be completed */
+            default: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+        };
+    };
+    'images.document': {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                documentId: string;
+                imageId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current document resource */
+            200: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ImageDocumentResponse'];
                 };
             };
             /** @description Request could not be completed */
@@ -14184,6 +14477,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
+                documentId: string;
                 imageId: string;
             };
             cookie?: never;
@@ -14245,6 +14539,7 @@ export interface operations {
             };
             header?: never;
             path: {
+                documentId: string;
                 imageId: string;
             };
             cookie?: never;
@@ -14273,54 +14568,6 @@ export interface operations {
             };
         };
     };
-    'images.filesystem': {
-        parameters: {
-            query: {
-                contentScopeId?: string;
-                entryId?: string;
-                expectedRevision: number;
-                limit?: components['parameters']['PageLimit'];
-                objectId?: string;
-                offset?: number;
-                parentId?: string;
-                query?: string;
-                rootId?: string;
-            };
-            header?: never;
-            path: {
-                imageId: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Read-only stored filesystem entries, independent of sampler relationships */
-            200: {
-                headers: {
-                    'X-Request-Id': components['headers']['XRequestId'];
-                    [name: string]: unknown;
-                };
-                content: {
-                    'application/json': {
-                        data: components['schemas']['ImageFilesystemPage'];
-                        meta: {
-                            requestId: string;
-                        };
-                    };
-                };
-            };
-            /** @description Request could not be completed */
-            default: {
-                headers: {
-                    'X-Request-Id': components['headers']['XRequestId'];
-                    [name: string]: unknown;
-                };
-                content: {
-                    'application/json': components['schemas']['ErrorResponse'];
-                };
-            };
-        };
-    };
     'images.objects': {
         parameters: {
             query?: {
@@ -14332,6 +14579,7 @@ export interface operations {
             };
             header?: never;
             path: {
+                documentId: string;
                 imageId: string;
             };
             cookie?: never;
@@ -14365,6 +14613,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
+                documentId: string;
                 imageId: string;
                 objectId: string;
             };
@@ -14412,6 +14661,7 @@ export interface operations {
             };
             header?: never;
             path: {
+                documentId: string;
                 imageId: string;
             };
             cookie?: never;
@@ -14456,6 +14706,7 @@ export interface operations {
             };
             header?: never;
             path: {
+                documentId: string;
                 imageId: string;
             };
             cookie?: never;
@@ -14491,6 +14742,7 @@ export interface operations {
             };
             header?: never;
             path: {
+                documentId: string;
                 imageId: string;
             };
             cookie?: never;
@@ -14527,6 +14779,7 @@ export interface operations {
             };
             header?: never;
             path: {
+                documentId: string;
                 imageId: string;
             };
             cookie?: never;
@@ -14541,6 +14794,92 @@ export interface operations {
                 };
                 content: {
                     'application/json': components['schemas']['ImageValidationPageResponse'];
+                };
+            };
+            /** @description Request could not be completed */
+            default: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+        };
+    };
+    'images.filesystem': {
+        parameters: {
+            query: {
+                contentScopeId?: string;
+                documentId?: string;
+                entryId?: string;
+                expectedRevision: number;
+                limit?: components['parameters']['PageLimit'];
+                objectId?: string;
+                offset?: number;
+                parentId?: string;
+                query?: string;
+                rootId?: string;
+            };
+            header?: never;
+            path: {
+                imageId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Read-only stored filesystem entries, independent of sampler relationships */
+            200: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': {
+                        data: components['schemas']['ImageFilesystemPage'];
+                        meta: {
+                            requestId: string;
+                        };
+                    };
+                };
+            };
+            /** @description Request could not be completed */
+            default: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+        };
+    };
+    'images.allocationMap': {
+        parameters: {
+            query: {
+                expectedRevision: number;
+                partitionIndex: number;
+            };
+            header?: never;
+            path: {
+                imageId: string;
+                sourceMemberId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Revision-pinned SFS partition cluster allocation map */
+            200: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ImageAllocationMapResponse'];
                 };
             };
             /** @description Request could not be completed */

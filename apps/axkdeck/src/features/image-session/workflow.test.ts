@@ -1,9 +1,11 @@
+import { nativeWorkspaceFixture } from '../../test/nativeWorkspaceFixture';
 import { describe, expect, it, vi } from 'vitest';
 import { AxklibApiError } from '../../lib/httpErrors';
 import type { ImageLocation } from '../../lib/storageLocations';
 import type { ImageTransport, OpenedImage } from '../../lib/transport';
 import { PickerController } from '../dialogs/picker';
 import { ImageSessionWorkflow } from './workflow.svelte';
+import type { SessionCollaborators } from './collaborators';
 
 const location: ImageLocation = {
     kind: 'server-file',
@@ -20,6 +22,7 @@ function opened(sessionId: number): OpenedImage {
         partitionIndex: 0,
     };
     return {
+        ...nativeWorkspaceFixture(),
         sessionId,
         allocationInspectionAvailable: true,
         revision: 1,
@@ -72,14 +75,68 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
     return { promise, resolve };
 }
 
-function connectWorkflow(workflow: ImageSessionWorkflow, loadVolume = vi.fn(async () => undefined)): void {
+function connectWorkflow(
+    workflow: ImageSessionWorkflow,
+    loadVolume = vi.fn(async () => undefined),
+    extra: Partial<SessionCollaborators> = {},
+): void {
     workflow.connect({
         catalog: { activeVolumeId: '', loadVolume, clear: vi.fn() },
         audition: { invalidateSession: vi.fn(async () => undefined) },
         mutation: { setCapabilities: vi.fn() },
         clearExportSelection: vi.fn(),
+        ...extra,
     } as never);
 }
+
+describe('document-scoped navigation', () => {
+    it('retains separate adapter state and blocks switches during operation recovery', async () => {
+        const selectDocument = vi.fn(async (_session: number, documentId: string | null) => ({
+            ...opened(7),
+            documentId,
+        }));
+        const transport = { openImage: vi.fn(async () => opened(7)), selectDocument };
+        const workflow = new ImageSessionWorkflow(transport as unknown as ImageTransport, {} as PickerController);
+        let selection = 'first';
+        connectWorkflow(workflow, undefined, {
+            captureDocumentState: () => {
+                const value = selection;
+                return () => {
+                    selection = value;
+                };
+            },
+        });
+        await workflow.open([location]);
+        const original = workflow.documentId!;
+        workflow.canSwitchDocument = () => false;
+        await workflow.selectDocument('second');
+        expect(selectDocument).not.toHaveBeenCalled();
+        expect(workflow.documentId).toBe(original);
+        workflow.canSwitchDocument = () => true;
+        await workflow.selectDocument('second');
+        selection = 'second';
+        await workflow.selectDocument(original);
+        expect(selection).toBe('first');
+        await workflow.selectDocument('second');
+        expect(selection).toBe('second');
+    });
+
+    it('ignores a document switch reply after its workspace has been replaced', async () => {
+        const pending = deferred<OpenedImage>();
+        const transport = { openImage: vi.fn(async () => opened(7)), selectDocument: vi.fn(() => pending.promise) };
+        const workflow = new ImageSessionWorkflow(transport as unknown as ImageTransport, {} as PickerController);
+        connectWorkflow(workflow);
+        await workflow.open([location]);
+        const change = workflow.selectDocument('second');
+        await vi.waitFor(() => expect(transport.selectDocument).toHaveBeenCalledOnce());
+        workflow.sessionId = 19;
+        pending.resolve({ ...opened(7), documentId: 'second' });
+        await change;
+        expect(workflow.sessionId).toBe(19);
+        expect(workflow.documentId).not.toBe('second');
+        expect(workflow.switchingDocument).toBe(false);
+    });
+});
 
 describe('ImageSessionWorkflow open progress', () => {
     it('applies writable capabilities before publishing a prepared device session', async () => {
@@ -105,7 +162,7 @@ describe('ImageSessionWorkflow open progress', () => {
             expect(workflow.location).toBeNull();
             expect(workflow.objectDeletionAvailable).toBe(false);
         });
-        await workflow.open(device, undefined, prepare);
+        await workflow.open([device], undefined, prepare);
         expect(prepare).toHaveBeenCalledOnce();
         expect(workflow.location).toEqual(device);
         expect(workflow.objectDeletionAvailable).toBe(true);
@@ -120,9 +177,9 @@ describe('ImageSessionWorkflow open progress', () => {
         };
         const workflow = new ImageSessionWorkflow(transport as unknown as ImageTransport, {} as PickerController);
         connectWorkflow(workflow);
-        await workflow.open(location);
+        await workflow.open([location]);
         await workflow.open(
-            { kind: 'device', reference: { sessionId: 'owned', targetId: 'disk' }, displayName: 'USB' },
+            [{ kind: 'device', reference: { sessionId: 'owned', targetId: 'disk' }, displayName: 'USB' }],
             undefined,
             async () => {
                 throw new Error('Permission declined');
@@ -155,7 +212,7 @@ describe('ImageSessionWorkflow open progress', () => {
         };
         const workflow = new ImageSessionWorkflow(transport as unknown as ImageTransport, {} as PickerController);
         connectWorkflow(workflow);
-        const opening = workflow.open(location);
+        const opening = workflow.open([location]);
         await vi.waitFor(() => expect(validationIssues).toHaveBeenCalledOnce());
         await workflow.refresh();
         if (outcome === 'resolve') resolve([]);
@@ -186,7 +243,7 @@ describe('ImageSessionWorkflow open progress', () => {
         };
         const workflow = new ImageSessionWorkflow(transport as unknown as ImageTransport, {} as PickerController);
         connectWorkflow(workflow);
-        await workflow.open(location);
+        await workflow.open([location]);
         expect(workflow.integrityDialogOpen).toBe(true);
     });
 
@@ -210,7 +267,7 @@ describe('ImageSessionWorkflow open progress', () => {
         };
         const workflow = new ImageSessionWorkflow(transport as unknown as ImageTransport, {} as PickerController);
         connectWorkflow(workflow);
-        await workflow.open(location);
+        await workflow.open([location]);
         expect(workflow.integrityDialogOpen).toBe(true);
         workflow.integrityDialogOpen = false;
         await workflow.refresh();
@@ -255,7 +312,7 @@ describe('ImageSessionWorkflow open progress', () => {
             );
             connectWorkflow(workflow);
 
-            const opening = workflow.open(location);
+            const opening = workflow.open([location]);
             await vi.advanceTimersByTimeAsync(749);
             expect(workflow.openProgressVisible).toBe(false);
             await vi.advanceTimersByTimeAsync(1);
@@ -298,7 +355,7 @@ describe('ImageSessionWorkflow open progress', () => {
             );
             connectWorkflow(workflow);
 
-            const opening = workflow.open(location);
+            const opening = workflow.open([location]);
             await vi.advanceTimersByTimeAsync(750);
 
             expect(workflow.openProgressVisible).toBe(true);
@@ -334,7 +391,7 @@ describe('ImageSessionWorkflow lease maintenance', () => {
             clearExportSelection: vi.fn(),
         } as never);
 
-        await workflow.open(location, { partitionIndex: 0, volumeName: 'newvolume' });
+        await workflow.open([location], { partitionIndex: 0, volumeName: 'newvolume' });
         await workflow.maintainLease();
 
         expect(openImage).toHaveBeenCalledTimes(2);
@@ -406,7 +463,7 @@ describe('ImageSessionWorkflow volume selection', () => {
 
 describe('ImageSessionWorkflow companion folders', () => {
     const folder: ImageLocation = {
-        kind: 'axk-object-directory',
+        kind: 'server-directory',
         reference: { rootId: 'root', relativePath: 'set/disk1' },
         displayName: 'disk1',
     };
@@ -415,6 +472,13 @@ describe('ImageSessionWorkflow companion folders', () => {
         return {
             ...opened(7),
             format: 'axk-object-directory',
+            sources: [
+                {
+                    ...nativeWorkspaceFixture().sources[0],
+                    source: { kind: 'DIRECTORY', directory: { rootId: 'root', relativePath: 'set/disk1' } },
+                    format: 'directory',
+                },
+            ],
             floppySet: {
                 status: next === null ? 'COMPLETE' : 'INCOMPLETE',
                 setLabel: '              ',
@@ -438,7 +502,7 @@ describe('ImageSessionWorkflow companion folders', () => {
                 picker,
             );
             connectWorkflow(workflow);
-            await workflow.open(folder);
+            await workflow.open([folder]);
             expect(workflow.companionRequest).toMatchObject({
                 sourceKind: 'directory',
                 nextRequiredIndex: 2,
@@ -479,7 +543,7 @@ describe('ImageSessionWorkflow companion folders', () => {
             mutation: { setCapabilities: vi.fn() },
             clearExportSelection: vi.fn(),
         } as never);
-        await workflow.open(folder);
+        await workflow.open([folder]);
         workflow.requestCompanionDisks({ kind: 'audition', objectId: 'wave-1' });
         const selection = { kind: 'sources', sources: [disk2] } as const;
         await workflow.attachCompanionDisks({ ...selection, sources: [disk2] });

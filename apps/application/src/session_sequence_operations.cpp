@@ -1,4 +1,6 @@
 #include "axklib/application/session_sequence_operations.hpp"
+#include "axklib/application/formats/a_series/session_read.hpp"
+#include "axklib/application/image_session_contracts.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -99,7 +101,7 @@ axk::app::Result<void> write_bytes(const std::filesystem::path &path, std::span<
 }
 
 axk::app::Result<std::vector<const axk::ObjectSnapshot *>>
-resolve_sequences(const Json &input, const axk::app::ImageSessionRead &session) {
+resolve_sequences(const Json &input, const axk::app::formats::a_series::SessionRead &session) {
     try {
         const auto &object_ids = input.at("objectIds");
         if (!object_ids.is_array() || object_ids.empty() || object_ids.size() > 1024U)
@@ -165,7 +167,8 @@ axk::app::Result<void> axk::app::bind_session_sequence_operations(OperationRegis
             const auto identity = parse_session_identity(input);
             if (!identity)
                 return std::unexpected(identity.error());
-            auto session = images.begin_read(identity->first, context.owner_id, identity->second);
+            auto session = axk::app::formats::a_series::SessionReader::acquire(images, image_document_ref(input),
+                                                                               context.owner_id, identity->second);
             if (!session)
                 return std::unexpected(session.error());
             const auto sequences = resolve_sequences(input, *session);

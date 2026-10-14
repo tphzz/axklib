@@ -40,6 +40,9 @@
             onselectmany={(selections) => {
                 if (request === current) finish(selections);
             }}
+            onselectsources={(selections) => {
+                if (request === current) finish(selections);
+            }}
             oncancel={() => {
                 if (request === current) finish(null);
             }}

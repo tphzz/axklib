@@ -33,6 +33,70 @@ def issue_codes(root: Path, policy: Path) -> list[str]:
     return [issue.code for issue in architecture_check.check_repository(root, policy)]
 
 
+def test_native_contract_cannot_depend_on_a_sampler_or_conversion(tmp_path: Path) -> None:
+    write_lines(tmp_path / "src/unit.cpp", 1)
+    source = tmp_path / "library/src/native/document.cpp"
+    source.parent.mkdir(parents=True)
+    source.write_text('#include "axklib/formats/tx16w/codec.hpp"\n', encoding="utf-8")
+    issues = architecture_check.check_repository(tmp_path, write_policy(tmp_path))
+    assert any(issue.code == "module_dependency_forbidden" for issue in issues)
+
+
+def test_native_format_cannot_include_writer_transport_or_another_format(tmp_path: Path) -> None:
+    write_lines(tmp_path / "src/unit.cpp", 1)
+    source = tmp_path / "library/include/axklib/formats/tx16w/document.hpp"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        '#include "axklib/writer.hpp"\n'
+        '#include "axklib/formats/a_series/document.hpp"\n'
+        '#include <nlohmann/json.hpp>\n'
+        '#include "../../writer.hpp"\n',
+        encoding="utf-8",
+    )
+    issues = architecture_check.check_repository(tmp_path, write_policy(tmp_path))
+    assert sum(issue.code == "module_dependency_forbidden" for issue in issues) == 4
+
+
+def test_native_format_can_include_its_contract_and_shared_sources(tmp_path: Path) -> None:
+    write_lines(tmp_path / "src/unit.cpp", 1)
+    source = tmp_path / "library/src/formats/tx16w/document.cpp"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        '#include "axklib/formats/tx16w/document.hpp"\n'
+        '#include "axklib/native/source.hpp"\n#include <vector>\n',
+        encoding="utf-8",
+    )
+    assert architecture_check.check_repository(tmp_path, write_policy(tmp_path)) == []
+
+
+def test_a_series_owner_cannot_depend_on_conversion_or_transport(tmp_path: Path) -> None:
+    write_lines(tmp_path / "src/unit.cpp", 1)
+    source = tmp_path / "library/src/formats/a_series/document.cpp"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        '#include "axklib/media.hpp"\n'
+        '#include "axklib/conversion/tx16w_to_a_series/converter.hpp"\n'
+        '#include <nlohmann/json.hpp>\n',
+        encoding="utf-8",
+    )
+    issues = architecture_check.check_repository(tmp_path, write_policy(tmp_path))
+    assert sum(issue.code == "module_dependency_forbidden" for issue in issues) == 2
+
+
+def test_shared_session_infrastructure_cannot_include_format_state(tmp_path: Path) -> None:
+    write_lines(tmp_path / "src/unit.cpp", 1)
+    source = tmp_path / "apps/application/src/image_sessions_internal.hpp"
+    source.parent.mkdir(parents=True)
+    source.write_text(
+        '#include "native_document_state.hpp"\n'
+        '#include "formats/a_series/session_state.hpp"\n'
+        '#include "axklib/formats/tx16w/document.hpp"\n',
+        encoding="utf-8",
+    )
+    issues = architecture_check.check_repository(tmp_path, write_policy(tmp_path))
+    assert sum(issue.code == "module_dependency_forbidden" for issue in issues) == 2
+
+
 def test_accepts_file_at_limit_and_matching_legacy_file(tmp_path: Path) -> None:
     write_lines(tmp_path / "src/at-limit.cpp", 700)
     write_lines(tmp_path / "src/legacy.cpp", 701)

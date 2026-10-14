@@ -7,10 +7,10 @@
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
 
-#include "a_series_sample_editor.hpp"
-#include "axklib/application/sample_formats.hpp"
+#include "axklib/application/formats/a_series/sample_formats.hpp"
 #include "axklib/catalog.hpp"
 #include "axklib/object.hpp"
+#include "formats/a_series/sample_editor.hpp"
 
 TEST(SampleBankFormats, DiagnosticsIgnoreInactiveAndSampleOnlyParametersWithoutChangingBytes) {
     axk::CurrentSbac bank;

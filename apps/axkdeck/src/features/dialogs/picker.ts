@@ -16,7 +16,7 @@ export type PickerParentDialog =
     | 'media-export'
     | 'integrity-repair'
     | 'sequence-import';
-export type PickerSelection = ImageLocation | DirectoryLocation | FileLocation[];
+export type PickerSelection = ImageLocation | DirectoryLocation | ImageLocation[];
 
 export interface PickerNavigation {
     purpose?: 'open-source';
@@ -45,6 +45,21 @@ export class PickerController {
 
     constructor(private readonly onChange: (request: PickerRequest | null) => void) {}
 
+    chooseSources(navigation: PickerNavigation = {}): Promise<ImageLocation[] | null> {
+        return this.begin(
+            {
+                mode: 'media-source',
+                title: 'Open',
+                extensions: [],
+                suggestedName: '',
+                multiple: true,
+                ...navigation,
+                purpose: 'open-source',
+            },
+            (selection) => (Array.isArray(selection) ? selection : null),
+        );
+    }
+
     chooseLocation(
         mode: PickerMode,
         title: string,
@@ -71,7 +86,8 @@ export class PickerController {
                 multiple: true,
                 ...navigation,
             },
-            (selection) => (Array.isArray(selection) ? selection : null),
+            (selection) =>
+                Array.isArray(selection) && selection.every((item) => item.kind === 'server-file') ? selection : null,
         );
     }
 
@@ -85,7 +101,14 @@ export class PickerController {
                 multiple: true,
                 ...navigation,
             },
-            (selection) => (Array.isArray(selection) || selection?.kind === 'server-directory' ? selection : null),
+            (selection) =>
+                Array.isArray(selection)
+                    ? selection.every((item) => item.kind === 'server-file')
+                        ? selection
+                        : null
+                    : selection?.kind === 'server-directory'
+                      ? selection
+                      : null,
         );
     }
 

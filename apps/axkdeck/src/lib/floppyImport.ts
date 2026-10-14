@@ -7,7 +7,7 @@ export type FloppyInputLocation = InputFileLocation | DirectoryLocation;
 export type FloppyObject = components['schemas']['FloppyImportObject'];
 export type FloppyPlanRequest = Omit<
     components['schemas']['ImageFloppyImportPlanRequest'],
-    'imageId' | 'expectedRevision'
+    'imageId' | 'documentId' | 'expectedRevision'
 >;
 export interface FloppyTransport {
     startFloppyInspection(sources: FloppyInputLocation[]): Promise<JobState>;

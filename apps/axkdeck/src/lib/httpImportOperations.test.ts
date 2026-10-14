@@ -14,7 +14,7 @@ describe('audioImportRequest', () => {
         const source = serverFileLocation({ rootId: 'workspace', relativePath: 'audio/Tone.wav' });
 
         const result = audioImportRequest(
-            'image-1',
+            { imageId: 'image-1', documentId: 'document-a-series-source-1' },
             8,
             { kind: 'CREATE_VOLUME', partitionIndex: 1, volumeName: 'Imported' },
             [
@@ -62,7 +62,7 @@ describe('sequenceImportRequest', () => {
         const source = serverFileLocation({ rootId: 'workspace', relativePath: 'midi/Pattern.mid' });
 
         const result = sequenceImportRequest(
-            'image-1',
+            { imageId: 'image-1', documentId: 'document-a-series-source-1' },
             8,
             { kind: 'CREATE_VOLUME', partitionIndex: 1, volumeName: 'Imported' },
             [{ source, sequenceName: 'Pattern' }],
@@ -103,7 +103,7 @@ describe('sampleBankCreationRequest', () => {
         { sampleFormat: 'A4000_A5000_224' as const, storedFormat: 'a4000_a5000_224' },
     ])('creates an explicit $storedFormat Sample Bank without input bindings', ({ sampleFormat, storedFormat }) => {
         expect(
-            sampleBankCreationRequest('image-1', 4, {
+            sampleBankCreationRequest({ imageId: 'image-1', documentId: 'document-a-series-source-1' }, 4, {
                 partitionIndex: 2,
                 volumeName: 'Keys',
                 sampleBankName: 'Layered Keys',
@@ -111,6 +111,7 @@ describe('sampleBankCreationRequest', () => {
                 sampleFormat,
             }),
         ).toEqual({
+            documentId: 'document-a-series-source-1',
             imageId: 'image-1',
             expectedRevision: 4,
             manifest: {
@@ -143,13 +144,14 @@ describe('tx16wDiskSetImportRequest', () => {
 
         expect(
             tx16wDiskSetImportRequest(
-                'image-1',
+                { imageId: 'image-1', documentId: 'document-a-series-source-1' },
                 7,
                 [upload, workspace],
                 { partitionIndex: 1, volumeName: 'TX16W' },
                 'WAVE_DATA_ONLY',
             ),
         ).toEqual({
+            documentId: 'document-a-series-source-1',
             imageId: 'image-1',
             expectedRevision: 7,
             manifest: {
@@ -181,13 +183,14 @@ describe('tx16wDiskSetImportRequest', () => {
 describe('sampleBankAssignmentRequest', () => {
     it('assigns selected Samples to one existing Sample Bank in request order', () => {
         expect(
-            sampleBankAssignmentRequest('image-1', 5, {
+            sampleBankAssignmentRequest({ imageId: 'image-1', documentId: 'document-a-series-source-1' }, 5, {
                 partitionIndex: 2,
                 volumeName: 'Keys',
                 sampleBankName: 'Existing Bank',
                 sampleNames: ['Piano 2', 'Piano 10'],
             }),
         ).toEqual({
+            documentId: 'document-a-series-source-1',
             imageId: 'image-1',
             expectedRevision: 5,
             manifest: {

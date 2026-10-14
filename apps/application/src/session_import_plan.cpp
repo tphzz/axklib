@@ -1,4 +1,5 @@
 #include "session_import_plan.hpp"
+#include "axklib/application/formats/a_series/session_read.hpp"
 
 #include <filesystem>
 #include <utility>
@@ -10,7 +11,8 @@
 
 namespace axk::app::package_operations_internal {
 Result<Json> store_session_import_plan(const std::shared_ptr<SessionPackageOperationState> &state, const Json &input,
-                                       const OperationContext &context, const ImageSessionRead &session,
+                                       const OperationContext &context,
+                                       const axk::app::formats::a_series::SessionRead &session,
                                        const std::shared_ptr<const VerifiedPackageSet> &package_set,
                                        const std::optional<std::string> &replace_plan_token,
                                        Clock::time_point operation_started) {
@@ -85,16 +87,19 @@ Result<Json> store_session_import_plan(const std::shared_ptr<SessionPackageOpera
     auto token = secure_random_hex(24U);
     if (!token)
         return std::unexpected(token.error());
-    auto record = std::make_shared<SessionPackagePlanRecord>(
-        SessionPackagePlanRecord{*token, context.owner_id, now + state->retention, identity.first, identity.second,
-                                 package_set, std::move(*plan), false, *capacity, std::move(admission)});
+    auto record = std::make_shared<SessionPackagePlanRecord>(SessionPackagePlanRecord{
+        *token, context.owner_id, now + state->retention, identity.first, session.document_id, session.source_member_id,
+        identity.second, package_set, std::move(*plan), false, *capacity, std::move(admission)});
     {
         std::lock_guard lock{state->mutex};
         cleanup_session_plans(*state, now);
         if (replace_plan_token) {
             const auto found = state->plans.find(*replace_plan_token);
             if (found == state->plans.end() || found->second->owner_id != context.owner_id || found->second->claimed ||
-                found->second->package_set != package_set) {
+                found->second->package_set != package_set || found->second->image_id != session.image_id ||
+                found->second->document_id != session.document_id ||
+                found->second->source_member_id != session.source_member_id ||
+                found->second->expected_revision != session.revision) {
                 return std::unexpected(
                     operation_error("package_plan_stale", "replacement package import plan changed while replanning"));
             }
@@ -123,6 +128,8 @@ Result<Json> store_session_import_plan(const std::shared_ptr<SessionPackageOpera
                 {"retainedPackageBytes", package_set->retained_payload_bytes}});
     auto result = plan_json(record->plan, record->token, static_cast<std::uint64_t>(state->retention.count() * 60));
     result["imageId"] = record->image_id;
+    result["documentId"] = record->document_id;
+    result["sourceMemberId"] = record->source_member_id;
     result["revision"] = record->expected_revision;
     result["packages"] = session_package_summaries(packages, preparation->destination_volume_names);
     result["capacity"] = capacity_admission_json(record->capacity);

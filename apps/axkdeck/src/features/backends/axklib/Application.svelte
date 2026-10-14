@@ -1,4 +1,8 @@
 <script lang="ts">
+    import { documentBindings } from '../../image-session/documentSelection';
+    import { captureASeriesWorkspace, resetASeriesWorkspace } from '../../devices/a-series/workspaceState';
+    import { sessionCapabilities } from './sessionCapabilities';
+    import { exportActions } from './exportActions';
     import { onDestroy, onMount } from 'svelte';
     import type { AppProps } from '../../../appProps';
     import { AuditionWorkflow } from '../../../features/audition/workflow.svelte';
@@ -48,12 +52,7 @@
     } from '../../../lib/objectSelection';
     import { userFacingMessage } from '../../../lib/userFacingMessage';
     import { useASeriesPreferences } from '../../../lib/aSeriesPreferences.svelte';
-    import type {
-        InspectorSelection,
-        PackageExportObject,
-        PackageExportSelection,
-        WorkspaceView,
-    } from '../../../lib/types';
+    import type { InspectorSelection, PackageExportObject, WorkspaceView } from '../../../lib/types';
 
     let {
         interfaceScaling = null,
@@ -314,8 +313,13 @@
     });
     const directComputerWorkflow = new DirectComputerWorkflow(isDesktop, transport.connectionMode);
     const pendingDirectComputerOperation = directComputerWorkflow.pendingOperation;
+    const { requestObjectPackageExport, requestAudioExport, requestWavExport, requestSequenceExport } = exportActions(
+        imageSessionWorkflow,
+        directComputerWorkflow,
+        exportWorkflow,
+    );
     const mediaDropWorkflow = new MediaDropWorkflow({
-        enabled: () => workspaceMode === 'device',
+        enabled: () => workspaceMode === 'device' || imageSessionWorkflow.sessionId === null,
         interfaceZoom: () => interfaceScaling?.state().appliedZoom ?? 1,
         isDesktop,
         workspaceView: () => workspaceView,
@@ -359,6 +363,12 @@
         programGeneration: programGenerationWorkflow,
         extentRepairs: extentLayoutRepairWorkflow,
         clearExportSelection: clearPackageExportSelection,
+        captureDocumentState: () =>
+            imageSessionWorkflow.documents.find((item) => item.id === imageSessionWorkflow.documentId)?.formatId ===
+            'yamaha.a-series'
+                ? captureASeriesWorkspace(catalog, auditionWorkflow, workspaceView, (view) => (workspaceView = view))
+                : undefined,
+        resetDocumentState: () => resetASeriesWorkspace(auditionWorkflow, (view) => (workspaceView = view)),
     });
     const programs = $derived(catalog.programs);
     const sampleBanks = $derived(catalog.sampleBanks);
@@ -441,6 +451,12 @@
             mediaDrop: mediaDropWorkflow,
         }),
     );
+    imageSessionWorkflow.canSwitchDocument = () =>
+        !appDialogsOpen &&
+        !pickerRequest &&
+        !imageSessionWorkflow.integrityDialogOpen &&
+        !workspaceManagerOpen &&
+        !physicalDevices?.mode;
     const bankMembers = $derived(selectedBank ? catalog.membersForBank(selectedBank.objectId) : []);
     const bankMemberWaveData = $derived(
         catalog.selectedBankMemberId ? catalog.waveDataForSample(catalog.selectedBankMemberId) : [],
@@ -481,17 +497,6 @@
         }
     });
 
-    function requestObjectPackageExport(items: PackageExportObject[]): void {
-        if (
-            !imageSessionWorkflow.packageExportAvailable ||
-            items.length === 0 ||
-            items.length > maximumPackageExportRoots
-        ) {
-            return;
-        }
-        directComputerWorkflow.exportPackage(exportWorkflow, items);
-    }
-
     function clearPackageExportSelection(): void {
         packageExportSelection = emptyPackageExportSelection();
     }
@@ -499,19 +504,6 @@
         imageSessionWorkflow.setStatus(
             `Package export supports at most ${maximumPackageExportRoots.toLocaleString()} selected objects`,
         );
-    }
-
-    async function requestAudioExport(items: PackageExportSelection[]): Promise<void> {
-        if (!imageSessionWorkflow.audioExportAvailable) return;
-        await directComputerWorkflow.exportAudio(exportWorkflow, items);
-    }
-    async function requestWavExport(items: PackageExportSelection[]): Promise<void> {
-        if (!imageSessionWorkflow.audioExportAvailable) return;
-        await directComputerWorkflow.exportWav(exportWorkflow, items);
-    }
-    function requestSequenceExport(items: PackageExportObject[]): void {
-        if (!imageSessionWorkflow.sequenceExportAvailable) return;
-        directComputerWorkflow.exportMidi(exportWorkflow, items);
     }
 
     function requestObjectDeletion(targets: PackageExportObject[]): void {
@@ -538,14 +530,14 @@
 <svelte:window
     oncontextmenu={suppressDesktopContextMenu}
     ondragenter={(event) => {
-        if (workspaceMode === 'device') mediaDropWorkflow.drag(event);
+        if (workspaceMode === 'device' || imageSessionWorkflow.sessionId === null) mediaDropWorkflow.drag(event);
     }}
     ondragover={(event) => {
-        if (workspaceMode === 'device') mediaDropWorkflow.drag(event);
+        if (workspaceMode === 'device' || imageSessionWorkflow.sessionId === null) mediaDropWorkflow.drag(event);
     }}
     ondragleave={(event) => mediaDropWorkflow.leave(event)}
     ondrop={(event) => {
-        if (workspaceMode === 'device') mediaDropWorkflow.drop(event);
+        if (workspaceMode === 'device' || imageSessionWorkflow.sessionId === null) mediaDropWorkflow.drop(event);
     }}
 />
 
@@ -562,6 +554,7 @@
     <WorkspaceShell
         bind:mode={workspaceMode}
         revision={imageSessionWorkflow.revision}
+        {...documentBindings(imageSessionWorkflow)}
         {transport}
         {...fileBindings}
         {interfaceScaling}
@@ -595,19 +588,7 @@
         {editorSelection}
         sourceStatus={imageSessionWorkflow.status}
         packageSelection={packageExportSelection}
-        objectDeletionAvailable={imageSessionWorkflow.objectDeletionAvailable}
-        waveDataCleanupAvailable={imageSessionWorkflow.waveDataCleanupAvailable}
-        programGenerationAvailable={imageSessionWorkflow.programGenerationAvailable}
-        programAssignmentCleanupAvailable={imageSessionWorkflow.programAssignmentCleanupAvailable}
-        packageImportAvailable={imageSessionWorkflow.packageImportAvailable}
-        packageExportAvailable={imageSessionWorkflow.packageExportAvailable}
-        volumePackageExportAvailable={imageSessionWorkflow.volumePackageExportAvailable}
-        volumeFloppyExportAvailable={imageSessionWorkflow.volumeFloppyExportAvailable}
-        audioExportAvailable={imageSessionWorkflow.audioExportAvailable}
-        sequenceExportAvailable={imageSessionWorkflow.sequenceExportAvailable}
-        mediaConversionAvailable={imageSessionWorkflow.mediaConversionAvailable}
-        allocationInspectionAvailable={imageSessionWorkflow.allocationInspectionAvailable}
-        samplerOrderingEnabled={imageSessionWorkflow.imageFormat === 'sfs'}
+        {...sessionCapabilities(imageSessionWorkflow)}
         openConnectionSettings={() => void openConnectionSettings()}
         openImage={() => void imageSessionWorkflow.chooseAndOpen()}
         createImage={() => void imageSessionWorkflow.chooseHardDiskDirectory()}

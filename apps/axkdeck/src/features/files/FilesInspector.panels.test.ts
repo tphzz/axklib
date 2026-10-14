@@ -1,5 +1,6 @@
 import { fireEvent, render } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
+import { nativeWorkspaceFixture } from '../../test/nativeWorkspaceFixture';
 import type { FilesystemEntry } from '../../lib/filesystem';
 import FilesInspector from './FilesInspector.svelte';
 
@@ -13,8 +14,9 @@ const entry: FilesystemEntry = {
     kind: 'file',
     sizeBytes: 356,
     childCount: 0,
-    objectId: 'sample-first',
-    contentScopeId: null,
+    sourceMemberId: 'source-1',
+    bindings: [{ documentId: 'document-a-series-source-1', objectId: 'sample-first', contentScopeId: null }],
+
     interpretation: '',
     storage: 'Record 0',
     issue: '',
@@ -61,7 +63,7 @@ describe('FilesInspector expansion panels', () => {
         const onshowdevice = vi.fn();
         const view = render(FilesInspector, {
             entry: { ...entry, issue: 'Linked Wave Data is missing.' },
-            canShowDevice: true,
+            documents: nativeWorkspaceFixture().documents,
             onshowdevice,
         });
         await fireEvent.click(view.getByRole('button', { name: 'Properties' }));
@@ -69,9 +71,11 @@ describe('FilesInspector expansion panels', () => {
 
         expect(view.getByRole('status').textContent).toBe('Linked Wave Data is missing.');
         expect(view.getByRole('status').closest('[hidden], [inert]')).toBeNull();
-        const footer = view.getByRole('button', { name: 'To Device' });
+        const footer = view.getByRole('button', { name: 'Show in A-series' });
         expect(footer.closest('.inspector-body')).toBeNull();
         await fireEvent.click(footer);
-        expect(onshowdevice).toHaveBeenCalledWith('sample-first');
+        expect(onshowdevice).toHaveBeenCalledWith(
+            expect.objectContaining({ objectId: 'sample-first', documentId: 'document-a-series-source-1' }),
+        );
     });
 });

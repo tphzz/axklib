@@ -4,6 +4,7 @@
 #include <fstream>
 #include <string>
 #include <system_error>
+#include <utility>
 
 #include <gtest/gtest.h>
 #include <nlohmann/json.hpp>
@@ -15,6 +16,43 @@
 #include "axklib/writer_internal.hpp"
 
 namespace {
+
+TEST(ImageSessionContract, RequiresBoundedExplicitSourcesAndRejectsObsoleteShapes) {
+    const axk::server::OpenApiValidator validator;
+    using Json = nlohmann::json;
+    const Json file{{"kind", "FILE"}, {"file", {{"rootId", "workspace"}, {"relativePath", "disk.ima"}}}};
+    const Json directory{{"kind", "DIRECTORY"}, {"directory", {{"rootId", "workspace"}, {"relativePath", "objects"}}}};
+    EXPECT_TRUE(validator.validate("ImageOpenRequest", {{"sources", Json::array({file, directory})}}));
+    EXPECT_FALSE(validator.validate("ImageOpenRequest", {{"source", file}}));
+    EXPECT_FALSE(validator.validate("ImageOpenRequest", {{"sources", Json::array({file})}, {"source", file}}));
+    EXPECT_FALSE(validator.validate("ImageOpenRequest", {{"sources", Json::array()}}));
+    EXPECT_FALSE(validator.validate("ImageOpenRequest", {{"sources", Json::array({file, file})}}));
+    auto obsolete = directory;
+    obsolete["kind"] = "AXK_OBJECT_DIRECTORY";
+    EXPECT_FALSE(validator.validate("ImageOpenRequest", {{"sources", Json::array({obsolete})}}));
+    Json sources = Json::array();
+    for (int index = 0; index < 33; ++index) {
+        auto source = file;
+        source["file"]["relativePath"] = std::to_string(index) + ".ima";
+        sources.push_back(std::move(source));
+    }
+    EXPECT_FALSE(validator.validate("ImageOpenRequest", {{"sources", sources}}));
+    sources.erase(32);
+    EXPECT_TRUE(validator.validate("ImageOpenRequest", {{"sources", sources}}));
+}
+
+TEST(ImageSessionContract, NativeAlterationsRequireAnExplicitDocument) {
+    const axk::server::OpenApiValidator validator;
+    nlohmann::json request{{"imageId", "image-1"},
+                           {"documentId", "document-a-series-source-2"},
+                           {"expectedRevision", 1},
+                           {"manifest", {{"inline", nlohmann::json::object()}}}};
+    EXPECT_TRUE(validator.validate("ImageSessionAlterationRequest", request));
+    request["documentId"] = "";
+    EXPECT_FALSE(validator.validate("ImageSessionAlterationRequest", request));
+    request.erase("documentId");
+    EXPECT_FALSE(validator.validate("ImageSessionAlterationRequest", request));
+}
 
 TEST(ImageSessionContract, FilesystemRootAcceptsFatFloppyContentsCapability) {
     const axk::server::OpenApiValidator validator;
@@ -113,9 +151,20 @@ TEST(ImageSessionContract, AcceptsEverySerializedFloppyMarker) {
     axk::app::ImageSessionSummary summary;
     summary.image_id = "image-test";
     summary.revision = 1U;
-    summary.source = {.root_id = "workspace", .relative_path = "ordinary.ima", .kind = axk::app::ImageSourceKind::file};
-    summary.format = "fat12_floppy";
-    summary.floppy_set = axk::app::ImageFloppySetSummary{
+    axk::app::ImageSourceSummary member;
+    member.id = "source-1";
+    member.source = {.root_id = "workspace", .relative_path = "ordinary.ima", .kind = axk::app::ImageSourceKind::file};
+    member.format = "fat12_floppy";
+    summary.sources.push_back(member);
+    auto &document = summary.documents.emplace_back();
+    document.id = "document-a-series-source-1";
+    document.format_id = "yamaha.a-series";
+    document.profile = "a-series";
+    document.name = "Ordinary";
+    document.completeness = "COMPLETE";
+    document.format = "fat12_floppy";
+    document.source_member_ids = {"source-1"};
+    document.floppy_set = axk::app::ImageFloppySetSummary{
         .status = axk::app::ImageFloppySetStatus::single,
         .set_label = "ORDINARY",
         .members = {{.index = 1U, .label = "ORDINARY", .marker = "ORDINARY"}},
@@ -123,14 +172,14 @@ TEST(ImageSessionContract, AcceptsEverySerializedFloppyMarker) {
     };
     for (const auto marker : std::array{"NONE", "ORDINARY", "CONTINUATION", "FINAL", "INVALID"}) {
         SCOPED_TRACE(marker);
-        summary.floppy_set->members.front().marker = marker;
+        document.floppy_set->members.front().marker = marker;
         const auto serialized = axk::app::image_session_summary_json(summary);
         const auto wire = validator.wire_value("ImageSession", serialized);
-        EXPECT_EQ(wire.at("floppySet").at("members").at(0).at("marker"), marker);
+        EXPECT_EQ(wire.at("documents").at(0).at("floppySet").at("members").at(0).at("marker"), marker);
         EXPECT_TRUE(validator.validate("ImageSession", wire)) << wire.dump();
     }
     for (const auto marker : std::array{"ordinary", "UNKNOWN"}) {
-        summary.floppy_set->members.front().marker = marker;
+        document.floppy_set->members.front().marker = marker;
         EXPECT_FALSE(validator.validate("ImageSession", axk::app::image_session_summary_json(summary)));
     }
 }
@@ -198,13 +247,11 @@ TEST_F(FloppyOpenContract, OpensUnnumberedOrdinaryFloppyThroughTheSerializedSess
     auto sandbox = axk::app::Sandbox::create({{"fixture", "Fixture", directory_, false}});
     ASSERT_TRUE(sandbox) << sandbox.error().message;
     axk::app::ImageSessionManager sessions{*sandbox};
-    const auto opened = sessions.open({"fixture", "ordinary.ima"}, "owner");
+    const auto opened = sessions.open({.sources = {{"fixture", "ordinary.ima"}}, .selected_formats = {}}, "owner");
     ASSERT_TRUE(opened) << opened.error().message;
-    ASSERT_TRUE(opened->floppy_set);
-    EXPECT_EQ(opened->floppy_set->status, axk::app::ImageFloppySetStatus::single);
-    ASSERT_EQ(opened->floppy_set->members.size(), 1U);
-    EXPECT_EQ(opened->floppy_set->members.front().marker, "ORDINARY");
-    EXPECT_EQ(opened->floppy_set->members.front().index, 0U);
+    ASSERT_EQ(opened->sources.size(), 1U);
+    EXPECT_EQ(opened->sources.front().format, "fat12");
+    EXPECT_TRUE(opened->documents.empty());
     const axk::server::OpenApiValidator validator;
     const auto wire = validator.wire_value("ImageSession", axk::app::image_session_summary_json(*opened));
     EXPECT_TRUE(validator.validate("ImageSession", wire)) << wire.dump();

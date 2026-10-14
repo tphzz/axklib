@@ -1,3 +1,4 @@
+import { nativeWorkspaceFixture } from '../test/nativeWorkspaceFixture';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { HttpImageTransport } from './httpTransport';
@@ -31,6 +32,7 @@ const object: SamplerObject = {
 };
 
 const opened: Omit<OpenedImage, 'sessionId'> = {
+    ...nativeWorkspaceFixture(),
     revision: 1,
     allocationInspectionAvailable: false,
     companionSources: [],
@@ -73,7 +75,7 @@ const opened: Omit<OpenedImage, 'sessionId'> = {
 };
 
 async function exerciseReadContract(transport: ImageTransport, source: FileLocation): Promise<void> {
-    const image = await transport.openImage(source);
+    const image = await transport.openImage([source]);
     expect(image.validation).toMatchObject({ valid: true, objectCount: 1 });
     const content = await transport.contentChildren(image.sessionId, '', 0, 64);
     expect(content).toMatchObject({ totalCount: 1 });
@@ -248,17 +250,37 @@ describe('ImageTransport shared read contract', () => {
                             result: {
                                 imageId: 'image-1',
                                 revision: 1,
-                                source: {
-                                    kind: 'FILE',
-                                    file: { rootId: 'workspace', relativePath: 'images/fixture.hds' },
-                                },
-                                companionSources: [],
-                                floppySet: null,
-                                format: 'SFS',
-                                rootCount: 1,
-                                objectCount: 1,
-                                relationshipCount: 1,
-                                validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                                sources: [
+                                    {
+                                        id: 'source-1',
+                                        source: {
+                                            kind: 'FILE',
+                                            file: { rootId: 'workspace', relativePath: 'images/fixture.hds' },
+                                        },
+                                        format: 'SFS',
+                                        filesystemRootIds: ['source-1:sfs-0'],
+                                        diagnostics: [],
+                                    },
+                                ],
+                                documents: [
+                                    {
+                                        id: 'document-a-series-source-1',
+                                        formatId: 'yamaha.a-series',
+                                        profile: 'a-series',
+                                        name: 'A-series',
+                                        completeness: 'COMPLETE',
+                                        sourceMemberIds: ['source-1'],
+                                        format: 'SFS',
+                                        floppySet: null,
+                                        companionSources: [],
+                                        validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
+                                        rootCount: 1,
+                                        objectCount: 1,
+                                        relationshipCount: 1,
+                                        availableOperations: [],
+                                    },
+                                ],
+                                discovery: { selectionRequired: false, candidates: [] },
                             },
                             error: null,
                         },

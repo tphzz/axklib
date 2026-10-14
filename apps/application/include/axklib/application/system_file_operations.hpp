@@ -17,7 +17,7 @@ namespace axk::app {
 // refreshes session metadata. Missing System files are never created.
 // Global preferences, recording configuration and effects share one validation and commit/rollback boundary.
 [[nodiscard]] Result<ImageSessionSummary>
-apply_system_file(ImageSessionManager &images, AlterationJournalStore &journals, std::string_view image_id,
+apply_system_file(ImageSessionManager &images, AlterationJournalStore &journals, const ImageDocumentRef &target,
                   std::string_view owner_id, std::uint64_t expected_revision, PartitionIndex partition,
                   const SystemFilePatch &patch, ASeriesModel model, const CancellationToken &cancellation = {},
                   ProgressSink *progress = nullptr);

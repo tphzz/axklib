@@ -63,10 +63,10 @@ class FilesystemEditOperations : public testing::Test {
 TEST_F(FilesystemEditOperations, CommitsRawFilesAndRefreshesTheSessionRevision) {
     axk::app::ImageSessionManager sessions{
         *sandbox, 32U, 500U, std::chrono::minutes{15}, std::chrono::steady_clock::now, &reservations};
-    const auto opened = sessions.open({"workspace", "image.hds"}, "owner");
+    const auto opened = sessions.open({{{"workspace", "image.hds"}}, {}}, "owner");
     ASSERT_TRUE(opened);
     axk::app::AlterationJournalStore journals{root / "journals"};
-    const auto updated = axk::app::apply_filesystem_edits(sessions, journals, opened->image_id, "owner",
+    const auto updated = axk::app::apply_filesystem_edits(sessions, journals, {opened->image_id, "source-1"}, "owner",
                                                           opened->revision, axk::PartitionIndex{0}, edits());
     ASSERT_TRUE(updated) << updated.error().message;
     EXPECT_EQ(updated->revision, opened->revision + 1U);
@@ -99,8 +99,8 @@ TEST_F(FilesystemEditOperations, CommitsRawFilesAndRefreshesTheSessionRevision) 
     ASSERT_TRUE(bytes);
     EXPECT_EQ(*bytes, std::vector<std::byte>(10001U, std::byte{0x57}));
     const auto before = digest();
-    const auto stale = axk::app::apply_filesystem_edits(sessions, journals, opened->image_id, "owner", opened->revision,
-                                                        axk::PartitionIndex{0}, edits());
+    const auto stale = axk::app::apply_filesystem_edits(sessions, journals, {opened->image_id, "source-1"}, "owner",
+                                                        opened->revision, axk::PartitionIndex{0}, edits());
     ASSERT_FALSE(stale);
     EXPECT_EQ(stale.error().code, "image_revision_stale");
     EXPECT_EQ(digest(), before);
@@ -132,19 +132,19 @@ TEST_F(FilesystemEditOperations, RejectedLargeAllocationLeavesBytesAndSessionRev
     const auto before = axk::app::detail::file_sha256(path).value();
     axk::app::ImageSessionManager sessions{
         *sandbox, 32U, 500U, std::chrono::minutes{15}, std::chrono::steady_clock::now, &reservations};
-    const auto opened = sessions.open({"workspace", "large.hds"}, "owner");
+    const auto opened = sessions.open({{{"workspace", "large.hds"}}, {}}, "owner");
     ASSERT_TRUE(opened);
     axk::app::AlterationJournalStore journals{root / "journals"};
     const std::vector<axk::FilesystemEdit> replace{
         axk::CreateFilesystemDirectory{{"Not committed"}},
         axk::PutFilesystemFile{{"large"}, std::make_shared<MutableFileInput>(), axk::FileConflict::replace}};
-    const auto rejected = axk::app::apply_filesystem_edits(sessions, journals, opened->image_id, "owner",
+    const auto rejected = axk::app::apply_filesystem_edits(sessions, journals, {opened->image_id, "source-1"}, "owner",
                                                            opened->revision, axk::PartitionIndex{0}, replace);
     ASSERT_FALSE(rejected);
     EXPECT_EQ(axk::app::detail::file_sha256(path).value(), before);
     ASSERT_TRUE(sessions.filesystem(opened->image_id, "owner", opened->revision));
     const std::vector<axk::FilesystemEdit> rename{axk::RenameFilesystemEntry{{"large"}, "renamed"}};
-    const auto updated = axk::app::apply_filesystem_edits(sessions, journals, opened->image_id, "owner",
+    const auto updated = axk::app::apply_filesystem_edits(sessions, journals, {opened->image_id, "source-1"}, "owner",
                                                           opened->revision, axk::PartitionIndex{0}, rename);
     ASSERT_TRUE(updated) << updated.error().message;
     EXPECT_EQ(updated->revision, opened->revision + 1U);
@@ -153,19 +153,20 @@ TEST_F(FilesystemEditOperations, RejectedLargeAllocationLeavesBytesAndSessionRev
 TEST_F(FilesystemEditOperations, ReleasesMutationAccessAfterRejectedPlansAndCancellation) {
     axk::app::ImageSessionManager sessions{
         *sandbox, 32U, 500U, std::chrono::minutes{15}, std::chrono::steady_clock::now, &reservations};
-    const auto opened = sessions.open({"workspace", "image.hds"}, "owner");
+    const auto opened = sessions.open({{{"workspace", "image.hds"}}, {}}, "owner");
     ASSERT_TRUE(opened);
     axk::app::AlterationJournalStore journals{root / "journals"};
     const auto before = digest();
     const std::vector<axk::FilesystemEdit> invalid{axk::CreateFilesystemDirectory{{".."}}};
-    EXPECT_FALSE(axk::app::apply_filesystem_edits(sessions, journals, opened->image_id, "owner", opened->revision,
-                                                  axk::PartitionIndex{0}, invalid));
+    EXPECT_FALSE(axk::app::apply_filesystem_edits(sessions, journals, {opened->image_id, "source-1"}, "owner",
+                                                  opened->revision, axk::PartitionIndex{0}, invalid));
     axk::CancellationSource cancellation;
     cancellation.cancel();
-    EXPECT_FALSE(axk::app::apply_filesystem_edits(sessions, journals, opened->image_id, "owner", opened->revision,
-                                                  axk::PartitionIndex{0}, edits(), cancellation.token()));
+    EXPECT_FALSE(axk::app::apply_filesystem_edits(sessions, journals, {opened->image_id, "source-1"}, "owner",
+                                                  opened->revision, axk::PartitionIndex{0}, edits(),
+                                                  cancellation.token()));
     EXPECT_EQ(digest(), before);
-    const auto read = sessions.begin_read(opened->image_id, "owner", opened->revision);
+    const auto read = sessions.begin_read({opened->image_id, "document-a-series-source-1"}, "owner", opened->revision);
     EXPECT_TRUE(read);
 }
 
@@ -174,7 +175,7 @@ TEST_F(FilesystemEditOperations, RejectsReadOnlySourcesAndOtherSessionsPathLease
     ASSERT_TRUE(readonly);
     axk::app::ImageSessionManager read_sessions{
         *readonly, 32U, 500U, std::chrono::minutes{15}, std::chrono::steady_clock::now, &reservations};
-    const auto read_image = read_sessions.open({"workspace", "image.hds"}, "reader");
+    const auto read_image = read_sessions.open({{{"workspace", "image.hds"}}, {}}, "reader");
     ASSERT_TRUE(read_image);
     const auto readonly_roots = read_sessions.filesystem(read_image->image_id, "reader", read_image->revision);
     ASSERT_TRUE(readonly_roots);
@@ -184,27 +185,27 @@ TEST_F(FilesystemEditOperations, RejectsReadOnlySourcesAndOtherSessionsPathLease
     EXPECT_FALSE(readonly_roots->root_capabilities.front().delete_entry);
     axk::app::AlterationJournalStore journals{root / "journals"};
     const auto before = digest();
-    EXPECT_FALSE(axk::app::apply_filesystem_edits(read_sessions, journals, read_image->image_id, "reader",
+    EXPECT_FALSE(axk::app::apply_filesystem_edits(read_sessions, journals, {read_image->image_id, "source-1"}, "reader",
                                                   read_image->revision, axk::PartitionIndex{0}, edits()));
     ASSERT_TRUE(read_sessions.close(read_image->image_id, "reader"));
     axk::app::ImageSessionManager sessions{
         *sandbox, 32U, 500U, std::chrono::minutes{15}, std::chrono::steady_clock::now, &reservations};
-    const auto opened = sessions.open({"workspace", "image.hds"}, "owner");
-    const auto second = sessions.open({"workspace", "image.hds"}, "other");
+    const auto opened = sessions.open({{{"workspace", "image.hds"}}, {}}, "owner");
+    const auto second = sessions.open({{{"workspace", "image.hds"}}, {}}, "other");
     ASSERT_TRUE(opened);
     ASSERT_TRUE(second);
-    EXPECT_FALSE(axk::app::apply_filesystem_edits(sessions, journals, opened->image_id, "owner", opened->revision,
-                                                  axk::PartitionIndex{0}, edits()));
+    EXPECT_FALSE(axk::app::apply_filesystem_edits(sessions, journals, {opened->image_id, "source-1"}, "owner",
+                                                  opened->revision, axk::PartitionIndex{0}, edits()));
     EXPECT_EQ(digest(), before);
     ASSERT_TRUE(sessions.close(second->image_id, "other"));
-    EXPECT_TRUE(axk::app::apply_filesystem_edits(sessions, journals, opened->image_id, "owner", opened->revision,
-                                                 axk::PartitionIndex{0}, edits()));
+    EXPECT_TRUE(axk::app::apply_filesystem_edits(sessions, journals, {opened->image_id, "source-1"}, "owner",
+                                                 opened->revision, axk::PartitionIndex{0}, edits()));
 }
 
 TEST_F(FilesystemEditOperations, CancelledCommitLeavesTheSameRevisionReadableAndRetryable) {
     axk::app::ImageSessionManager sessions{
         *sandbox, 32U, 500U, std::chrono::minutes{15}, std::chrono::steady_clock::now, &reservations};
-    const auto opened = sessions.open({"workspace", "image.hds"}, "owner");
+    const auto opened = sessions.open({{{"workspace", "image.hds"}}, {}}, "owner");
     ASSERT_TRUE(opened);
     const auto before = digest();
     axk::CancellationSource cancellation;
@@ -215,24 +216,25 @@ TEST_F(FilesystemEditOperations, CancelledCommitLeavesTheSameRevisionReadableAnd
                                                   return false;
                                               }};
     const auto cancelled =
-        axk::app::apply_filesystem_edits(sessions, journals, opened->image_id, "owner", opened->revision,
+        axk::app::apply_filesystem_edits(sessions, journals, {opened->image_id, "source-1"}, "owner", opened->revision,
                                          axk::PartitionIndex{0}, edits(), cancellation.token());
     ASSERT_FALSE(cancelled);
     EXPECT_EQ(cancelled.error().code, "operation_cancelled");
     EXPECT_EQ(digest(), before);
     {
-        const auto read = sessions.begin_read(opened->image_id, "owner", opened->revision);
+        const auto read =
+            sessions.begin_read({opened->image_id, "document-a-series-source-1"}, "owner", opened->revision);
         ASSERT_TRUE(read) << read.error().message;
     }
-    const auto retry = axk::app::apply_filesystem_edits(sessions, journals, opened->image_id, "owner", opened->revision,
-                                                        axk::PartitionIndex{0}, edits());
+    const auto retry = axk::app::apply_filesystem_edits(sessions, journals, {opened->image_id, "source-1"}, "owner",
+                                                        opened->revision, axk::PartitionIndex{0}, edits());
     EXPECT_TRUE(retry) << retry.error().message;
 }
 
 TEST_F(FilesystemEditOperations, ChangedImportInputRollsBackWithoutChangingSessionIdentity) {
     axk::app::ImageSessionManager sessions{
         *sandbox, 32U, 500U, std::chrono::minutes{15}, std::chrono::steady_clock::now, &reservations};
-    const auto opened = sessions.open({"workspace", "image.hds"}, "owner");
+    const auto opened = sessions.open({{{"workspace", "image.hds"}}, {}}, "owner");
     ASSERT_TRUE(opened);
     const auto before = digest();
     auto input = std::make_shared<MutableFileInput>();
@@ -243,30 +245,31 @@ TEST_F(FilesystemEditOperations, ChangedImportInputRollsBackWithoutChangingSessi
                                                       input->value = std::byte{0x55};
                                                   return false;
                                               }};
-    const auto failed = axk::app::apply_filesystem_edits(sessions, journals, opened->image_id, "owner",
+    const auto failed = axk::app::apply_filesystem_edits(sessions, journals, {opened->image_id, "source-1"}, "owner",
                                                          opened->revision, axk::PartitionIndex{0}, changes);
     ASSERT_FALSE(failed);
     EXPECT_EQ(failed.error().code, "filesystem_input_changed");
     EXPECT_EQ(digest(), before);
     {
-        const auto read = sessions.begin_read(opened->image_id, "owner", opened->revision);
+        const auto read =
+            sessions.begin_read({opened->image_id, "document-a-series-source-1"}, "owner", opened->revision);
         ASSERT_TRUE(read) << read.error().message;
     }
-    const auto retry = axk::app::apply_filesystem_edits(sessions, journals, opened->image_id, "owner", opened->revision,
-                                                        axk::PartitionIndex{0}, changes);
+    const auto retry = axk::app::apply_filesystem_edits(sessions, journals, {opened->image_id, "source-1"}, "owner",
+                                                        opened->revision, axk::PartitionIndex{0}, changes);
     EXPECT_TRUE(retry) << retry.error().message;
 }
 
 TEST_F(FilesystemEditOperations, RejectsAnExternallyChangedSourceBeforePlanning) {
     axk::app::ImageSessionManager sessions{
         *sandbox, 32U, 500U, std::chrono::minutes{15}, std::chrono::steady_clock::now, &reservations};
-    const auto opened = sessions.open({"workspace", "image.hds"}, "owner");
+    const auto opened = sessions.open({{{"workspace", "image.hds"}}, {}}, "owner");
     ASSERT_TRUE(opened);
     const auto path = root / "workspace/image.hds";
     std::filesystem::last_write_time(path, std::filesystem::last_write_time(path) + std::chrono::seconds{1});
     const auto before = digest();
     axk::app::AlterationJournalStore journals{root / "journals"};
-    const auto rejected = axk::app::apply_filesystem_edits(sessions, journals, opened->image_id, "owner",
+    const auto rejected = axk::app::apply_filesystem_edits(sessions, journals, {opened->image_id, "source-1"}, "owner",
                                                            opened->revision, axk::PartitionIndex{0}, edits());
     ASSERT_FALSE(rejected);
     EXPECT_EQ(rejected.error().code, "image_source_changed");
@@ -277,7 +280,7 @@ TEST_F(FilesystemEditOperations, RegisteredJobImportsExactHostAndUploadBytesAndD
     using Json = nlohmann::json;
     axk::app::ImageSessionManager sessions{
         *sandbox, 32U, 500U, std::chrono::minutes{15}, std::chrono::steady_clock::now, &reservations};
-    const auto opened = sessions.open({"workspace", "image.hds"}, "owner");
+    const auto opened = sessions.open({{{"workspace", "image.hds"}}, {}}, "owner");
     ASSERT_TRUE(opened);
     axk::app::AlterationJournalStore journals{root / "journals"};
     axk::app::UploadStore uploads{root / "uploads", 1048576U, 1048576U, 8U, 1024U, std::chrono::minutes{5}};
@@ -297,6 +300,7 @@ TEST_F(FilesystemEditOperations, RegisteredJobImportsExactHostAndUploadBytesAndD
     ASSERT_TRUE(uploads.complete(upload->reference, "owner"));
     Json request{
         {"imageId", opened->image_id},
+        {"documentId", "document-a-series-source-1"},
         {"expectedRevision", opened->revision},
         {"acknowledgeDeviceRelationships", true},
         {"edits", Json::array({{{"kind", "CREATE_DIRECTORY"}, {"parentEntryId", root_id}, {"relativePath", {"Docs"}}},
@@ -377,7 +381,7 @@ TEST_F(FilesystemEditOperations, FilesEntryResolutionKeepsPartitionsSeparateEven
     const axk::HdsBuildManifest manifest{"1.0", 8U * 1024U * 1024U, {{"Same", {}}, {"Same", {}}}};
     ASSERT_TRUE(axk::write_hds_image(manifest, root / "workspace/two.hds"));
     axk::app::ImageSessionManager sessions{*sandbox};
-    const auto opened = sessions.open({"workspace", "two.hds"}, "owner");
+    const auto opened = sessions.open({{{"workspace", "two.hds"}}, {}}, "owner");
     ASSERT_TRUE(opened);
     const auto roots = sessions.filesystem(opened->image_id, "owner", 1U);
     ASSERT_TRUE(roots);
@@ -401,7 +405,7 @@ TEST_F(FilesystemEditOperations, InspectsRawInputsAndRejectsChangesSinceReview) 
     using Json = nlohmann::json;
     axk::app::ImageSessionManager sessions{
         *sandbox, 32U, 500U, std::chrono::minutes{15}, std::chrono::steady_clock::now, &reservations};
-    const auto opened = sessions.open({"workspace", "image.hds"}, "owner");
+    const auto opened = sessions.open({{{"workspace", "image.hds"}}, {}}, "owner");
     ASSERT_TRUE(opened);
     const auto roots = sessions.filesystem(opened->image_id, "owner", opened->revision);
     ASSERT_TRUE(roots);
@@ -427,6 +431,7 @@ TEST_F(FilesystemEditOperations, InspectsRawInputsAndRejectsChangesSinceReview) 
     EXPECT_FALSE(snapshot.at("revision").get<std::string>().empty());
     EXPECT_EQ(inspection->at("inputs")[0].at("source"), source);
     Json request{{"imageId", opened->image_id},
+                 {"documentId", "document-a-series-source-1"},
                  {"expectedRevision", opened->revision},
                  {"acknowledgeDeviceRelationships", true},
                  {"edits", Json::array({{{"kind", "PUT_FILE"},
@@ -456,7 +461,7 @@ TEST_F(FilesystemEditOperations, InspectsRawInputsAndRejectsChangesSinceReview) 
 TEST_F(FilesystemEditOperations, RejectsMissingSnapshotAndSameContentReplacementWithoutMutation) {
     using Json = nlohmann::json;
     axk::app::ImageSessionManager sessions{*sandbox};
-    const auto opened = sessions.open({"workspace", "image.hds"}, "owner");
+    const auto opened = sessions.open({{{"workspace", "image.hds"}}, {}}, "owner");
     ASSERT_TRUE(opened);
     const auto roots = sessions.filesystem(opened->image_id, "owner", opened->revision);
     ASSERT_TRUE(roots);
@@ -475,6 +480,7 @@ TEST_F(FilesystemEditOperations, RejectsMissingSnapshotAndSameContentReplacement
     const auto inspection = registry.invoke("filesystem.inputs.inspect", {{"inputs", Json::array({source})}}, context);
     ASSERT_TRUE(inspection);
     Json request{{"imageId", opened->image_id},
+                 {"documentId", "document-a-series-source-1"},
                  {"expectedRevision", opened->revision},
                  {"acknowledgeDeviceRelationships", true},
                  {"edits", Json::array({{{"kind", "PUT_FILE"},
@@ -503,7 +509,7 @@ TEST_F(FilesystemEditOperations, RechecksReviewedHostIdentityDuringCommitAndRoll
     using Json = nlohmann::json;
     axk::app::ImageSessionManager sessions{
         *sandbox, 32U, 500U, std::chrono::minutes{15}, std::chrono::steady_clock::now, &reservations};
-    const auto opened = sessions.open({"workspace", "image.hds"}, "owner");
+    const auto opened = sessions.open({{{"workspace", "image.hds"}}, {}}, "owner");
     ASSERT_TRUE(opened);
     const auto roots = sessions.filesystem(opened->image_id, "owner", opened->revision);
     ASSERT_TRUE(roots);
@@ -534,6 +540,7 @@ TEST_F(FilesystemEditOperations, RechecksReviewedHostIdentityDuringCommitAndRoll
     const auto inspection = registry.invoke("filesystem.inputs.inspect", {{"inputs", Json::array({source})}}, context);
     ASSERT_TRUE(inspection);
     Json request{{"imageId", opened->image_id},
+                 {"documentId", "document-a-series-source-1"},
                  {"expectedRevision", opened->revision},
                  {"acknowledgeDeviceRelationships", true},
                  {"edits", Json::array({{{"kind", "PUT_FILE"},
@@ -548,7 +555,8 @@ TEST_F(FilesystemEditOperations, RechecksReviewedHostIdentityDuringCommitAndRoll
     EXPECT_EQ(changed.error().code, "filesystem_input_changed");
     EXPECT_EQ(digest(), before);
     {
-        const auto read = sessions.begin_read(opened->image_id, "owner", opened->revision);
+        const auto read =
+            sessions.begin_read({opened->image_id, "document-a-series-source-1"}, "owner", opened->revision);
         ASSERT_TRUE(read) << read.error().message;
     }
     const auto updated = registry.invoke("filesystem.inputs.inspect", {{"inputs", Json::array({source})}}, context);
@@ -599,11 +607,11 @@ TEST_F(FilesystemEditOperations, ImportInspectionUsesTheReviewedDirectoryAndRevi
     using Json = nlohmann::json;
     axk::app::ImageSessionManager sessions{
         *sandbox, 32U, 500U, std::chrono::minutes{15}, std::chrono::steady_clock::now, &reservations};
-    const auto opened = sessions.open({"workspace", "image.hds"}, "owner");
+    const auto opened = sessions.open({{{"workspace", "image.hds"}}, {}}, "owner");
     ASSERT_TRUE(opened);
     axk::app::AlterationJournalStore journals{root / "journals"};
-    const auto initial = axk::app::apply_filesystem_edits(sessions, journals, opened->image_id, "owner", 1U,
-                                                          axk::PartitionIndex{0}, edits());
+    const auto initial = axk::app::apply_filesystem_edits(sessions, journals, {opened->image_id, "source-1"}, "owner",
+                                                          1U, axk::PartitionIndex{0}, edits());
     ASSERT_TRUE(initial);
     const auto roots = sessions.filesystem(opened->image_id, "owner", 2U);
     ASSERT_TRUE(roots);
@@ -618,6 +626,7 @@ TEST_F(FilesystemEditOperations, ImportInspectionUsesTheReviewedDirectoryAndRevi
         .owner_id = "owner", .request_id = "review", .cancellation = {}, .progress = nullptr, .display_path = {}};
     Json request{
         {"imageId", opened->image_id},
+        {"documentId", "document-a-series-source-1"},
         {"expectedRevision", 2U},
         {"parentEntryId", directory->id},
         {"entries", Json::array({{{"relativePath", {"file.bin"}}, {"directory", false}, {"sizeBytes", 0U}},

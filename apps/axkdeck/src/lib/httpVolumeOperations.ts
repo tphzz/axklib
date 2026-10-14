@@ -1,3 +1,4 @@
+import { documentTarget } from './httpNativeDocuments';
 import type { AxklibHttpApiClient } from './httpApiClient';
 import type { HttpJobController } from './httpJobController';
 import type { SessionState } from './httpTransportModels';
@@ -12,7 +13,7 @@ async function inspect<T>(
     input: Record<string, unknown>,
 ): Promise<T> {
     const result = await client.invoke<T>(operation, {
-        imageId: session.remoteId,
+        ...documentTarget(session),
         expectedRevision: session.revision,
         ...input,
     });

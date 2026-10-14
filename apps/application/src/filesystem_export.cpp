@@ -44,8 +44,7 @@ Result<void> write_staging(const ImageSessionRead &session, const detail::Filesy
         do {
             const auto count =
                 static_cast<std::size_t>(std::min<std::uint64_t>(1024U * 1024U, entry.size_bytes - offset));
-            auto bytes = detail::read_filesystem_range(*session.media, plan.files.at(entry.entry_id), offset, count,
-                                                       cancellation);
+            auto bytes = detail::read_workspace_file(plan.files.at(entry.entry_id), offset, count, cancellation);
             if (!bytes)
                 return std::unexpected(bytes.error());
             if (bytes->size() != count)
@@ -84,10 +83,10 @@ detail::stage_filesystem_export(ImageSessionManager &images, const Sandbox &sand
                                 ProgressSink *progress, FilesystemExportLayout layout) {
     if (cancellation.is_cancelled())
         return std::unexpected(Error{"operation_cancelled", "Filesystem export cancelled"});
-    auto session = images.begin_read(image_id, owner_id, expected_revision);
+    auto session = images.begin_filesystem_read(image_id, owner_id, expected_revision);
     if (!session)
         return std::unexpected(session.error());
-    auto plan = plan_filesystem_export(*session->media, entry_ids, cancellation, layout);
+    auto plan = plan_filesystem_export(*session->filesystem, entry_ids, cancellation, layout);
     if (!plan)
         return std::unexpected(plan.error());
     const auto staging = sandbox.create_staging_directory("filesystem-export");
@@ -107,10 +106,10 @@ Result<FilesystemExportSummary> inspect_filesystem_export(ImageSessionManager &i
                                                           std::span<const std::string> entry_ids,
                                                           const CancellationToken &cancellation,
                                                           FilesystemExportLayout layout) {
-    auto session = images.begin_read(image_id, owner_id, expected_revision);
+    auto session = images.begin_filesystem_read(image_id, owner_id, expected_revision);
     if (!session)
         return std::unexpected(session.error());
-    auto plan = detail::plan_filesystem_export(*session->media, entry_ids, cancellation, layout);
+    auto plan = detail::plan_filesystem_export(*session->filesystem, entry_ids, cancellation, layout);
     if (!plan)
         return std::unexpected(plan.error());
     return std::move(plan->summary);

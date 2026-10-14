@@ -75,7 +75,7 @@ axklib info source.hds --format paths
 navigation aids and are not stored objects.
 
 For `info` only, a directory input is searched for bounded
-`AXK_OBJECT_DIRECTORY` sources. A source may be a flat object leaf or a parent
+`DIRECTORY` sources containing A-series objects. A source may be a flat object leaf or a parent
 containing one level of related disk folders; the parent form assembles
 contiguous multi-disk Wave Data segments. Each recognized source is reported as
 one read-only medium. Other report, extraction, validation, and authoring

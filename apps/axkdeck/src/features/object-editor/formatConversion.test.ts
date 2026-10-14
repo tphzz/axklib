@@ -6,6 +6,8 @@ import { ObjectEditorWorkflow } from './workflow.svelte';
 
 function setup(bank = false) {
     const detail = {
+        formatId: 'yamaha.a-series',
+        profile: 'a-series',
         image: { revision: 1 },
         object: { id: 'sample', key: 'sample', name: bank ? 'Bank' : 'Sample', type: bank ? 'SBAC' : 'SBNK' },
         formatConversion: sampleConversionFixture('A3000_188', { kind: bank ? 'SAMPLE_BANK' : 'SAMPLE' }),

@@ -900,7 +900,7 @@ describe('ServerStoragePicker', () => {
                       nextCursor: null,
                   },
         );
-        vi.mocked(imageTransport.inspectSandboxMediaSource).mockResolvedValue('AXK_OBJECT_DIRECTORY');
+        vi.mocked(imageTransport.inspectSandboxMediaSource).mockResolvedValue('DIRECTORY');
         render(ServerStoragePicker, {
             props: {
                 transport: imageTransport,
@@ -936,7 +936,7 @@ describe('ServerStoragePicker', () => {
         });
         await waitFor(() => expect(onselect).toHaveBeenCalled());
         expect(onselect).toHaveBeenCalledWith({
-            kind: 'axk-object-directory',
+            kind: 'server-directory',
             reference: { rootId: 'workspace', relativePath: 'objects' },
             displayName: 'Yamaha images/objects',
         });

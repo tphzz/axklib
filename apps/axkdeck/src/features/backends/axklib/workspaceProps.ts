@@ -5,7 +5,7 @@ import type { SequenceImportWorkflow } from '../../import/sequenceWorkflow.svelt
 import type { MutationWorkflow } from '../../mutation/workflow.svelte';
 import type { InterfaceScaleController } from '../../../lib/interfaceScale';
 import type { ImageLocation } from '../../../lib/storageLocations';
-import type { ImageTransport } from '../../../lib/transport';
+import type { ImageTransport, OpenedImage } from '../../../lib/transport';
 import type {
     DiskTreeItem,
     ImageTreeAction,
@@ -34,6 +34,14 @@ export interface WorkspaceProps {
     mode?: WorkspaceMode;
     revision?: number;
     transport: ImageTransport;
+    documents: OpenedImage['documents'];
+    documentId: string | null;
+    sources: OpenedImage['sources'];
+    discovery: OpenedImage['discovery'];
+    switchingDocument: boolean;
+    documentSwitchBlocked?: boolean;
+    selectDocument: (documentId: string | null) => Promise<void>;
+    resolveDocuments: (formats: string[]) => Promise<void>;
     filesMutations?: (sessionId: number) => FilesystemMutationDriver;
     filesExports?: (sessionId: number) => FilesystemExportActions;
     filesImports?: (sessionId: number) => AxklibFilesystemImports;

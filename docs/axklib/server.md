@@ -13,7 +13,7 @@ The complete contract is available in the rendered
 
 ### Floppy Session Identity
 
-An image session's `floppySet` includes ordinary standalone Yamaha disks as
+An A-series document's `floppySet` includes ordinary standalone Yamaha disks as
 well as multi-disk sets. `ORDINARY` denotes the ordinary `A3000.SYM` marker;
 it is distinct from `NONE`, `CONTINUATION`, `FINAL` and `INVALID`.
 A member's `index` preserves a parsed two-digit catalog ordinal (1-99), or
@@ -25,15 +25,17 @@ marker. These metadata ranges do not change the 32-member attachment limit.
 ### Files Inside An Image
 
 `GET /api/v1/images/{imageId}/filesystem` lists the stored filesystem entries
-inside an owned image session. It is separate from host workspace browsing and
-the semantic `/content` tree. Supported containers are SFS, FAT12, standard and EX5 FAT16,
-ISO9660 and physical members of a floppy set. Archives and standalone object
-sources report `available: false`.
+inside an owned source-set workspace. It is separate from host workspace browsing
+and each native document's semantic `content` tree. Supported containers are SFS,
+FAT12, standard and EX5 FAT16, ISO9660 and physical members of a floppy set.
+Selected directories expose their admitted entries; standalone files expose a
+read-only file root without inventing a filesystem or native document.
 
 Every request supplies `expectedRevision`. Without a selector the response lists
 roots. `parentId` lists immediate children; `rootId` with `query` searches names
 throughout that root, including unloaded directories. `entryId`, `objectId` and
-`contentScopeId` support identity-based lookup. Choose only one selector. Results
+`contentScopeId` support identity-based lookup. Native object and content lookups
+also require `documentId`. Choose only one selector. Results
 use `offset`, `limit` and `totalCount`; the normal server page limit applies.
 
 Entries contain exact stored names, a root-relative path, parent/ancestor IDs,
@@ -65,7 +67,9 @@ these presentation fields changes the server's write-admission checks.
 `filesystemMetadata` identifies reserved SFS support entries. Those entries
 remain visible and selectable even when their empty reserved index target is
 absent from the payload-bearing inventory, without an unresolved-target warning.
-`objectId` is present only for a unique mapping to a decoded object. Entry IDs
+`sourceMemberId` identifies storage ownership. Each entry's `bindings` contains
+explicit `documentId` and nullable `objectId`/`contentScopeId` values, retaining
+multiple native interpretations where appropriate. Entry IDs
 are opaque: clients must not derive record numbers or links from them. A changed
 revision invalidates the cached index and clients must revalidate selections.
 SFS traversal bounds cycles and depth, and all indexes enforce an entry-count
@@ -672,23 +676,43 @@ sequence numbers. After a disconnect, replay retained events through REST and
 fetch the job snapshot; WebSocket delivery is an update hint, not the source of
 truth.
 
-`POST /api/v1/images` requires one explicit `ImageSourceRef`. Use
-`{"kind":"FILE","file":...}` for an image or standalone object file and
-`{"kind":"AXK_OBJECT_DIRECTORY","directory":...}` for a flat directory of
-Yamaha object files or a parent containing one level of related disk folders.
-The parent form assembles complete contiguous multi-disk Wave Data segments.
-Opening a flat leaf does not search sibling folders. This keeps image opening
-and directory navigation bounded to the selected source.
+`POST /api/v1/images` requires `sources`, an array of 1-32 explicit
+`ImageSourceRef` values. Use `{"kind":"FILE","file":...}` for an image or
+standalone file and `{"kind":"DIRECTORY","directory":...}` for a directory.
+A `DEVICE` source must be the only member. Duplicate, overlapping and aliased
+members are rejected. The completed job and session summary expose `sources`,
+`documents`, `discovery` and the workspace `revision`.
+
+`GET /api/v1/images/{imageId}/documents` lists native documents. Select native
+reads under `/api/v1/images/{imageId}/documents/{documentId}`: `content`,
+`objects`, `objects/{objectId}`, `relationships`, `validation/issues` and
+supported `preview` or `system-program-contexts` resources. Object details have
+format-discriminated schemas. Capabilities belong to the selected document,
+not the first source. Native operation jobs require `documentId` alongside
+`imageId` and their revision preconditions. Allocation maps instead select a
+source member at `/api/v1/images/{imageId}/sources/{sourceMemberId}/allocation-map`.
+
+Competing format claims appear in `discovery`; POST to the document collection
+with `selectedFormats` and `expectedRevision` resolves them explicitly. Unknown
+native data can remain available through Files. Incomplete TX16W sets retain
+their objects, typed details, source locations and unresolved relationships;
+their native capabilities are read-only. A-series editing remains supported for
+one writable member per mutation. Untouched members are checked before
+publishing a replacement workspace revision.
+
+For A-series directories, one bounded level of related disk folders can assemble
+complete contiguous multi-disk Wave Data segments. Opening a flat leaf does not
+search sibling folders.
 Object-directory sessions are bounded and read-only: inventory, relationships,
 preview, audition, and package export are available, while image alteration and
 package import are not. An incomplete leaf can be inventoried, but split Wave
 Data cannot be previewed, auditioned, or exported as a complete package until
 its companion folders are attached.
 
-`POST /api/v1/images/{imageId}/companions` accepts `expectedRevision` and a
+`POST /api/v1/images/{imageId}/documents/{documentId}/companions` accepts `expectedRevision` and a
 `selection`: `SOURCES` with a list of `ImageSourceRef` values, or
 `IMMEDIATE_SIBLINGS` for an explicit nearby search. Directory sources use
-`AXK_OBJECT_DIRECTORY`; raw floppy members use `FILE`.
+`DIRECTORY`; raw floppy members use `FILE`.
 Cataloged folders expose `floppySet` with the required disk index at open time.
 Attachment validates the same-label, contiguous member sequence and admits all
 cataloged objects from later members, not only waveform continuations. An
@@ -710,11 +734,11 @@ Axkdeck selects companion sources directly through the server storage picker,
 including on localhost. No local/remote source chooser is inserted. The picker
 starts beside the opened source unless a previous companion location is retained.
 
-`POST /api/v1/files/list` performs only a bounded directory listing. A media
-picker navigates directories without media inspection and inspects the current
-directory with `POST /api/v1/files/media-source/inspect` only when the user
-chooses to open it. The
-response reports `mediaSourceKind: "AXK_OBJECT_DIRECTORY"` when bounded
+`POST /api/v1/files/list` performs only a bounded directory listing. Workflows
+that require a recognized sampler directory can explicitly inspect it using
+`POST /api/v1/files/media-source/inspect`. Generic source-set admission does not
+require a directory to contain recognized sampler objects. The inspection
+response reports `mediaSourceKind: "DIRECTORY"` when bounded
 file-prefix inspection recognizes Yamaha object data, otherwise `null`.
 Inspection does not decode complete payloads or recurse beyond one related
 disk-folder level.
@@ -740,9 +764,9 @@ free-space or import-capacity figures.
 
 ### Image integrity and mutation admission
 
-Every readable image session advertises `images.validation.issues`. Retrieve
+Native documents advertise their supported `images.validation.issues` capability. Retrieve
 the bounded issue list with
-`GET /api/v1/images/{imageId}/validation/issues`. An SFS image remains readable
+`GET /api/v1/images/{imageId}/documents/{documentId}/validation/issues`. An SFS image remains readable
 when its two allocation bitmap copies differ, a stored bitmap disagrees with
 index extents, or clusters have multiple owners; inventory, validation, preview,
 audition, and supported exports remain available for still-readable objects.

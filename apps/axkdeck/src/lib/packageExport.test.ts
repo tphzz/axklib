@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { packageExportFilename } from './packageExport';
-import { axkObjectDirectoryLocation, serverFileLocation } from './storageLocations';
+import { serverDirectoryLocation, serverFileLocation } from './storageLocations';
 import type { PackageExportObjectKind, PackageExportSelection } from './types';
 
 const object = (kind: PackageExportObjectKind, name: string): PackageExportSelection => ({
@@ -70,7 +70,7 @@ describe('package export filenames', () => {
         expect(
             packageExportFilename(
                 [volume('Object directory')],
-                axkObjectDirectoryLocation(
+                serverDirectoryLocation(
                     { rootId: 'workspace', relativePath: 'floppies/FS1R/DISK2' },
                     'Workspace/floppies/FS1R/DISK2',
                 ),
@@ -82,7 +82,7 @@ describe('package export filenames', () => {
         expect(
             packageExportFilename(
                 [volume('Object directory')],
-                axkObjectDirectoryLocation({ rootId: 'workspace', relativePath: '' }, ''),
+                serverDirectoryLocation({ rootId: 'workspace', relativePath: '' }, ''),
             ),
         ).toBe('Object directory.axkvol');
         expect(

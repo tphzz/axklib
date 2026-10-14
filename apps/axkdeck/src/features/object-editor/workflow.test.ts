@@ -5,6 +5,8 @@ import { ObjectEditorWorkflow } from './workflow.svelte';
 
 function detail(id = 'sample', revision = 1): ObjectDetail {
     return {
+        formatId: 'yamaha.a-series',
+        profile: 'a-series',
         image: { revision },
         object: { id, key: id, name: id },
         editing: {

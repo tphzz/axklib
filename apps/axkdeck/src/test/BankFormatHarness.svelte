@@ -63,6 +63,8 @@
             ];
         }
         return {
+            formatId: 'yamaha.a-series',
+            profile: 'a-series',
             image: { revision: writes + 1 },
             object: { id: 'Bank', key: 'Bank', name: 'Bank', type: 'SBAC' },
             editing: null,

@@ -81,12 +81,12 @@ int main(int argc, char **argv) {
         };
         axk::app::ImageSessionSummary session;
         measure("open", [&](Progress &progress) {
-            session = require(images.open({"bench", "image.hda"}, "bench", {}, &progress));
+            session = require(images.open({{{"bench", "image.hda"}}, {}}, "bench", {}, &progress));
         });
         auto edit = [&](std::vector<axk::FilesystemEdit> edits, Progress &progress) {
-            session =
-                require(axk::app::apply_filesystem_edits(images, journals, session.image_id, "bench", session.revision,
-                                                         axk::PartitionIndex{0}, edits, {}, &progress));
+            session = require(axk::app::apply_filesystem_edits(
+                images, journals, {session.image_id, session.sources.front().id}, "bench", session.revision,
+                axk::PartitionIndex{0}, edits, {}, &progress));
             require(images.filesystem(session.image_id, "bench", session.revision));
         };
         measure("create", [&](Progress &progress) { edit({axk::CreateFilesystemDirectory{{"AXKBENCH"}}}, progress); });

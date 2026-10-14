@@ -128,6 +128,11 @@ struct MediaValidationIssue {
     ValidationSeverity severity{ValidationSeverity::error};
 };
 
+struct MediaFileLocation {
+    std::string source_name;
+    std::string path;
+};
+
 struct MediaObject {
     std::string key;
     std::string logical_path;
@@ -141,11 +146,13 @@ struct MediaObject {
     DecodedObject decoded;
     std::vector<std::byte> raw_payload;
     std::optional<Error> decode_issue;
+    std::vector<MediaFileLocation> source_files{};
 };
 
 struct AxkObjectDirectoryEntry {
     std::string name;
     std::shared_ptr<const RandomAccessReader> reader;
+    std::optional<MediaFileLocation> source_file{};
 };
 
 struct MediaObjectDescriptor {
@@ -158,6 +165,7 @@ struct MediaObjectDescriptor {
     MenuLabel volume_label;
     std::uint64_t data_offset{};
     std::uint64_t size{};
+    std::vector<MediaFileLocation> source_files{};
 };
 
 struct MediaInventory {

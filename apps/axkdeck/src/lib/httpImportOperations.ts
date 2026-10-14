@@ -1,3 +1,4 @@
+import { documentTarget } from './httpNativeDocuments';
 import type {
     AudioImportItem,
     AudioImportOptions,
@@ -26,6 +27,7 @@ const ALTERATION_MANIFEST_SCHEMA_VERSION = '1.0';
 
 interface ImportAlterationRequest extends Record<string, unknown> {
     imageId: string;
+    documentId: string;
     expectedRevision: number;
     manifest: {
         inline: {
@@ -45,10 +47,16 @@ export class HttpImportOperations {
         const session = this.imageSessions.get(sessionId);
         const request =
             input.kind === 'AUDIO'
-                ? audioImportRequest(session.remoteId, session.revision, input.target, input.items, input.options)
+                ? audioImportRequest(
+                      documentTarget(session),
+                      session.revision,
+                      input.target,
+                      input.items,
+                      input.options,
+                  )
                 : input.kind === 'SEQUENCE'
                   ? sequenceImportRequest(
-                        session.remoteId,
+                        documentTarget(session),
                         session.revision,
                         input.target,
                         input.items,
@@ -56,7 +64,7 @@ export class HttpImportOperations {
                     )
                   : input.kind === 'TX16W'
                     ? tx16wDiskSetImportRequest(
-                          session.remoteId,
+                          documentTarget(session),
                           session.revision,
                           input.sources,
                           input.target,
@@ -111,7 +119,7 @@ export class HttpImportOperations {
     ): Promise<Tx16wImportInspection> {
         const session = this.imageSessions.get(sessionId);
         const result = await this.client.invoke<Tx16wImportInspection>('images.tx16w.inspect', {
-            imageId: session.remoteId,
+            ...documentTarget(session),
             expectedRevision: session.revision,
             sources: sources.map(serverInput),
             target,
@@ -129,17 +137,20 @@ export class HttpImportOperations {
         policy?: CapacityPolicy,
     ): Promise<JobState> {
         const session = this.imageSessions.get(sessionId);
-        return this.start(audioImportRequest(session.remoteId, session.revision, target, items, options), policy);
+        return this.start(
+            audioImportRequest(documentTarget(session), session.revision, target, items, options),
+            policy,
+        );
     }
 
     startSampleBankCreation(sessionId: number, creation: SampleBankCreation): Promise<JobState> {
         const session = this.imageSessions.get(sessionId);
-        return this.start(sampleBankCreationRequest(session.remoteId, session.revision, creation));
+        return this.start(sampleBankCreationRequest(documentTarget(session), session.revision, creation));
     }
 
     startSampleBankAssignment(sessionId: number, assignment: SampleBankAssignment): Promise<JobState> {
         const session = this.imageSessions.get(sessionId);
-        return this.start(sampleBankAssignmentRequest(session.remoteId, session.revision, assignment));
+        return this.start(sampleBankAssignmentRequest(documentTarget(session), session.revision, assignment));
     }
 
     startSequenceImport(
@@ -151,7 +162,7 @@ export class HttpImportOperations {
     ): Promise<JobState> {
         const session = this.imageSessions.get(sessionId);
         return this.start(
-            sequenceImportRequest(session.remoteId, session.revision, target, items, systemExclusivePolicy),
+            sequenceImportRequest(documentTarget(session), session.revision, target, items, systemExclusivePolicy),
             policy,
         );
     }
@@ -165,7 +176,7 @@ export class HttpImportOperations {
     ): Promise<JobState> {
         const session = this.imageSessions.get(sessionId);
         return this.start(
-            tx16wDiskSetImportRequest(session.remoteId, session.revision, sources, target, importMode),
+            tx16wDiskSetImportRequest(documentTarget(session), session.revision, sources, target, importMode),
             policy,
         );
     }
@@ -176,7 +187,7 @@ export class HttpImportOperations {
 }
 
 export function tx16wDiskSetImportRequest(
-    imageId: string,
+    document: ReturnType<typeof documentTarget>,
     expectedRevision: number,
     sources: InputFileLocation[],
     target: AudioImportTarget,
@@ -184,7 +195,7 @@ export function tx16wDiskSetImportRequest(
 ): ImportAlterationRequest {
     const logicalPaths = sources.map((_, index) => `tx16w/disk-${String(index + 1).padStart(2, '0')}.ima`);
     return request(
-        imageId,
+        document,
         expectedRevision,
         [
             {
@@ -201,13 +212,13 @@ export function tx16wDiskSetImportRequest(
 }
 
 function request(
-    imageId: string,
+    document: ReturnType<typeof documentTarget>,
     expectedRevision: number,
     operations: Record<string, unknown>[],
     inputBindings: ImportAlterationRequest['inputBindings'],
 ): ImportAlterationRequest {
     return {
-        imageId,
+        ...document,
         expectedRevision,
         manifest: {
             inline: {
@@ -220,7 +231,7 @@ function request(
 }
 
 export function audioImportRequest(
-    imageId: string,
+    document: ReturnType<typeof documentTarget>,
     expectedRevision: number,
     target: VolumeImportDestination,
     items: AudioImportItem[],
@@ -293,16 +304,16 @@ export function audioImportRequest(
             },
         });
     }
-    return request(imageId, expectedRevision, operations, inputBindings);
+    return request(document, expectedRevision, operations, inputBindings);
 }
 
 export function sampleBankCreationRequest(
-    imageId: string,
+    document: ReturnType<typeof documentTarget>,
     expectedRevision: number,
     creation: SampleBankCreation,
 ): ImportAlterationRequest {
     return request(
-        imageId,
+        document,
         expectedRevision,
         [
             {
@@ -322,12 +333,12 @@ export function sampleBankCreationRequest(
 }
 
 export function sampleBankAssignmentRequest(
-    imageId: string,
+    document: ReturnType<typeof documentTarget>,
     expectedRevision: number,
     assignment: SampleBankAssignment,
 ): ImportAlterationRequest {
     return request(
-        imageId,
+        document,
         expectedRevision,
         [
             {
@@ -344,7 +355,7 @@ export function sampleBankAssignmentRequest(
 }
 
 export function sequenceImportRequest(
-    imageId: string,
+    document: ReturnType<typeof documentTarget>,
     expectedRevision: number,
     target: VolumeImportDestination,
     items: SequenceImportItem[],
@@ -376,5 +387,5 @@ export function sequenceImportRequest(
         manifestPath: `sequence/import-${index}.mid`,
         input: serverInput(item.source),
     }));
-    return request(imageId, expectedRevision, operations, inputBindings);
+    return request(document, expectedRevision, operations, inputBindings);
 }

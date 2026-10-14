@@ -1,3 +1,4 @@
+import { nativeWorkspaceFixture } from '../../../test/nativeWorkspaceFixture';
 import { fireEvent, render, waitFor, within } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import { CatalogWorkflow } from '../../catalog/workflow.svelte';
@@ -59,6 +60,10 @@ function setup() {
     });
     const navigateToObject = vi.fn(async (): Promise<WorkspaceView | null> => 'programs');
     const props: WorkspaceProps = {
+        ...nativeWorkspaceFixture(),
+        switchingDocument: false,
+        selectDocument: async () => undefined,
+        resolveDocuments: async () => undefined,
         transport,
         isDesktop: false,
         workspaceTabs: [{ id: 'programs', label: 'Programs', icon: 'music' }],

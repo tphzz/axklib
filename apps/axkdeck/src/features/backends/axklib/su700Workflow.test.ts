@@ -24,6 +24,8 @@ const inspection: Su700Inspection = {
 };
 async function setup() {
     const root = filesystemEntry({
+        sourceMemberId: 'source-1',
+        bindings: [],
         id: 'root',
         rootId: 'root',
         kind: 'root',

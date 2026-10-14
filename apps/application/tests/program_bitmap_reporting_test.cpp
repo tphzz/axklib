@@ -281,9 +281,10 @@ TEST_P(ProgramBitmapReporting, ActiveMissingWaveDataConvergesAcrossReportCorpusA
     axk::app::PathReservationCoordinator reservations;
     axk::app::ImageSessionManager sessions{
         *sandbox, 4U, 100U, std::chrono::minutes{15}, std::chrono::steady_clock::now, &reservations};
-    const auto opened = sessions.open({"workspace", image_name}, "owner");
+    const auto opened = sessions.open({{{"workspace", image_name}}, {}}, "owner");
     ASSERT_TRUE(opened) << opened.error().message;
-    const auto session_issues = sessions.validation_issues(opened->image_id, "owner", 100U);
+    const auto session_issues =
+        sessions.validation_issues({opened->image_id, "document-a-series-source-1"}, "owner", 100U);
     ASSERT_TRUE(session_issues);
     EXPECT_EQ(session_issues->items.size(), issues.size());
     for (const auto &issue : session_issues->items) {
@@ -299,9 +300,9 @@ TEST_P(ProgramBitmapReporting, ExposesObjectBoundMismatchWarningsWhenOpeningEach
     axk::app::PathReservationCoordinator reservations;
     axk::app::ImageSessionManager sessions{
         *sandbox, 4U, 100U, std::chrono::minutes{15}, std::chrono::steady_clock::now, &reservations};
-    const auto opened = sessions.open({"workspace", image_name}, "owner");
+    const auto opened = sessions.open({{{"workspace", image_name}}, {}}, "owner");
     ASSERT_TRUE(opened) << opened.error().message;
-    const auto issues = sessions.validation_issues(opened->image_id, "owner", 100U);
+    const auto issues = sessions.validation_issues({opened->image_id, "document-a-series-source-1"}, "owner", 100U);
     ASSERT_TRUE(issues) << issues.error().message;
     ASSERT_EQ(issues->items.size(), 2U);
     for (const auto &issue : issues->items) {
@@ -311,7 +312,8 @@ TEST_P(ProgramBitmapReporting, ExposesObjectBoundMismatchWarningsWhenOpeningEach
                     issue.code == "REL_SBNK_PROGRAM_BITMAP_MISMATCH");
     }
     if (!GetParam().media_format) {
-        const auto admitted = sessions.begin_mutation(opened->image_id, "owner", opened->revision);
+        const auto admitted =
+            sessions.begin_mutation({opened->image_id, "document-a-series-source-1"}, "owner", opened->revision);
         EXPECT_TRUE(admitted) << admitted.error().message;
         if (admitted)
             sessions.abort_mutation(opened->image_id, "owner", opened->revision);

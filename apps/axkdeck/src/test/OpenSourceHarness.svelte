@@ -24,7 +24,7 @@
     const images = {
         location: null as ImageLocation | null,
         status: 'Ready',
-        open: async (location: ImageLocation, _preferred: unknown, prepare?: ImageSessionPreparation) => {
+        open: async ([location]: ImageLocation[], _preferred: unknown, prepare?: ImageSessionPreparation) => {
             if (await onopen(location)) {
                 try {
                     await prepare?.({ sessionId: 1, format: 'sfs' } as OpenedImage);

@@ -1,3 +1,4 @@
+#include "axklib/application/formats/a_series/session_read.hpp"
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -404,7 +405,8 @@ class PackageOperationsTest : public testing::Test {
     }
 
     std::string volume_content_id(const axk::app::ImageSessionSummary &session, std::string_view name) {
-        const auto read = images_->begin_read(session.image_id, "owner", session.revision);
+        const auto read = axk::app::formats::a_series::SessionReader::acquire(
+            *images_, {session.image_id, "document-a-series-source-1"}, "owner", session.revision);
         EXPECT_TRUE(read) << read.error().message;
         if (!read)
             return {};
@@ -622,11 +624,12 @@ TEST_F(PackageOperationsTest, SessionImportIsRevisionBoundJournaledAndExplicitly
                           {"roots", {{{"kind", "volume"}, {"partitionIndex", 0U}, {"volumeName", "Mixed"}}}}},
                          context());
     ASSERT_TRUE(exported) << exported.error().message;
-    const auto opened = images_->open({"workspace", "target.hds"}, "owner");
+    const auto opened = images_->open({{{"workspace", "target.hds"}}, {}}, "owner");
     ASSERT_TRUE(opened) << opened.error().message;
 
     const auto request = nlohmann::json{
         {"imageId", opened->image_id},
+        {"documentId", "document-a-series-source-1"},
         {"expectedRevision", opened->revision},
         {"packages", {{{"fileRef", {{"rootId", "workspace"}, {"relativePath", "session-volume.axkvol"}}}}}},
         {"destination", {{"kind", "EXISTING_VOLUME"}, {"partitionIndex", 0U}, {"volumeName", "Imported"}}},
@@ -691,7 +694,7 @@ TEST_F(PackageOperationsTest, SessionImportIsRevisionBoundJournaledAndExplicitly
     const auto refreshed = images_->inspect(opened->image_id, "owner");
     ASSERT_TRUE(refreshed) << refreshed.error().message;
     EXPECT_EQ(refreshed->revision, 2U);
-    EXPECT_GT(refreshed->object_count, opened->object_count);
+    EXPECT_GT(refreshed->documents.at(0).object_count, opened->documents.at(0).object_count);
 }
 
 TEST_F(PackageOperationsTest, FloppyImportRetainsOwnerBoundSelectionAndCreatesVolumeAtomically) {
@@ -706,7 +709,7 @@ TEST_F(PackageOperationsTest, FloppyImportRetainsOwnerBoundSelectionAndCreatesVo
     auto stranger = context();
     stranger.owner_id = "stranger";
     EXPECT_FALSE(registry_.invoke("images.floppy_import.release", {{"inspectionToken", token}}, stranger));
-    const auto opened = images_->open({"workspace", "target.hds"}, "owner");
+    const auto opened = images_->open({{{"workspace", "target.hds"}}, {}}, "owner");
     ASSERT_TRUE(opened);
     const auto &objects = inspected->at("objects");
     const auto sample = std::ranges::find_if(
@@ -714,6 +717,7 @@ TEST_F(PackageOperationsTest, FloppyImportRetainsOwnerBoundSelectionAndCreatesVo
     ASSERT_NE(sample, objects.end());
     const nlohmann::json request{
         {"imageId", opened->image_id},
+        {"documentId", "document-a-series-source-1"},
         {"expectedRevision", opened->revision},
         {"inspectionToken", token},
         {"selectedObjectKeys", {sample->at("objectKey")}},
@@ -743,7 +747,7 @@ TEST_F(PackageOperationsTest, FloppyImportRetainsOwnerBoundSelectionAndCreatesVo
     EXPECT_FALSE(registry_.invoke("images.floppy_import", {{"planToken", plan->at("planToken")}}, context()));
     const auto refreshed = images_->inspect(opened->image_id, "owner");
     ASSERT_TRUE(refreshed);
-    EXPECT_EQ(refreshed->object_count, 2U);
+    EXPECT_EQ(refreshed->documents.at(0).object_count, 2U);
     EXPECT_FALSE(volume_content_id(*refreshed, "From floppy").empty());
 }
 
@@ -761,7 +765,7 @@ TEST_F(PackageOperationsTest, FloppyRecoveryAcknowledgementDoesNotPermitExcluded
     EXPECT_TRUE(inspected->at("requiresAcknowledgement").get<bool>());
     EXPECT_TRUE(std::ranges::any_of(inspected->at("excludedFiles"),
                                     [](const auto &file) { return file.at("unreadableObject").template get<bool>(); }));
-    const auto opened = images_->open({"workspace", "target.hds"}, "owner");
+    const auto opened = images_->open({{{"workspace", "target.hds"}}, {}}, "owner");
     ASSERT_TRUE(opened);
     const auto &objects = inspected->at("objects");
     const auto wave =
@@ -769,6 +773,7 @@ TEST_F(PackageOperationsTest, FloppyRecoveryAcknowledgementDoesNotPermitExcluded
     ASSERT_NE(wave, objects.end());
     nlohmann::json request{
         {"imageId", opened->image_id},
+        {"documentId", "document-a-series-source-1"},
         {"expectedRevision", opened->revision},
         {"inspectionToken", inspected->at("inspectionToken")},
         {"selectedObjectKeys", {wave->at("objectKey")}},
@@ -792,13 +797,14 @@ TEST_F(PackageOperationsTest, FloppyImportRejectsChangedSourceBeforePlanningOrWr
     const nlohmann::json source{{"fileRef", {{"rootId", "workspace"}, {"relativePath", "source.img"}}}};
     const auto inspected = registry_.invoke("images.floppy_import.inspect", {{"sources", {source}}}, context());
     ASSERT_TRUE(inspected) << inspected.error().message;
-    const auto opened = images_->open({"workspace", "target.hds"}, "owner");
+    const auto opened = images_->open({{{"workspace", "target.hds"}}, {}}, "owner");
     ASSERT_TRUE(opened);
     const auto &objects = inspected->at("objects");
     const auto wave = std::ranges::find_if(objects, [](const auto &entry) { return entry.at("objectType") == "SMPL"; });
     ASSERT_NE(wave, objects.end());
     const nlohmann::json request{
         {"imageId", opened->image_id},
+        {"documentId", "document-a-series-source-1"},
         {"expectedRevision", opened->revision},
         {"inspectionToken", inspected->at("inspectionToken")},
         {"selectedObjectKeys", {wave->at("objectKey")}},
@@ -830,7 +836,7 @@ TEST_F(PackageOperationsTest, UnpackedFloppyImportsAndParentSetsHaveTheSameObjec
         {{"sources", {{{"fileRef", {{"rootId", "workspace"}, {"relativePath", "source.img"}}}}}}}, context());
     ASSERT_TRUE(raw) << raw.error().message;
     EXPECT_EQ(inspected->at("objects").size(), raw->at("objects").size());
-    const auto opened = images_->open({"workspace", "target.hds"}, "owner");
+    const auto opened = images_->open({{{"workspace", "target.hds"}}, {}}, "owner");
     ASSERT_TRUE(opened);
     nlohmann::json keys = nlohmann::json::array();
     for (const auto &object : inspected->at("objects")) {
@@ -840,6 +846,7 @@ TEST_F(PackageOperationsTest, UnpackedFloppyImportsAndParentSetsHaveTheSameObjec
     const auto plan = registry_.invoke(
         "images.floppy_import.plan",
         {{"imageId", opened->image_id},
+         {"documentId", "document-a-series-source-1"},
          {"expectedRevision", opened->revision},
          {"inspectionToken", inspected->at("inspectionToken")},
          {"selectedObjectKeys", keys},
@@ -856,7 +863,7 @@ TEST_F(PackageOperationsTest, UnpackedFloppyImportsAndParentSetsHaveTheSameObjec
 TEST_F(PackageOperationsTest, UnpackedFloppyDetectsAddedRemovedAndChangedFilesBeforeWriting) {
     unpack_floppy();
     const auto before = read_bytes(root_ / "target.hds");
-    const auto opened = images_->open({"workspace", "target.hds"}, "owner");
+    const auto opened = images_->open({{{"workspace", "target.hds"}}, {}}, "owner");
     ASSERT_TRUE(opened);
     for (const auto mutation : {"add", "remove", "change"}) {
         SCOPED_TRACE(mutation);
@@ -873,6 +880,7 @@ TEST_F(PackageOperationsTest, UnpackedFloppyDetectsAddedRemovedAndChangedFilesBe
         ASSERT_NE(wave, objects.end());
         const nlohmann::json request{
             {"imageId", opened->image_id},
+            {"documentId", "document-a-series-source-1"},
             {"expectedRevision", opened->revision},
             {"inspectionToken", inspected->at("inspectionToken")},
             {"selectedObjectKeys", {wave->at("objectKey")}},
@@ -925,11 +933,12 @@ TEST_F(PackageOperationsTest, SessionBatchImportCreatesUniquelyNamedVolumesAtomi
                              context());
         ASSERT_TRUE(exported) << exported.error().message;
     }
-    const auto opened = images_->open({"workspace", "target.hds"}, "owner");
+    const auto opened = images_->open({{{"workspace", "target.hds"}}, {}}, "owner");
     ASSERT_TRUE(opened) << opened.error().message;
 
     const auto request = nlohmann::json{
         {"imageId", opened->image_id},
+        {"documentId", "document-a-series-source-1"},
         {"expectedRevision", opened->revision},
         {"packages",
          {{{"fileRef", {{"rootId", "workspace"}, {"relativePath", "batch-one.axkvol"}}}},
@@ -978,7 +987,9 @@ TEST_F(PackageOperationsTest, SessionBatchImportCreatesUniquelyNamedVolumesAtomi
                                           {{"planToken", replanned->at("planToken").get<std::string>()}}, context());
     ASSERT_TRUE(applied) << applied.error().message;
     EXPECT_EQ(applied->at("revision"), opened->revision + 1U);
-    EXPECT_EQ(applied->size(), 12U);
+    EXPECT_EQ(applied->size(), 14U);
+    EXPECT_EQ(applied->at("documentId"), "document-a-series-source-1");
+    EXPECT_EQ(applied->at("sourceMemberId"), "source-1");
     EXPECT_FALSE(applied->contains("sfsIndexCapacity"));
     const auto refreshed = images_->inspect(opened->image_id, "owner");
     ASSERT_TRUE(refreshed) << refreshed.error().message;
@@ -997,10 +1008,11 @@ TEST_F(PackageOperationsTest, SessionBatchImportCreatesOneSharedVolumeFromMultip
         ASSERT_TRUE(exported) << exported.error().message;
     }
 
-    const auto target = images_->open({"workspace", "target.hds"}, "owner");
+    const auto target = images_->open({{{"workspace", "target.hds"}}, {}}, "owner");
     ASSERT_TRUE(target) << target.error().message;
     const auto request = nlohmann::json{
         {"imageId", target->image_id},
+        {"documentId", "document-a-series-source-1"},
         {"expectedRevision", target->revision},
         {"packages",
          {{{"fileRef", {{"rootId", "workspace"}, {"relativePath", "shared-one.axkvol"}}}},
@@ -1026,10 +1038,11 @@ TEST_F(PackageOperationsTest, SessionBatchImportCreatesOneSharedVolumeFromMultip
 }
 
 TEST_F(PackageOperationsTest, SessionExportsExactSingleAndMultiRootPackagesToWorkspaceOrRetainedDownload) {
-    const auto opened = images_->open({"workspace", "fixture.hds"}, "owner");
+    const auto opened = images_->open({{{"workspace", "fixture.hds"}}, {}}, "owner");
     ASSERT_TRUE(opened) << opened.error().message;
     const auto base =
         nlohmann::json{{"imageId", opened->image_id},
+                       {"documentId", "document-a-series-source-1"},
                        {"expectedRevision", opened->revision},
                        {"roots", {{{"kind", "VOLUME"}, {"contentId", volume_content_id(*opened, "New Volume")}}}}};
 
@@ -1065,7 +1078,7 @@ TEST_F(PackageOperationsTest, SessionExportsExactSingleAndMultiRootPackagesToWor
     ASSERT_FALSE(rejected_extension);
     EXPECT_EQ(rejected_extension.error().code, "package_extension_mismatch");
 
-    const auto objects = images_->objects(opened->image_id, "owner", 100U);
+    const auto objects = images_->objects({opened->image_id, "document-a-series-source-1"}, "owner", 100U);
     ASSERT_TRUE(objects) << objects.error().message;
     const auto sample = std::ranges::find(objects->items, "SBNK", &axk::app::ImageObjectItem::type);
     const auto wave_data = std::ranges::find(objects->items, "SMPL", &axk::app::ImageObjectItem::type);
@@ -1079,6 +1092,7 @@ TEST_F(PackageOperationsTest, SessionExportsExactSingleAndMultiRootPackagesToWor
     const auto selected =
         registry_.invoke("images.package_export",
                          {{"imageId", opened->image_id},
+                          {"documentId", "document-a-series-source-1"},
                           {"expectedRevision", opened->revision},
                           {"roots", selected_roots},
                           {"destination",
@@ -1098,6 +1112,7 @@ TEST_F(PackageOperationsTest, SessionExportsExactSingleAndMultiRootPackagesToWor
 
     const auto wrong_type = registry_.invoke("images.package_export",
                                              {{"imageId", opened->image_id},
+                                              {"documentId", "document-a-series-source-1"},
                                               {"expectedRevision", opened->revision},
                                               {"roots", {{{"kind", "SMPL"}, {"objectId", sample->id}}}},
                                               {"destination", {{"kind", "DOWNLOAD"}, {"filename", "wrong.axksmpl"}}}},
@@ -1108,6 +1123,7 @@ TEST_F(PackageOperationsTest, SessionExportsExactSingleAndMultiRootPackagesToWor
     const auto duplicate = registry_.invoke(
         "images.package_export",
         {{"imageId", opened->image_id},
+         {"documentId", "document-a-series-source-1"},
          {"expectedRevision", opened->revision},
          {"roots", {{{"kind", "SBNK"}, {"objectId", sample->id}}, {{"kind", "SBNK"}, {"objectId", sample->id}}}},
          {"destination", {{"kind", "DOWNLOAD"}, {"filename", "duplicate.axkpkg"}}}},
@@ -1117,10 +1133,11 @@ TEST_F(PackageOperationsTest, SessionExportsExactSingleAndMultiRootPackagesToWor
 }
 
 TEST_F(PackageOperationsTest, SessionExportsA3kArchiveVolumeAsDirectPackage) {
-    const auto opened = images_->open({"workspace", "archive.a3k"}, "owner");
+    const auto opened = images_->open({{{"workspace", "archive.a3k"}}, {}}, "owner");
     ASSERT_TRUE(opened) << opened.error().message;
     const auto request = nlohmann::json{
         {"imageId", opened->image_id},
+        {"documentId", "document-a-series-source-1"},
         {"expectedRevision", opened->revision},
         {"roots", {{{"kind", "VOLUME"}, {"contentId", volume_content_id(*opened, "Archive Volume")}}}},
         {"destination", {{"kind", "DOWNLOAD"}, {"filename", "archive-volume.axkvol"}}},
@@ -1150,10 +1167,11 @@ TEST_F(PackageOperationsTest, InspectsA3kArchiveAsAnImportableVolumePackage) {
 }
 
 TEST_F(PackageOperationsTest, SessionImportCreatesOneExplicitlyNamedVolumeForA3kArchive) {
-    const auto opened = images_->open({"workspace", "target.hds"}, "owner");
+    const auto opened = images_->open({{{"workspace", "target.hds"}}, {}}, "owner");
     ASSERT_TRUE(opened) << opened.error().message;
     const auto request = nlohmann::json{
         {"imageId", opened->image_id},
+        {"documentId", "document-a-series-source-1"},
         {"expectedRevision", opened->revision},
         {"packages", {{{"fileRef", {{"rootId", "workspace"}, {"relativePath", "archive.a3k"}}}}}},
         {"destination", {{"kind", "CREATE_VOLUME"}, {"partitionIndex", 0U}, {"volumeName", "Imported A3K"}}},
@@ -1176,14 +1194,16 @@ TEST_F(PackageOperationsTest, SessionImportCreatesOneExplicitlyNamedVolumeForA3k
 }
 
 TEST_F(PackageOperationsTest, SessionInspectsAndExportsImmediateVolumePackagesWithReport) {
-    const auto opened = images_->open({"workspace", "batch-volumes.hds"}, "owner");
+    const auto opened = images_->open({{{"workspace", "batch-volumes.hds"}}, {}}, "owner");
     ASSERT_TRUE(opened) << opened.error().message;
-    const auto roots = images_->content(opened->image_id, "owner", 500U);
+    const auto roots = images_->content({opened->image_id, "document-a-series-source-1"}, "owner", 500U);
     ASSERT_TRUE(roots) << roots.error().message;
     const auto scope = std::ranges::find(roots->items, "partition", &axk::app::ImageContentItem::kind);
     ASSERT_NE(scope, roots->items.end());
-    const nlohmann::json base{
-        {"imageId", opened->image_id}, {"expectedRevision", opened->revision}, {"scopeId", scope->id}};
+    const nlohmann::json base{{"imageId", opened->image_id},
+                              {"documentId", "document-a-series-source-1"},
+                              {"expectedRevision", opened->revision},
+                              {"scopeId", scope->id}};
 
     const auto inspected = registry_.invoke("images.volume_package_export.inspect", base, context());
     ASSERT_TRUE(inspected) << inspected.error().message;
@@ -1229,9 +1249,9 @@ TEST_F(PackageOperationsTest, SessionInspectsAndExportsImmediateVolumePackagesWi
 }
 
 TEST_F(PackageOperationsTest, SessionVolumePackageExportPublishesNothingWhenEveryVolumeIsEmpty) {
-    const auto opened = images_->open({"workspace", "target.hds"}, "owner");
+    const auto opened = images_->open({{{"workspace", "target.hds"}}, {}}, "owner");
     ASSERT_TRUE(opened) << opened.error().message;
-    const auto roots = images_->content(opened->image_id, "owner", 500U);
+    const auto roots = images_->content({opened->image_id, "document-a-series-source-1"}, "owner", 500U);
     ASSERT_TRUE(roots) << roots.error().message;
     const auto scope = std::ranges::find(roots->items, "partition", &axk::app::ImageContentItem::kind);
     ASSERT_NE(scope, roots->items.end());
@@ -1239,6 +1259,7 @@ TEST_F(PackageOperationsTest, SessionVolumePackageExportPublishesNothingWhenEver
     const auto exported = registry_.invoke(
         "images.volume_package_export",
         {{"imageId", opened->image_id},
+         {"documentId", "document-a-series-source-1"},
          {"expectedRevision", opened->revision},
          {"scopeId", scope->id},
          {"destination",
@@ -1250,9 +1271,9 @@ TEST_F(PackageOperationsTest, SessionVolumePackageExportPublishesNothingWhenEver
 }
 
 TEST_F(PackageOperationsTest, SessionVolumePackageExportCancellationPublishesNothing) {
-    const auto opened = images_->open({"workspace", "batch-volumes.hds"}, "owner");
+    const auto opened = images_->open({{{"workspace", "batch-volumes.hds"}}, {}}, "owner");
     ASSERT_TRUE(opened) << opened.error().message;
-    const auto roots = images_->content(opened->image_id, "owner", 500U);
+    const auto roots = images_->content({opened->image_id, "document-a-series-source-1"}, "owner", 500U);
     ASSERT_TRUE(roots) << roots.error().message;
     const auto scope = std::ranges::find(roots->items, "partition", &axk::app::ImageContentItem::kind);
     ASSERT_NE(scope, roots->items.end());
@@ -1264,6 +1285,7 @@ TEST_F(PackageOperationsTest, SessionVolumePackageExportCancellationPublishesNot
     const auto exported = registry_.invoke(
         "images.volume_package_export",
         {{"imageId", opened->image_id},
+         {"documentId", "document-a-series-source-1"},
          {"expectedRevision", opened->revision},
          {"scopeId", scope->id},
          {"destination",
@@ -1275,14 +1297,15 @@ TEST_F(PackageOperationsTest, SessionVolumePackageExportCancellationPublishesNot
 }
 
 TEST_F(PackageOperationsTest, SessionInspectsAndExportsSfzToWorkspaceOrRetainedTar) {
-    const auto opened = images_->open({"workspace", "fixture.hds"}, "owner");
+    const auto opened = images_->open({{{"workspace", "fixture.hds"}}, {}}, "owner");
     ASSERT_TRUE(opened) << opened.error().message;
-    const auto objects = images_->objects(opened->image_id, "owner", 100U);
+    const auto objects = images_->objects({opened->image_id, "document-a-series-source-1"}, "owner", 100U);
     ASSERT_TRUE(objects) << objects.error().message;
     const auto sample = std::ranges::find(objects->items, "SBNK", &axk::app::ImageObjectItem::type);
     ASSERT_NE(sample, objects->items.end());
     const nlohmann::json roots{{{"kind", "SBNK"}, {"objectId", sample->id}}};
     const auto base = nlohmann::json{{"imageId", opened->image_id},
+                                     {"documentId", "document-a-series-source-1"},
                                      {"expectedRevision", opened->revision},
                                      {"selectionMode", "DEPENDENCY_CLOSURE"},
                                      {"roots", roots}};
@@ -1326,13 +1349,14 @@ TEST_F(PackageOperationsTest, SessionInspectsAndExportsSfzToWorkspaceOrRetainedT
 }
 
 TEST_F(PackageOperationsTest, SessionExportsOnlySelectedSampleAsOneFlatWav) {
-    const auto opened = images_->open({"workspace", "fixture.hds"}, "owner");
+    const auto opened = images_->open({{{"workspace", "fixture.hds"}}, {}}, "owner");
     ASSERT_TRUE(opened) << opened.error().message;
-    const auto objects = images_->objects(opened->image_id, "owner", 100U);
+    const auto objects = images_->objects({opened->image_id, "document-a-series-source-1"}, "owner", 100U);
     ASSERT_TRUE(objects) << objects.error().message;
     const auto sample = std::ranges::find(objects->items, "SBNK", &axk::app::ImageObjectItem::type);
     ASSERT_NE(sample, objects->items.end());
     const nlohmann::json base{{"imageId", opened->image_id},
+                              {"documentId", "document-a-series-source-1"},
                               {"expectedRevision", opened->revision},
                               {"selectionMode", "SELECTED_AUDIO_OBJECTS"},
                               {"roots", {{{"kind", "SBNK"}, {"objectId", sample->id}}}}};
@@ -1368,9 +1392,9 @@ TEST_F(PackageOperationsTest, SessionExportsOnlySelectedSampleAsOneFlatWav) {
 }
 
 TEST_F(PackageOperationsTest, SessionExportsSelectedMonoAndStereoSamplesAsOneBatch) {
-    const auto opened = images_->open({"workspace", "selected-wav.hds"}, "owner");
+    const auto opened = images_->open({{{"workspace", "selected-wav.hds"}}, {}}, "owner");
     ASSERT_TRUE(opened) << opened.error().message;
-    const auto objects = images_->objects(opened->image_id, "owner", 100U);
+    const auto objects = images_->objects({opened->image_id, "document-a-series-source-1"}, "owner", 100U);
     ASSERT_TRUE(objects) << objects.error().message;
     const auto object_id = [&](std::string_view name) {
         const auto found = std::ranges::find_if(
@@ -1380,6 +1404,7 @@ TEST_F(PackageOperationsTest, SessionExportsSelectedMonoAndStereoSamplesAsOneBat
     };
     const nlohmann::json base{
         {"imageId", opened->image_id},
+        {"documentId", "document-a-series-source-1"},
         {"expectedRevision", opened->revision},
         {"selectionMode", "SELECTED_AUDIO_OBJECTS"},
         {"roots",
@@ -1410,16 +1435,17 @@ TEST_F(PackageOperationsTest, SessionExportsSelectedMonoAndStereoSamplesAsOneBat
 }
 
 TEST_F(PackageOperationsTest, SessionRejectsInvalidSelectedStereoSampleDuringInspection) {
-    const auto opened = images_->open(
-        {"workspace", "invalid-stereo-objects", axk::app::ImageSourceKind::axk_object_directory}, "owner");
+    const auto opened =
+        images_->open({{{"workspace", "invalid-stereo-objects", axk::app::ImageSourceKind::directory}}, {}}, "owner");
     ASSERT_TRUE(opened) << opened.error().message;
-    const auto objects = images_->objects(opened->image_id, "owner", 100U);
+    const auto objects = images_->objects({opened->image_id, "document-a-series-source-1"}, "owner", 100U);
     ASSERT_TRUE(objects) << objects.error().message;
     const auto sample = std::ranges::find_if(
         objects->items, [](const auto &object) { return object.type == "SBNK" && object.name == "Stereo Sample"; });
     ASSERT_NE(sample, objects->items.end());
     const nlohmann::json request{
         {"imageId", opened->image_id},
+        {"documentId", "document-a-series-source-1"},
         {"expectedRevision", opened->revision},
         {"selectionMode", "SELECTED_AUDIO_OBJECTS"},
         {"roots", {{{"kind", "SBNK"}, {"objectId", sample->id}}}},
@@ -1436,10 +1462,11 @@ TEST_F(PackageOperationsTest, SessionIgnoresStoredProgramRowsWithoutAnExactTarge
     const auto source_path = root_ / "warned-audio.hds";
     std::filesystem::copy_file(root_ / "mixed-roots.hds", source_path);
     make_first_program_assignment_context_only(source_path);
-    const auto opened = images_->open({"workspace", "warned-audio.hds"}, "owner");
+    const auto opened = images_->open({{{"workspace", "warned-audio.hds"}}, {}}, "owner");
     ASSERT_TRUE(opened) << opened.error().message;
     const nlohmann::json roots{{{"kind", "VOLUME"}, {"contentId", volume_content_id(*opened, "Mixed")}}};
     const auto base = nlohmann::json{{"imageId", opened->image_id},
+                                     {"documentId", "document-a-series-source-1"},
                                      {"expectedRevision", opened->revision},
                                      {"selectionMode", "DEPENDENCY_CLOSURE"},
                                      {"roots", roots}};
@@ -1464,9 +1491,9 @@ TEST_F(PackageOperationsTest, SessionIgnoresStoredProgramRowsWithoutAnExactTarge
 
 TEST_F(PackageOperationsTest, SessionRejectsSfzWhenAnySelectionIssueIsFatal) {
     write_audio_source_with_orphan_wave_data(root_ / "fatal-audio.hds");
-    const auto opened = images_->open({"workspace", "fatal-audio.hds"}, "owner");
+    const auto opened = images_->open({{{"workspace", "fatal-audio.hds"}}, {}}, "owner");
     ASSERT_TRUE(opened) << opened.error().message;
-    const auto objects = images_->objects(opened->image_id, "owner", 100U);
+    const auto objects = images_->objects({opened->image_id, "document-a-series-source-1"}, "owner", 100U);
     ASSERT_TRUE(objects) << objects.error().message;
     const auto object_id = [&](std::string_view type, std::string_view name) {
         const auto found = std::ranges::find_if(
@@ -1479,6 +1506,7 @@ TEST_F(PackageOperationsTest, SessionRejectsSfzWhenAnySelectionIssueIsFatal) {
         {{"kind", "SMPL"}, {"objectId", object_id("SMPL", "Orphan Wave")}},
     };
     const auto base = nlohmann::json{{"imageId", opened->image_id},
+                                     {"documentId", "document-a-series-source-1"},
                                      {"expectedRevision", opened->revision},
                                      {"selectionMode", "DEPENDENCY_CLOSURE"},
                                      {"roots", roots}};
@@ -1500,9 +1528,9 @@ TEST_F(PackageOperationsTest, SessionRejectsSfzWhenAnySelectionIssueIsFatal) {
 }
 
 TEST_F(PackageOperationsTest, SessionExportsSequencesAsMidiToWorkspaceOrRetainedTar) {
-    const auto opened = images_->open({"workspace", "sequence.bin", axk::app::ImageSourceKind::file}, "owner");
+    const auto opened = images_->open({{{"workspace", "sequence.bin", axk::app::ImageSourceKind::file}}, {}}, "owner");
     ASSERT_TRUE(opened) << opened.error().message;
-    const auto objects = images_->objects(opened->image_id, "owner", 100U);
+    const auto objects = images_->objects({opened->image_id, "document-a-series-source-1"}, "owner", 100U);
     ASSERT_TRUE(objects) << objects.error().message;
     const auto sequence = std::ranges::find(objects->items, "SEQU", &axk::app::ImageObjectItem::type);
     ASSERT_NE(sequence, objects->items.end());
@@ -1513,8 +1541,10 @@ TEST_F(PackageOperationsTest, SessionExportsSequencesAsMidiToWorkspaceOrRetained
     EXPECT_EQ(sequence->sequence->effective_initial_tempo_microseconds_per_quarter_note, 500'000U);
     EXPECT_TRUE(sequence->sequence->tempo_events.empty());
 
-    const nlohmann::json base{
-        {"imageId", opened->image_id}, {"expectedRevision", opened->revision}, {"objectIds", {sequence->id}}};
+    const nlohmann::json base{{"imageId", opened->image_id},
+                              {"documentId", "document-a-series-source-1"},
+                              {"expectedRevision", opened->revision},
+                              {"objectIds", {sequence->id}}};
     auto workspace_request = base;
     workspace_request["destination"] = {
         {"kind", "WORKSPACE"},
@@ -1550,10 +1580,9 @@ TEST_F(PackageOperationsTest, SessionExportsSequencesAsMidiToWorkspaceOrRetained
 }
 
 TEST_F(PackageOperationsTest, SessionExportsAnAxkObjectDirectoryAsAVolumePackage) {
-    const auto opened =
-        images_->open({"workspace", "objects", axk::app::ImageSourceKind::axk_object_directory}, "owner");
+    const auto opened = images_->open({{{"workspace", "objects", axk::app::ImageSourceKind::directory}}, {}}, "owner");
     ASSERT_TRUE(opened) << opened.error().message;
-    const auto content = images_->content(opened->image_id, "owner", 64U);
+    const auto content = images_->content({opened->image_id, "document-a-series-source-1"}, "owner", 64U);
     ASSERT_TRUE(content) << content.error().message;
     ASSERT_EQ(content->items.size(), 1U);
     const auto &volume = content->items.front();
@@ -1563,6 +1592,7 @@ TEST_F(PackageOperationsTest, SessionExportsAnAxkObjectDirectoryAsAVolumePackage
     const auto exported =
         registry_.invoke("images.package_export",
                          {{"imageId", opened->image_id},
+                          {"documentId", "document-a-series-source-1"},
                           {"expectedRevision", opened->revision},
                           {"roots", {{{"kind", "VOLUME"}, {"contentId", volume.id}}}},
                           {"destination",
@@ -1582,14 +1612,13 @@ TEST_F(PackageOperationsTest, SessionExportsAnAxkObjectDirectoryAsAVolumePackage
     EXPECT_EQ(package->kind, axk::PackageKind::volume);
     ASSERT_EQ(package->roots.size(), 1U);
     EXPECT_EQ(package->roots.front().display_name, "Object directory");
-    EXPECT_EQ(package->nodes.size(), opened->object_count);
+    EXPECT_EQ(package->nodes.size(), opened->documents.at(0).object_count);
 }
 
 TEST_F(PackageOperationsTest, SessionExportsFlatMediaAudioIntoOneSharedPoolWithoutSyntheticHierarchy) {
-    const auto opened =
-        images_->open({"workspace", "objects", axk::app::ImageSourceKind::axk_object_directory}, "owner");
+    const auto opened = images_->open({{{"workspace", "objects", axk::app::ImageSourceKind::directory}}, {}}, "owner");
     ASSERT_TRUE(opened) << opened.error().message;
-    const auto content = images_->content(opened->image_id, "owner", 64U);
+    const auto content = images_->content({opened->image_id, "document-a-series-source-1"}, "owner", 64U);
     ASSERT_TRUE(content) << content.error().message;
     ASSERT_EQ(content->items.size(), 1U);
     const auto &volume = content->items.front();
@@ -1599,6 +1628,7 @@ TEST_F(PackageOperationsTest, SessionExportsFlatMediaAudioIntoOneSharedPoolWitho
     const auto exported = registry_.invoke(
         "images.audio_export",
         {{"imageId", opened->image_id},
+         {"documentId", "document-a-series-source-1"},
          {"expectedRevision", opened->revision},
          {"selectionMode", "DEPENDENCY_CLOSURE"},
          {"roots", {{{"kind", "VOLUME"}, {"contentId", volume.id}}}},
@@ -1619,9 +1649,9 @@ TEST_F(PackageOperationsTest, SessionExportsFlatMediaAudioIntoOneSharedPoolWitho
 
 TEST_F(PackageOperationsTest, SessionExportRequestsCompanionDisksAndSucceedsAfterExplicitAttachment) {
     const auto opened =
-        images_->open({"workspace", "disk-set/DISK2", axk::app::ImageSourceKind::axk_object_directory}, "owner");
+        images_->open({{{"workspace", "disk-set/DISK2", axk::app::ImageSourceKind::directory}}, {}}, "owner");
     ASSERT_TRUE(opened) << opened.error().message;
-    const auto content = images_->content(opened->image_id, "owner", 64U);
+    const auto content = images_->content({opened->image_id, "document-a-series-source-1"}, "owner", 64U);
     ASSERT_TRUE(content) << content.error().message;
     ASSERT_EQ(content->items.size(), 1U);
     const auto &volume = content->items.front();
@@ -1635,6 +1665,7 @@ TEST_F(PackageOperationsTest, SessionExportRequestsCompanionDisksAndSucceedsAfte
 
     const auto rejected = registry_.invoke("images.package_export",
                                            {{"imageId", opened->image_id},
+                                            {"documentId", "document-a-series-source-1"},
                                             {"expectedRevision", opened->revision},
                                             {"roots", roots},
                                             {"destination", destination}},
@@ -1642,14 +1673,15 @@ TEST_F(PackageOperationsTest, SessionExportRequestsCompanionDisksAndSucceedsAfte
     ASSERT_FALSE(rejected);
     EXPECT_EQ(rejected.error().code, "companion_disks_required") << rejected.error().message;
 
-    const auto attached = images_->attach_companions(
-        opened->image_id, "owner", opened->revision,
-        {axk::app::CompanionSelectionKind::sources,
-         {{"workspace", "disk-set/DISK1", axk::app::ImageSourceKind::axk_object_directory}}});
+    const auto attached =
+        images_->attach_companions({opened->image_id, "document-a-series-source-1"}, "owner", opened->revision,
+                                   {axk::app::CompanionSelectionKind::sources,
+                                    {{"workspace", "disk-set/DISK1", axk::app::ImageSourceKind::directory}}});
     ASSERT_TRUE(attached) << attached.error().message;
     const nlohmann::json attached_roots{{{"kind", "VOLUME"}, {"contentId", volume_content_id(*attached, volume.name)}}};
     const auto exported = registry_.invoke("images.package_export",
                                            {{"imageId", attached->image_id},
+                                            {"documentId", "document-a-series-source-1"},
                                             {"expectedRevision", attached->revision},
                                             {"roots", attached_roots},
                                             {"destination", destination}},
@@ -1660,9 +1692,9 @@ TEST_F(PackageOperationsTest, SessionExportRequestsCompanionDisksAndSucceedsAfte
 }
 
 TEST_F(PackageOperationsTest, SessionExportCombinesEveryPortableObjectRootKindWithoutDuplicatingTheGraph) {
-    const auto opened = images_->open({"workspace", "mixed-roots.hds"}, "owner");
+    const auto opened = images_->open({{{"workspace", "mixed-roots.hds"}}, {}}, "owner");
     ASSERT_TRUE(opened) << opened.error().message;
-    const auto objects = images_->objects(opened->image_id, "owner", 100U);
+    const auto objects = images_->objects({opened->image_id, "document-a-series-source-1"}, "owner", 100U);
     ASSERT_TRUE(objects) << objects.error().message;
 
     std::vector<std::string> sample_bank_ids;
@@ -1678,6 +1710,7 @@ TEST_F(PackageOperationsTest, SessionExportCombinesEveryPortableObjectRootKindWi
     const auto homogeneous =
         registry_.invoke("images.package_export",
                          {{"imageId", opened->image_id},
+                          {"documentId", "document-a-series-source-1"},
                           {"expectedRevision", opened->revision},
                           {"roots", homogeneous_roots},
                           {"destination",
@@ -1707,6 +1740,7 @@ TEST_F(PackageOperationsTest, SessionExportCombinesEveryPortableObjectRootKindWi
     };
     const auto exported = registry_.invoke("images.package_export",
                                            {{"imageId", opened->image_id},
+                                            {"documentId", "document-a-series-source-1"},
                                             {"expectedRevision", opened->revision},
                                             {"roots", roots},
                                             {"destination",

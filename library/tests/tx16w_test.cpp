@@ -7,8 +7,8 @@
 
 #include <gtest/gtest.h>
 
-#include "axklib/tx16w.hpp"
-#include "axklib/tx16w_a_series.hpp"
+#include "axklib/conversion/tx16w_to_a_series/plan.hpp"
+#include "axklib/formats/tx16w/codec.hpp"
 
 namespace {
 
@@ -356,7 +356,7 @@ TEST(Tx16wInspection, ResolvesHierarchyWavesAcrossExplicitDiskSetMembers) {
 
 TEST(Tx16wASeries, PlansRelationshipsAndReportsLossyParameterMappings) {
     axk::tx16w::Inspection inspection;
-    inspection.waves.push_back({"C0.W01", 33'333U, 100U, 200U, true, {0, 16, -16}, {}, {}, {}, {}, {}, {}});
+    inspection.waves.push_back({{"C0.W01", 33'333U, 100U, 200U, true, {}, {}, {}, {}, {}}, {0, 16, -16}, {}});
     axk::tx16w::NativeSetup setup;
     setup.name = "KBD-1";
     setup.waves.push_back({0U, "C0"});
@@ -423,8 +423,8 @@ TEST(Tx16wASeries, PlansRelationshipsAndReportsLossyParameterMappings) {
 
 TEST(Tx16wASeries, ResolvesSameNamedWavesByNativeFileSlot) {
     axk::tx16w::Inspection inspection;
-    inspection.waves.push_back({"DUP.W03", 50'000U, 0U, 2U, false, {0, 16}, {}, {}, {}, {}, {}, std::uint8_t{2U}});
-    inspection.waves.push_back({"DUP.W11", 50'000U, 0U, 2U, false, {0, 32}, {}, {}, {}, {}, {}, std::uint8_t{10U}});
+    inspection.waves.push_back({{"DUP.W03", 50'000U, 0U, 2U, false, {}, {}, {}, {}, std::uint8_t{2U}}, {0, 16}, {}});
+    inspection.waves.push_back({{"DUP.W11", 50'000U, 0U, 2U, false, {}, {}, {}, {}, std::uint8_t{10U}}, {0, 32}, {}});
     axk::tx16w::NativeSetup setup;
     setup.name = "DUPLICATES";
     setup.waves.push_back({2U, "DUP"});
@@ -446,7 +446,7 @@ TEST(Tx16wASeries, ResolvesSameNamedWavesByNativeFileSlot) {
 
 TEST(Tx16wASeries, PreservesPerformancesUpToTheNativeAssignmentCapacity) {
     axk::tx16w::Inspection inspection;
-    inspection.waves.push_back({"TONE.W01", 50'000U, 0U, 2U, false, {0, 16}, {}, {}, {}, {}, {}, {}});
+    inspection.waves.push_back({{"TONE.W01", 50'000U, 0U, 2U, false, {}, {}, {}, {}, {}}, {0, 16}, {}});
     axk::tx16w::NativeSetup setup;
     setup.name = "WIDE";
     setup.waves.push_back({0U, "TONE"});
@@ -478,7 +478,7 @@ TEST(Tx16wASeries, PreservesPerformancesUpToTheNativeAssignmentCapacity) {
 
 TEST(Tx16wASeries, PreservesVoiceReuseAcrossPrograms) {
     axk::tx16w::Inspection inspection;
-    inspection.waves.push_back({"TONE.W01", 50'000U, 0U, 2U, false, {0, 16}, {}, {}, {}, {}, {}, {}});
+    inspection.waves.push_back({{"TONE.W01", 50'000U, 0U, 2U, false, {}, {}, {}, {}, {}}, {0, 16}, {}});
     axk::tx16w::NativeSetup setup;
     setup.name = "SHARED";
     setup.waves.push_back({0U, "TONE"});
@@ -507,7 +507,7 @@ TEST(Tx16wASeries, PreservesVoiceReuseAcrossPrograms) {
 
 TEST(Tx16wASeries, BlocksIncompleteHierarchyButAllowsExplicitWaveDataOnlyImport) {
     axk::tx16w::Inspection inspection;
-    inspection.waves.push_back({"HERE.W01", 50'000U, 0U, 2U, false, {0, 16}, {}, {}, {}, {}, {}, {}});
+    inspection.waves.push_back({{"HERE.W01", 50'000U, 0U, 2U, false, {}, {}, {}, {}, {}}, {0, 16}, {}});
     axk::tx16w::NativeSetup setup;
     setup.name = "PARTIAL";
     setup.waves = {{0U, "HERE"}, {1U, "OTHER"}};
@@ -543,7 +543,7 @@ TEST(Tx16wASeries, BlocksIncompleteHierarchyButAllowsExplicitWaveDataOnlyImport)
 
 TEST(Tx16wASeries, ResolvesFatUnderscoresAgainstNativeSpacePaddedWaveReferences) {
     axk::tx16w::Inspection inspection;
-    inspection.waves.push_back({"BIG_EP.W01", 50'000U, 0U, 2U, false, {0, 16}, {}, {}, {}, {}, {}, {}});
+    inspection.waves.push_back({{"BIG_EP.W01", 50'000U, 0U, 2U, false, {}, {}, {}, {}, {}}, {0, 16}, {}});
     axk::tx16w::NativeSetup setup;
     setup.name = "MULTI";
     setup.waves = {{0U, "BIG EP"}};
@@ -562,7 +562,7 @@ TEST(Tx16wASeries, ResolvesFatUnderscoresAgainstNativeSpacePaddedWaveReferences)
 
 TEST(Tx16wASeries, ResolvesTargetCollisionsAndSparseWaveSlots) {
     axk::tx16w::Inspection inspection;
-    inspection.waves.push_back({"TONE.W01", 50'000U, 0U, 2U, false, {0, 16}, {}, {}, {}, {}, {}, {}});
+    inspection.waves.push_back({{"TONE.W01", 50'000U, 0U, 2U, false, {}, {}, {}, {}, {}}, {0, 16}, {}});
     axk::tx16w::NativeSetup setup;
     setup.name = "SPARSE";
     setup.waves.push_back({7U, "TONE"});
@@ -592,7 +592,7 @@ TEST(Tx16wASeries, ResolvesTargetCollisionsAndSparseWaveSlots) {
 
 TEST(Tx16wASeries, SynthesizesAuditionProgramsWhenPerformanceFileIsAbsent) {
     axk::tx16w::Inspection inspection;
-    inspection.waves.push_back({"TONE.W01", 50'000U, 0U, 2U, false, {0, 16}, {}, {}, {}, {}, {}, {}});
+    inspection.waves.push_back({{"TONE.W01", 50'000U, 0U, 2U, false, {}, {}, {}, {}, {}}, {0, 16}, {}});
     axk::tx16w::NativeSetup setup;
     setup.name = "VOICEONLY";
     setup.waves.push_back({0U, "TONE"});

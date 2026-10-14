@@ -12,6 +12,7 @@
 #include "axklib/audio.hpp"
 #include "axklib/audio_export.hpp"
 #include "axklib/catalog.hpp"
+#include "axklib/formats/a_series/document.hpp"
 #include "axklib/media.hpp"
 #include "axklib/relationship.hpp"
 #include "axklib/semantic.hpp"
@@ -40,15 +41,6 @@ std::string object_type_name(ObjectType type) {
     }
     return "UNKNOWN";
 }
-
-struct image_state {
-    MediaContainer container;
-    std::unordered_map<std::string, MediaObjectDescriptor> descriptors;
-    ObjectCatalog catalog;
-    RelationshipGraph graph;
-    ContentTree tree;
-    ValidationReport validation;
-};
 
 const std::vector<ContentNode> *find_children(const ContentTree &tree, std::string_view parent) {
     if (parent.empty())
@@ -112,13 +104,13 @@ object_info public_object(const ObjectSnapshot &item) {
     return value;
 }
 
-result<page<content_node>> content_page(const std::shared_ptr<const image_state> &state, const std::string &parent_id,
-                                        std::uint64_t offset, std::uint64_t limit) {
+result<page<content_node>> content_page(const std::shared_ptr<const formats::a_series::Document> &state,
+                                        const std::string &parent_id, std::uint64_t offset, std::uint64_t limit) {
     if (!state)
         return invalid_argument("image session is not open");
     if (limit == 0U)
         return invalid_argument("content page limit must be nonzero");
-    const auto *children = find_children(state->tree, parent_id);
+    const auto *children = find_children(state->state().tree, parent_id);
     if (children == nullptr)
         return invalid_argument("content node is not part of this image session");
     page<content_node> output;
@@ -132,20 +124,21 @@ result<page<content_node>> content_page(const std::shared_ptr<const image_state>
     return output;
 }
 
-result<page<object_info>> object_page(const std::shared_ptr<const image_state> &state, std::uint64_t offset,
-                                      std::uint64_t limit) {
+result<page<object_info>> object_page(const std::shared_ptr<const formats::a_series::Document> &state,
+                                      std::uint64_t offset, std::uint64_t limit) {
     if (!state)
         return invalid_argument("image session is not open");
     if (limit == 0U)
         return invalid_argument("object page limit must be nonzero");
     page<object_info> output;
-    output.total_count = state->catalog.objects.size();
-    const auto begin = std::min<std::uint64_t>(offset, state->catalog.objects.size());
-    const auto remaining = static_cast<std::uint64_t>(state->catalog.objects.size()) - begin;
+    output.total_count = state->state().inventory.catalog.objects.size();
+    const auto begin = std::min<std::uint64_t>(offset, state->state().inventory.catalog.objects.size());
+    const auto remaining = static_cast<std::uint64_t>(state->state().inventory.catalog.objects.size()) - begin;
     const auto count = std::min(limit, remaining);
     output.items.reserve(static_cast<std::size_t>(count));
     for (std::uint64_t index = 0; index < count; ++index)
-        output.items.push_back(public_object(state->catalog.objects[static_cast<std::size_t>(begin + index)]));
+        output.items.push_back(
+            public_object(state->state().inventory.catalog.objects[static_cast<std::size_t>(begin + index)]));
     return output;
 }
 
@@ -167,37 +160,37 @@ relationship_info public_relationship(const Relationship &item) {
     return value;
 }
 
-result<page<relationship_info>> relationship_page(const std::shared_ptr<const image_state> &state, std::uint64_t offset,
-                                                  std::uint64_t limit) {
+result<page<relationship_info>> relationship_page(const std::shared_ptr<const formats::a_series::Document> &state,
+                                                  std::uint64_t offset, std::uint64_t limit) {
     if (!state)
         return invalid_argument("image session is not open");
     if (limit == 0U)
         return invalid_argument("relationship page limit must be nonzero");
     page<relationship_info> output;
-    output.total_count = state->graph.relationships.size();
+    output.total_count = state->state().graph.relationships.size();
     const auto begin = std::min<std::uint64_t>(offset, output.total_count);
     const auto count = std::min(limit, output.total_count - begin);
     output.items.reserve(static_cast<std::size_t>(count));
     for (std::uint64_t index = 0; index < count; ++index)
         output.items.push_back(
-            public_relationship(state->graph.relationships[static_cast<std::size_t>(begin + index)]));
+            public_relationship(state->state().graph.relationships[static_cast<std::size_t>(begin + index)]));
     return output;
 }
 
-validation_summary public_validation(const image_state &state) {
+validation_summary public_validation(const formats::a_series::Document &state) {
     std::uint64_t errors{};
     std::uint64_t warnings{};
-    for (const auto &issue : state.validation.issues) {
+    for (const auto &issue : state.state().validation.issues) {
         errors += issue.severity == ValidationSeverity::error ? 1U : 0U;
         warnings += issue.severity == ValidationSeverity::warning ? 1U : 0U;
     }
     return {
-        state.validation.valid(),
-        state.validation.issues.size(),
+        state.state().validation.valid(),
+        state.state().validation.issues.size(),
         errors,
         warnings,
-        state.validation.coverage.object_count,
-        state.validation.coverage.relationship_count,
+        state.state().validation.coverage.object_count,
+        state.state().validation.coverage.relationship_count,
     };
 }
 
@@ -213,19 +206,19 @@ std::string validation_severity_name(ValidationSeverity severity) {
     return "error";
 }
 
-result<page<validation_issue>> validation_issue_page(const std::shared_ptr<const image_state> &state,
+result<page<validation_issue>> validation_issue_page(const std::shared_ptr<const formats::a_series::Document> &state,
                                                      std::uint64_t offset, std::uint64_t limit) {
     if (!state)
         return invalid_argument("image session is not open");
     if (limit == 0U)
         return invalid_argument("validation issue page limit must be nonzero");
     page<validation_issue> output;
-    output.total_count = state->validation.issues.size();
+    output.total_count = state->state().validation.issues.size();
     const auto begin = std::min<std::uint64_t>(offset, output.total_count);
     const auto count = std::min(limit, output.total_count - begin);
     output.items.reserve(static_cast<std::size_t>(count));
     for (std::uint64_t index = 0; index < count; ++index) {
-        const auto &issue = state->validation.issues[static_cast<std::size_t>(begin + index)];
+        const auto &issue = state->state().validation.issues[static_cast<std::size_t>(begin + index)];
         output.items.push_back({issue.code, validation_severity_name(issue.severity), issue.message, issue.sampler_path,
                                 issue.object_key});
     }
@@ -235,11 +228,11 @@ result<page<validation_issue>> validation_issue_page(const std::shared_ptr<const
 } // namespace
 
 struct image::impl {
-    std::shared_ptr<const image_state> state;
+    std::shared_ptr<const formats::a_series::Document> state;
 };
 
 struct snapshot::impl {
-    std::shared_ptr<const image_state> state;
+    std::shared_ptr<const formats::a_series::Document> state;
 };
 
 image::image() = default;
@@ -265,27 +258,12 @@ result<image> image_factory::open(MediaContainer container, operation_context &c
     return protect<image>([&]() -> result<image> {
         if (!context.impl_)
             return invalid_argument("operation context is not initialized");
-        auto inventory = build_media_inventory(container, MediaObjectReadMode::decoded_metadata, 64U * 1024U * 1024U,
-                                               context.impl_->cancellation.token(), nullptr, context.impl_.get());
-        if (!inventory)
-            return public_error(inventory.error());
-        auto graph = build_relationship_graph(inventory->catalog);
-        auto tree = build_content_tree(container, inventory->catalog, graph);
-        auto validation = validate_semantics(container, *inventory, graph);
-        std::unordered_map<std::string, MediaObjectDescriptor> descriptors;
-        descriptors.reserve(inventory->objects.size());
-        for (auto &descriptor : inventory->objects)
-            descriptors.emplace(descriptor.key, std::move(descriptor));
-        auto state = std::make_shared<image_state>(image_state{
-            std::move(container),
-            std::move(descriptors),
-            std::move(inventory->catalog),
-            std::move(graph),
-            std::move(tree),
-            std::move(validation),
-        });
+        auto document = formats::a_series::Document::open(std::move(container), context.impl_->cancellation.token(),
+                                                          nullptr, context.impl_.get());
+        if (!document)
+            return public_error(document.error());
         image output;
-        output.impl_ = std::make_unique<image::impl>(image::impl{std::move(state)});
+        output.impl_ = std::make_unique<image::impl>(image::impl{std::move(*document)});
         return output;
     });
 }
@@ -369,14 +347,15 @@ result<waveform_preview> image::preview(const std::string &object_key, std::uint
             return invalid_argument("operation context is not initialized");
         if (object_key.empty() || bin_count == 0U || bin_count > std::numeric_limits<std::size_t>::max())
             return invalid_argument("waveform key and nonzero bin count are required");
-        const auto found = std::ranges::find(impl_->state->catalog.objects, object_key, &ObjectSnapshot::key);
-        if (found == impl_->state->catalog.objects.end())
+        const auto found =
+            std::ranges::find(impl_->state->state().inventory.catalog.objects, object_key, &ObjectSnapshot::key);
+        if (found == impl_->state->state().inventory.catalog.objects.end())
             return error{
                 error_code::object_missing, error_category::object, "waveform is not part of this image session", {}};
-        const auto descriptor = impl_->state->descriptors.find(found->key);
-        if (descriptor == impl_->state->descriptors.end())
+        const auto descriptor = impl_->state->state().descriptors.find(found->key);
+        if (descriptor == impl_->state->state().descriptors.end())
             return internal_error("media object descriptor is missing");
-        auto media_object = load_media_object(impl_->state->container, descriptor->second, 64U * 1024U * 1024U,
+        auto media_object = load_media_object(impl_->state->state().media, *descriptor->second, 64U * 1024U * 1024U,
                                               context.impl_->cancellation.token());
         if (!media_object)
             return public_error(media_object.error());
@@ -403,14 +382,15 @@ result<std::vector<std::uint8_t>> image::waveform_pcm(const std::string &object_
             return invalid_argument("operation context is not initialized");
         if (object_key.empty())
             return invalid_argument("waveform key is required");
-        const auto found = std::ranges::find(impl_->state->catalog.objects, object_key, &ObjectSnapshot::key);
-        if (found == impl_->state->catalog.objects.end())
+        const auto found =
+            std::ranges::find(impl_->state->state().inventory.catalog.objects, object_key, &ObjectSnapshot::key);
+        if (found == impl_->state->state().inventory.catalog.objects.end())
             return error{
                 error_code::object_missing, error_category::object, "waveform is not part of this image session", {}};
-        const auto descriptor = impl_->state->descriptors.find(found->key);
-        if (descriptor == impl_->state->descriptors.end())
+        const auto descriptor = impl_->state->state().descriptors.find(found->key);
+        if (descriptor == impl_->state->state().descriptors.end())
             return internal_error("media object descriptor is missing");
-        auto media_object = load_media_object(impl_->state->container, descriptor->second, 64U * 1024U * 1024U,
+        auto media_object = load_media_object(impl_->state->state().media, *descriptor->second, 64U * 1024U * 1024U,
                                               context.impl_->cancellation.token());
         if (!media_object)
             return public_error(media_object.error());
@@ -435,8 +415,8 @@ result<export_summary> image::export_audio(const std::string &utf8_output_direct
         auto directory = checked_path(utf8_output_directory, "output directory");
         if (!directory)
             return directory.error();
-        auto plan = build_export_plan(impl_->state->container, impl_->state->catalog, impl_->state->graph,
-                                      context.impl_->cancellation.token());
+        auto plan = build_export_plan(impl_->state->state().media, impl_->state->state().inventory.catalog,
+                                      impl_->state->state().graph, context.impl_->cancellation.token());
         if (!plan)
             return public_error(plan.error());
         auto audio = write_export_audio(*plan, *directory, options.overwrite, context.impl_->cancellation.token());

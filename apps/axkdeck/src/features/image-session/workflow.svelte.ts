@@ -1,6 +1,7 @@
+import { DocumentSelection } from './documentSelection';
 import { collectVolumes, findPartition, findSourceItem, noImageSource } from './sourceTree';
-import { findRefreshedVolume, refreshVolumeSelection } from './sourceTree';
-import { axkObjectDirectoryLocation, locationKey } from '../../lib/storageLocations';
+import { imageLocation } from '../../lib/httpImageSources';
+import { serverDirectoryLocation, locationKey } from '../../lib/storageLocations';
 import type { DirectoryLocation, DirectoryRef, FileLocation, FileRef, ImageLocation } from '../../lib/storageLocations';
 import type {
     CompanionSelection,
@@ -16,22 +17,12 @@ import { emptyVolumeSelection, updateVolumeSelection, type VolumeSelectionState 
 import { AxklibApiError } from '../../lib/httpErrors';
 import { userFacingMessage } from '../../lib/userFacingMessage';
 import { ImageOpenDiagnostics } from './diagnostics';
-import type { AuditionWorkflow } from '../audition/workflow.svelte';
-import type { CatalogWorkflow } from '../catalog/workflow.svelte';
-import type { DeletionWorkflow } from '../deletion/workflow.svelte';
+import type { SessionCollaborators } from './collaborators';
 import type { PickerController } from '../dialogs/picker';
-import type { ExportCompanionRetry, ExportWorkflow } from '../export/workflow.svelte';
-import type { MediaExportWorkflow } from '../export/mediaWorkflow.svelte';
-import type { VolumePackageExportWorkflow } from '../export/volumePackageWorkflow.svelte';
-import type { VolumeFloppyExportWorkflow } from '../export/volumeFloppyWorkflow.svelte';
+import type { ExportCompanionRetry } from '../export/workflow.svelte';
 import { ImageSessionController, type ImageSessionPreparation } from './actions';
-import type { PackageImportWorkflow } from '../import/packageWorkflow.svelte';
-import type { FloppyImportWorkflow } from '../import/floppyWorkflow.svelte';
-import type { MutationWorkflow } from '../mutation/workflow.svelte';
-import type { ProgramGenerationWorkflow } from '../program-generation/workflow.svelte';
-import type { ExtentLayoutRepairWorkflow } from './extentLayoutRepairWorkflow.svelte';
-import { allocationBlockerKey, validationStatus } from './validationStatus';
-import { applyOpenedImageMetadata } from './openedImageMetadata';
+import { allocationBlockerKey } from './validationStatus';
+import { applyOpenedImage } from './openedImageMetadata';
 
 export type CompanionRetry =
     { kind: 'audition'; objectId: string } | { kind: 'sample-bank'; bankId: string } | ExportCompanionRetry;
@@ -41,24 +32,9 @@ type CompanionSourceKind = 'file' | 'directory';
 const imageSessionKeepAliveIntervalMs = 5 * 60 * 1000;
 const imageOpenProgressDelayMs = 750;
 
-interface SessionCollaborators {
-    catalog: CatalogWorkflow;
-    audition: AuditionWorkflow;
-    mutation: MutationWorkflow;
-    exports: ExportWorkflow;
-    volumePackages: VolumePackageExportWorkflow;
-    volumeFloppies: VolumeFloppyExportWorkflow;
-    mediaExports: MediaExportWorkflow;
-    packageImport: PackageImportWorkflow;
-    floppyImport?: FloppyImportWorkflow;
-    deletion: DeletionWorkflow;
-    programGeneration: ProgramGenerationWorkflow;
-    extentRepairs: ExtentLayoutRepairWorkflow;
-    clearExportSelection: () => void;
-}
-
 export class ImageSessionWorkflow {
     confirmEditorLeave: () => Promise<boolean> = async () => true;
+    canSwitchDocument: () => boolean = () => true;
     sourceItems = $state<DiskTreeItem[]>([]);
     volumeSelection = $state<VolumeSelectionState>(emptyVolumeSelection());
     selectedSource = $state<DiskTreeItem>({
@@ -69,6 +45,12 @@ export class ImageSessionWorkflow {
     });
     location = $state<ImageLocation | null>(null);
     sessionId = $state<number | null>(null);
+    documents = $state<OpenedImage['documents']>([]);
+    documentId = $state<string | null>(null);
+    sources = $state<OpenedImage['sources']>([]);
+    discovery = $state<OpenedImage['discovery']>({ selectionRequired: false, candidates: [] });
+    switchingDocument = $state(false);
+    private documentSelection = new DocumentSelection();
     companionSources = $state<ImageLocation[]>([]);
     floppySet = $state<FloppySetSummary | null>(null);
     opening = $state(false);
@@ -223,17 +205,19 @@ export class ImageSessionWorkflow {
     }
 
     async open(
-        location: ImageLocation,
+        locations: ImageLocation[],
         preferred?: { partitionIndex: number; volumeName?: string },
         prepare?: ImageSessionPreparation,
     ): Promise<void> {
         if (!(await this.confirmEditorLeave())) return;
+        const location = locations[0];
+        if (!location) return;
         const requestId = this.nextOpenRequestId++;
         this.beginOpenProgress(requestId, location);
         this.status = 'Opening image';
         try {
             const opened = await this.controller.open(
-                location,
+                locations,
                 (job) => this.updateOpenProgress(requestId, job),
                 prepare,
             );
@@ -246,6 +230,7 @@ export class ImageSessionWorkflow {
                 elapsedMs: this.openElapsedMs(),
             });
             this.lastOpenedImageFile = location.kind === 'server-file' ? location.reference : null;
+            this.documentSelection.clear();
             await this.applyOpenedImage(opened, preferred);
             this.diagnostics.report('image_open_workspace_ready', {
                 sessionId: opened.sessionId,
@@ -287,7 +272,11 @@ export class ImageSessionWorkflow {
     }
 
     async reopen(preferred?: { partitionIndex: number; volumeName?: string }): Promise<void> {
-        if (this.location) await this.open(this.location, preferred);
+        if (this.sources.length)
+            await this.open(
+                this.sources.map((source) => imageLocation(source.source)),
+                preferred,
+            );
     }
 
     async refresh(
@@ -327,6 +316,21 @@ export class ImageSessionWorkflow {
         if (selected) await this.open(selected);
     }
 
+    selectDocument(documentId: string | null): Promise<void> {
+        return this.documentSelection.change(
+            this,
+            this.requireCollaborators(),
+            this.transport,
+            { documentId },
+            (opened, preferred) => this.applyOpenedImage(opened, preferred),
+        );
+    }
+    resolveDocuments(formats: string[]): Promise<void> {
+        return this.documentSelection.change(this, this.requireCollaborators(), this.transport, { formats }, (opened) =>
+            this.applyOpenedImage(opened),
+        );
+    }
+
     async chooseHardDiskDirectory(): Promise<void> {
         if (this.transport.storageMode !== 'server') return;
         const selection = await this.picker.chooseLocation('directory', 'Choose image location', [], '', {
@@ -338,7 +342,7 @@ export class ImageSessionWorkflow {
 
     finishHardDiskCreation(file: FileLocation): void {
         this.hardDiskDirectory = null;
-        void this.open(file);
+        void this.open([file]);
     }
 
     cancelHardDiskCreation(): void {
@@ -377,7 +381,7 @@ export class ImageSessionWorkflow {
             request.sourceKind === 'file' && selection.kind === 'server-file'
                 ? selection
                 : request.sourceKind === 'directory' && selection.kind === 'server-directory'
-                  ? axkObjectDirectoryLocation(selection.reference, selection.displayName)
+                  ? serverDirectoryLocation(selection.reference, selection.displayName)
                   : null;
         if (!source || request.sources.some((candidate) => sameImageSource(candidate, source))) return;
         this.companionRequest = {
@@ -527,31 +531,27 @@ export class ImageSessionWorkflow {
         return this.collaborators;
     }
 
-    private async chooseImageLocation(): Promise<ImageLocation | null> {
+    private async chooseImageLocation(): Promise<ImageLocation[] | null> {
         if (this.transport.storageMode !== 'server') return null;
-        const selection = await this.picker.chooseLocation(
-            'media-source',
-            'Open',
-            ['hds', 'hda', 'ima', 'img', 'iso', 'a3k', 'zip'],
-            '',
-            {
-                purpose: 'open-source',
-                initialDirectory: this.lastImageDirectory,
-                initialFile: this.lastOpenedImageFile,
-                ondirectorychange: (directory) => (this.lastImageDirectory = directory),
-            },
-        );
-        return selection?.kind === 'server-file' || selection?.kind === 'axk-object-directory' ? selection : null;
+        const selection = await this.picker.chooseSources({
+            purpose: 'open-source',
+            initialDirectory: this.lastImageDirectory,
+            initialFile: this.lastOpenedImageFile,
+            ondirectorychange: (directory) => (this.lastImageDirectory = directory),
+        });
+        return selection;
     }
 
     private openCompanionRequest(retry: CompanionRetry | null): void {
-        if (!this.location) return;
+        const memberId = this.documents.find((document) => document.id === this.documentId)?.sourceMemberIds[0];
+        const source = this.sources.find((member) => member.id === memberId)?.source;
+        if (!source || source.kind === 'DEVICE') return;
         this.companionRequest = {
             requestId: this.nextCompanionRequestId++,
             sources: [...this.companionSources],
             retry,
-            sourceKind: this.location.kind === 'server-file' ? 'file' : 'directory',
-            setLabel: this.floppySet?.setLabel.trim() || this.location.displayName,
+            sourceKind: source.kind === 'FILE' ? 'file' : 'directory',
+            setLabel: this.floppySet?.setLabel.trim() || imageLocation(source).displayName.split(/[\\/]/).at(-1) || '',
             nextRequiredIndex: this.floppySet?.nextRequiredIndex ?? null,
             busy: false,
             error: '',
@@ -563,34 +563,12 @@ export class ImageSessionWorkflow {
         preferred?: { partitionIndex: number; volumeName?: string },
         preserve = false,
     ): Promise<void> {
-        const { catalog, mutation, clearExportSelection } = this.requireCollaborators();
-        const previous = this.selectedSource;
-        const preferredItem = preserve
-            ? findRefreshedVolume(opened.tree, previous)
-            : preferred
-              ? findSourceItem(opened.tree, preferred.partitionIndex, preferred.volumeName)
-              : null;
-        if (preserve) {
-            if (!preferredItem) throw new Error('The edited volume is no longer available');
-            await catalog.refreshVolume(previous.id, preferredItem.id, preferredItem.partitionIndex ?? null);
-            if (this.sessionId !== opened.sessionId || this.selectedSource.id !== previous.id)
-                throw new Error('The workspace changed during refresh');
-            this.volumeSelection = refreshVolumeSelection(this.volumeSelection, opened.tree);
-        } else clearExportSelection();
-        applyOpenedImageMetadata(this, opened);
-        mutation.setCapabilities(opened);
-        this.selectedSource = preferredItem ?? opened.initialVolume ?? opened.tree[0] ?? this.selectedSource;
-        if (!preserve) {
-            this.volumeSelection =
-                this.selectedSource.kind === 'volume'
-                    ? { items: [this.selectedSource], anchorId: this.selectedSource.id }
-                    : emptyVolumeSelection();
-            if (this.selectedSource.kind === 'volume')
-                await catalog.loadVolume(this.selectedSource.id, this.selectedSource.partitionIndex ?? null);
-            else catalog.clear();
-        }
-        this.status = validationStatus(opened.validation);
-        if (opened.validation.errorCount > 0 || (opened.format === 'ex5-disk' && opened.validation.warningCount > 0))
+        await applyOpenedImage(this, this.requireCollaborators(), opened, preferred, preserve);
+        if (
+            opened.validation.errorCount > 0 ||
+            opened.validation.warningCount > 0 ||
+            opened.sources.some((source) => source.diagnostics.length)
+        )
             await this.showAutomaticIntegrityIssues(opened);
         else this.automaticCapacityWarnings.clear();
         if (opened.floppySet?.status === 'INCOMPLETE') this.openCompanionRequest(null);
@@ -615,16 +593,31 @@ export class ImageSessionWorkflow {
     }
 
     private async loadIntegrityIssues(sessionId: number, revision = this.revision): Promise<void> {
+        const documentId = this.documentId;
         this.integrityLoading = true;
         this.integrityError = '';
         try {
-            const issues = await this.transport.validationIssues(sessionId);
-            if (this.sessionId === sessionId && this.revision === revision) this.integrityIssues = issues;
+            const native = documentId ? await this.transport.validationIssues(sessionId) : [];
+            const issues = [
+                ...native,
+                ...this.sources.flatMap((source) =>
+                    source.diagnostics.map((issue) => ({
+                        code: issue.code,
+                        severity: issue.severity,
+                        message: issue.message,
+                        samplerPath: issue.path,
+                        objectId: null,
+                    })),
+                ),
+            ];
+            if (this.sessionId === sessionId && this.revision === revision && this.documentId === documentId)
+                this.integrityIssues = issues;
         } catch (error) {
-            if (this.sessionId === sessionId && this.revision === revision)
+            if (this.sessionId === sessionId && this.revision === revision && this.documentId === documentId)
                 this.integrityError = userFacingMessage(error);
         } finally {
-            if (this.sessionId === sessionId && this.revision === revision) this.integrityLoading = false;
+            if (this.sessionId === sessionId && this.revision === revision && this.documentId === documentId)
+                this.integrityLoading = false;
         }
     }
 
@@ -660,6 +653,10 @@ export class ImageSessionWorkflow {
         await this.controller.close();
         collaborators.clearExportSelection();
         this.companionSources = [];
+        this.documents = [];
+        this.documentId = null;
+        this.sources = [];
+        this.documentSelection.clear();
         this.floppySet = null;
         this.integrityDialogOpen = false;
         this.integrityIssues = [];

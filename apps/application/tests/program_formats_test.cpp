@@ -13,9 +13,9 @@
 #include <nlohmann/json.hpp>
 
 #include "axklib/application/filesystem.hpp"
+#include "axklib/application/formats/a_series/program_formats.hpp"
+#include "axklib/application/formats/a_series/sample_formats.hpp"
 #include "axklib/application/image_sessions.hpp"
-#include "axklib/application/program_formats.hpp"
-#include "axklib/application/sample_formats.hpp"
 #include "axklib/audio.hpp"
 #include "axklib/bytes.hpp"
 #include "axklib/catalog.hpp"
@@ -198,15 +198,16 @@ TEST_F(ProgramFormatSession, SummaryAndDetailExposeConversionAndGuardedProgramPa
         auto sandbox = axk::app::Sandbox::create({{"workspace", "Workspace", root, writable}});
         ASSERT_TRUE(sandbox) << sandbox.error().message;
         axk::app::ImageSessionManager sessions{*sandbox};
-        const auto opened = sessions.open({"workspace", "program.hds"}, "owner");
+        const auto opened = sessions.open({{{"workspace", "program.hds"}}, {}}, "owner");
         ASSERT_TRUE(opened) << opened.error().message;
-        const auto objects = sessions.objects(opened->image_id, "owner", 100U);
+        const auto objects = sessions.objects({opened->image_id, "document-a-series-source-1"}, "owner", 100U);
         ASSERT_TRUE(objects) << objects.error().message;
         const auto program = std::ranges::find_if(objects->items, [](const auto &item) { return item.type == "PROG"; });
         ASSERT_NE(program, objects->items.end());
         EXPECT_EQ(program->program_format, metadata(4U));
         EXPECT_TRUE(program->sample_format.is_null());
-        const auto detail = sessions.object_detail(opened->image_id, "owner", program->id);
+        const auto detail =
+            sessions.object_detail({opened->image_id, "document-a-series-source-1"}, "owner", program->id);
         ASSERT_TRUE(detail) << detail.error().message;
         EXPECT_EQ(Json(detail->at("object").at("programFormat")), program->program_format);
         EXPECT_TRUE(detail->at("object").at("sampleFormat").is_null());
@@ -231,7 +232,8 @@ TEST_F(ProgramFormatSession, SummaryAndDetailExposeConversionAndGuardedProgramPa
             if (item.type == "PROG")
                 continue;
             EXPECT_TRUE(item.program_format.is_null());
-            const auto other = sessions.object_detail(opened->image_id, "owner", item.id);
+            const auto other =
+                sessions.object_detail({opened->image_id, "document-a-series-source-1"}, "owner", item.id);
             ASSERT_TRUE(other) << other.error().message;
             EXPECT_TRUE(other->at("object").contains("programFormat"));
             EXPECT_TRUE(other->at("object").at("programFormat").is_null());
@@ -241,7 +243,8 @@ TEST_F(ProgramFormatSession, SummaryAndDetailExposeConversionAndGuardedProgramPa
             }
         }
         if (!writable)
-            EXPECT_FALSE(sessions.begin_mutation(opened->image_id, "owner", opened->revision));
+            EXPECT_FALSE(
+                sessions.begin_mutation({opened->image_id, "document-a-series-source-1"}, "owner", opened->revision));
         ASSERT_TRUE(sessions.close(opened->image_id, "owner"));
     }
 }
@@ -272,12 +275,13 @@ TEST_F(ProgramFormatSession, RevisionOneSeparatesStoredEffectIdsFromLaterLoaderV
     auto sandbox = axk::app::Sandbox::create({{"workspace", "Workspace", root, false}});
     ASSERT_TRUE(sandbox);
     axk::app::ImageSessionManager sessions{*sandbox};
-    const auto opened = sessions.open({"workspace", "program.iso"}, "owner");
+    const auto opened = sessions.open({{{"workspace", "program.iso"}}, {}}, "owner");
     ASSERT_TRUE(opened);
-    const auto objects = sessions.objects(opened->image_id, "owner", 100U, {}, "PROG");
+    const auto objects = sessions.objects({opened->image_id, "document-a-series-source-1"}, "owner", 100U, {}, "PROG");
     ASSERT_TRUE(objects);
     ASSERT_EQ(objects->items.size(), 1U);
-    const auto detail = sessions.object_detail(opened->image_id, "owner", objects->items.front().id);
+    const auto detail =
+        sessions.object_detail({opened->image_id, "document-a-series-source-1"}, "owner", objects->items.front().id);
     ASSERT_TRUE(detail);
     const auto &decoded = detail->at("object").at("decoded");
     EXPECT_EQ(decoded.at("effectTypeInterpretation"), "a3000-v2-and-later-load");
@@ -332,18 +336,20 @@ TEST_F(ProgramFormatSession, ScopedInventoryRetainsRealProgramsWithDefaultNamesA
         auto sandbox = axk::app::Sandbox::create({{"workspace", "Workspace", root, false}});
         ASSERT_TRUE(sandbox);
         axk::app::ImageSessionManager sessions{*sandbox};
-        const auto opened = sessions.open({"workspace", filename}, "owner");
+        const auto opened = sessions.open({{{"workspace", filename}}, {}}, "owner");
         ASSERT_TRUE(opened);
-        const auto all = sessions.objects(opened->image_id, "owner", 100U, {}, "PROG");
+        const auto all = sessions.objects({opened->image_id, "document-a-series-source-1"}, "owner", 100U, {}, "PROG");
         ASSERT_TRUE(all);
         ASSERT_EQ(all->items.size(), 1U);
-        const auto roots = sessions.content(opened->image_id, "owner", 100U);
+        const auto roots = sessions.content({opened->image_id, "document-a-series-source-1"}, "owner", 100U);
         ASSERT_TRUE(roots);
-        const auto volumes = sessions.content(opened->image_id, "owner", 100U, {}, roots->items.front().id);
+        const auto volumes = sessions.content({opened->image_id, "document-a-series-source-1"}, "owner", 100U, {},
+                                              roots->items.front().id);
         ASSERT_TRUE(volumes);
         const auto volume = std::ranges::find(volumes->items, "volume", &axk::app::ImageContentItem::kind);
         ASSERT_NE(volume, volumes->items.end());
-        const auto scoped = sessions.objects(opened->image_id, "owner", 1U, {}, "PROG", volume->id);
+        const auto scoped =
+            sessions.objects({opened->image_id, "document-a-series-source-1"}, "owner", 1U, {}, "PROG", volume->id);
         ASSERT_TRUE(scoped);
         ASSERT_EQ(scoped->items.size(), 1U);
         EXPECT_EQ(scoped->items.front().id, all->items.front().id);
@@ -403,9 +409,9 @@ TEST_F(ProgramFormatSession, MalformedProgramsRemainVisibleWithUnknownStorageInS
                 auto sandbox = axk::app::Sandbox::create({{"workspace", "Workspace", root, false}});
                 ASSERT_TRUE(sandbox);
                 axk::app::ImageSessionManager sessions{*sandbox};
-                const auto opened = sessions.open({"workspace", filename}, "owner");
+                const auto opened = sessions.open({{{"workspace", filename}}, {}}, "owner");
                 ASSERT_TRUE(opened) << opened.error().message;
-                const auto objects = sessions.objects(opened->image_id, "owner", 100U);
+                const auto objects = sessions.objects({opened->image_id, "document-a-series-source-1"}, "owner", 100U);
                 ASSERT_TRUE(objects);
                 const auto program =
                     std::ranges::find_if(objects->items, [](const auto &item) { return item.type == "PROG"; });
@@ -416,20 +422,21 @@ TEST_F(ProgramFormatSession, MalformedProgramsRemainVisibleWithUnknownStorageInS
                 for (const auto *metric :
                      {"logicalSize", "storedAssignmentCount", "assignmentCapacity", "parameterTailBytes"})
                     EXPECT_TRUE(program->program_format.at(metric).is_null());
-                const auto detail = sessions.object_detail(opened->image_id, "owner", program->id);
+                const auto detail =
+                    sessions.object_detail({opened->image_id, "document-a-series-source-1"}, "owner", program->id);
                 ASSERT_TRUE(detail) << detail.error().message;
                 EXPECT_EQ(Json(detail->at("object").at("programFormat")), program->program_format);
                 EXPECT_TRUE(detail->at("formatConversion").is_null());
                 EXPECT_TRUE(detail->at("editing").is_null());
-                const auto roots = sessions.content(opened->image_id, "owner", 100U);
+                const auto roots = sessions.content({opened->image_id, "document-a-series-source-1"}, "owner", 100U);
                 ASSERT_TRUE(roots);
-                const auto volumes =
-                    sessions.content(opened->image_id, "owner", 100U, std::nullopt, roots->items.front().id);
+                const auto volumes = sessions.content({opened->image_id, "document-a-series-source-1"}, "owner", 100U,
+                                                      std::nullopt, roots->items.front().id);
                 ASSERT_TRUE(volumes);
                 const auto volume = std::ranges::find(volumes->items, "volume", &axk::app::ImageContentItem::kind);
                 ASSERT_NE(volume, volumes->items.end());
-                const auto scoped =
-                    sessions.objects(opened->image_id, "owner", 1U, std::nullopt, std::nullopt, volume->id);
+                const auto scoped = sessions.objects({opened->image_id, "document-a-series-source-1"}, "owner", 1U,
+                                                     std::nullopt, std::nullopt, volume->id);
                 ASSERT_TRUE(scoped);
                 auto page = *scoped;
                 std::size_t program_count{};
@@ -441,8 +448,8 @@ TEST_F(ProgramFormatSession, MalformedProgramsRemainVisibleWithUnknownStorageInS
                         }
                     if (!page.next_cursor)
                         break;
-                    const auto next =
-                        sessions.objects(opened->image_id, "owner", 1U, *page.next_cursor, std::nullopt, volume->id);
+                    const auto next = sessions.objects({opened->image_id, "document-a-series-source-1"}, "owner", 1U,
+                                                       *page.next_cursor, std::nullopt, volume->id);
                     ASSERT_TRUE(next);
                     page = *next;
                 } while (true);

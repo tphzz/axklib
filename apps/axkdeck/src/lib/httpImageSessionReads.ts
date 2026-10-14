@@ -75,8 +75,30 @@ export class HttpImageSessionReads {
     }
     protected constructor(protected readonly imageSessions: HttpImageSessions) {}
 
-    openImage(location: ImageLocation, options?: ImageOpenOptions): Promise<OpenedImage> {
-        return this.imageSessions.open(location, options);
+    openImage(sources: ImageLocation[], options?: ImageOpenOptions): Promise<OpenedImage> {
+        return this.imageSessions.open(sources, options);
+    }
+
+    selectDocument(sessionId: number, documentId: string | null) {
+        return this.imageSessions.selectDocument(sessionId, documentId);
+    }
+    resolveDocuments(sessionId: number, selectedFormats: string[]) {
+        return this.imageSessions.resolveDocuments(sessionId, selectedFormats);
+    }
+    nativeContent(sessionId: number) {
+        return this.imageSessions.native.content(sessionId);
+    }
+    nativeObjects(sessionId: number) {
+        return this.imageSessions.native.objects(sessionId);
+    }
+    nativeRelationships(sessionId: number) {
+        return this.imageSessions.native.relationships(sessionId);
+    }
+    nativeObjectDetail(sessionId: number, objectId: string) {
+        return this.imageSessions.native.detail(sessionId, objectId);
+    }
+    preview(sessionId: number, objectId: string, bins: number) {
+        return this.imageSessions.native.preview(sessionId, objectId, bins);
     }
 
     keepImageAlive(sessionId: number): Promise<void> {

@@ -1,3 +1,4 @@
+import { nativeWorkspaceFixture } from '../../test/nativeWorkspaceFixture';
 import { describe, expect, it, vi } from 'vitest';
 
 import { InMemoryImageTransport } from './inMemoryTransport';
@@ -8,6 +9,7 @@ describe('InMemoryImageTransport', () => {
         const onClose = vi.fn();
         const transport = new InMemoryImageTransport({
             opened: {
+                ...nativeWorkspaceFixture(),
                 initialVolume: null,
                 tree: [],
                 validation: {
@@ -24,12 +26,12 @@ describe('InMemoryImageTransport', () => {
             onClose,
         });
 
-        const opened = await transport.openImage(
+        const opened = await transport.openImage([
             serverFileLocation({
                 rootId: 'workspace',
                 relativePath: 'images/empty.hds',
             }),
-        );
+        ]);
         await transport.closeImage(opened.sessionId);
 
         expect(opened.sessionId).toBe(1);

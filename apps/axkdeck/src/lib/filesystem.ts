@@ -31,14 +31,20 @@ export interface FilesystemEntry {
     kind: 'root' | 'partition' | 'directory' | 'file';
     sizeBytes: number | null;
     childCount: number;
-    objectId: string | null;
-    contentScopeId: string | null;
+    sourceMemberId: string;
+    bindings: FilesystemBinding[];
     interpretation: string;
     storage: string;
     issue: string;
     filesystemMetadata: boolean;
     rawAttributes: string;
     attributes: FilesystemAttribute[];
+}
+
+export interface FilesystemBinding {
+    documentId: string;
+    objectId: string | null;
+    contentScopeId: string | null;
 }
 
 export interface FilesystemQuery {
@@ -48,6 +54,7 @@ export interface FilesystemQuery {
     entryId?: string;
     objectId?: string;
     contentScopeId?: string;
+    documentId?: string;
     offset?: number;
     limit?: number;
 }

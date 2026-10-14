@@ -314,13 +314,18 @@ status instead of silently disappearing. Remote axkdeck connections use a
 directory-only browser for the remote host; after selection, ordinary image
 and output access remains confined to the configured workspaces.
 
-The image browser opens supported image and standalone object files normally.
-It also recognizes flat leaf directories containing externally extracted
-Yamaha objects and labels them **Sampler object folder**. Select that row to
-open it directly. The resulting `AXK_OBJECT_DIRECTORY` session is read-only and
-supports browsing, preview, audition, and package export. Parent collection
-directories remain navigation folders unless they are themselves recognized as
-one bounded multi-disk object set.
+Open collects an explicit source set of up to 32 files and directories. Add
+selected files or the current folder, remove unwanted members, then open the
+set. Files spans all admitted members. The native-document selector chooses
+Device view without interpreting the first source as the whole workspace.
+A-series documents retain their editors and existing write guards. TX16W
+documents expose read-only native objects, details and relationships, including
+incomplete sets. A physical device opens alone, not as part of a mixed file set.
+
+Recognized A-series object directories remain read-only and support browsing,
+preview, audition and package export. Parent directories can contain one bounded
+level of related disk folders. Their source kind is the generic `DIRECTORY`;
+sampler interpretation belongs to the discovered document.
 
 Opening one sampler object folder does not scan nearby folders. If playback or
 package export needs Wave Data continued on another sampler disk, axkdeck asks

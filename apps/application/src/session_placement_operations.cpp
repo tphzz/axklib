@@ -1,4 +1,6 @@
 #include "axklib/application/session_placement_operations.hpp"
+#include "axklib/application/formats/a_series/session_read.hpp"
+#include "axklib/application/image_session_contracts.hpp"
 
 #include <compare>
 #include <cstdint>
@@ -152,7 +154,7 @@ axk::app::Result<std::set<axk::SfsId>> physical_volume_closure(const axk::Partit
     return result;
 }
 
-axk::app::Result<std::set<axk::SfsId>> resolve_volume_closure(const axk::app::ImageSessionRead &session,
+axk::app::Result<std::set<axk::SfsId>> resolve_volume_closure(const axk::app::formats::a_series::SessionRead &session,
                                                               std::uint8_t partition_index,
                                                               std::string_view volume_name) {
     if (axk::is_partition_support_root_entry(volume_name)) {
@@ -185,12 +187,13 @@ axk::app::Result<std::set<axk::SfsId>> resolve_volume_closure(const axk::app::Im
 }
 
 axk::app::Result<Json> inspect_volume_deletion(axk::app::ImageSessionManager &images, std::string_view owner_id,
-                                               std::string_view image_id, std::uint64_t revision,
+                                               const axk::app::ImageDocumentRef &document, std::uint64_t revision,
                                                const std::vector<VolumeDeletionTarget> &targets) {
-    auto session = images.begin_read(image_id, owner_id, revision);
+    auto session = axk::app::formats::a_series::SessionReader::acquire(images, document, owner_id, revision);
     if (!session)
         return std::unexpected(session.error());
 
+    const auto &image_id = document.image_id;
     std::set<std::pair<std::uint8_t, axk::SfsId>> closure;
     Json target_json = Json::array();
     for (const auto &target : targets) {
@@ -303,14 +306,15 @@ axk::app::Result<void> axk::app::bind_session_placement_operations(OperationRegi
                                                                    ImageSessionManager &images,
                                                                    OperationRegistry::Handler alteration_handler) {
     if (!registry.is_implemented("images.volume_deletion.inspect")) {
-        auto bound = registry.bind("images.volume_deletion.inspect",
-                                   [&images](const Json &input, const OperationContext &context) -> Result<Json> {
-                                       auto request = parse_volume_deletion_request(input);
-                                       if (!request)
-                                           return std::unexpected(request.error());
-                                       return inspect_volume_deletion(images, context.owner_id, request->image_id,
-                                                                      request->revision, request->targets);
-                                   });
+        auto bound =
+            registry.bind("images.volume_deletion.inspect",
+                          [&images](const Json &input, const OperationContext &context) -> Result<Json> {
+                              auto request = parse_volume_deletion_request(input);
+                              if (!request)
+                                  return std::unexpected(request.error());
+                              return inspect_volume_deletion(images, context.owner_id, image_document_ref(input),
+                                                             request->revision, request->targets);
+                          });
         if (!bound)
             return bound;
     }
@@ -320,7 +324,8 @@ axk::app::Result<void> axk::app::bind_session_placement_operations(OperationRegi
                 auto request = parse_placement_request(input);
                 if (!request)
                     return std::unexpected(request.error());
-                auto session = images.begin_read(request->image_id, context.owner_id, request->revision);
+                auto session = axk::app::formats::a_series::SessionReader::acquire(images, image_document_ref(input),
+                                                                                   context.owner_id, request->revision);
                 if (!session)
                     return std::unexpected(session.error());
                 auto plan = detail::plan_placement_repair(*session, request->scope, request->recovery_volume_name);
@@ -343,7 +348,8 @@ axk::app::Result<void> axk::app::bind_session_placement_operations(OperationRegi
                 if (!request)
                     return std::unexpected(request.error());
                 auto plan = [&]() -> Result<detail::PlacementRepairPlan> {
-                    auto session = images.begin_read(request->image_id, context.owner_id, request->revision);
+                    auto session = axk::app::formats::a_series::SessionReader::acquire(
+                        images, image_document_ref(input), context.owner_id, request->revision);
                     if (!session)
                         return std::unexpected(session.error());
                     return detail::plan_placement_repair(*session, request->scope, request->recovery_volume_name);
@@ -355,6 +361,7 @@ axk::app::Result<void> axk::app::bind_session_placement_operations(OperationRegi
                                                            "the selected scope has no safely repairable objects"));
                 }
                 Json mutation{{"imageId", request->image_id},
+                              {"documentId", input.at("documentId")},
                               {"expectedRevision", request->revision},
                               {"manifest", {{"inline", repair_manifest(*plan)}}},
                               {"inputBindings", Json::array()}};

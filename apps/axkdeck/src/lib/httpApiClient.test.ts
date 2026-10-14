@@ -212,11 +212,11 @@ describe('AxklibHttpApiClient', () => {
     it('inspects one selected directory as a media source', async () => {
         const fetchMock = vi
             .spyOn(globalThis, 'fetch')
-            .mockResolvedValueOnce(jsonResponse({ data: { mediaSourceKind: 'AXK_OBJECT_DIRECTORY' } }));
+            .mockResolvedValueOnce(jsonResponse({ data: { mediaSourceKind: 'DIRECTORY' } }));
         const client = new AxklibHttpApiClient({ baseUrl: 'http://localhost/api/v1', bearerToken: 'token' });
         const directory = { rootId: 'workspace', relativePath: 'objects' };
 
-        await expect(client.inspectMediaSource(directory)).resolves.toBe('AXK_OBJECT_DIRECTORY');
+        await expect(client.inspectMediaSource(directory)).resolves.toBe('DIRECTORY');
         expect(fetchMock).toHaveBeenCalledWith(
             'http://localhost/api/v1/files/media-source/inspect',
             expect.objectContaining({ body: JSON.stringify({ directory }) }),

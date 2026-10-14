@@ -1,3 +1,4 @@
+import { documentTarget } from './httpNativeDocuments';
 import {
     AxklibApiError,
     AxklibHttpApiClient,
@@ -6,7 +7,6 @@ import {
 } from './httpApiClient';
 import type { components } from './generated/axklibApiV1';
 import { loadProgramEditorCatalog } from './httpProgramCatalog';
-import { normalizeWaveformPreview } from './waveformPreview';
 import type { ObjectParameterEdit, SampleDuplicationRequest, ObjectFormatConversionRequest } from './objectEditing';
 import type {
     AudioImportOptions,
@@ -55,7 +55,6 @@ import type {
     PlanSummary,
     PlacementRepairInspection,
     PlacementRepairScope,
-    PreviewEnvelope,
     SequenceImportItem,
     SequenceSystemExclusivePolicy,
     MidiInspection,
@@ -135,7 +134,7 @@ export class HttpImageTransport extends HttpPackageTransport implements ImageTra
     sandboxDirectory(directory: DirectoryRef, cursor?: string): Promise<DirectoryListing> {
         return this.client.listDirectory(directory, { cursor });
     }
-    inspectSandboxMediaSource(directory: DirectoryRef): Promise<'AXK_OBJECT_DIRECTORY' | null> {
+    inspectSandboxMediaSource(directory: DirectoryRef): Promise<'DIRECTORY' | null> {
         return this.client.inspectMediaSource(directory);
     }
     async createSandboxDirectory(parent: DirectoryRef, name: string): Promise<void> {
@@ -442,14 +441,6 @@ export class HttpImageTransport extends HttpPackageTransport implements ImageTra
         return this.imageSessions.startProgramGeneration(sessionId, contentScopeId, programs);
     }
 
-    async preview(sessionId: number, objectKey: string, binCount: number): Promise<PreviewEnvelope> {
-        const session = this.imageSessions.get(sessionId);
-        const query = new URLSearchParams({ objectId: objectKey, bins: String(binCount) });
-        return normalizeWaveformPreview(
-            await this.client.request('GET', `/images/${encodeURIComponent(session.remoteId)}/preview?${query}`),
-        );
-    }
-
     async prepareAuditionBundle(
         sessionId: number,
         objectKeys: readonly string[],
@@ -458,7 +449,7 @@ export class HttpImageTransport extends HttpPackageTransport implements ImageTra
     ): Promise<AuditionBundleDescriptor> {
         const session = this.imageSessions.get(sessionId);
         const submitted = await this.client.invoke<never>('auditions.prepare', {
-            imageId: session.remoteId,
+            ...documentTarget(session),
             objectIds: objectKeys,
             ...(storedPcm ? { sourceWindow: 'STORED' } : {}),
         });

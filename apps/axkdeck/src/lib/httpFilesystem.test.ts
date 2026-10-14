@@ -3,21 +3,21 @@ import { AxklibHttpApiClient } from './httpApiClient';
 import { HttpImageSessions } from './httpImageSessions';
 import { HttpJobController } from './httpJobController';
 import { serverFileLocation, clientUploadLocation } from './storageLocations';
+import { nativeWorkspaceFixture } from '../test/nativeWorkspaceFixture';
+import { documentSession } from './httpNativeDocuments';
 
 afterEach(() => vi.restoreAllMocks());
 
 function setup() {
     const client = new AxklibHttpApiClient({ baseUrl: 'http://localhost/api/v1', bearerToken: 'test' });
     const sessions = new HttpImageSessions(client, new HttpJobController(client));
-    vi.spyOn(sessions, 'get').mockReturnValue({
-        remoteId: 'remote-image',
-        revision: 9,
-        source: serverFileLocation({ rootId: 'images', relativePath: 'test.hds' }),
-        contentCursors: new Map(),
-        contentItems: new Map(),
-        objectCursors: new Map(),
-        relationshipCursors: new Map(),
-    });
+    vi.spyOn(sessions, 'get').mockReturnValue(
+        documentSession({
+            ...nativeWorkspaceFixture(),
+            imageId: 'remote-image',
+            revision: 9,
+        }),
+    );
     return { client, sessions };
 }
 

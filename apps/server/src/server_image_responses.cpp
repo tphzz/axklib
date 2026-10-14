@@ -47,8 +47,8 @@ Json ServerApplication::image_summary_json(const axk::app::ImageSessionSummary &
     return axk::app::image_session_summary_json(summary);
 }
 
-crow::response ServerApplication::attach_companions_response(const crow::request &request,
-                                                             const std::string &image_id) {
+crow::response ServerApplication::attach_companions_response(const crow::request &request, const std::string &image_id,
+                                                             const std::string &document_id) {
     const auto id = request_id(request);
     if (auto denied = guard(request, id))
         return std::move(*denied);
@@ -76,7 +76,8 @@ crow::response ServerApplication::attach_companions_response(const crow::request
             400, {"invalid_request", "expectedRevision and a valid companion source selection are required"}, id);
     }
 
-    const auto summary = images_.attach_companions(image_id, request_owner(request), expected_revision, selection);
+    const auto summary =
+        images_.attach_companions({image_id, document_id}, request_owner(request), expected_revision, selection);
     if (!summary)
         return error_response(status_for_error(summary.error()), summary.error(), id);
     return json_response(200, {{"data", image_summary_json(*summary)}, {"meta", {{"requestId", id}}}}, id);
@@ -132,14 +133,50 @@ crow::response ServerApplication::image_page_response(const crow::request &reque
                          id);
 }
 
-crow::response ServerApplication::image_content_response(const crow::request &request, const std::string &image_id) {
+crow::response ServerApplication::image_documents_response(const crow::request &request, const std::string &image_id) {
+    const auto id = request_id(request);
+    if (auto denied = guard(request, id))
+        return std::move(*denied);
+    if (request.method == crow::HTTPMethod::Post) {
+        const auto body = parse_validated_json_body(request, "ImageDocumentSelectionRequest");
+        if (!body)
+            return error_response(status_for_error(body.error(), 400), body.error(), id);
+        const auto formats = body->at("selectedFormats").get<std::vector<std::string>>();
+        const auto result = images_.select_documents(image_id, request_owner(request),
+                                                     body->at("expectedRevision").get<std::uint64_t>(), formats);
+        if (!result)
+            return error_response(status_for_error(result.error()), result.error(), id);
+        return json_response(200, {{"data", image_summary_json(*result)}, {"meta", {{"requestId", id}}}}, id);
+    }
+    return image_page_response<axk::app::ImageDocumentSummary>(
+        request, image_id,
+        [this](auto image, auto owner, auto limit, auto cursor) {
+            return images_.documents(image, owner, limit, cursor);
+        },
+        [](const auto &document) { return axk::app::image_document_summary_json(document); });
+}
+
+crow::response ServerApplication::image_document_response(const crow::request &request, const std::string &image_id,
+                                                          const std::string &document_id) {
+    const auto id = request_id(request);
+    if (auto denied = guard(request, id))
+        return std::move(*denied);
+    const auto result = images_.document({image_id, document_id}, request_owner(request));
+    if (!result)
+        return error_response(status_for_error(result.error()), result.error(), id);
+    return json_response(200, {{"data", axk::app::image_document_summary_json(*result)}, {"meta", {{"requestId", id}}}},
+                         id);
+}
+
+crow::response ServerApplication::image_content_response(const crow::request &request, const std::string &image_id,
+                                                         const std::string &document_id) {
     std::optional<std::string_view> parent_id;
     if (const auto *value = request.url_params.get("parentId"); value != nullptr && *value != '\0')
         parent_id = value;
     return image_page_response<axk::app::ImageContentItem>(
         request, image_id,
-        [this, parent_id](auto id, auto owner, auto limit, auto cursor) {
-            return images_.content(id, owner, limit, cursor, parent_id);
+        [this, parent_id, &document_id](auto id, auto owner, auto limit, auto cursor) {
+            return images_.content({std::string{id}, document_id}, owner, limit, cursor, parent_id);
         },
         [](const axk::app::ImageContentItem &item) {
             return Json{
@@ -168,7 +205,8 @@ crow::response ServerApplication::image_content_response(const crow::request &re
         });
 }
 
-crow::response ServerApplication::image_objects_response(const crow::request &request, const std::string &image_id) {
+crow::response ServerApplication::image_objects_response(const crow::request &request, const std::string &image_id,
+                                                         const std::string &document_id) {
     std::optional<std::string_view> object_type;
     if (const auto *value = request.url_params.get("type"); value != nullptr && *value != '\0')
         object_type = value;
@@ -177,8 +215,8 @@ crow::response ServerApplication::image_objects_response(const crow::request &re
         content_scope_id = value;
     return image_page_response<axk::app::ImageObjectItem>(
         request, image_id,
-        [this, object_type, content_scope_id](auto id, auto owner, auto limit, auto cursor) {
-            return images_.objects(id, owner, limit, cursor, object_type, content_scope_id);
+        [this, object_type, content_scope_id, &document_id](auto id, auto owner, auto limit, auto cursor) {
+            return images_.objects({std::string{id}, document_id}, owner, limit, cursor, object_type, content_scope_id);
         },
         [this](const axk::app::ImageObjectItem &item) {
             Json waveform;
@@ -235,11 +273,11 @@ crow::response ServerApplication::image_objects_response(const crow::request &re
 }
 
 crow::response ServerApplication::image_object_response(const crow::request &request, const std::string &image_id,
-                                                        const std::string &object_id) {
+                                                        const std::string &document_id, const std::string &object_id) {
     const auto id = request_id(request);
     if (auto denied = guard(request, id))
         return std::move(*denied);
-    const auto metadata = images_.object_detail(image_id, request_owner(request), object_id);
+    const auto metadata = images_.object_detail({image_id, document_id}, request_owner(request), object_id);
     if (!metadata)
         return error_response(status_for_error(metadata.error()), metadata.error(), id);
     return json_response(
@@ -248,7 +286,8 @@ crow::response ServerApplication::image_object_response(const crow::request &req
 }
 
 crow::response ServerApplication::image_relationships_response(const crow::request &request,
-                                                               const std::string &image_id) {
+                                                               const std::string &image_id,
+                                                               const std::string &document_id) {
     axk::app::ImageRelationshipFilter filter;
     if (const auto *value = request.url_params.get("scopeId"); value != nullptr && *value != '\0')
         filter.content_scope_id = value;
@@ -260,8 +299,8 @@ crow::response ServerApplication::image_relationships_response(const crow::reque
         filter.relationship_type = value;
     return image_page_response<axk::app::ImageRelationshipItem>(
         request, image_id,
-        [this, filter](auto id, auto owner, auto limit, auto cursor) {
-            return images_.relationships(id, owner, limit, cursor, filter);
+        [this, filter, &document_id](auto id, auto owner, auto limit, auto cursor) {
+            return images_.relationships({std::string{id}, document_id}, owner, limit, cursor, filter);
         },
         [](const axk::app::ImageRelationshipItem &item) {
             return Json{{"id", item.id},
@@ -280,7 +319,8 @@ crow::response ServerApplication::image_relationships_response(const crow::reque
 }
 
 crow::response ServerApplication::image_system_program_contexts_response(const crow::request &request,
-                                                                         const std::string &image_id) {
+                                                                         const std::string &image_id,
+                                                                         const std::string &document_id) {
     const auto id = request_id(request);
     if (auto denied = guard(request, id))
         return std::move(*denied);
@@ -289,8 +329,8 @@ crow::response ServerApplication::image_system_program_contexts_response(const c
     if (!partition || *partition > 7U) {
         return error_response(400, {"invalid_partition", "partitionIndex must be an integer from 0 through 7"}, id);
     }
-    const auto contexts =
-        images_.system_program_contexts(image_id, request_owner(request), static_cast<std::uint8_t>(*partition));
+    const auto contexts = images_.system_program_contexts({image_id, document_id}, request_owner(request),
+                                                          static_cast<std::uint8_t>(*partition));
     if (!contexts)
         return error_response(status_for_error(contexts.error()), contexts.error(), id);
 
@@ -329,11 +369,12 @@ crow::response ServerApplication::image_system_program_contexts_response(const c
     return json_response(200, {{"data", std::move(data)}, {"meta", {{"requestId", id}}}}, id);
 }
 
-crow::response ServerApplication::image_validation_response(const crow::request &request, const std::string &image_id) {
+crow::response ServerApplication::image_validation_response(const crow::request &request, const std::string &image_id,
+                                                            const std::string &document_id) {
     return image_page_response<axk::app::ImageValidationItem>(
         request, image_id,
-        [this](auto id, auto owner, auto limit, auto cursor) {
-            return images_.validation_issues(id, owner, limit, cursor);
+        [this, &document_id](auto id, auto owner, auto limit, auto cursor) {
+            return images_.validation_issues({std::string{id}, document_id}, owner, limit, cursor);
         },
         [](const axk::app::ImageValidationItem &item) {
             return Json{{"code", item.code},
@@ -344,7 +385,8 @@ crow::response ServerApplication::image_validation_response(const crow::request 
         });
 }
 
-crow::response ServerApplication::image_preview_response(const crow::request &request, const std::string &image_id) {
+crow::response ServerApplication::image_preview_response(const crow::request &request, const std::string &image_id,
+                                                         const std::string &document_id) {
     const auto id = request_id(request);
     if (auto denied = guard(request, id))
         return std::move(*denied);
@@ -352,7 +394,8 @@ crow::response ServerApplication::image_preview_response(const crow::request &re
     const auto bins = parse_unsigned(request.url_params.get("bins") == nullptr ? "" : request.url_params.get("bins"));
     if (object_id == nullptr || *object_id == '\0' || !bins || *bins > std::numeric_limits<std::size_t>::max())
         return error_response(400, {"invalid_preview", "objectId and an unsigned bins value are required"}, id);
-    const auto preview = images_.preview(image_id, request_owner(request), object_id, static_cast<std::size_t>(*bins));
+    const auto preview =
+        images_.preview({image_id, document_id}, request_owner(request), object_id, static_cast<std::size_t>(*bins));
     if (!preview)
         return error_response(status_for_error(preview.error()), preview.error(), id);
     Json lanes = Json::array();

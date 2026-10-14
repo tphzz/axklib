@@ -2,6 +2,7 @@ import { render, cleanup, fireEvent } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { FilesystemEntry } from '../../lib/filesystem';
 import FilesInspector from './FilesInspector.svelte';
+import { nativeWorkspaceFixture } from '../../test/nativeWorkspaceFixture';
 
 afterEach(cleanup);
 
@@ -15,8 +16,9 @@ const entry: FilesystemEntry = {
     kind: 'file',
     sizeBytes: 256,
     childCount: 0,
-    objectId: null,
-    contentScopeId: null,
+    sourceMemberId: 'source-1',
+    bindings: [],
+
     interpretation: '',
     storage: 'Record 0',
     issue: '',
@@ -29,16 +31,57 @@ describe('FilesInspector native metadata', () => {
     it('keeps cross-mode navigation in the fixed footer outside scrolling properties', async () => {
         const onshowdevice = vi.fn();
         const view = render(FilesInspector, {
-            entry: { ...entry, objectId: 'object' },
-            canShowDevice: true,
+            entry: {
+                ...entry,
+                bindings: [{ documentId: 'document-a-series-source-1', objectId: 'object', contentScopeId: null }],
+            },
+            documents: nativeWorkspaceFixture().documents,
             onshowdevice,
         });
-        const button = view.getByRole('button', { name: 'To Device' });
+        const button = view.getByRole('button', { name: 'Show in A-series' });
         expect(button.closest('.inspector-body')).toBeNull();
         expect(button.closest('.inspector-mode-footer')).toBeTruthy();
-        expect(button.getAttribute('title')).toBe('Show this entry in Device');
+        expect(button.getAttribute('title')).toBe('Show in A-series');
         await fireEvent.click(button);
-        expect(onshowdevice).toHaveBeenCalledWith('object');
+        expect(onshowdevice).toHaveBeenCalledWith({
+            documentId: 'document-a-series-source-1',
+            objectId: 'object',
+            contentScopeId: null,
+        });
+    });
+    it('offers one action per document without choosing an arbitrary object from a container file', async () => {
+        const onshowdevice = vi.fn();
+        const first = nativeWorkspaceFixture().documents[0];
+        const second = { ...first, id: 'document-second', name: 'Second disk' };
+        const view = render(FilesInspector, {
+            entry: {
+                ...entry,
+                bindings: [
+                    { documentId: first.id, objectId: 'voice-1', contentScopeId: null },
+                    { documentId: first.id, objectId: 'voice-2', contentScopeId: null },
+                    { documentId: first.id, objectId: 'voice-1', contentScopeId: null },
+                    { documentId: second.id, objectId: null, contentScopeId: 'volume-2' },
+                    { documentId: 'removed-document', objectId: 'old', contentScopeId: null },
+                ],
+            },
+            documents: [first, second],
+            onshowdevice,
+        });
+        const actions = view.getAllByRole('button', { name: /^Show in / });
+        expect(actions).toHaveLength(2);
+        expect(actions[0].closest('.inspector-body')).toBeNull();
+        await fireEvent.click(view.getByRole('button', { name: 'Show in A-series (2 objects)' }));
+        expect(onshowdevice).toHaveBeenLastCalledWith({
+            documentId: first.id,
+            objectId: null,
+            contentScopeId: null,
+        });
+        await fireEvent.click(view.getByRole('button', { name: 'Show in Second disk' }));
+        expect(onshowdevice).toHaveBeenLastCalledWith({
+            documentId: second.id,
+            objectId: null,
+            contentScopeId: 'volume-2',
+        });
     });
     it('identifies reserved entries without a false warning or invented permissions', async () => {
         const view = render(FilesInspector, { entry });

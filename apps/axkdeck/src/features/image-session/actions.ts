@@ -32,7 +32,7 @@ export class ImageSessionController {
     }
 
     async open(
-        location: ImageLocation,
+        locations: ImageLocation[],
         onUpdate?: (job: JobState) => void,
         prepare?: ImageSessionPreparation,
     ): Promise<OpenedImage | null> {
@@ -52,7 +52,7 @@ export class ImageSessionController {
             return true;
         };
         try {
-            let opened = await this.transport.openImage(location, {
+            let opened = await this.transport.openImage(locations, {
                 signal: abortController.signal,
                 onUpdate,
             });
@@ -71,7 +71,7 @@ export class ImageSessionController {
             }
             if (!current()) return null;
             candidateSessionId = null;
-            this.update({ sessionId: opened.sessionId, location, opening: false });
+            this.update({ sessionId: opened.sessionId, location: locations[0] ?? null, opening: false });
             return opened;
         } catch (error) {
             failure = error;

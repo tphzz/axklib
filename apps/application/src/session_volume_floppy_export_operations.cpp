@@ -1,4 +1,6 @@
 #include "axklib/application/session_volume_floppy_export_operations.hpp"
+#include "axklib/application/formats/a_series/session_read.hpp"
+#include "axklib/application/image_session_contracts.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -180,7 +182,7 @@ Json issue_json(const axk::MediaConversionIssue &issue) {
 }
 
 axk::app::Result<ExportContext> resolve_context(const axk::app::ImageContentScope &content,
-                                                const axk::app::ImageSessionRead &session,
+                                                const axk::app::formats::a_series::SessionRead &session,
                                                 const axk::MediaBuildLimits &limits,
                                                 const axk::CancellationToken &cancellation) {
     if (content.item.kind != "partition" || !content.item.partition_index) {
@@ -313,26 +315,27 @@ axk::app::bind_session_volume_floppy_export_operations(OperationRegistry &regist
                                                        ImageSessionManager &images, DownloadArchiveStore &downloads,
                                                        const axk::MediaBuildLimits &media_limits) {
     if (!registry.is_implemented("images.volume_floppy_export.inspect")) {
-        auto bound =
-            registry.bind("images.volume_floppy_export.inspect",
-                          [&images, media_limits](const Json &input, const OperationContext &context) -> Result<Json> {
-                              auto identity = parse_identity(input);
-                              if (!identity)
-                                  return std::unexpected(identity.error());
-                              auto scope_id = parse_scope_id(input);
-                              if (!scope_id)
-                                  return std::unexpected(scope_id.error());
-                              auto content = images.content_scope(identity->first, context.owner_id, *scope_id);
-                              if (!content)
-                                  return std::unexpected(content.error());
-                              auto session = images.begin_read(identity->first, context.owner_id, identity->second);
-                              if (!session)
-                                  return std::unexpected(session.error());
-                              auto resolved = resolve_context(*content, *session, media_limits, context.cancellation);
-                              if (!resolved)
-                                  return std::unexpected(resolved.error());
-                              return inspection_json(*resolved);
-                          });
+        auto bound = registry.bind(
+            "images.volume_floppy_export.inspect",
+            [&images, media_limits](const Json &input, const OperationContext &context) -> Result<Json> {
+                auto identity = parse_identity(input);
+                if (!identity)
+                    return std::unexpected(identity.error());
+                auto scope_id = parse_scope_id(input);
+                if (!scope_id)
+                    return std::unexpected(scope_id.error());
+                auto content = images.content_scope(image_document_ref(input), context.owner_id, *scope_id);
+                if (!content)
+                    return std::unexpected(content.error());
+                auto session = axk::app::formats::a_series::SessionReader::acquire(images, image_document_ref(input),
+                                                                                   context.owner_id, identity->second);
+                if (!session)
+                    return std::unexpected(session.error());
+                auto resolved = resolve_context(*content, *session, media_limits, context.cancellation);
+                if (!resolved)
+                    return std::unexpected(resolved.error());
+                return inspection_json(*resolved);
+            });
         if (!bound)
             return bound;
     }
@@ -348,10 +351,11 @@ axk::app::bind_session_volume_floppy_export_operations(OperationRegistry &regist
             auto scope_id = parse_scope_id(input);
             if (!scope_id)
                 return std::unexpected(scope_id.error());
-            auto content = images.content_scope(identity->first, context.owner_id, *scope_id);
+            auto content = images.content_scope(image_document_ref(input), context.owner_id, *scope_id);
             if (!content)
                 return std::unexpected(content.error());
-            auto session = images.begin_read(identity->first, context.owner_id, identity->second);
+            auto session = axk::app::formats::a_series::SessionReader::acquire(images, image_document_ref(input),
+                                                                               context.owner_id, identity->second);
             if (!session)
                 return std::unexpected(session.error());
             auto resolved = resolve_context(*content, *session, media_limits, context.cancellation);

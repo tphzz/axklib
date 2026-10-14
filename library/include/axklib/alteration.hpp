@@ -8,6 +8,7 @@
 #include <variant>
 #include <vector>
 
+#include "axklib/conversion/tx16w_to_a_series/source.hpp"
 #include "axklib/io.hpp"
 #include "axklib/program_assignment_parameters.hpp"
 #include "axklib/program_parameters.hpp"
@@ -18,7 +19,6 @@
 #include "axklib/sampler_model.hpp"
 #include "axklib/sdk/diagnostics.hpp"
 #include "axklib/sequence.hpp"
-#include "axklib/tx16w.hpp"
 #include "axklib/types.hpp"
 #include "axklib/volume_capacity.hpp"
 #include "axklib/writer.hpp"

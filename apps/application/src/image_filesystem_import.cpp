@@ -22,25 +22,19 @@ ImageSessionManager::inspect_filesystem_import(std::string_view image_id, std::s
     if (!session)
         return std::unexpected(session.error());
     const auto &state = *session;
-    const std::scoped_lock lock{state->access_mutex};
-    if (state->revision != expected_revision)
-        return std::unexpected(session_error("image_revision_stale", "image session revision changed", true));
-    if (state->mutating || !state->media)
-        return std::unexpected(session_error("entry_in_use", "image session is not readable", true));
-    if (auto unchanged = state->verify_source_unchanged(); !unchanged)
-        return std::unexpected(unchanged.error());
-    if (!state->filesystem_index) {
-        auto index = detail::build_image_filesystem(*state->media, state->source_reader, state->snapshots_by_id,
-                                                    state->descriptors_by_id, state->content);
-        if (!index)
-            return std::unexpected(index.error());
-        state->filesystem_index = std::move(*index);
-    }
-    const auto parent = detail::FilesystemEntryPaths{*state->filesystem_index}.resolve(parent_entry_id);
+    const auto read = begin_filesystem_read(image_id, owner_id, expected_revision);
+    if (!read)
+        return std::unexpected(read.error());
+    const auto parent = detail::FilesystemEntryPaths{*read->filesystem}.resolve(parent_entry_id);
     if (!parent)
         return std::unexpected(parent.error());
     if (parent->entry->kind == "file")
         return std::unexpected(Error{"invalid_request", "The import destination must be a directory"});
+    const auto source = Implementation::member(*state, parent->entry->source_member_id);
+    if (!source)
+        return std::unexpected(source.error());
+    if (!(*source)->media || !(*source)->reader)
+        return std::unexpected(Error{"unsupported_operation", "The destination is not a writable filesystem"});
     std::vector<FilesystemImportEntry> resolved;
     resolved.reserve(entries.size());
     for (const auto &entry : entries) {
@@ -51,12 +45,12 @@ ImageSessionManager::inspect_filesystem_import(std::string_view image_id, std::s
         path.insert(path.end(), entry.path.begin(), entry.path.end());
         resolved.push_back({std::move(path), entry.directory, entry.size_bytes, entry.conflict});
     }
-    auto result = state->media->kind() == MediaKind::sfs
-                      ? axk::inspect_sfs_file_import(state->source_reader, parent->partition, resolved, cancellation)
-                      : axk::inspect_fat_file_import(state->source_reader, parent->partition, resolved, cancellation);
+    auto result = (*source)->media->kind() == MediaKind::sfs
+                      ? axk::inspect_sfs_file_import((*source)->reader, parent->partition, resolved, cancellation)
+                      : axk::inspect_fat_file_import((*source)->reader, parent->partition, resolved, cancellation);
     if (!result)
-        return std::unexpected(core_error(result.error(), state->source));
-    if (auto unchanged = state->verify_source_unchanged(); !unchanged)
+        return std::unexpected(core_error(result.error(), (*source)->reference));
+    if (auto unchanged = read->verify_source_unchanged(); !unchanged)
         return std::unexpected(unchanged.error());
     return std::move(*result);
 }

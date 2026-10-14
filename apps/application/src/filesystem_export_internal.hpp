@@ -28,7 +28,7 @@ stage_filesystem_export(ImageSessionManager &images, const Sandbox &sandbox, std
                         std::span<const std::string> entry_ids, const CancellationToken &cancellation,
                         ProgressSink *progress, FilesystemExportLayout layout);
 
-[[nodiscard]] Result<FilesystemExportPlan> plan_filesystem_export(const MediaContainer &media,
+[[nodiscard]] Result<FilesystemExportPlan> plan_filesystem_export(const ImageFilesystemIndex &index,
                                                                   std::span<const std::string> entry_ids,
                                                                   const CancellationToken &cancellation,
                                                                   FilesystemExportLayout layout);
