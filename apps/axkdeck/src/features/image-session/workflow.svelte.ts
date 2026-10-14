@@ -71,6 +71,8 @@ export class ImageSessionWorkflow {
         sourceKind: CompanionSourceKind;
         setLabel: string;
         nextRequiredIndex: number | null;
+        requirements: OpenedImage['documents'][number]['companions']['requirements'];
+        canSearchNearby: boolean;
         busy: boolean;
         error: string;
     } | null>(null);
@@ -357,7 +359,7 @@ export class ImageSessionWorkflow {
         this.hardDiskDirectory = null;
     }
 
-    requestCompanionDisks(retry: CompanionRetry): void {
+    requestCompanionDisks(retry: CompanionRetry | null = null): void {
         if (this.sessionId === null || !this.location) return;
         this.openCompanionRequest(retry);
     }
@@ -426,8 +428,10 @@ export class ImageSessionWorkflow {
             if (this.sessionId !== sessionId || this.companionRequest?.requestId !== request.requestId) return;
             this.companionRequest = null;
             await this.applyOpenedImage(opened, preferred);
-            if (opened.floppySet?.status === 'INCOMPLETE') this.openCompanionRequest(request.retry);
-            else if (request.retry) await this.retryCompanionAction(request.retry);
+            const requirements =
+                this.documents.find((document) => document.id === this.documentId)?.companions.requirements ?? [];
+            if (requirements.some((item) => item.state === 'MISSING')) this.openCompanionRequest(request.retry);
+            else if (request.retry && requirements.length === 0) await this.retryCompanionAction(request.retry);
         } catch (error) {
             if (
                 this.sessionId === sessionId &&
@@ -551,7 +555,9 @@ export class ImageSessionWorkflow {
     }
 
     private openCompanionRequest(retry: CompanionRetry | null): void {
-        const memberId = this.documents.find((document) => document.id === this.documentId)?.sourceMemberIds[0];
+        const document = this.documents.find((document) => document.id === this.documentId);
+        if (!document?.companions.canAttach) return;
+        const memberId = document.sourceMemberIds[0];
         const source = this.sources.find((member) => member.id === memberId)?.source;
         if (!source || source.kind === 'DEVICE') return;
         this.companionRequest = {
@@ -561,6 +567,8 @@ export class ImageSessionWorkflow {
             sourceKind: source.kind === 'FILE' ? 'file' : 'directory',
             setLabel: this.floppySet?.setLabel.trim() || imageLocation(source).displayName.split(/[\\/]/).at(-1) || '',
             nextRequiredIndex: this.floppySet?.nextRequiredIndex ?? null,
+            requirements: document.companions.requirements,
+            canSearchNearby: document.companions.canSearchNearby,
             busy: false,
             error: '',
         };
@@ -579,7 +587,12 @@ export class ImageSessionWorkflow {
         )
             await this.showAutomaticIntegrityIssues(opened);
         else this.automaticCapacityWarnings.clear();
-        if (opened.floppySet?.status === 'INCOMPLETE') this.openCompanionRequest(null);
+        if (
+            this.documents
+                .find((document) => document.id === this.documentId)
+                ?.companions.requirements.some((item) => item.state === 'MISSING')
+        )
+            this.openCompanionRequest(null);
     }
 
     private async showAutomaticIntegrityIssues(opened: OpenedImage): Promise<void> {

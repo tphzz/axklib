@@ -1,9 +1,9 @@
 <script lang="ts">
+    import StructureNavigation from './StructureNavigation.svelte';
     import type { ImageLocation } from '../storageLocations';
     import type { ObjectSelectionMode } from '../objectSelection';
     import { orderSamplerTreeItems } from '../samplerTreeOrder';
     import type { DiskTreeItem, ImageTreeAction } from '../types';
-    import Icon from './Icon.svelte';
     import ImageActions from './ImageActions.svelte';
     import ImageTreeContextMenu from './ImageTreeContextMenu.svelte';
     import TreeNode from './TreeNode.svelte';
@@ -192,21 +192,13 @@
             {onmanagelocations}
         />
     {/if}
-    <section class="image-contents" aria-label="Image contents">
-        <div class="panel-heading">
-            <div>
-                <p class="eyebrow">Contents</p>
-                <h2>Partitions and volumes</h2>
-            </div>
-        </div>
-
-        {#if image}
-            <label class="search-field mx-3 mb-2">
-                <Icon name="search" size={15} />
-                <input bind:value={filter} type="search" placeholder="Search" aria-label="Search image contents" />
-            </label>
-        {/if}
-
+    <StructureNavigation
+        label="Image contents"
+        heading="Partitions and volumes"
+        bind:query={filter}
+        searchLabel="Search image contents"
+        searchable={Boolean(image)}
+    >
         <div
             bind:this={treeScroll}
             class="image-tree-scroll min-h-0 flex-1 overflow-y-auto px-2 pb-4"
@@ -261,7 +253,7 @@
                 <p class="empty-copy">Open an image to browse its contents</p>
             {/if}
         </div>
-    </section>
+    </StructureNavigation>
 </aside>
 
 {#if treeMenu}

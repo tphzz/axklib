@@ -25,6 +25,7 @@ export function nativeWorkspaceFixture(): Pick<
                 format: 'sfs',
                 floppySet: null,
                 companionSources: [],
+                companions: { canAttach: false, canSearchNearby: false, requirements: [] },
                 validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
                 sourceMemberIds: ['source-1'],
                 availableOperations: [],

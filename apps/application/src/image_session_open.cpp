@@ -1,8 +1,6 @@
 #include "image_sessions_internal.hpp"
 
 #include "axklib/diagnostics.hpp"
-#include "formats/a_series/directory.hpp"
-#include "formats/a_series/floppy_set.hpp"
 
 namespace axk::app {
 
@@ -93,17 +91,13 @@ Result<ImageSessionSummary> ImageSessionManager::attach_companions(const ImageDo
         if (!document)
             return std::unexpected(document.error());
         auto candidates = selection.sources;
+        if (!(*document)->companions.can_attach)
+            return std::unexpected(
+                session_error("companion_sources_unsupported", "This document does not accept companions"));
         if (selection.kind == CompanionSelectionKind::immediate_siblings) {
-            if (!selection.sources.empty() || !(*document)->primary || !(*document)->floppy_set)
+            if (!selection.sources.empty() || !(*document)->find_companions)
                 return std::unexpected(session_error("invalid_companion_sources", "Select explicit companion sources"));
-            const auto &source = (*document)->primary->reference;
-            auto siblings =
-                source.kind == ImageSourceKind::directory
-                    ? formats::a_series::sibling_directory_sources(
-                          implementation_->sandbox, source, (*document)->floppy_set->set_label,
-                          (*document)->floppy_set->status != ImageFloppySetStatus::recovery, cancellation)
-                    : formats::a_series::immediate_sibling_floppy_sources(
-                          implementation_->sandbox, source, (*document)->floppy_set->set_label, cancellation);
+            auto siblings = (*document)->find_companions(implementation_->sandbox, owner_id, cancellation);
             if (!siblings)
                 return std::unexpected(siblings.error());
             candidates = std::move(*siblings);
@@ -132,6 +126,23 @@ Result<ImageSessionSummary> ImageSessionManager::attach_companions(const ImageDo
         if (!updated || (*updated)->member_ids == (*document)->member_ids)
             return std::unexpected(
                 session_error("companion_segment_not_found", "Selected sources do not extend this document"));
+        for (const auto &member : fresh.sources.members)
+            if (std::ranges::find(references.begin(), references.begin() + static_cast<std::ptrdiff_t>(original_count),
+                                  member->reference) ==
+                    references.begin() + static_cast<std::ptrdiff_t>(original_count) &&
+                std::ranges::find((*updated)->member_ids, member->id) == (*updated)->member_ids.end())
+                return std::unexpected(
+                    session_error("invalid_companion_sources", "A selected source does not belong to this document"));
+        if ((*updated)->companion_attachment_error)
+            return std::unexpected(*(*updated)->companion_attachment_error);
+        for (const auto &previous : (*session)->documents) {
+            if (previous->id == target.document_id)
+                continue;
+            auto untouched = Implementation::document(fresh, previous->id);
+            if (!untouched || (*untouched)->member_ids != previous->member_ids)
+                return std::unexpected(
+                    session_error("document_membership_changed", "Companions would change an unrelated document"));
+        }
         for (const auto &item : fresh.documents) {
             auto previous = Implementation::document(**session, item->id);
             if (previous)

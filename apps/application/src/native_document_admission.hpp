@@ -1,9 +1,13 @@
 #pragma once
 
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
+
+#include "axklib/application/image_documents.hpp"
 
 #include "image_sources.hpp"
 #include "native_document_state.hpp"
@@ -20,6 +24,10 @@ struct NativeDocumentAdmission {
     std::shared_ptr<const RandomAccessReader> snapshot;
     std::shared_ptr<const MediaContainer> media;
     std::unique_ptr<NativeDocumentState> native;
+    ImageCompanionSummary companions;
+    std::optional<Error> companion_attachment_error;
+    std::function<Result<std::vector<ImageSourceRef>>(const Sandbox &, std::string_view, const CancellationToken &)>
+        find_companions;
 };
 
 } // namespace axk::app

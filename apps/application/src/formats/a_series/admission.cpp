@@ -166,6 +166,23 @@ Result<std::vector<NativeDocumentAdmission>> admit_documents(const Sandbox &, co
             return std::unexpected(core_error(common.error(), source->reference));
         (*projected)->native_document = std::move(*common);
         item.native = std::move(*projected);
+        if (item.floppy_set) {
+            item.companions.can_attach = true;
+            item.companions.can_search_nearby = true;
+            if (item.floppy_set->status == ImageFloppySetStatus::incomplete)
+                item.companions.requirements.push_back(
+                    {item.floppy_set->next_required_index
+                         ? "Disk " + std::to_string(*item.floppy_set->next_required_index)
+                         : "Companion disk",
+                     "MISSING", std::nullopt});
+            item.find_companions = [reference = source->reference, summary = *item.floppy_set](
+                                       const Sandbox &sandbox, std::string_view, const CancellationToken &token) {
+                return reference.kind == ImageSourceKind::directory
+                           ? sibling_directory_sources(sandbox, reference, summary.set_label,
+                                                       summary.status != ImageFloppySetStatus::recovery, token)
+                           : immediate_sibling_floppy_sources(sandbox, reference, summary.set_label, token);
+            };
+        }
         consumed.insert(item.member_ids.begin(), item.member_ids.end());
         result.push_back(std::move(item));
     }

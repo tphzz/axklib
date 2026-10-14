@@ -30,12 +30,14 @@ struct NativeFile {
     native::SourceLocation location;
     FileIdentity identity;
     bool decoded{};
+    bool unsupported{};
 };
 
 class Document final : public native::Document {
   public:
-    [[nodiscard]] static Result<std::shared_ptr<const Document>> open(std::shared_ptr<const native::SourceSet> sources,
-                                                                      const CancellationToken &cancellation = {});
+    [[nodiscard]] static Result<std::shared_ptr<const Document>>
+    open(std::shared_ptr<const native::SourceSet> sources, const CancellationToken &cancellation = {},
+         std::span<const std::string> member_ids = {}, std::span<const std::string> ambiguous_requirements = {});
     [[nodiscard]] const native::DocumentSummary &summary() const noexcept override;
     [[nodiscard]] const native::Catalog &catalog() const noexcept override;
     [[nodiscard]] const std::shared_ptr<const native::SourceSet> &sources() const noexcept override;

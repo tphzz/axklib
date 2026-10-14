@@ -1064,6 +1064,10 @@ describe('App panel layout', () => {
             companionSources: [],
             floppySet: null,
             tree: [{ id: 'disk-17', name: 'DISK2', kind: 'disk' as const, childCount: 1, children: [volume] }],
+            documents: nativeWorkspaceFixture().documents.map((document) => ({
+                ...document,
+                companions: { canAttach: true, canSearchNearby: true, requirements: [] },
+            })),
             sources: [
                 {
                     ...nativeWorkspaceFixture().sources[0],
@@ -1173,6 +1177,14 @@ describe('App panel layout', () => {
         };
         const opened = {
             ...openedImageWithVolumes([volume], volume),
+            documents: nativeWorkspaceFixture().documents.map((document) => ({
+                ...document,
+                companions: {
+                    canAttach: true,
+                    canSearchNearby: true,
+                    requirements: [{ name: 'Disk 2', state: 'MISSING' as const, objectId: null }],
+                },
+            })),
             floppySet: {
                 status: 'INCOMPLETE' as const,
                 setLabel: 'LONG VOLUME',
@@ -1192,6 +1204,10 @@ describe('App panel layout', () => {
         mocks.openImage.mockResolvedValueOnce(opened);
         mocks.attachCompanions.mockResolvedValue({
             ...opened,
+            documents: opened.documents.map((document) => ({
+                ...document,
+                companions: { ...document.companions, requirements: [] },
+            })),
             floppySet: { ...opened.floppySet, status: 'COMPLETE', nextRequiredIndex: null },
         });
 

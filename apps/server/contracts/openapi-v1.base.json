@@ -18836,6 +18836,7 @@
           "completeness",
           "sourceMemberIds",
           "companionSources",
+          "companions",
           "floppySet",
           "format",
           "availableOperations",
@@ -18881,6 +18882,28 @@
             "uniqueItems": true,
             "items": {
               "$ref": "#/components/schemas/ImageSourceRef"
+            }
+          },
+          "companions": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["canAttach", "canSearchNearby", "requirements"],
+            "properties": {
+              "canAttach": { "type": "boolean" },
+              "canSearchNearby": { "type": "boolean" },
+              "requirements": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["name", "state", "objectId"],
+                  "properties": {
+                    "name": { "type": "string" },
+                    "state": { "type": "string", "enum": ["MISSING", "AMBIGUOUS", "UNSUPPORTED", "INVALID"] },
+                    "objectId": { "type": ["string", "null"] }
+                  }
+                }
+              }
             }
           },
           "floppySet": {

@@ -8,6 +8,7 @@
     import Icon from '../../../lib/components/Icon.svelte';
     import CollectionToolbar from '../../../lib/components/CollectionToolbar.svelte';
     import ObjectContextMenu from '../../../lib/components/ObjectContextMenu.svelte';
+    import StructureNavigation from '../../../lib/components/StructureNavigation.svelte';
     import {
         collectionPageStep,
         focusCollectionIndex,
@@ -24,6 +25,7 @@
         sources,
         onrevealFiles,
         onconvert,
+        onaddcompanions,
         children,
         remember,
     }: {
@@ -34,6 +36,7 @@
         sources: OpenedImage['sources'];
         onrevealFiles: (objectId: string) => void;
         onconvert?: () => void;
+        onaddcompanions?: () => void;
         children: Snippet<[WorkspacePresentation, DevicePresentationState]>;
         remember: RememberView;
     } = $props();
@@ -53,6 +56,7 @@
     const retained = untrack(() =>
         remember('tx16w', () => ({
             kind: 'performance' as Kind,
+            structureQuery: '',
             collections: {
                 performance: emptyCollection(),
                 voice: emptyCollection(),
@@ -64,6 +68,7 @@
         })),
     );
     let kind = $state(retained.kind);
+    let structureQuery = $state(retained.structureQuery);
     let collections = $state(retained.collections);
     const current = $derived(collections[kind]);
     const selected = $derived(current.selected);
@@ -169,7 +174,7 @@
         void focusCollectionIndex(event.currentTarget, next);
     }
     function openMenu(event: MouseEvent | KeyboardEvent): void {
-        if (!onconvert) return;
+        if (!onconvert && !onaddcompanions) return;
         event.preventDefault();
         const target = event.currentTarget as HTMLElement;
         target.focus();
@@ -182,44 +187,57 @@
     onDestroy(() => {
         ++generation;
         ++detailGeneration;
-        Object.assign(retained, { kind, collections });
+        Object.assign(retained, { kind, collections, structureQuery });
     });
 </script>
 
 {#snippet navigation()}
-    <nav class="tx-navigation" aria-label="TX16W structure">
-        <div class="panel-heading">
-            <div>
-                <h2>Yamaha TX16W</h2>
-                <p>
-                    {document.completeness === 'INCOMPLETE'
-                        ? 'Incomplete source set'
-                        : document.completeness === 'INVALID'
-                          ? 'Invalid source set'
-                          : 'Read only'}
-                </p>
-            </div>
-        </div>
+    <StructureNavigation
+        label="TX16W structure"
+        heading="TX16W floppy image"
+        bind:query={structureQuery}
+        searchLabel="Search TX16W structure"
+        navigation
+    >
+        {#if document.companions.requirements.length}
+            <details class="source-status">
+                <summary
+                    >{document.companions.requirements.some((item) => item.state === 'MISSING')
+                        ? 'Missing companion files'
+                        : 'Source issues'}</summary
+                >
+                <ul>
+                    {#each document.companions.requirements as item}
+                        <li>{item.name}: {item.state.toLowerCase()}</li>
+                    {/each}
+                </ul>
+            </details>
+        {:else if document.completeness === 'INVALID'}
+            <p class="source-status">Invalid native data</p>
+        {/if}
         <div class="roots">
-            <button
-                type="button"
-                class="root selected"
-                aria-pressed="true"
-                title="/"
-                oncontextmenu={openMenu}
-                onkeydown={(event) => {
-                    if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) openMenu(event);
-                }}
-            >
-                <Icon name="hard-drive" size={15} /><span>/</span>
-            </button>
+            {#if '/'.includes(structureQuery.trim())}
+                <button
+                    type="button"
+                    class="root selected"
+                    aria-pressed="true"
+                    title="/"
+                    oncontextmenu={openMenu}
+                    onkeydown={(event) => {
+                        if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) openMenu(event);
+                    }}
+                >
+                    <Icon name="hard-drive" size={15} /><span>/</span>
+                </button>
+            {:else}<p class="empty-copy">No matching contents</p>{/if}
         </div>
-    </nav>
+    </StructureNavigation>
     {#if menu}<ObjectContextMenu
             objectName="/"
             left={menu.left}
             top={menu.top}
             {onconvert}
+            {onaddcompanions}
             convertLabel="Convert..."
             onclose={() => (menu = null)}
         />{/if}
@@ -295,13 +313,16 @@
 )}
 
 <style>
-    .tx-navigation {
-        overflow: auto;
-        font-size: 11px;
-    }
-    p {
-        font-size: 11px;
+    .source-status {
+        margin: 0 9px 8px;
+        font-size: 10px;
         color: var(--color-text-muted);
+    }
+    .source-status ul {
+        padding-left: 14px;
+        max-height: 120px;
+        overflow: auto;
+        overflow-wrap: anywhere;
     }
     .roots {
         padding: 0 8px 8px;

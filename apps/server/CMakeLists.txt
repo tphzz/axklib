@@ -236,6 +236,7 @@ if(BUILD_TESTING)
     tests/event_dispatcher_test.cpp
     tests/event_tickets_test.cpp
     tests/http_headers_test.cpp
+    tests/path_parameters_test.cpp
     tests/image_session_contract_test.cpp
     tests/job_json_test.cpp
     tests/process_lifetime_test.cpp

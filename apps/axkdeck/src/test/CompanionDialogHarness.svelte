@@ -18,6 +18,8 @@
         sourceKind="directory"
         setLabel="Disk set"
         nextRequiredIndex={2}
+        requirements={[]}
+        canSearchNearby={true}
         {busy}
         error=""
         onadd={() => {}}

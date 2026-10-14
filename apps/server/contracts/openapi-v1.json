@@ -5471,6 +5471,55 @@
             "type": "array",
             "uniqueItems": true
           },
+          "companions": {
+            "additionalProperties": false,
+            "properties": {
+              "canAttach": {
+                "type": "boolean"
+              },
+              "canSearchNearby": {
+                "type": "boolean"
+              },
+              "requirements": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "objectId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "state": {
+                      "enum": [
+                        "MISSING",
+                        "AMBIGUOUS",
+                        "UNSUPPORTED",
+                        "INVALID"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "state",
+                    "objectId"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "canAttach",
+              "canSearchNearby",
+              "requirements"
+            ],
+            "type": "object"
+          },
           "completeness": {
             "enum": [
               "COMPLETE",
@@ -5563,6 +5612,7 @@
           "completeness",
           "sourceMemberIds",
           "companionSources",
+          "companions",
           "floppySet",
           "format",
           "availableOperations",

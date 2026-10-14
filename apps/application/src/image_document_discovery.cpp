@@ -4,7 +4,7 @@
 
 #include "axklib/native/registry.hpp"
 #include "formats/a_series/admission.hpp"
-#include "formats/tx16w/session_state.hpp"
+#include "formats/tx16w/admission.hpp"
 
 namespace axk::app {
 
@@ -82,13 +82,8 @@ Result<void> ImageSessionManager::Implementation::discover(Session &session, con
             const auto tx16w = std::dynamic_pointer_cast<const axk::tx16w::Document>(native_document);
             if (!tx16w)
                 return std::unexpected(session_error("document_invalid", "No application adapter for native document"));
-            document_state->id = "document-tx16w";
-            document_state->format = "yamaha.tx16w";
-            document_state->native = std::make_unique<formats::tx16w::SessionState>(tx16w);
-            std::set<std::string> members;
-            for (const auto &file : tx16w->native_files())
-                members.insert(file.location.member_id);
-            document_state->member_ids.assign(members.begin(), members.end());
+            static_cast<NativeDocumentAdmission &>(*document_state) =
+                formats::tx16w::admit_document(tx16w, session.sources);
         }
         session.documents.push_back(std::move(document_state));
     }

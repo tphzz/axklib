@@ -10,8 +10,10 @@ const collection = () => within(screen.getByRole('region', { name: 'TX16W native
 const inspector = () => within(screen.getByRole('complementary', { name: 'TX16W inspector' }));
 function setup(transport = nativeDocumentFixture(), memory = new ViewMemory(), documentId = tx16wDocument.id) {
     const onconvert = vi.fn();
+    const onaddcompanions = vi.fn();
     return {
         onconvert,
+        onaddcompanions,
         ...render(Tx16wPresentationHarness, {
             transport,
             sessionId: 1,
@@ -21,6 +23,7 @@ function setup(transport = nativeDocumentFixture(), memory = new ViewMemory(), d
             remember: memory.forDocument(1, documentId),
             onrevealFiles: vi.fn(),
             onconvert,
+            onaddcompanions,
         }),
     };
 }
@@ -29,6 +32,9 @@ describe('TX16W workspace conventions', () => {
     it('has one structural root, ordered collection tabs, no all-objects view, and an empty default collection', async () => {
         setup();
         const navigation = screen.getByRole('navigation', { name: 'TX16W structure' });
+        expect(within(navigation).getByText('Contents').className).toBe('eyebrow');
+        expect(within(navigation).getByRole('heading', { name: 'TX16W floppy image' })).toBeTruthy();
+        expect(within(navigation).getByRole('searchbox', { name: 'Search TX16W structure' })).toBeTruthy();
         expect(
             within(navigation)
                 .getAllByRole('button')
@@ -124,7 +130,7 @@ describe('TX16W workspace conventions', () => {
     });
 
     it('opens root conversion with pointer or keyboard and restores focus on Escape', async () => {
-        const { onconvert } = setup();
+        const { onconvert, onaddcompanions } = setup();
         const root = screen.getByRole('button', { name: '/' });
         await fireEvent.contextMenu(root, { clientX: 20, clientY: 30 });
         await fireEvent.click(await screen.findByRole('menuitem', { name: 'Convert...' }));
@@ -134,6 +140,9 @@ describe('TX16W workspace conventions', () => {
         await fireEvent.keyDown(item, { key: 'Escape' });
         await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
         expect(document.activeElement).toBe(root);
+        await fireEvent.contextMenu(root);
+        await fireEvent.click(await screen.findByRole('menuitem', { name: 'Add companion images...' }));
+        expect(onaddcompanions).toHaveBeenCalledOnce();
     });
 
     it('does not show an old detail after switching collections', async () => {
@@ -151,6 +160,25 @@ describe('TX16W workspace conventions', () => {
         release(detail);
         await waitFor(() => expect(inspector().getByText('No object selected')).toBeTruthy());
         expect(inspector().queryByRole('heading', { name: 'Wave 20' })).toBeNull();
+    });
+
+    it('searches structure independently from collection names and retains it per document', async () => {
+        const memory = new ViewMemory();
+        const view = setup(nativeDocumentFixture(), memory);
+        await fireEvent.click(screen.getByRole('button', { name: 'Waves' }));
+        await collection().findByRole('button', { name: 'Wave 20' });
+        await fireEvent.input(screen.getByRole('searchbox', { name: 'Search TX16W structure' }), {
+            target: { value: 'Wave 20' },
+        });
+        expect(screen.queryByRole('button', { name: '/' })).toBeNull();
+        expect(collection().getByRole('button', { name: 'Wave 20' })).toBeTruthy();
+        view.unmount();
+        setup(nativeDocumentFixture(), memory);
+        expect(screen.getByRole('searchbox', { name: 'Search TX16W structure' })).toHaveProperty('value', 'Wave 20');
+        await fireEvent.input(screen.getByRole('searchbox', { name: 'Search TX16W structure' }), {
+            target: { value: '/' },
+        });
+        expect(screen.getByRole('button', { name: '/' })).toBeTruthy();
     });
 
     it('pages by complete row heights and supports boundary navigation', async () => {

@@ -81,7 +81,7 @@ class ConversionOperations : public testing::Test {
     Json request(bool native = true) const {
         Json source = {{"kind", "DOCUMENT"},
                        {"imageId", workspace.image_id},
-                       {"documentId", "document-tx16w"},
+                       {"documentId", "document-tx16w-source-2"},
                        {"expectedRevision", 1}};
         if (!native)
             source = {{"kind", "SOURCES"},
@@ -163,7 +163,7 @@ TEST_F(ConversionOperations, ExplicitSourcePreparationIsReadOnlyAndRejectsChange
 }
 
 TEST_F(ConversionOperations, NativeSnapshotDoesNotRetainAnAccessLockAndClosedWorkspaceCannotExecute) {
-    auto snapshot = images->native_snapshot({workspace.image_id, "document-tx16w"}, "owner", 1U);
+    auto snapshot = images->native_snapshot({workspace.image_id, "document-tx16w-source-2"}, "owner", 1U);
     ASSERT_TRUE(snapshot);
     EXPECT_TRUE(images->inspect(workspace.image_id, "owner"));
     auto prepared = registry.invoke("conversions.prepare", request(), context);

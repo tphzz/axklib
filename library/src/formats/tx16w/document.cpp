@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <utility>
 
+#include "axklib/formats/tx16w/dependencies.hpp"
 #include "axklib/formats/tx16w/relationships.hpp"
 
 namespace axk::tx16w {
@@ -34,6 +35,16 @@ bool native_magic(std::span<const std::byte> bytes) {
 }
 
 bool native_kind(char kind) { return std::string_view{"WSVUFPOCRX"}.find(kind) != std::string_view::npos; }
+
+bool unsupported_magic(std::span<const std::byte> bytes) {
+    const auto matches = [&](std::size_t offset, std::string_view value) {
+        return bytes.size() >= offset + value.size() &&
+               std::ranges::equal(bytes.subspan(offset, value.size()), value,
+                                  [](std::byte left, char right) { return left == static_cast<std::byte>(right); });
+    };
+    return matches(0U, "FORM") &&
+           (matches(8U, "AIFC") || matches(8U, "TYPP") || matches(8U, "TYPS") || matches(8U, "TYPO"));
+}
 
 std::string occurrence_id(const native::SourceLocation &location) {
     std::string id{"tx16w:"};
@@ -70,11 +81,16 @@ Document::Document(std::shared_ptr<const native::SourceSet> sources)
       sources_(std::move(sources)) {}
 
 Result<std::shared_ptr<const Document>> Document::open(std::shared_ptr<const native::SourceSet> sources,
-                                                       const CancellationToken &cancellation) {
+                                                       const CancellationToken &cancellation,
+                                                       std::span<const std::string> member_ids,
+                                                       std::span<const std::string> ambiguous_requirements) {
     if (!sources)
         return std::unexpected(document_error("TX16W opening requires admitted sources"));
     if (!within_discovery_limit(*sources))
         return std::unexpected(document_error("TX16W discovery exceeds its 16,384-entry limit"));
+    for (const auto &id : member_ids)
+        if (std::ranges::find(sources->members(), id, &native::SourceMember::id) == sources->members().end())
+            return std::unexpected(document_error("TX16W document scope contains an unknown source member"));
     if (const auto verified = sources->verify(cancellation); !verified)
         return std::unexpected(verified.error());
     auto result = std::shared_ptr<Document>{new Document{std::move(sources)}};
@@ -100,6 +116,8 @@ Result<std::shared_ptr<const Document>> Document::open(std::shared_ptr<const nat
         result->summary_.completeness = native::Completeness::invalid;
     };
     for (const auto &member : result->sources_->members()) {
+        if (!member_ids.empty() && std::ranges::find(member_ids, member.id) == member_ids.end())
+            continue;
         for (const auto &root : member.roots) {
             for (const auto &entry : root.entries) {
                 if (const auto active = cancellation.check(); !active)
@@ -113,11 +131,20 @@ Result<std::shared_ptr<const Document>> Document::open(std::shared_ptr<const nat
                 const auto header = prefix(*result->sources_, *location, 32U, cancellation);
                 if (!header)
                     return std::unexpected(header.error());
-                if (!native_magic(*header))
+                const bool unsupported = !native_magic(*header) && unsupported_magic(*header);
+                result->files_.push_back({*location, *identity, false, unsupported});
+                if (!native_magic(*header) && !unsupported)
                     continue;
                 if (++native_files > maximum_native_files || result->objects_.size() > maximum_objects - 96U)
                     return std::unexpected(document_error("TX16W document exceeds its native catalog limits"));
-                result->files_.push_back({*location, *identity, false});
+                if (unsupported) {
+                    add(*location, *identity, OpaqueFile{identity->kind}, "native-file", entry.path);
+                    result->catalog_.diagnostics.push_back(
+                        {"tx16w.unsupported-payload", native::Severity::warning,
+                         "Typhoon/AIFC content is present but is not decoded by the Yamaha-native adapter",
+                         occurrence_id(*location)});
+                    continue;
+                }
                 if (identity->kind == 'W') {
                     auto wave = decode_wave_header(*header, location->length, entry.path);
                     if (!wave) {
@@ -191,14 +218,37 @@ Result<std::shared_ptr<const Document>> Document::open(std::shared_ptr<const nat
     if (native_files == 0U)
         return std::unexpected(make_error(ErrorCode::container_unrecognized, ErrorCategory::object,
                                           "Sources contain no recognized TX16W native files"));
+    result->summary_.id = "tx16w-" + result->files_.front().location.member_id;
     if (auto linked = detail::build_relationships(result->objects_, result->files_, result->catalog_, cancellation);
         !linked)
         return std::unexpected(linked.error());
+    result->summary_.source_requirements = detail::source_requirements(result->objects_, result->files_);
+    for (auto &requirement : result->summary_.source_requirements) {
+        if (std::ranges::find(ambiguous_requirements, requirement.name) != ambiguous_requirements.end())
+            requirement.state = native::DependencyState::ambiguous;
+        if (requirement.state == native::DependencyState::invalid) {
+            result->summary_.completeness = native::Completeness::invalid;
+            result->catalog_.diagnostics.push_back({"tx16w.invalid-dependency", native::Severity::error,
+                                                    "Required native file is present but invalid: " + requirement.name,
+                                                    requirement.object_id});
+        }
+        if (requirement.state == native::DependencyState::ambiguous)
+            result->catalog_.diagnostics.push_back({"tx16w.ambiguous-dependency", native::Severity::warning,
+                                                    "Several source occurrences can supply: " + requirement.name,
+                                                    requirement.object_id});
+        if (requirement.state == native::DependencyState::unsupported)
+            result->catalog_.diagnostics.push_back({"tx16w.unsupported-dependency", native::Severity::warning,
+                                                    "Native dependency " + requirement.name +
+                                                        " remains unresolved; similarly named Typhoon/AIFC content is "
+                                                        "present, but equivalence cannot be verified",
+                                                    requirement.object_id});
+    }
     if (result->summary_.completeness != native::Completeness::invalid &&
-        (!result->catalog_.diagnostics.empty() ||
-         std::ranges::any_of(result->catalog_.relationships, [](const auto &relationship) {
-             return relationship.resolution != native::Resolution::resolved;
-         })))
+        std::ranges::any_of(result->summary_.source_requirements, [](const auto &requirement) {
+            return requirement.state == native::DependencyState::missing ||
+                   requirement.state == native::DependencyState::ambiguous ||
+                   requirement.state == native::DependencyState::unsupported;
+        }))
         result->summary_.completeness = native::Completeness::incomplete;
     if (const auto verified = result->sources_->verify(cancellation); !verified)
         return std::unexpected(verified.error());
@@ -276,10 +326,7 @@ native::FormatProvider provider() {
                 return result;
             },
             [](auto sources, const auto &cancellation) -> Result<std::vector<std::shared_ptr<const native::Document>>> {
-                auto document = Document::open(std::move(sources), cancellation);
-                if (!document)
-                    return std::unexpected(document.error());
-                return std::vector<std::shared_ptr<const native::Document>>{std::move(*document)};
+                return detail::open_documents(std::move(sources), cancellation);
             }};
 }
 

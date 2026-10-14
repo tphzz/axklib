@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 
+from image_open_native import check_object_detail, inspect_native, native_items
 from release_server_smoke import (
     ApiClient,
     Client,
@@ -150,8 +151,12 @@ def check_image(
             raise RuntimeError("completed job and current image summary differ")
         attached: list[dict[str, Any]] = []
         for step in companion_steps or []:
-            if (selected_document() or {}).get("floppySet", {}).get("nextRequiredIndex") != step["beforeNextIndex"]:
+            previous_document = selected_document()
+            if "beforeNextIndex" in step and (previous_document or {}).get("floppySet", {}).get("nextRequiredIndex") != step["beforeNextIndex"]:
                 raise RuntimeError("initial/partial disk-set requirement differs")
+            previous_id = (previous_document or {}).get("id")
+            previous_revision = summary["revision"]
+            previous_objects = native_items(get, native_path() + "/objects", maximum_entries) if expected.get("allObjectDetails") else []
             requests += 1
             if requests > maximum_requests or time.monotonic() > deadline:
                 raise RuntimeError("companion attachment request/time limit exceeded")
@@ -180,13 +185,19 @@ def check_image(
             )["data"]
             if get("", {}) != summary:
                 raise RuntimeError("attached and current image summaries differ")
-            state = (selected_document() or {}).get("floppySet", {})
-            if (
+            if (selected_document() or {}).get("id") != previous_id or summary["revision"] != previous_revision + 1:
+                raise RuntimeError("companion attachment changed document identity or skipped revision")
+            for item in previous_objects:
+                check_object_detail(get, native_path(), item["id"], str(previous_id), summary["revision"])
+            state = (selected_document() or {}).get("floppySet") or {}
+            if "status" in step and (
                 state.get("status") != step["status"]
                 or state.get("nextRequiredIndex") != step["nextRequiredIndex"]
             ):
                 raise RuntimeError("attached disk-set status differs")
-            attached.append({"path": step["path"], "floppySet": state})
+            attached.append({"path": step["path"], "floppySet": state,
+                             "retainedObjectDetails": len(previous_objects),
+                             "companions": (selected_document() or {}).get("companions")})
         document = selected_document()
         image_format = document["format"] if document else summary["sources"][0]["format"]
         if image_format != expected["format"]:
@@ -333,27 +344,9 @@ def check_image(
                 raise RuntimeError("expected nonempty Device view")
         if "objectCount" in expected and (document or {}).get("objectCount", 0) != expected["objectCount"]:
             raise RuntimeError("object count differs")
-        if expected.get("objects"):
-            found_objects: set[tuple[str, str]] = set()
-            object_cursor: str | None = None
-            object_cursors: set[str] = set()
-            while True:
-                query = {"limit": 200}
-                if object_cursor is not None:
-                    query["cursor"] = object_cursor
-                page = get(native_path() + "/objects", query)
-                found_objects.update((item["type"], item["name"]) for item in page["items"])
-                if len(found_objects) > maximum_entries:
-                    raise RuntimeError("object limit exceeded")
-                object_cursor = page["nextCursor"]
-                if object_cursor is None:
-                    break
-                if object_cursor in object_cursors or not page["items"]:
-                    raise RuntimeError("object pagination did not progress")
-                object_cursors.add(object_cursor)
-            if not {(item["type"], item["name"]) for item in expected["objects"]} <= found_objects:
-                raise RuntimeError("expected companion objects are missing")
+        native = inspect_native(get, native_path(), document, summary["revision"], expected, maximum_entries) if document else {}
         return {
+            **native,
             "format": image_format,
             "sourceMembers": summary["sources"],
             "documents": summary["documents"],

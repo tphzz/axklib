@@ -1064,7 +1064,7 @@ TEST_F(WriteOperationsTest, ScopedAlterationWritesTheSecondMemberAndPreservesOth
     ASSERT_TRUE(opened) << opened.error().message;
     ASSERT_EQ(opened->documents.size(), 3U);
     const axk::app::ImageDocumentRef target{opened->image_id, "document-a-series-source-2"};
-    const axk::app::ImageDocumentRef tx{opened->image_id, "document-tx16w"};
+    const axk::app::ImageDocumentRef tx{opened->image_id, "document-tx16w-source-3"};
     const auto tx_before = images_->objects(tx, "owner", 100U);
     ASSERT_TRUE(tx_before);
     const nlohmann::json manifest{{"schema_version", "1.0"},

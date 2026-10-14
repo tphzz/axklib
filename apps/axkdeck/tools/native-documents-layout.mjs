@@ -73,7 +73,35 @@ try {
         const root = page.getByRole('navigation', { name: 'TX16W structure' }).getByRole('button', { name: '/', exact: true });
         assert.equal(await page.getByRole('button', { name: /All objects/i }).count(), 0);
         if (await root.isVisible()) {
+            const structure = page.getByRole('navigation', { name: 'TX16W structure' });
+            const structureSearch = structure.getByRole('searchbox', { name: 'Search TX16W structure' });
+            const navigationGeometry = async (section) => section.evaluate((node) => {
+                const base = node.getBoundingClientRect();
+                return ['.panel-heading', '.eyebrow', 'h2', '.search-field'].map((selector) => {
+                    const element = node.querySelector(selector);
+                    const bounds = element.getBoundingClientRect(), style = getComputedStyle(element);
+                    return { left: bounds.left - base.left, top: bounds.top - base.top, height: bounds.height,
+                        fontSize: style.fontSize, fontWeight: style.fontWeight, color: style.color };
+                });
+            });
+            const txGeometry = await navigationGeometry(structure);
+            const objectRows = await page.getByRole('region', { name: 'TX16W native objects' }).locator('tbody tr').count();
+            await structureSearch.fill('no matching structure');
+            assert.equal(await root.count(), 0);
+            assert.equal(await page.getByRole('region', { name: 'TX16W native objects' }).locator('tbody tr').count(), objectRows);
+            await structureSearch.fill('/');
+            await selector.selectOption('source-1');
+            const aSeries = page.getByRole('region', { name: 'Image contents', exact: true });
+            await aSeries.getByRole('searchbox').waitFor();
+            assert.deepEqual(await navigationGeometry(aSeries), txGeometry, 'Sampler headers and Search must share geometry and typography');
+            await selector.selectOption('source-2');
+            await structureSearch.waitFor();
+            assert.equal(await structureSearch.inputValue(), '/', 'Structure query survives source switching');
+            await structureSearch.fill('');
             assert.notEqual(await root.evaluate((node) => getComputedStyle(node).backgroundImage), 'none', 'Structural selection must remain visible');
+            await root.click({ button: 'right' });
+            await page.getByRole('menuitem', { name: 'Add companion images...', exact: true }).click();
+            assert.equal(await page.getByLabel('Companion requests').textContent(), '1');
             await root.click({ button: 'right' });
             await page.getByRole('menuitem', { name: 'Convert...', exact: true }).click();
             assert.equal(await page.getByLabel('Conversion requests').textContent(), '1');

@@ -7,6 +7,7 @@ import shutil
 import tempfile
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from server_test_harness import (
     ServerProcess,
@@ -94,6 +95,14 @@ def exercise(server: Path, fixture: Path, root: Path) -> None:
             if item["formatId"] == "yamaha.tx16w"
         )
         base = f"/api/v1/images/{image}/documents/{document}"
+        native_base = f"/api/v1/images/{image}/documents/{source}"
+        native_objects = get(f"{native_base}/objects?limit=100")["items"]
+        for native_object in native_objects:
+            detail = get(f"{native_base}/objects/{quote(native_object['id'], safe='')}")
+            assert detail["objectId"] == native_object["id"], detail
+        for invalid_id in ("%", "%0", "%gg", "%00"):
+            rejected = request(port, TOKEN, "GET", f"{native_base}/objects/{invalid_id}")
+            assert rejected.status == 400, rejected.content
         objects = get(f"{base}/objects?limit=100")["items"]
         sample = next(item for item in objects if item["type"] == "SBNK")
         editing = get(f"{base}/objects/{sample['id']}")["editing"]

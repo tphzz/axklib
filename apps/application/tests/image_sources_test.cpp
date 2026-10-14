@@ -159,13 +159,18 @@ TEST_F(ImageSourcesTest, NativeDocumentsIsolateObjectsAndBindEveryOccurrenceToFi
     auto opened = sessions.open({{{"root", "a.hds"}, {"root", "TONE.W01"}, {"root", "OTHER.W01"}}, {}}, "owner");
     ASSERT_TRUE(opened) << opened.error().message;
     ASSERT_EQ(opened->sources.size(), 3U);
-    ASSERT_EQ(opened->documents.size(), 2U);
+    ASSERT_EQ(opened->documents.size(), 3U);
     const axk::app::ImageDocumentRef a{opened->image_id, "document-a-series-source-1"};
-    const axk::app::ImageDocumentRef tx{opened->image_id, "document-tx16w"};
+    const axk::app::ImageDocumentRef tx{opened->image_id, "document-tx16w-source-2"};
     auto objects = sessions.objects(tx, "owner", 100U);
     ASSERT_TRUE(objects) << objects.error().message;
-    ASSERT_EQ(objects->items.size(), 2U);
-    EXPECT_NE(objects->items[0].id, objects->items[1].id);
+    ASSERT_EQ(objects->items.size(), 1U);
+    const axk::app::ImageDocumentRef other{opened->image_id, "document-tx16w-source-3"};
+    auto other_objects = sessions.objects(other, "owner", 100U);
+    ASSERT_TRUE(other_objects);
+    ASSERT_EQ(other_objects->items.size(), 1U);
+    EXPECT_NE(objects->items.front().id, other_objects->items.front().id);
+    EXPECT_FALSE(sessions.object_detail(tx, "owner", other_objects->items.front().id));
     for (const auto &object : objects->items) {
         auto detail = sessions.object_detail(tx, "owner", object.id);
         ASSERT_TRUE(detail) << detail.error().message;
@@ -227,7 +232,7 @@ TEST_F(ImageSourcesTest, ASeriesCommitPreservesOtherDocumentsAndRejectsUntouched
     auto opened = sessions.open({{{"root", "a.hds"}, {"root", "TONE.W01"}}, {}}, "owner");
     ASSERT_TRUE(opened) << opened.error().message;
     const axk::app::ImageDocumentRef a{opened->image_id, "document-a-series-source-1"};
-    const axk::app::ImageDocumentRef tx{opened->image_id, "document-tx16w"};
+    const axk::app::ImageDocumentRef tx{opened->image_id, "document-tx16w-source-2"};
     auto before = sessions.objects(tx, "owner", 100U);
     ASSERT_TRUE(before);
     auto mutation = sessions.begin_mutation(a, "owner", 1U);

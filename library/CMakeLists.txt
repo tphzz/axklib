@@ -279,7 +279,8 @@ axk_enable_sanitizers(axk_format_a_series)
 axk_enable_coverage(axk_format_a_series)
 
 add_library(axk_format_tx16w STATIC src/formats/tx16w/codec.cpp src/formats/tx16w/document.cpp
-                                  src/formats/tx16w/relationships.cpp)
+                                  src/formats/tx16w/relationships.cpp src/formats/tx16w/dependencies.cpp
+                                  src/formats/tx16w/discovery.cpp)
 add_library(axklib::format_tx16w ALIAS axk_format_tx16w)
 target_compile_features(axk_format_tx16w PUBLIC cxx_std_23)
 target_include_directories(axk_format_tx16w PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/internal")

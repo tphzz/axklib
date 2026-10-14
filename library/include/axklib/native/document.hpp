@@ -16,6 +16,13 @@ namespace axk::native {
 enum class Completeness : std::uint8_t { complete, incomplete, invalid };
 enum class Severity : std::uint8_t { info, warning, error };
 enum class Resolution : std::uint8_t { resolved, missing, ambiguous };
+enum class DependencyState : std::uint8_t { missing, ambiguous, unsupported, invalid };
+
+struct SourceRequirement {
+    std::string name;
+    DependencyState state{DependencyState::missing};
+    std::optional<std::string> object_id;
+};
 
 struct Capability {
     std::string operation;
@@ -30,6 +37,7 @@ struct DocumentSummary {
     std::string name;
     Completeness completeness{Completeness::complete};
     std::vector<Capability> capabilities;
+    std::vector<SourceRequirement> source_requirements{};
 };
 
 struct ObjectSummary {

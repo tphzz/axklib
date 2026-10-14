@@ -90,6 +90,10 @@ Result<void> build_relationships(std::span<const NativeObject> objects, std::spa
             relationship.candidates = candidates;
             relationship.resolution = native::Resolution::ambiguous;
         }
+        if (relationship.resolution != native::Resolution::resolved)
+            catalog.diagnostics.push_back(
+                {"tx16w.unresolved-reference", native::Severity::warning,
+                 "Unresolved " + relationship.type + " reference " + relationship.native_reference, source.id});
         catalog.relationships.push_back(std::move(relationship));
         return {};
     };

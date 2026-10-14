@@ -57,6 +57,18 @@ struct ImageSourceSummary {
     std::vector<Diagnostic> diagnostics{};
 };
 
+struct ImageSourceRequirement {
+    std::string name;
+    std::string state;
+    std::optional<std::string> object_id;
+};
+
+struct ImageCompanionSummary {
+    bool can_attach{};
+    bool can_search_nearby{};
+    std::vector<ImageSourceRequirement> requirements;
+};
+
 struct ImageDocumentSummary {
     std::string id;
     std::string format_id;
@@ -72,6 +84,7 @@ struct ImageDocumentSummary {
     std::size_t root_count{};
     std::size_t object_count{};
     std::size_t relationship_count{};
+    ImageCompanionSummary companions{};
 };
 
 struct ImageDiscoveryCandidate {

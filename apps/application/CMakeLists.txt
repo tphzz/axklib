@@ -85,7 +85,8 @@ add_library(axk_application STATIC src/alteration_journal.cpp src/alteration_jou
 add_library(axklib::application ALIAS axk_application)
 target_sources(axk_application PRIVATE src/image_document_discovery.cpp src/image_document_browsing.cpp src/native_document_snapshot.cpp
   src/conversion_plan_store.cpp src/conversion_operations.cpp src/conversion_sources.cpp src/prepared_session_commit.cpp
-  src/image_source_read.cpp src/image_filesystem_workspace.cpp src/formats/a_series/admission.cpp src/formats/tx16w/session_state.cpp)
+  src/image_source_read.cpp src/image_filesystem_workspace.cpp src/formats/a_series/admission.cpp
+  src/formats/tx16w/session_state.cpp src/formats/tx16w/admission.cpp)
 set_target_properties(axk_application PROPERTIES POSITION_INDEPENDENT_CODE ON CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
 target_sources(axk_application PRIVATE src/device_provider.cpp src/device_xml.cpp src/device_source.cpp src/device_sessions.cpp
                                        src/device_patch_alignment.cpp src/device_transactions.cpp src/image_device_mutation.cpp
@@ -137,6 +138,7 @@ if(BUILD_TESTING)
   add_executable(axk_application_tests tests/alteration_journal_test.cpp tests/directory_shrink_journal_test.cpp tests/application_operations_test.cpp tests/audio_export_layout_test.cpp tests/audio_operations_test.cpp
                                        tests/a_series_bank_editor_test.cpp tests/a_series_sample_editor_test.cpp tests/content_id_test.cpp tests/image_allocation_map_test.cpp
                                        tests/download_archives_test.cpp
+                                       tests/tx16w_companions_test.cpp
                                        tests/extraction_operations_test.cpp tests/export_parameter_ownership_test.cpp tests/file_operations_test.cpp
                                        tests/program_bitmap_reporting_test.cpp
                                        tests/program_formats_test.cpp

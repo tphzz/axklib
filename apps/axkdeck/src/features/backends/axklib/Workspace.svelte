@@ -360,6 +360,7 @@
             sources={workspace.sources}
             onrevealFiles={(id) => void revealInFiles(id)}
             onconvert={workspace.convertDocument}
+            onaddcompanions={document.companions.canAttach ? workspace.addDocumentCompanions : undefined}
             children={shell}
         />
     {:else}

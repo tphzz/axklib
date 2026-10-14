@@ -141,6 +141,91 @@ TEST(Tx16wDocument, DoesNotTreatAnEmptyVoiceCompanionAsAMissingFile) {
     EXPECT_EQ((*opened)->summary().completeness, axk::native::Completeness::complete);
 }
 
+TEST(Tx16wDocument, WarningsAndInternalReferencesDoNotImplyMissingMedia) {
+    auto voices = file(8704U);
+    text(voices, 0x1250U + 46U, "Timbre");
+    voices[0x1250U] = std::byte{63U};
+    const auto sources = axk::native::SourceSet::create(
+        {member("one", {entry("SET.S01", file(1536U)), entry("SET.V01", std::move(voices)), entry("SET.F01", file(32U)),
+                        entry("TONE.W01", wave())})});
+    ASSERT_TRUE(sources);
+    const auto opened = axk::tx16w::Document::open(*sources);
+    ASSERT_TRUE(opened);
+    EXPECT_EQ((*opened)->summary().completeness, axk::native::Completeness::complete);
+    EXPECT_FALSE((*opened)->catalog().diagnostics.empty());
+    EXPECT_TRUE((*opened)->summary().source_requirements.empty());
+    EXPECT_TRUE(std::ranges::any_of((*opened)->catalog().relationships, [](const auto &relationship) {
+        return relationship.type == "timbre-wave" && relationship.resolution == axk::native::Resolution::missing;
+    }));
+}
+
+TEST(Tx16wDocument, ReportsPresentUnsupportedWaveSeparatelyFromMissingCompanions) {
+    auto setup = file(1536U);
+    text(setup, 0xf0U + 7U, "TONE");
+    auto compressed = std::vector<std::byte>(32U);
+    text(compressed, 0U, "FORM");
+    text(compressed, 8U, "AIFC");
+    const auto sources = axk::native::SourceSet::create(
+        {member("one", {entry("SET.S01", std::move(setup)), entry("SET.V01", file(8704U)),
+                        entry("TONE.C01", std::move(compressed))})});
+    ASSERT_TRUE(sources);
+    const auto opened = axk::tx16w::Document::open(*sources);
+    ASSERT_TRUE(opened);
+    EXPECT_EQ((*opened)->summary().completeness, axk::native::Completeness::incomplete);
+    ASSERT_EQ((*opened)->summary().source_requirements.size(), 1U);
+    EXPECT_EQ((*opened)->summary().source_requirements.front().state, axk::native::DependencyState::unsupported);
+    EXPECT_EQ((*opened)->summary().source_requirements.front().name, "TONE.W01");
+    EXPECT_TRUE(std::ranges::any_of((*opened)->catalog().objects, [](const auto &object) {
+        return object.name == "TONE.C01" && object.type == "native-file";
+    }));
+}
+
+TEST(Tx16wDocument, DiscoveryGroupsOnlyUniqueCompanionsAndKeepsIndependentSetupsSeparate) {
+    auto first = file(1536U);
+    text(first, 0xf0U + 7U, "TONE");
+    const auto sources = axk::native::SourceSet::create(
+        {member("one", {entry("TONE.W01", wave()), entry("NOTES.S01", std::vector<std::byte>(32U))}),
+         member("two", {entry("SET.S01", std::move(first)), entry("SET.V01", file(8704U))}),
+         member("three", {entry("SET.S01", file(1536U)), entry("SET.V01", file(8704U))})});
+    ASSERT_TRUE(sources);
+    axk::native::FormatRegistry registry;
+    ASSERT_TRUE(registry.add(axk::tx16w::provider()));
+    const auto opened = registry.open(*sources);
+    ASSERT_TRUE(opened);
+    ASSERT_EQ(opened->documents.size(), 2U);
+    const auto &joined = opened->documents.front();
+    EXPECT_EQ(joined->summary().id, "tx16w-one");
+    EXPECT_EQ(joined->sources(), *sources);
+    EXPECT_EQ(joined->catalog().objects.size(), 2U);
+    EXPECT_EQ(joined->summary().completeness, axk::native::Completeness::complete);
+    EXPECT_EQ(opened->documents.back()->summary().id, "tx16w-three");
+}
+
+TEST(Tx16wDocument, UnsupportedAudioDoesNotResolveNativeReferencesOrCompeteWithNativeWaves) {
+    auto setup = file(1536U);
+    text(setup, 0xf0U + 16U + 7U, "TONE");
+    auto compressed = std::vector<std::byte>(32U);
+    text(compressed, 0U, "FORM");
+    text(compressed, 8U, "AIFC");
+    auto entries = std::vector{entry("SET.S01", std::move(setup)), entry("SET.V01", file(8704U)),
+                               entry("TONE.C01", std::move(compressed))};
+    auto sources = axk::native::SourceSet::create({member("one", entries)});
+    ASSERT_TRUE(sources);
+    auto opened = axk::tx16w::Document::open(*sources);
+    ASSERT_TRUE(opened);
+    ASSERT_EQ((*opened)->summary().source_requirements.size(), 1U);
+    EXPECT_EQ((*opened)->summary().source_requirements.front().state, axk::native::DependencyState::unsupported);
+    EXPECT_EQ((*opened)->summary().source_requirements.front().name, "TONE.W02");
+    EXPECT_EQ((*opened)->catalog().relationships.front().resolution, axk::native::Resolution::missing);
+
+    entries.push_back(entry("TONE.W02", wave()));
+    sources = axk::native::SourceSet::create({member("one", std::move(entries))});
+    ASSERT_TRUE(sources);
+    opened = axk::tx16w::Document::open(*sources);
+    ASSERT_TRUE(opened);
+    EXPECT_TRUE((*opened)->summary().source_requirements.empty());
+}
+
 TEST(Tx16wDocument, DoesNotSilentlyReadWavePcmUnderChangedMetadata) {
     auto reader = std::make_shared<CountingReader>(wave());
     const auto sources = axk::native::SourceSet::create({member("one", {{"wave", "TONE.W01", false, 0U, reader}})});
@@ -153,6 +238,42 @@ TEST(Tx16wDocument, DoesNotSilentlyReadWavePcmUnderChangedMetadata) {
     const auto read = (*opened)->read_wave((*opened)->native_objects().front().id);
     ASSERT_FALSE(read);
     EXPECT_EQ(read.error().code, axk::ErrorCode::transaction_stale);
+}
+
+TEST(Tx16wDocument, DiscoveryPreservesAmbiguousSuppliersWithoutMergingThem) {
+    auto setup = file(1536U);
+    text(setup, 0xf7U, "TONE");
+    const auto sources = axk::native::SourceSet::create(
+        {member("one", {entry("SET.S01", std::move(setup)), entry("SET.V01", file(8704U))}),
+         member("two", {entry("TONE.W01", wave())}), member("three", {entry("TONE.W01", wave())})});
+    ASSERT_TRUE(sources);
+    axk::native::FormatRegistry registry;
+    ASSERT_TRUE(registry.add(axk::tx16w::provider()));
+    const auto opened = registry.open(*sources);
+    ASSERT_TRUE(opened) << opened.error().message;
+    ASSERT_EQ(opened->documents.size(), 3U);
+    const auto &target = opened->documents.front();
+    ASSERT_EQ(target->summary().source_requirements.size(), 1U);
+    EXPECT_EQ(target->summary().source_requirements.front().state, axk::native::DependencyState::ambiguous);
+    EXPECT_EQ(target->catalog().objects.size(), 1U);
+}
+
+TEST(Tx16wDocument, ExistingReferencedFileWithDamagedMagicIsInvalidNotMissing) {
+    auto setup = file(1536U);
+    text(setup, 0xf7U, "TONE");
+    const auto sources = axk::native::SourceSet::create(
+        {member("one", {entry("SET.S01", std::move(setup)), entry("SET.V01", file(8704U))}),
+         member("two", {entry("TONE.W01", std::vector<std::byte>(35U))})});
+    ASSERT_TRUE(sources);
+    axk::native::FormatRegistry registry;
+    ASSERT_TRUE(registry.add(axk::tx16w::provider()));
+    const auto opened = registry.open(*sources);
+    ASSERT_TRUE(opened) << opened.error().message;
+    ASSERT_EQ(opened->documents.size(), 1U);
+    const auto &document = opened->documents.front();
+    ASSERT_EQ(document->summary().source_requirements.size(), 1U);
+    EXPECT_EQ(document->summary().source_requirements.front().state, axk::native::DependencyState::invalid);
+    EXPECT_EQ(document->summary().completeness, axk::native::Completeness::invalid);
 }
 
 TEST(Tx16wDocument, KeepsOrphanedEmptyNativeFilesExplicitlyIncomplete) {

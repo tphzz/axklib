@@ -11,6 +11,11 @@ export const tx16wDocument: NativeDocumentSummary = {
     profile: 'yamaha-native',
     format: 'yamaha.tx16w',
     completeness: 'INCOMPLETE',
+    companions: {
+        canAttach: true,
+        canSearchNearby: true,
+        requirements: [{ name: 'WAVE.W01', state: 'MISSING', objectId: null }],
+    },
     sourceMemberIds: ['source-2', 'source-3'],
     objectCount: 60,
     relationshipCount: 1,

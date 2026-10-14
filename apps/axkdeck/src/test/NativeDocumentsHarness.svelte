@@ -5,6 +5,7 @@
     import Tx16wPresentation from '../features/devices/tx16w/Presentation.svelte';
     import WorkspaceShell from '../features/workspace/WorkspaceShell.svelte';
     import FilesInspector from '../features/files/FilesInspector.svelte';
+    import ImageNavigator from '../lib/components/ImageNavigator.svelte';
     import { ViewMemory, shellViewState } from '../features/workspace/viewMemory';
     import { provideASeriesPreferences, ASeriesPreferences } from '../lib/aSeriesPreferences.svelte';
     import { nativeWorkspaceFixture } from './nativeWorkspaceFixture';
@@ -33,6 +34,7 @@
     let mode = $state<'device' | 'files'>('device');
     let reveal = $state('');
     let conversions = $state(0);
+    let companions = $state(0);
     const remember = $derived(memory.forDocument(1, documentId));
     async function select(id: string | null) {
         documentId = id;
@@ -74,6 +76,29 @@
 {/snippet}
 {#snippet files()}<p class="empty-copy">Files workspace</p>
     <output aria-label="Selected source count">{selections.length}</output>{/snippet}
+{#snippet aSeriesNavigation()}
+    <ImageNavigator
+        navigationOnly
+        image={{
+            kind: 'server-file',
+            reference: { rootId: 'root', relativePath: 'Disk1.hds' },
+            displayName: 'Disk1.hds',
+        }}
+        items={[{ id: 'partition', kind: 'partition', name: 'Partition 0', childCount: 0 }]}
+        selectedId="partition"
+        opening={false}
+        storageLocationsAvailable={false}
+        onopen={() => undefined}
+        oncreate={() => undefined}
+        onclose={() => undefined}
+        onmanagelocations={() => undefined}
+        onselect={() => undefined}
+        onloadchildren={async () => ({ items: [], totalCount: 0 })}
+        volumeActionsEnabled={false}
+        partitionActionsEnabled={false}
+        onimageaction={() => undefined}
+    />
+{/snippet}
 {#snippet filesInspector()}
     <FilesInspector
         {documents}
@@ -129,6 +154,7 @@
             revision={1}
             document={tx16wDocument}
             onconvert={() => conversions++}
+            onaddcompanions={() => companions++}
             onrevealFiles={(id) => {
                 reveal = id;
                 mode = 'files';
@@ -137,13 +163,14 @@
         />
     {:else}
         {@render shell(
-            { navigation: files, content: files },
+            { navigation: aSeriesNavigation, content: files },
             { lowerOpen: false, setLowerOpen: () => undefined, showObject: async () => undefined },
         )}
     {/if}
 {/key}
 <output hidden aria-label="Revealed object">{reveal}</output>
 <output hidden aria-label="Conversion requests">{conversions}</output>
+<output hidden aria-label="Companion requests">{companions}</output>
 {#if opening}
     <OpenSourceDialog
         {transport}

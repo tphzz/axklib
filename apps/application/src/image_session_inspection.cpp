@@ -16,6 +16,7 @@ Result<ImageDocumentSummary> ImageSessionManager::Implementation::summarize(cons
     summary.format = document_state.format;
     summary.floppy_set = document_state.floppy_set;
     summary.companion_sources = document_state.companion_sources;
+    summary.companions = document_state.companions;
     summary.source_member_ids = document_state.member_ids;
     summary.root_count = document_state.native->root_count;
     summary.object_count = document_state.native->objects.size();

@@ -56,6 +56,8 @@
         sourceKind: 'file' | 'directory';
         setLabel: string;
         nextRequiredIndex: number | null;
+        requirements: import('../../lib/transport').NativeDocumentSummary['companions']['requirements'];
+        canSearchNearby: boolean;
         busy: boolean;
         error: string;
     }
@@ -174,6 +176,8 @@
         sourceKind={companionRequest.sourceKind}
         setLabel={companionRequest.setLabel}
         nextRequiredIndex={companionRequest.nextRequiredIndex}
+        requirements={companionRequest.requirements}
+        canSearchNearby={companionRequest.canSearchNearby}
         busy={companionRequest.busy}
         error={companionRequest.error}
         onadd={addCompanion}

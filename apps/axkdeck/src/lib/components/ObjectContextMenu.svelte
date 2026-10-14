@@ -15,6 +15,7 @@
         onrename?: () => void;
         onduplicate?: () => void;
         onconvert?: () => void;
+        onaddcompanions?: () => void;
         convertLabel?: string;
         onassignsamplebank?: () => void;
         onexportpackage?: () => void;
@@ -39,6 +40,7 @@
         onrename,
         onduplicate,
         onconvert,
+        onaddcompanions,
         convertLabel = 'Convert Sample format...',
         onassignsamplebank,
         onexportpackage,
@@ -65,7 +67,15 @@
             ? document.activeElement
             : null;
     const hasMutations = $derived(
-        Boolean(oncreatedirectory || onrename || onduplicate || onconvert || onassignsamplebank || ondelete),
+        Boolean(
+            oncreatedirectory ||
+            onrename ||
+            onduplicate ||
+            onconvert ||
+            onaddcompanions ||
+            onassignsamplebank ||
+            ondelete,
+        ),
     );
     const hasExports = $derived(
         Boolean(onexportpackage || onexportwav || onexportsfz || onexportmidi || onexportfiles),
@@ -235,6 +245,12 @@
             >Rename…</button
         >
     {/if}
+    {#if onaddcompanions}<button
+            type="button"
+            role="menuitem"
+            onmouseenter={() => closeSubmenu(false)}
+            onclick={() => choose(onaddcompanions)}>Add companion images...</button
+        >{/if}
     {#if onconvert}<button
             class="context-menu-item"
             type="button"

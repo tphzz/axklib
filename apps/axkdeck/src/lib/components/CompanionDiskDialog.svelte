@@ -1,5 +1,6 @@
 <script lang="ts">
     import type { ImageLocation } from '../storageLocations';
+    import type { NativeDocumentSummary } from '../transport';
     import { locationKey } from '../storageLocations';
     import { modal } from '../modal';
     import Icon from './Icon.svelte';
@@ -9,6 +10,8 @@
         sourceKind: 'file' | 'directory';
         setLabel: string;
         nextRequiredIndex: number | null;
+        requirements: NativeDocumentSummary['companions']['requirements'];
+        canSearchNearby: boolean;
         busy: boolean;
         error: string;
         onadd: () => void;
@@ -23,6 +26,8 @@
         sourceKind,
         setLabel,
         nextRequiredIndex,
+        requirements,
+        canSearchNearby,
         busy,
         error,
         onadd,
@@ -53,21 +58,30 @@
         </header>
 
         <div class="companion-disk-content">
-            {#if sourceKind === 'file' || nextRequiredIndex !== null}
+            {#if nextRequiredIndex !== null}
                 <p>
-                    Floppy set <strong>{setLabel}</strong>{nextRequiredIndex === null
-                        ? ' is incomplete.'
-                        : ` requires disk ${nextRequiredIndex}.`}
+                    Floppy set <strong>{setLabel}</strong> requires disk {nextRequiredIndex}.
                 </p>
             {:else}
-                <p>Wave Data continues in another extracted sampler-disk folder.</p>
+                <p>Companions for <strong>{setLabel}</strong></p>
+            {/if}
+            {#if requirements.length}
+                <ul class="companion-requirements" aria-label="Source requirements">
+                    {#each requirements as item}<li>{item.name}: {item.state.toLowerCase()}</li>{/each}
+                </ul>
             {/if}
             <div class="companion-disk-actions">
                 <button class="secondary-button" type="button" disabled={busy} onclick={onadd}>
                     <Icon name={sourceKind === 'file' ? 'file-plus' : 'folder-plus'} size={15} />
                     {sourceKind === 'file' ? 'Add floppy image' : 'Add folder'}
                 </button>
-                <button class="secondary-button" type="button" disabled={busy} onclick={onnearby}>
+                <button
+                    class="secondary-button"
+                    type="button"
+                    disabled={busy || !canSearchNearby}
+                    title={canSearchNearby ? undefined : 'Nearby discovery is unavailable for this source'}
+                    onclick={onnearby}
+                >
                     <Icon name="search" size={15} />
                     {sourceKind === 'file' ? 'Search nearby images and retry' : 'Search nearby folders and retry'}
                 </button>
@@ -169,6 +183,15 @@
         border: 1px solid var(--color-border);
         max-height: 220px;
         overflow: auto;
+    }
+
+    .companion-requirements {
+        max-height: 100px;
+        overflow: auto;
+        overflow-wrap: anywhere;
+        margin: 0;
+        padding-left: 16px;
+        color: var(--color-text-muted);
     }
 
     .companion-disk-row {

@@ -3489,6 +3489,16 @@ export interface components {
         };
         ImageDocument: {
             availableOperations: string[];
+            companions: {
+                canAttach: boolean;
+                canSearchNearby: boolean;
+                requirements: {
+                    name: string;
+                    objectId: string | null;
+                    /** @enum {string} */
+                    state: 'MISSING' | 'AMBIGUOUS' | 'UNSUPPORTED' | 'INVALID';
+                }[];
+            };
             companionSources: components['schemas']['ImageSourceRef'][];
             /** @enum {string} */
             completeness: 'COMPLETE' | 'INCOMPLETE' | 'INVALID';

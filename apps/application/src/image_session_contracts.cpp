@@ -86,6 +86,11 @@ axk::app::Result<axk::app::ImageOpenSources> axk::app::image_open_sources_from_j
 }
 
 nlohmann::json axk::app::image_document_summary_json(const ImageDocumentSummary &summary) {
+    auto requirements = nlohmann::json::array();
+    for (const auto &item : summary.companions.requirements)
+        requirements.push_back({{"name", item.name},
+                                {"state", item.state},
+                                {"objectId", item.object_id ? nlohmann::json(*item.object_id) : nlohmann::json{}}});
     nlohmann::json companion_sources = nlohmann::json::array();
     for (const auto &source : summary.companion_sources)
         companion_sources.push_back(image_source_ref_json(source));
@@ -108,6 +113,10 @@ nlohmann::json axk::app::image_document_summary_json(const ImageDocumentSummary 
             {"completeness", summary.completeness},
             {"sourceMemberIds", summary.source_member_ids},
             {"companionSources", std::move(companion_sources)},
+            {"companions",
+             {{"canAttach", summary.companions.can_attach},
+              {"canSearchNearby", summary.companions.can_search_nearby},
+              {"requirements", std::move(requirements)}}},
             {"floppySet", std::move(floppy_set)},
             {"format", summary.format},
             {"availableOperations", summary.available_operations},

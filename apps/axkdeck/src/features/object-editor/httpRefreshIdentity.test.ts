@@ -131,6 +131,7 @@ async function setup(initialFormat: KnownFormat, failFirstCatalogRefresh = false
                 format: 'sfs',
                 floppySet: null,
                 companionSources: [],
+                companions: { canAttach: false, canSearchNearby: false, requirements: [] },
                 validation: { valid: true, infoCount: 0, warningCount: 0, errorCount: 0 },
                 rootCount: 1,
                 objectCount: 1,

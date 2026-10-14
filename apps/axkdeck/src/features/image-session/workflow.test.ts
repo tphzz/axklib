@@ -504,6 +504,16 @@ describe('ImageSessionWorkflow companion folders', () => {
         return {
             ...opened(7),
             format: 'axk-object-directory',
+            documents: [
+                {
+                    ...nativeWorkspaceFixture().documents[0]!,
+                    companions: {
+                        canAttach: true,
+                        canSearchNearby: true,
+                        requirements: next === null ? [] : [{ name: `Disk ${next}`, state: 'MISSING', objectId: null }],
+                    },
+                },
+            ],
             sources: [
                 {
                     ...nativeWorkspaceFixture().sources[0],

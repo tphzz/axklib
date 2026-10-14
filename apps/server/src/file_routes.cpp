@@ -2,6 +2,8 @@
 
 #include <utility>
 
+#include "path_parameters.hpp"
+
 namespace axk::server::detail {
 
 void register_file_routes(ServerCrowApp &app, FileRoutes routes) {
@@ -18,25 +20,30 @@ void register_file_routes(ServerCrowApp &app, FileRoutes routes) {
     app.route_dynamic("/api/v1/download-archives/<string>/content")
         .methods(crow::HTTPMethod::Get, crow::HTTPMethod::Delete)(std::move(routes.download_archive_content));
     app.route_dynamic("/api/v1/images/<string>")
-        .methods(crow::HTTPMethod::Get, crow::HTTPMethod::Delete)(std::move(routes.image));
+        .methods(crow::HTTPMethod::Get, crow::HTTPMethod::Delete)(decoded_path_route(std::move(routes.image)));
     app.route_dynamic("/api/v1/images/<string>/documents")
-        .methods(crow::HTTPMethod::Get, crow::HTTPMethod::Post)(std::move(routes.image_documents));
-    app.route_dynamic("/api/v1/images/<string>/documents/<string>")(std::move(routes.image_document));
+        .methods(crow::HTTPMethod::Get, crow::HTTPMethod::Post)(decoded_path_route(std::move(routes.image_documents)));
+    app.route_dynamic("/api/v1/images/<string>/documents/<string>")(
+        decoded_path_route(std::move(routes.image_document)));
     app.route_dynamic("/api/v1/images/<string>/documents/<string>/companions")
-        .methods(crow::HTTPMethod::Post)(std::move(routes.attach_companions));
-    app.route_dynamic("/api/v1/images/<string>/documents/<string>/content")(std::move(routes.image_content));
-    app.route_dynamic("/api/v1/images/<string>/filesystem")(std::move(routes.image_filesystem));
-    app.route_dynamic("/api/v1/images/<string>/documents/<string>/objects")(std::move(routes.image_objects));
-    app.route_dynamic("/api/v1/images/<string>/documents/<string>/objects/<string>")(std::move(routes.image_object));
+        .methods(crow::HTTPMethod::Post)(decoded_path_route(std::move(routes.attach_companions)));
+    app.route_dynamic("/api/v1/images/<string>/documents/<string>/content")(
+        decoded_path_route(std::move(routes.image_content)));
+    app.route_dynamic("/api/v1/images/<string>/filesystem")(decoded_path_route(std::move(routes.image_filesystem)));
+    app.route_dynamic("/api/v1/images/<string>/documents/<string>/objects")(
+        decoded_path_route(std::move(routes.image_objects)));
+    app.route_dynamic("/api/v1/images/<string>/documents/<string>/objects/<string>")(
+        decoded_path_route(std::move(routes.image_object)));
     app.route_dynamic("/api/v1/images/<string>/documents/<string>/relationships")(
-        std::move(routes.image_relationships));
+        decoded_path_route(std::move(routes.image_relationships)));
     app.route_dynamic("/api/v1/images/<string>/documents/<string>/system-program-contexts")(
-        std::move(routes.image_system_program_contexts));
+        decoded_path_route(std::move(routes.image_system_program_contexts)));
     app.route_dynamic("/api/v1/images/<string>/sources/<string>/allocation-map")(
-        std::move(routes.image_allocation_map));
+        decoded_path_route(std::move(routes.image_allocation_map)));
     app.route_dynamic("/api/v1/images/<string>/documents/<string>/validation/issues")(
-        std::move(routes.image_validation));
-    app.route_dynamic("/api/v1/images/<string>/documents/<string>/preview")(std::move(routes.image_preview));
+        decoded_path_route(std::move(routes.image_validation)));
+    app.route_dynamic("/api/v1/images/<string>/documents/<string>/preview")(
+        decoded_path_route(std::move(routes.image_preview)));
     app.route_dynamic("/api/v1/auditions/<string>/content")
         .methods(crow::HTTPMethod::Get)(std::move(routes.audition_content));
     app.route_dynamic("/api/v1/auditions/<string>")

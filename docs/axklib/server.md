@@ -713,6 +713,29 @@ its companion folders are attached.
 `selection`: `SOURCES` with a list of `ImageSourceRef` values, or
 `IMMEDIATE_SIBLINGS` for an explicit nearby search. Directory sources use
 `DIRECTORY`; raw floppy members use `FILE`.
+Each document exposes `companions` with `canAttach`, `canSearchNearby` and
+`requirements`. Each requirement names a native file (or required disk for
+A-series) and declares `MISSING`, `AMBIGUOUS`, `UNSUPPORTED` or `INVALID`, plus
+an optional referring `objectId`. Clients prompt for additional media only
+for `MISSING`; warnings and unsupported records do not imply missing disks.
+TX16W membership follows native Setup/Voice/Wave references, not host image
+names or neighboring catalog text. Distinct Setup sources remain separate;
+competing suppliers are not arbitrarily assigned. Attachments preserve existing
+document/object IDs and reject unrelated, ambiguous, invalid or stale inputs
+without publishing a new revision. Mixed Typhoon/AIFC payloads remain opaque
+and are reported as unsupported, not decoded as Yamaha-native Waves.
+An unsupported audio candidate does not establish native equivalence: the
+relationship remains unresolved and the document remains `INCOMPLETE` without
+prompting for a missing disk. Exact native Wave files take precedence and may
+still be attached later. Basename similarity to opaque audio never groups sources.
+When starting from a wave-only disk, attach the Setup-bearing disk before other
+wave-only companions, since those companions do not reference each other.
+
+Resource IDs are opaque UTF-8 strings: percent-encode each path component.
+The server decodes it exactly once; `+` is literal, and malformed escapes,
+control bytes and invalid UTF-8 are rejected.
+
+For A-series:
 Cataloged folders expose `floppySet` with the required disk index at open time.
 Attachment validates the same-label, contiguous member sequence and admits all
 cataloged objects from later members, not only waveform continuations. An

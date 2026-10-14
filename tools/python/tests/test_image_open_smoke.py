@@ -20,7 +20,7 @@ class FakeClient:
             "revision": 1,
             "sources": [{"id": "source-1", "format": "fat12", "diagnostics": []}],
             "documents": [{"id": "document-1", "profile": self.device, "format": "fat12",
-                           "objectCount": 1, "validation": {"valid": True, "errorCount": 0, "warningCount": 0, "infoCount": 0}}] if self.device else [],
+                           "objectCount": 1, "companions": {"requirements": []}, "validation": {"valid": True, "errorCount": 0, "warningCount": 0, "infoCount": 0}}] if self.device else [],
         }
         if path == "/images" and method == "POST":
             assert body == {
@@ -35,6 +35,14 @@ class FakeClient:
             return 200, {"data": summary}
         if "/validation/issues?" in path:
             return 200, {"data": {"items": [{"code": "TEST_INVALID"}], "nextCursor": None}}
+        if "/objects/" in path:
+            assert "/objects/object%3A1?" in path
+            return 200, {"data": {"formatId": "yamaha.a-series", "object": {"id": "object:1"},
+                                  "image": {"documentId": "document-1", "revision": 1}}}
+        if "/objects?" in path:
+            return 200, {"data": {"items": [{"id": "object:1", "type": "wave", "name": "Wave"}], "nextCursor": None}}
+        if "/relationships?" in path:
+            return 200, {"data": {"items": [], "nextCursor": None}}
         if "/filesystem?" in path:
             parent = "parentId=root" in path
             offset = "offset=1" in path
@@ -228,6 +236,8 @@ def test_directory_companions_require_each_completed_session_state() -> None:
                     totalCount=0,
                     revision=self.revision,
                 )
+            if "/objects/" in path:
+                document["data"]["image"]["revision"] = self.revision
             return status, document
 
     client = DirectoryClient()
