@@ -473,7 +473,8 @@
             timeline: {
                 frameCount: row.inspection!.projectedOutputFrameCount,
                 sampleRate: row.targetSampleRate!,
-                loopMode: row.loopMode,
+                direction: 'FORWARD',
+                looping: row.loopMode === 1,
                 loopStartFrame: row.loopStartFrame,
                 loopLengthFrames: row.loopLengthFrames,
             },

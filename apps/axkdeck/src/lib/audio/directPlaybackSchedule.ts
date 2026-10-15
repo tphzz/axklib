@@ -34,7 +34,7 @@ export function planDirectPlayback<T extends PlaybackTimeline>(
     if (mode === 'forced-one-shot') {
         return oneShotSchedule('forced-one-shot', {
             ...timeline,
-            loopMode: 0,
+            looping: false,
             loopStartFrame: 0,
             loopLengthFrames: 0,
         });
@@ -53,7 +53,7 @@ export function planDirectPlayback<T extends PlaybackTimeline>(
             timeline,
         };
     }
-    const forwardOneShot = timeline.loopMode === 0 || timeline.loopMode === 4;
+    const forwardOneShot = !timeline.looping && timeline.direction === 'FORWARD';
     if (
         forwardOneShot &&
         !isReversePlayback(timeline) &&
@@ -69,7 +69,7 @@ export function planDirectPlayback<T extends PlaybackTimeline>(
             stopAfterSeconds: shortOneShotPreviewSeconds,
             timeline: {
                 ...timeline,
-                loopMode: 1,
+                looping: true,
                 loopStartFrame: 0,
                 loopLengthFrames: timeline.frameCount,
             },

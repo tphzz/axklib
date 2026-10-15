@@ -36,7 +36,8 @@ axk::app::Result<void> axk::app::bind_audition_operations(OperationRegistry &reg
                                           "Preparing bounded audio sources", std::nullopt});
             }
             auto audition =
-                images.prepare_audition(image_document_ref(request), context.owner_id, object_ids, context.cancellation,
+                images.prepare_audition(image_document_ref(request), context.owner_id, object_ids,
+                                        request.at("expectedRevision").get<std::uint64_t>(), context.cancellation,
                                         request.value("sourceWindow", "PLAYBACK") == "STORED");
             if (!audition)
                 return std::unexpected(audition.error());
@@ -59,12 +60,15 @@ axk::app::Result<void> axk::app::bind_audition_operations(OperationRegistry &reg
                                      {"loopLengthFrames", lane.loop_length_frames}});
                 }
                 clips.push_back({{"objectId", clip.object_id},
-                                 {"loopMode", clip.loop_mode},
-                                 {"loopModeLabel", clip.loop_mode_label},
+                                 {"direction", clip.direction},
+                                 {"looping", clip.looping},
                                  {"warnings", clip.warnings},
                                  {"lanes", std::move(lanes)}});
             }
             return Json{{"auditionId", audition->audition_id},
+                        {"imageId", audition->image_id},
+                        {"documentId", audition->document_id},
+                        {"revision", audition->revision},
                         {"contentSizeBytes", audition->content_size_bytes},
                         {"clips", std::move(clips)}};
         });

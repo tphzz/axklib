@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { AuditionWorkflow } from './workflow.svelte';
 import type { CatalogWorkflow } from '../catalog/workflow.svelte';
-import type { ImageTransport, PreviewEnvelope, SamplerObject } from '../../lib/transport';
+import type { AudioIdentity, ImageTransport, PreviewEnvelope, SamplerObject } from '../../lib/transport';
 import type { WaveDataItem } from '../../lib/types';
 
 function fixture(initialBins = 0) {
@@ -20,12 +20,20 @@ function fixture(initialBins = 0) {
         waveform: bins(initialBins),
         previewState: initialBins ? 'ready' : 'idle',
     };
-    const requests: { resolve: (value: PreviewEnvelope) => void; reject: (reason: Error) => void }[] = [];
-    const preview = vi.fn(() => new Promise<PreviewEnvelope>((resolve, reject) => requests.push({ resolve, reject })));
+    let identity: AudioIdentity = { imageId: 'image-1', documentId: 'document-1', revision: 1 };
+    const requests: {
+        resolve: (value: PreviewEnvelope) => void;
+        reject: (reason: Error) => void;
+        signal?: AbortSignal;
+    }[] = [];
+    const preview = vi.fn(
+        (_session: number, _objectId: string, _bins: number, signal?: AbortSignal) =>
+            new Promise<PreviewEnvelope>((resolve, reject) => requests.push({ resolve, reject, signal })),
+    );
     const catalog = { waveData: [item], samplePreviewStates: {} } as unknown as CatalogWorkflow;
     const status = vi.fn();
     const workflow = new AuditionWorkflow({
-        transport: { preview } as unknown as ImageTransport,
+        transport: { preview, audioIdentity: () => identity } as unknown as ImageTransport,
         catalog,
         sessionId: () => 1,
         workspaceView: () => 'wave-data',
@@ -37,13 +45,17 @@ function fixture(initialBins = 0) {
         requestCompanionDisks: () => undefined,
     });
     const result = (count: number): PreviewEnvelope => ({
+        ...identity,
         objectId: 'wave',
+        warnings: [],
         lanes: [
             {
                 role: 'MONO',
                 sourceObjectId: 'wave',
                 sampleRate: 44100,
                 sampleWidthBytes: 2,
+                nativeBitDepth: 16,
+                sampleRateApproximate: false,
                 storedFrameCount: 8000,
                 playbackStartFrame: 0,
                 playbackLengthFrames: 8000,
@@ -53,7 +65,17 @@ function fixture(initialBins = 0) {
             },
         ],
     });
-    return { workflow, catalog, requests, preview, result, status };
+    return {
+        workflow,
+        catalog,
+        requests,
+        preview,
+        result,
+        status,
+        changeIdentity: (next: Partial<AudioIdentity>) => {
+            identity = { ...identity, ...next };
+        },
+    };
 }
 
 describe('adaptive waveform previews', () => {
@@ -61,7 +83,7 @@ describe('adaptive waveform previews', () => {
         const f = fixture(1024);
         f.workflow.requestWaveformPreview(f.catalog.waveData[0]!, 2048);
         f.workflow.requestWaveformPreview(f.catalog.waveData[0]!, 2048);
-        expect(f.preview).toHaveBeenCalledExactlyOnceWith(1, 'wave', 2048);
+        expect(f.preview).toHaveBeenCalledExactlyOnceWith(1, 'wave', 2048, expect.any(AbortSignal));
         expect(f.catalog.waveData[0]!.previewState).toBe('ready');
         expect(f.catalog.waveData[0]!.waveform).toHaveLength(1024);
         f.requests[0]!.resolve(f.result(2048));
@@ -91,8 +113,22 @@ describe('adaptive waveform previews', () => {
         const f = fixture(1024);
         f.workflow.requestWaveformPreview(f.catalog.waveData[0]!, 4096);
         f.workflow.resetPreviewQueue();
+        expect(f.requests[0]!.signal?.aborted).toBe(true);
         f.requests[0]!.resolve(f.result(4096));
         await new Promise((resolve) => setTimeout(resolve, 0));
         expect(f.catalog.waveData[0]!.waveform).toHaveLength(1024);
     });
+    it.each([{ revision: 2 }, { documentId: 'document-2' }])(
+        'discards an upgrade after its audio identity changes: %j',
+        async (change) => {
+            const f = fixture(1024);
+            f.workflow.requestWaveformPreview(f.catalog.waveData[0]!, 4096);
+            const oldReply = f.result(4096);
+            f.changeIdentity(change);
+            f.requests[0]!.resolve(oldReply);
+            await new Promise((resolve) => setTimeout(resolve, 0));
+            expect(f.catalog.waveData[0]!.waveform).toHaveLength(1024);
+            expect(f.status).not.toHaveBeenCalled();
+        },
+    );
 });

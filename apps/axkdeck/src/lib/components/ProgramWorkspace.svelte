@@ -1,4 +1,5 @@
 <script lang="ts">
+    import CollectionRow from './CollectionRow.svelte';
     import {
         collectionPageStep,
         focusCollectionIndex,
@@ -409,10 +410,10 @@
             data-navigation-list
         >
             {#each filteredPrograms as program, index (program.id)}
-                <button
+                <CollectionRow
                     type="button"
-                    class:active={activeObjectId === program.objectId}
-                    class:selected={selection.items.some((item) => item.objectId === program.objectId)}
+                    active={activeObjectId === program.objectId}
+                    selected={selection.items.some((item) => item.objectId === program.objectId)}
                     class="program-row"
                     data-collection-object-id={program.objectId}
                     data-navigation-index={index}
@@ -429,7 +430,7 @@
                             metadata={program.assignmentSummary}
                         />
                     </span>
-                </button>
+                </CollectionRow>
             {:else}
                 <p class="empty-copy">No matching Programs</p>
             {/each}

@@ -54,8 +54,8 @@ export interface PlaybackDescriptor {
     sampleWidthBytes: number;
     frameCount: number;
     wavSizeBytes: number;
-    loopMode: number;
-    loopModeLabel: string;
+    direction: 'FORWARD' | 'REVERSE';
+    looping: boolean;
     loopStartFrame: number;
     loopLengthFrames: number;
     warnings: string[];

@@ -576,7 +576,6 @@
         sequenceImport={sequenceImportWorkflow}
         importAudio={() => directComputerWorkflow.importAudio(audioImportWorkflow, audioFileInput)}
         importMidi={() => directComputerWorkflow.importMidi(sequenceImportWorkflow, sequenceFileInput)}
-        addDocumentCompanions={() => imageSessionWorkflow.requestCompanionDisks()}
         convertDocument={() => {
             if (imageSessionWorkflow.sessionId !== null && imageSessionWorkflow.documentId)
                 void tx16wImportWorkflow.requestNativeDocument(

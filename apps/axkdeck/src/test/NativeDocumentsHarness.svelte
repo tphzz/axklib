@@ -5,6 +5,7 @@
     import Tx16wPresentation from '../features/devices/tx16w/Presentation.svelte';
     import WorkspaceShell from '../features/workspace/WorkspaceShell.svelte';
     import FilesInspector from '../features/files/FilesInspector.svelte';
+    import { provideInspectorPanels } from '../lib/inspectorPanels.svelte';
     import ImageNavigator from '../lib/components/ImageNavigator.svelte';
     import { ViewMemory, shellViewState } from '../features/workspace/viewMemory';
     import { provideASeriesPreferences, ASeriesPreferences } from '../lib/aSeriesPreferences.svelte';
@@ -14,6 +15,7 @@
     import type { DevicePresentationState, WorkspacePresentation } from '../features/workspace/contracts';
 
     provideASeriesPreferences(new ASeriesPreferences());
+    provideInspectorPanels();
     const transport = nativeDocumentFixture();
     const memory = new ViewMemory();
     const sources = [
@@ -34,7 +36,6 @@
     let mode = $state<'device' | 'files'>('device');
     let reveal = $state('');
     let conversions = $state(0);
-    let companions = $state(0);
     const remember = $derived(memory.forDocument(1, documentId));
     async function select(id: string | null) {
         documentId = id;
@@ -154,7 +155,7 @@
             revision={1}
             document={tx16wDocument}
             onconvert={() => conversions++}
-            onaddcompanions={() => companions++}
+            visible={mode === 'device'}
             onrevealFiles={(id) => {
                 reveal = id;
                 mode = 'files';
@@ -170,7 +171,6 @@
 {/key}
 <output hidden aria-label="Revealed object">{reveal}</output>
 <output hidden aria-label="Conversion requests">{conversions}</output>
-<output hidden aria-label="Companion requests">{companions}</output>
 {#if opening}
     <OpenSourceDialog
         {transport}

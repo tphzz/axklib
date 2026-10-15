@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from image_open_native import check_object_detail, inspect_native
+from image_open_native import check_object_detail, check_wave_preview, inspect_native
 from tx16w_corpus_smoke import load_sets, variants
 
 
@@ -83,3 +83,35 @@ def test_corpus_manifest_requires_unique_contained_documented_members(tmp_path: 
         path.write_text(json.dumps({"sets": [{**case, "sources": sources}]}))
         with pytest.raises(ValueError):
             load_sets(path)
+
+
+@pytest.mark.parametrize("problem", [None, "identity", "precision", "warning", "bounds", "pcm", "inverted"])
+def test_wave_preview_checks_identity_dimensions_uncertainty_and_pcm(problem: str | None) -> None:
+    lane = {"storedFrameCount": 2, "sampleRate": 33333, "sampleWidthBytes": 2, "nativeBitDepth": 12,
+            "playbackStartFrame": 0, "playbackLengthFrames": 2, "loopStartFrame": 1, "loopLengthFrames": 1,
+            "sampleRateApproximate": True, "bins": [{"minimum": -32768, "maximum": 32767}] * 2}
+    preview: dict[str, Any] = {"imageId": "image", "documentId": "document", "revision": 3,
+                               "objectId": "wave:/1", "warnings": ["Approximate rate"], "lanes": [lane]}
+    if problem == "identity":
+        preview["revision"] = 2
+    if problem == "precision":
+        lane["nativeBitDepth"] = 24
+    if problem == "warning":
+        preview["warnings"] = []
+    if problem == "bounds":
+        lane["playbackLengthFrames"] = 3
+    if problem == "pcm":
+        lane["bins"] = [{"minimum": float("nan"), "maximum": 1}] * 2
+    if problem == "inverted":
+        lane["bins"] = [{"minimum": 1, "maximum": -1}] * 2
+
+    def get(path: str, query: dict[str, Any]) -> dict[str, Any]:
+        assert path == "/documents/document/preview"
+        assert query == {"objectId": "wave:/1", "expectedRevision": 3, "bins": 64}
+        return preview
+
+    if problem:
+        with pytest.raises(RuntimeError):
+            check_wave_preview(get, "/documents/document", "wave:/1", "image", "document", 3)
+    else:
+        check_wave_preview(get, "/documents/document", "wave:/1", "image", "document", 3)

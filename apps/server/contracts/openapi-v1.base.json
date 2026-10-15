@@ -1932,13 +1932,22 @@
             "type": "string",
             "minLength": 1
           }
+        },
+        {
+          "name": "expectedRevision",
+          "in": "query",
+          "required": true,
+          "schema": {
+            "type": "integer",
+            "minimum": 1
+          }
         }
       ],
       "get": {
         "operationId": "images.preview",
         "responses": {
           "200": {
-            "description": "Bounded physical Wave Data or Sample playback-window min/max lanes",
+            "description": "Bounded document-scoped PCM min/max lanes",
             "content": {
               "application/json": {
                 "schema": {
@@ -4712,7 +4721,9 @@
           "playbackLengthFrames",
           "loopStartFrame",
           "loopLengthFrames",
-          "bins"
+          "bins",
+          "nativeBitDepth",
+          "sampleRateApproximate"
         ],
         "properties": {
           "role": {
@@ -4764,6 +4775,14 @@
             "items": {
               "$ref": "#/components/schemas/ImagePreviewBin"
             }
+          },
+          "nativeBitDepth": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 16
+          },
+          "sampleRateApproximate": {
+            "type": "boolean"
           }
         }
       },
@@ -4780,7 +4799,11 @@
             "additionalProperties": false,
             "required": [
               "objectId",
-              "lanes"
+              "lanes",
+              "imageId",
+              "documentId",
+              "revision",
+              "warnings"
             ],
             "properties": {
               "objectId": {
@@ -4793,6 +4816,24 @@
                 "maxItems": 2,
                 "items": {
                   "$ref": "#/components/schemas/ImagePreviewLane"
+                }
+              },
+              "imageId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "documentId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "revision": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "warnings": {
+                "type": "array",
+                "items": {
+                  "type": "string"
                 }
               }
             }
@@ -7955,7 +7996,8 @@
         "required": [
           "imageId",
           "objectIds",
-          "documentId"
+          "documentId",
+          "expectedRevision"
         ],
         "properties": {
           "sourceWindow": {
@@ -7983,6 +8025,10 @@
           "documentId": {
             "type": "string",
             "minLength": 1
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 1
           }
         }
       },
@@ -8049,23 +8095,15 @@
         "additionalProperties": false,
         "required": [
           "objectId",
-          "loopMode",
-          "loopModeLabel",
           "warnings",
-          "lanes"
+          "lanes",
+          "direction",
+          "looping"
         ],
         "properties": {
           "objectId": {
             "type": "string",
             "minLength": 1
-          },
-          "loopMode": {
-            "type": "integer",
-            "minimum": 0,
-            "maximum": 255
-          },
-          "loopModeLabel": {
-            "type": "string"
           },
           "warnings": {
             "type": "array",
@@ -8080,6 +8118,16 @@
             "items": {
               "$ref": "#/components/schemas/AuditionLane"
             }
+          },
+          "direction": {
+            "type": "string",
+            "enum": [
+              "FORWARD",
+              "REVERSE"
+            ]
+          },
+          "looping": {
+            "type": "boolean"
           }
         }
       },
@@ -8089,7 +8137,10 @@
         "required": [
           "auditionId",
           "contentSizeBytes",
-          "clips"
+          "clips",
+          "imageId",
+          "documentId",
+          "revision"
         ],
         "properties": {
           "auditionId": {
@@ -8107,6 +8158,18 @@
             "items": {
               "$ref": "#/components/schemas/AuditionClip"
             }
+          },
+          "imageId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "documentId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
           }
         }
       },
@@ -19225,7 +19288,9 @@
               "sampleRate",
               "attackFrames",
               "repeatFrames",
-              "looped"
+              "looped",
+              "sampleRateApproximate",
+              "nativeBitDepth"
             ],
             "properties": {
               "type": {
@@ -19245,6 +19310,13 @@
               },
               "looped": {
                 "type": "boolean"
+              },
+              "sampleRateApproximate": {
+                "type": "boolean"
+              },
+              "nativeBitDepth": {
+                "type": "integer",
+                "const": 12
               }
             }
           },

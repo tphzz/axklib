@@ -1,3 +1,4 @@
+import { sameAudioIdentity } from './audio/audioIdentity';
 import { documentTarget } from './httpNativeDocuments';
 import {
     AxklibApiError,
@@ -445,6 +446,7 @@ export class HttpImageTransport extends HttpPackageTransport implements ImageTra
         const session = this.imageSessions.get(sessionId);
         const submitted = await this.client.invoke<never>('auditions.prepare', {
             ...documentTarget(session),
+            expectedRevision: session.revision,
             objectIds: objectKeys,
             ...(storedPcm ? { sourceWindow: 'STORED' } : {}),
         });
@@ -460,7 +462,15 @@ export class HttpImageTransport extends HttpPackageTransport implements ImageTra
                 completed.errorContext,
             );
         }
-        return completed.result as AuditionBundleDescriptor;
+        const bundle = completed.result as AuditionBundleDescriptor;
+        if (
+            this.imageSessions.get(sessionId) !== session ||
+            !sameAudioIdentity(bundle, { ...documentTarget(session), revision: session.revision })
+        ) {
+            await this.deleteAudition(bundle.auditionId);
+            throw new Error('Native document changed during audio preparation');
+        }
+        return bundle;
     }
 
     async readAuditionContent(

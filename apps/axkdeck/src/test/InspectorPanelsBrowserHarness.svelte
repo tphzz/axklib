@@ -28,6 +28,10 @@
         return {
             ...preview,
             preview: {
+                imageId: 'image-1',
+                documentId: 'document-1',
+                revision: 1,
+                warnings: [],
                 objectId: preview.item.objectId,
                 lanes: preview.waveData.map(({ role, waveData }) => ({
                     role: role === 'left' ? 'LEFT' : 'RIGHT',
@@ -35,6 +39,8 @@
                     sampleRate: 44100,
                     storedFrameCount: 44100,
                     sampleWidthBytes: 2,
+                    nativeBitDepth: 16,
+                    sampleRateApproximate: false,
                     playbackStartFrame: 0,
                     playbackLengthFrames: 44100,
                     loopStartFrame: 11025,

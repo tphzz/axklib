@@ -1,9 +1,22 @@
 import { describe, expect, it, vi } from 'vitest';
 import { CatalogWorkflow } from '../catalog/workflow.svelte';
-import type { ImageTransport, SamplerObject, SamplerRelationship } from '../../lib/transport';
+import type { ImageTransport, PreviewEnvelope, SamplerObject, SamplerRelationship } from '../../lib/transport';
 import type { PackageExportSelectionState } from '../../lib/objectSelection';
 import type { PackageExportObject, SampleStructureItem, WaveDataItem, WorkspaceView } from '../../lib/types';
 import { AuditionWorkflow } from './workflow.svelte';
+
+function transportFixture(): ImageTransport {
+    const identity = { imageId: 'image-1', documentId: 'document-1', revision: 1 };
+    return {
+        audioIdentity: () => identity,
+        preview: async (_session: number, objectId: string): Promise<PreviewEnvelope> => ({
+            ...identity,
+            objectId,
+            warnings: [],
+            lanes: [],
+        }),
+    } as unknown as ImageTransport;
+}
 
 function relationship(
     id: string,
@@ -43,7 +56,7 @@ describe('AuditionWorkflow auditionability indexes', () => {
             membersForBank,
         } as unknown as CatalogWorkflow;
         const workflow = new AuditionWorkflow({
-            transport: {} as ImageTransport,
+            transport: transportFixture(),
             catalog,
             sessionId: () => 1,
             workspaceView: () => 'sample-banks',
@@ -77,7 +90,7 @@ describe('AuditionWorkflow auditionability indexes', () => {
             clearSampleSelection,
         } as unknown as CatalogWorkflow;
         const workflow = new AuditionWorkflow({
-            transport: {} as ImageTransport,
+            transport: transportFixture(),
             catalog,
             sessionId: () => 1,
             workspaceView: () => 'samples',
@@ -122,7 +135,7 @@ describe('AuditionWorkflow auditionability indexes', () => {
         });
         const setInspectorOpen = vi.fn();
         const workflow = new AuditionWorkflow({
-            transport: {} as ImageTransport,
+            transport: transportFixture(),
             catalog,
             sessionId: () => null,
             workspaceView: () => workspaceView,
@@ -160,7 +173,7 @@ describe('AuditionWorkflow auditionability indexes', () => {
             waveData: [],
         } as unknown as CatalogWorkflow;
         const workflow = new AuditionWorkflow({
-            transport: {} as ImageTransport,
+            transport: transportFixture(),
             catalog,
             sessionId: () => null,
             workspaceView: () => 'programs',
@@ -234,7 +247,7 @@ function refreshSetup() {
     };
     const setSelection = vi.fn((selection: PackageExportSelectionState) => (state.selection = selection));
     const workflow = new AuditionWorkflow({
-        transport: {} as ImageTransport,
+        transport: transportFixture(),
         catalog: catalog as unknown as CatalogWorkflow,
         sessionId: () => state.sessionId,
         workspaceView: () => state.view,
@@ -361,7 +374,7 @@ describe('AuditionWorkflow editor refresh selection', () => {
 describe('CatalogWorkflow Sample context', () => {
     it('clears only the Sample lane and its dependent inspector context', () => {
         const catalog = new CatalogWorkflow({
-            transport: {} as ImageTransport,
+            transport: transportFixture(),
             sessionId: () => 1,
             stopPlayback: () => Promise.resolve(),
             resetPreviews: () => undefined,

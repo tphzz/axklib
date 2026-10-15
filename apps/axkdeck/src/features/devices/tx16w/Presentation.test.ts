@@ -5,15 +5,13 @@ import { nativeDocumentFixture, nativeObjects, tx16wDocument } from '../../../te
 import { ViewMemory } from '../../workspace/viewMemory';
 import type { ImageTransport } from '../../../lib/transport';
 
-const labels = ['Performances', 'Voices', 'Timbres', 'Waves', 'Setups', 'Native Files'];
+const labels = ['Performances', 'Voices', 'Timbres', 'Waves', 'Setups'];
 const collection = () => within(screen.getByRole('region', { name: 'TX16W native objects' }));
 const inspector = () => within(screen.getByRole('complementary', { name: 'TX16W inspector' }));
 function setup(transport = nativeDocumentFixture(), memory = new ViewMemory(), documentId = tx16wDocument.id) {
     const onconvert = vi.fn();
-    const onaddcompanions = vi.fn();
     return {
         onconvert,
-        onaddcompanions,
         ...render(Tx16wPresentationHarness, {
             transport,
             sessionId: 1,
@@ -23,7 +21,6 @@ function setup(transport = nativeDocumentFixture(), memory = new ViewMemory(), d
             remember: memory.forDocument(1, documentId),
             onrevealFiles: vi.fn(),
             onconvert,
-            onaddcompanions,
         }),
     };
 }
@@ -50,12 +47,8 @@ describe('TX16W workspace conventions', () => {
         expect(screen.queryByRole('button', { name: 'Convert' })).toBeNull();
         await collection().findByText('No performances');
         await fireEvent.click(screen.getByRole('button', { name: 'Waves' }));
-        await collection().findByRole('button', { name: 'Wave 20' });
-        expect(
-            collection()
-                .getAllByRole('columnheader')
-                .map((node) => node.textContent),
-        ).toEqual(['Name', 'Bytes']);
+        await collection().findByRole('button', { name: 'Inspect Wave 20' });
+        expect(collection().queryByRole('columnheader', { name: 'Type' })).toBeNull();
         expect(screen.getByRole('searchbox', { name: 'Search Waves' })).toBeTruthy();
     });
 
@@ -63,7 +56,7 @@ describe('TX16W workspace conventions', () => {
         const memory = new ViewMemory();
         const view = setup(nativeDocumentFixture(), memory);
         await fireEvent.click(screen.getByRole('button', { name: 'Waves' }));
-        await fireEvent.click(await collection().findByRole('button', { name: 'Wave 20' }));
+        await fireEvent.click(await collection().findByRole('button', { name: 'Inspect Wave 20' }));
         await inspector().findByRole('heading', { name: 'Wave 20' });
         await fireEvent.input(screen.getByRole('searchbox', { name: 'Search Waves' }), { target: { value: 'Wave 2' } });
         await fireEvent.click(screen.getByRole('button', { name: 'Voices' }));
@@ -122,15 +115,19 @@ describe('TX16W workspace conventions', () => {
             target: { value: 'not found' },
         });
         await fireEvent.click(screen.getByRole('button', { name: 'Voices' }));
-        await fireEvent.click(await collection().findByRole('button', { name: 'Voice One' }));
+        await fireEvent.click(await collection().findByRole('button', { name: /^Voice One/ }));
+        await inspector().findByRole('heading', { name: 'Voice One' });
+        await fireEvent.click(inspector().getByRole('button', { name: /^Relationships/ }));
         await fireEvent.click(await inspector().findByRole('button', { name: 'Wave 20' }));
         expect(screen.getByRole('searchbox', { name: 'Search Waves' })).toHaveProperty('value', '');
-        await waitFor(() => expect(document.activeElement).toBe(collection().getByRole('button', { name: 'Wave 20' })));
+        await waitFor(() =>
+            expect(document.activeElement).toBe(collection().getByRole('button', { name: 'Inspect Wave 20' })),
+        );
         await inspector().findByRole('heading', { name: 'Wave 20' });
     });
 
     it('opens root conversion with pointer or keyboard and restores focus on Escape', async () => {
-        const { onconvert, onaddcompanions } = setup();
+        const { onconvert } = setup();
         const root = screen.getByRole('button', { name: '/' });
         await fireEvent.contextMenu(root, { clientX: 20, clientY: 30 });
         await fireEvent.click(await screen.findByRole('menuitem', { name: 'Convert...' }));
@@ -141,8 +138,8 @@ describe('TX16W workspace conventions', () => {
         await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
         expect(document.activeElement).toBe(root);
         await fireEvent.contextMenu(root);
-        await fireEvent.click(await screen.findByRole('menuitem', { name: 'Add companion images...' }));
-        expect(onaddcompanions).toHaveBeenCalledOnce();
+        expect(await screen.findByRole('menuitem', { name: 'Convert...' })).toBeTruthy();
+        expect(screen.queryByRole('menuitem', { name: 'Add companion images...' })).toBeNull();
     });
 
     it('does not show an old detail after switching collections', async () => {
@@ -155,7 +152,7 @@ describe('TX16W workspace conventions', () => {
             });
         setup(transport);
         await fireEvent.click(screen.getByRole('button', { name: 'Waves' }));
-        await fireEvent.click(await collection().findByRole('button', { name: 'Wave 20' }));
+        await fireEvent.click(await collection().findByRole('button', { name: 'Inspect Wave 20' }));
         await fireEvent.click(screen.getByRole('button', { name: 'Voices' }));
         release(detail);
         await waitFor(() => expect(inspector().getByText('No object selected')).toBeTruthy());
@@ -166,12 +163,12 @@ describe('TX16W workspace conventions', () => {
         const memory = new ViewMemory();
         const view = setup(nativeDocumentFixture(), memory);
         await fireEvent.click(screen.getByRole('button', { name: 'Waves' }));
-        await collection().findByRole('button', { name: 'Wave 20' });
+        await collection().findByRole('button', { name: 'Inspect Wave 20' });
         await fireEvent.input(screen.getByRole('searchbox', { name: 'Search TX16W structure' }), {
             target: { value: 'Wave 20' },
         });
         expect(screen.queryByRole('button', { name: '/' })).toBeNull();
-        expect(collection().getByRole('button', { name: 'Wave 20' })).toBeTruthy();
+        expect(collection().getByRole('button', { name: 'Inspect Wave 20' })).toBeTruthy();
         view.unmount();
         setup(nativeDocumentFixture(), memory);
         expect(screen.getByRole('searchbox', { name: 'Search TX16W structure' })).toHaveProperty('value', 'Wave 20');
@@ -184,20 +181,27 @@ describe('TX16W workspace conventions', () => {
     it('pages by complete row heights and supports boundary navigation', async () => {
         setup();
         await fireEvent.click(screen.getByRole('button', { name: 'Waves' }));
-        const button = await collection().findByRole('button', { name: 'Wave 20' });
+        const button = await collection().findByRole('button', { name: 'Inspect Wave 20' });
         Object.defineProperty(button.closest('[data-navigation-list]'), 'clientHeight', { value: 300 });
-        Object.defineProperty(button, 'offsetHeight', { value: 18 });
-        Object.defineProperty(button.closest('tr'), 'offsetHeight', { value: 30 });
+        const row = button.closest('.wave-data-row, tr') ?? button;
+        if (row !== button) Object.defineProperty(button, 'offsetHeight', { value: 30 });
+        Object.defineProperty(row, 'offsetHeight', { value: 30 });
         await fireEvent.click(button);
         await fireEvent.keyDown(button, { key: 'PageDown' });
-        await waitFor(() => expect(document.activeElement).toBe(collection().getByRole('button', { name: 'Wave 29' })));
+        await waitFor(() =>
+            expect(document.activeElement).toBe(collection().getByRole('button', { name: 'Inspect Wave 29' })),
+        );
         await fireEvent.keyDown(document.activeElement!, { key: 'Home' });
-        await waitFor(() => expect(document.activeElement).toBe(collection().getByRole('button', { name: 'Wave 00' })));
+        await waitFor(() =>
+            expect(document.activeElement).toBe(collection().getByRole('button', { name: 'Inspect Wave 00' })),
+        );
         await fireEvent.keyDown(document.activeElement!, { key: 'End' });
-        await waitFor(() => expect(document.activeElement).toBe(collection().getByRole('button', { name: 'Wave 59' })));
+        await waitFor(() =>
+            expect(document.activeElement).toBe(collection().getByRole('button', { name: 'Inspect Wave 59' })),
+        );
     });
 
-    it('keeps unsupported records inspectable in Native Files without mixing them into collections', async () => {
+    it('keeps unsupported records out of typed collections without a Native Files workspace tab', async () => {
         const transport = nativeDocumentFixture();
         const detail = await transport.nativeObjectDetail(1, 'wave-20');
         transport.nativeObjects = async () => [
@@ -214,10 +218,11 @@ describe('TX16W workspace conventions', () => {
         setup(transport);
         await collection().findByText('No performances');
         expect(collection().queryByRole('button', { name: 'UNSUPPORTED.C01' })).toBeNull();
-        await fireEvent.click(screen.getByRole('button', { name: 'Native Files' }));
-        await fireEvent.click(await collection().findByRole('button', { name: 'UNSUPPORTED.C01' }));
-        await inspector().findByText('unsupported');
-        expect(inspector().getByRole('button', { name: 'To Files' })).toBeTruthy();
+        expect(screen.queryByRole('button', { name: 'Native Files' })).toBeNull();
+        for (const label of labels) {
+            await fireEvent.click(screen.getByRole('button', { name: label }));
+            expect(collection().queryByRole('button', { name: 'UNSUPPORTED.C01' })).toBeNull();
+        }
     });
 
     it('waits for native inventory before revealing an object requested from Files', async () => {
@@ -234,6 +239,8 @@ describe('TX16W workspace conventions', () => {
         release();
         await inspector().findByRole('heading', { name: 'Wave 20' });
         expect(screen.getByRole('button', { name: 'Waves' }).getAttribute('aria-pressed')).toBe('true');
-        await waitFor(() => expect(document.activeElement).toBe(collection().getByRole('button', { name: 'Wave 20' })));
+        await waitFor(() =>
+            expect(document.activeElement).toBe(collection().getByRole('button', { name: 'Inspect Wave 20' })),
+        );
     });
 });

@@ -283,8 +283,9 @@ TEST_F(SessionMediaConversionOperationsTest, ExportsAnOversizedVolumeAsATypedMul
         images_->objects({completed->image_id, "document-a-series-source-1"}, "owner", 32U, std::nullopt, "SMPL");
     ASSERT_TRUE(completed_wave_data) << completed_wave_data.error().message;
     ASSERT_EQ(completed_wave_data->items.size(), 1U);
-    const auto completed_audition = images_->prepare_audition({completed->image_id, "document-a-series-source-1"},
-                                                              "owner", {completed_wave_data->items.front().id});
+    const auto completed_audition =
+        images_->prepare_audition({completed->image_id, "document-a-series-source-1"}, "owner",
+                                  {completed_wave_data->items.front().id}, completed->revision);
     ASSERT_TRUE(completed_audition) << completed_audition.error().message;
     EXPECT_GT(completed_audition->content_size_bytes, 44U);
 

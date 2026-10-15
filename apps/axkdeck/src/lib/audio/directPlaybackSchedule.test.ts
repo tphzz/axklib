@@ -5,7 +5,8 @@ import { planDirectPlayback } from './directPlaybackSchedule';
 const baseTimeline = {
     frameCount: 260,
     sampleRate: 44_100,
-    loopMode: 0,
+    direction: 'FORWARD' as const,
+    looping: false,
     loopStartFrame: 0,
     loopLengthFrames: 0,
 };
@@ -20,7 +21,7 @@ describe('direct playback scheduling', () => {
             loopStartSeconds: 0,
             loopEndSeconds: naturalDurationSeconds,
             stopAfterSeconds: 0.5,
-            timeline: { ...baseTimeline, loopMode: 1, loopLengthFrames: baseTimeline.frameCount },
+            timeline: { ...baseTimeline, looping: true, loopLengthFrames: baseTimeline.frameCount },
         });
     });
 
@@ -38,7 +39,13 @@ describe('direct playback scheduling', () => {
     });
 
     it('preserves declared loop points without imposing a stop', () => {
-        const looped = { ...baseTimeline, frameCount: 4_410, loopMode: 1, loopStartFrame: 100, loopLengthFrames: 300 };
+        const looped = {
+            ...baseTimeline,
+            frameCount: 4_410,
+            looping: true,
+            loopStartFrame: 100,
+            loopLengthFrames: 300,
+        };
 
         expect(planDirectPlayback(looped, 0.1, 'interactive')).toEqual({
             kind: 'declared-loop',
@@ -51,8 +58,8 @@ describe('direct playback scheduling', () => {
     });
 
     it('does not reinterpret reverse playback or forced one-shots', () => {
-        const reversed = { ...baseTimeline, loopMode: 3 };
-        const looped = { ...baseTimeline, loopMode: 1, loopStartFrame: 10, loopLengthFrames: 100 };
+        const reversed = { ...baseTimeline, direction: 'REVERSE' as const };
+        const looped = { ...baseTimeline, looping: true, loopStartFrame: 10, loopLengthFrames: 100 };
 
         expect(planDirectPlayback(reversed, 0.005, 'interactive')).toMatchObject({
             kind: 'natural-one-shot',
@@ -64,7 +71,7 @@ describe('direct playback scheduling', () => {
             kind: 'forced-one-shot',
             loop: false,
             stopAfterSeconds: null,
-            timeline: { ...looped, loopMode: 0, loopStartFrame: 0, loopLengthFrames: 0 },
+            timeline: { ...looped, looping: false, loopStartFrame: 0, loopLengthFrames: 0 },
         });
     });
 });

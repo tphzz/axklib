@@ -1479,6 +1479,7 @@ export interface paths {
         parameters: {
             query: {
                 bins: number;
+                expectedRevision: number;
                 objectId: string;
             };
             header?: never;
@@ -2587,11 +2588,15 @@ export interface components {
             auditionId: string;
             clips: components['schemas']['AuditionClip'][];
             contentSizeBytes: number;
+            documentId: string;
+            imageId: string;
+            revision: number;
         };
         AuditionClip: {
+            /** @enum {string} */
+            direction: 'FORWARD' | 'REVERSE';
             lanes: components['schemas']['AuditionLane'][];
-            loopMode: number;
-            loopModeLabel: string;
+            looping: boolean;
             objectId: string;
             warnings: string[];
         };
@@ -2609,6 +2614,7 @@ export interface components {
         };
         AuditionPrepareRequest: {
             documentId: string;
+            expectedRevision: number;
             imageId: string;
             objectIds: string[];
             /**
@@ -4037,11 +4043,13 @@ export interface components {
             bins: components['schemas']['ImagePreviewBin'][];
             loopLengthFrames: number;
             loopStartFrame: number;
+            nativeBitDepth: number;
             playbackLengthFrames: number;
             playbackStartFrame: number;
             /** @enum {unknown} */
             role: 'MONO' | 'LEFT' | 'RIGHT';
             sampleRate: number;
+            sampleRateApproximate: boolean;
             /** @enum {integer} */
             sampleWidthBytes: 1 | 2;
             sourceObjectId: string;
@@ -4049,8 +4057,12 @@ export interface components {
         };
         ImagePreviewResponse: {
             data: {
+                documentId: string;
+                imageId: string;
                 lanes: components['schemas']['ImagePreviewLane'][];
                 objectId: string;
+                revision: number;
+                warnings: string[];
             };
             meta: components['schemas']['ResponseMeta'];
         };
@@ -5807,8 +5819,11 @@ export interface components {
             | {
                   attackFrames: number;
                   looped: boolean;
+                  /** @constant */
+                  nativeBitDepth: 12;
                   repeatFrames: number;
                   sampleRate: number;
+                  sampleRateApproximate: boolean;
                   /** @constant */
                   type: 'wave';
               }
@@ -14984,6 +14999,7 @@ export interface operations {
         parameters: {
             query: {
                 bins: number;
+                expectedRevision: number;
                 objectId: string;
             };
             header?: never;
@@ -14995,7 +15011,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Bounded physical Wave Data or Sample playback-window min/max lanes */
+            /** @description Bounded document-scoped PCM min/max lanes */
             200: {
                 headers: {
                     'X-Request-Id': components['headers']['XRequestId'];

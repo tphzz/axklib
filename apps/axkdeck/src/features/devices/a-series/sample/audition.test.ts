@@ -99,12 +99,34 @@ function auditionFixture() {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('draft audition validation', () => {
+    it.each([
+        { loopMode: 0, direction: 'FORWARD', looping: false },
+        { loopMode: 1, direction: 'FORWARD', looping: true },
+        { loopMode: 2, direction: 'FORWARD', looping: true },
+        { loopMode: 3, direction: 'REVERSE', looping: false },
+        { loopMode: 4, direction: 'FORWARD', looping: false },
+        { loopMode: 5, direction: 'REVERSE', looping: false },
+    ])('maps native loop mode $loopMode to a neutral playback descriptor', async ({ loopMode, direction, looping }) => {
+        const { prepare, snapshot } = auditionFixture();
+        snapshot.blockedParameters = [];
+        const prepared = await prepare({ loop_mode: loopMode, loop_start_frame: 100, loop_length_frames: 300 });
+        expect(prepared.descriptor).toMatchObject({ direction, looping, loopLengthFrames: looping ? 300 : 0 });
+        expect(prepared.descriptor).not.toHaveProperty('loopMode');
+        expect(prepared.descriptor).not.toHaveProperty('loopModeLabel');
+    });
+
     it('plays valid stereo PCM even when dormant loop fields are write-protected', async () => {
         const { prepare, source, renderedInputs } = auditionFixture();
         source.lanes[0]!.getChannelData(0)[10] = 0.25;
         source.lanes[1]!.getChannelData(0)[10] = -0.5;
         const prepared = await prepare();
-        expect(prepared.descriptor).toMatchObject({ channels: 2, frameCount: 15000, loopMode: 4, loopLengthFrames: 0 });
+        expect(prepared.descriptor).toMatchObject({
+            channels: 2,
+            frameCount: 15000,
+            direction: 'FORWARD',
+            looping: false,
+            loopLengthFrames: 0,
+        });
         expect(renderedInputs[0]!.getChannelData(0)[10]).toBe(0.25);
         expect(renderedInputs[0]!.getChannelData(1)[10]).toBe(-0.5);
     });

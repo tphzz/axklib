@@ -1,7 +1,10 @@
 #include <algorithm>
+#include <array>
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -41,6 +44,18 @@ class Tx16wCompanions : public testing::Test {
         std::ranges::copy(std::string_view{"LM8953"}, result.begin());
         return result;
     }
+    static std::vector<char> odd_wave(bool looped, bool known_rate = true) {
+        auto result = bytes(41U);
+        result[22] = static_cast<char>(looped ? 0x49 : 0xc9);
+        result[23] = known_rate ? 2 : 0;
+        result[24] = 2;
+        result[27] = 3;
+        // Five signed 12-bit samples; the sixth packed sample is padding.
+        const std::array<unsigned char, 9> packed{0x80, 0x0f, 0xff, 0x00, 0x01, 0x00, 0x7f, 0xf0, 0x80};
+        std::ranges::transform(packed, result.begin() + 32,
+                               [](unsigned char value) { return static_cast<char>(value); });
+        return result;
+    }
     void write(std::string_view path, const std::vector<char> &value) {
         std::filesystem::create_directories((root / path).parent_path());
         std::ofstream output{root / path, std::ios::binary};
@@ -48,6 +63,156 @@ class Tx16wCompanions : public testing::Test {
         ASSERT_TRUE(output);
     }
 };
+
+TEST_F(Tx16wCompanions, PreviewsOddPackedWaveWithExactAmplitudeAndAttackRepeatLoopBounds) {
+    write("TONE.W01", odd_wave(true));
+    const auto sandbox = axk::app::Sandbox::create({{"root", "Root", root, false}});
+    ASSERT_TRUE(sandbox);
+    axk::app::ImageSessionManager sessions{*sandbox};
+    const auto opened = sessions.open({{{"root", "TONE.W01"}}, {}}, "owner");
+    ASSERT_TRUE(opened) << opened.error().message;
+    const axk::app::ImageDocumentRef target{opened->image_id, opened->documents.front().id};
+    const auto objects = sessions.objects(target, "owner", 100U);
+    ASSERT_TRUE(objects);
+    ASSERT_EQ(objects->items.size(), 1U);
+    const auto preview = sessions.preview(target, "owner", objects->items.front().id, 5U, opened->revision);
+    ASSERT_TRUE(preview) << preview.error().message;
+    EXPECT_EQ(preview->image_id, opened->image_id);
+    EXPECT_EQ(preview->document_id, target.document_id);
+    EXPECT_EQ(preview->revision, opened->revision);
+    EXPECT_TRUE(preview->warnings.empty());
+    ASSERT_EQ(preview->lanes.size(), 1U);
+    const auto &lane = preview->lanes.front();
+    EXPECT_EQ(lane.source_object_id, objects->items.front().id);
+    EXPECT_EQ(lane.sample_rate, 50'000U);
+    EXPECT_EQ(lane.sample_width_bytes, 2U);
+    EXPECT_EQ(lane.stored_frame_count, 5U);
+    EXPECT_EQ(lane.playback_start_frame, 0U);
+    EXPECT_EQ(lane.playback_length_frames, 5U);
+    EXPECT_EQ(lane.loop_start_frame, 2U);
+    EXPECT_EQ(lane.loop_length_frames, 3U);
+    const std::array<std::int32_t, 5> expected{-32768, -16, 0, 16, 32752};
+    ASSERT_EQ(lane.bins.size(), expected.size());
+    for (std::size_t index = 0; index < expected.size(); ++index) {
+        EXPECT_EQ(lane.bins[index].minimum, expected[index]);
+        EXPECT_EQ(lane.bins[index].maximum, expected[index]);
+    }
+}
+
+TEST_F(Tx16wCompanions, AuditionsOddPackedWaveWithoutPaddingAndWarnsAboutUnknownRate) {
+    const auto sandbox = axk::app::Sandbox::create({{"root", "Root", root, false}});
+    ASSERT_TRUE(sandbox);
+    axk::app::ImageSessionManager sessions{*sandbox};
+    for (const bool looped : {false, true}) {
+        SCOPED_TRACE(looped);
+        const auto filename = looped ? "LOOP.W01" : "ONCE.W01";
+        write(filename, odd_wave(looped, false));
+        const auto opened = sessions.open({{{"root", filename}}, {}}, "owner");
+        ASSERT_TRUE(opened) << opened.error().message;
+        const axk::app::ImageDocumentRef target{opened->image_id, opened->documents.front().id};
+        const auto objects = sessions.objects(target, "owner", 100U);
+        ASSERT_TRUE(objects);
+        ASSERT_EQ(objects->items.size(), 1U);
+        const auto audition = sessions.prepare_audition(target, "owner", {objects->items.front().id}, opened->revision);
+        ASSERT_TRUE(audition) << audition.error().message;
+        EXPECT_EQ(audition->image_id, opened->image_id);
+        EXPECT_EQ(audition->document_id, target.document_id);
+        EXPECT_EQ(audition->revision, opened->revision);
+        ASSERT_EQ(audition->clips.size(), 1U);
+        const auto &clip = audition->clips.front();
+        EXPECT_EQ(clip.direction, "FORWARD");
+        EXPECT_EQ(clip.looping, looped);
+        EXPECT_FALSE(clip.warnings.empty());
+        const auto preview = sessions.preview(target, "owner", objects->items.front().id, 5U, opened->revision);
+        ASSERT_TRUE(preview) << preview.error().message;
+        EXPECT_FALSE(preview->warnings.empty());
+        ASSERT_EQ(clip.lanes.size(), 1U);
+        const auto &lane = clip.lanes.front();
+        EXPECT_EQ(lane.sample_rate, 33'333U);
+        EXPECT_EQ(lane.sample_width_bytes, 2U);
+        EXPECT_EQ(lane.frame_count, 5U);
+        EXPECT_EQ(lane.loop_start_frame, looped ? 2U : 0U);
+        EXPECT_EQ(lane.loop_length_frames, looped ? 3U : 0U);
+        EXPECT_EQ(lane.wav_size_bytes, 54U);
+        const auto pcm = sessions.audition_range(audition->audition_id, "owner", lane.content_offset_bytes + 44U, 10U);
+        ASSERT_TRUE(pcm) << pcm.error().message;
+        const std::vector<std::byte> expected{std::byte{0x00}, std::byte{0x80}, std::byte{0xf0}, std::byte{0xff},
+                                              std::byte{0x00}, std::byte{0x00}, std::byte{0x10}, std::byte{0x00},
+                                              std::byte{0xf0}, std::byte{0x7f}};
+        EXPECT_EQ(pcm->bytes, expected);
+        EXPECT_TRUE(sessions.delete_audition(audition->audition_id, "owner"));
+    }
+}
+
+TEST_F(Tx16wCompanions, AudioRequestsEnforceRevisionOwnershipCancellationAndRangeBoundaries) {
+    write("TONE.W01", odd_wave(true));
+    const auto sandbox = axk::app::Sandbox::create({{"root", "Root", root, false}});
+    ASSERT_TRUE(sandbox);
+    axk::app::ImageSessionManager sessions{*sandbox};
+    const auto opened = sessions.open({{{"root", "TONE.W01"}}, {}}, "owner");
+    ASSERT_TRUE(opened) << opened.error().message;
+    const axk::app::ImageDocumentRef target{opened->image_id, opened->documents.front().id};
+    const auto objects = sessions.objects(target, "owner", 100U);
+    ASSERT_TRUE(objects);
+    ASSERT_EQ(objects->items.size(), 1U);
+    const auto &object_id = objects->items.front().id;
+    EXPECT_FALSE(sessions.preview(target, "other-owner", object_id, 5U, opened->revision));
+    EXPECT_FALSE(sessions.prepare_audition(target, "other-owner", {object_id}, opened->revision));
+    EXPECT_FALSE(sessions.preview(target, "owner", object_id, 0U, opened->revision));
+    EXPECT_FALSE(sessions.preview(target, "owner", object_id, 4097U, opened->revision));
+    axk::CancellationSource cancelled;
+    cancelled.cancel();
+    EXPECT_FALSE(sessions.preview(target, "owner", object_id, 5U, opened->revision, cancelled.token()));
+    EXPECT_FALSE(sessions.prepare_audition(target, "owner", {object_id}, opened->revision, cancelled.token()));
+    const auto audition = sessions.prepare_audition(target, "owner", {object_id}, opened->revision);
+    ASSERT_TRUE(audition) << audition.error().message;
+    EXPECT_FALSE(sessions.audition_range(audition->audition_id, "other-owner", 44U, 10U));
+    EXPECT_FALSE(sessions.audition_range(audition->audition_id, "owner", 44U, 10U, cancelled.token()));
+    EXPECT_FALSE(sessions.audition_range(audition->audition_id, "owner", audition->content_size_bytes, 1U));
+    EXPECT_FALSE(
+        sessions.audition_range(audition->audition_id, "owner", std::numeric_limits<std::uint64_t>::max(), 1U));
+    const auto suffix = sessions.audition_range(audition->audition_id, "owner", 51U, 3U);
+    ASSERT_TRUE(suffix) << suffix.error().message;
+    EXPECT_EQ(suffix->bytes, (std::vector<std::byte>{std::byte{0x00}, std::byte{0xf0}, std::byte{0x7f}}));
+    const auto attached = sessions.attach_companions(
+        target, "owner", opened->revision,
+        {axk::app::CompanionSelectionKind::sources, {{"root", "main", axk::app::ImageSourceKind::directory}}});
+    ASSERT_TRUE(attached) << attached.error().message;
+    const auto stale_preview = sessions.preview(target, "owner", object_id, 5U, opened->revision);
+    ASSERT_FALSE(stale_preview);
+    EXPECT_EQ(stale_preview.error().code, "image_revision_stale");
+    const auto stale_audition = sessions.prepare_audition(target, "owner", {object_id}, opened->revision);
+    ASSERT_FALSE(stale_audition);
+    EXPECT_EQ(stale_audition.error().code, "image_revision_stale");
+    EXPECT_FALSE(sessions.audition_range(audition->audition_id, "owner", 44U, 10U));
+    const auto fresh_preview = sessions.preview(target, "owner", object_id, 5U, attached->revision);
+    ASSERT_TRUE(fresh_preview) << fresh_preview.error().message;
+    EXPECT_EQ(fresh_preview->revision, attached->revision);
+    const auto fresh_audition = sessions.prepare_audition(target, "owner", {object_id}, attached->revision);
+    ASSERT_TRUE(fresh_audition) << fresh_audition.error().message;
+    EXPECT_EQ(fresh_audition->revision, attached->revision);
+    EXPECT_TRUE(sessions.delete_audition(fresh_audition->audition_id, "owner"));
+}
+
+TEST_F(Tx16wCompanions, OpaqueNativeFilesHaveNoDeviceNavigationBinding) {
+    write("SET.F01", bytes(32U));
+    const auto sandbox = axk::app::Sandbox::create({{"root", "Root", root, false}});
+    ASSERT_TRUE(sandbox);
+    axk::app::ImageSessionManager sessions{*sandbox};
+    const auto opened = sessions.open({{{"root", "TONE.W01"}, {"root", "SET.F01"}}, {}}, "owner");
+    ASSERT_TRUE(opened) << opened.error().message;
+    const auto roots = sessions.filesystem(opened->image_id, "owner", opened->revision);
+    ASSERT_TRUE(roots) << roots.error().message;
+    const auto opaque_root =
+        std::ranges::find(roots->items, opened->sources.back().id, &axk::app::ImageFilesystemEntry::source_member_id);
+    ASSERT_NE(opaque_root, roots->items.end());
+    const auto files = sessions.filesystem(opened->image_id, "owner", opened->revision, {.parent_id = opaque_root->id});
+    ASSERT_TRUE(files) << files.error().message;
+    ASSERT_EQ(files->items.size(), 1U);
+    EXPECT_TRUE(files->items.front().bindings.empty());
+    EXPECT_FALSE(files->items.front().object_id);
+    EXPECT_FALSE(files->items.front().content_scope_id);
+}
 
 TEST_F(Tx16wCompanions, AppendingCompanionsPreservesIdsOtherDocumentsAndRevisionGuards) {
     auto sandbox = axk::app::Sandbox::create({{"root", "Root", root, false}});

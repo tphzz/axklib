@@ -298,31 +298,10 @@ export interface PreviewEnvelope extends Omit<ApiPreviewEnvelope, 'lanes'> {
 export interface PreviewLane extends Omit<ApiPreviewLane, 'bins'> {
     bins: readonly components['schemas']['ImagePreviewBin'][];
 }
-export interface AuditionLaneDescriptor {
-    role: 'MONO' | 'LEFT' | 'RIGHT';
-    sourceObjectId: string;
-    sampleRate: number;
-    sampleWidthBytes: number;
-    frameCount: number;
-    wavSizeBytes: number;
-    contentOffsetBytes: number;
-    loopStartFrame: number;
-    loopLengthFrames: number;
-}
-
-export interface AuditionClipDescriptor {
-    objectId: string;
-    loopMode: number;
-    loopModeLabel: string;
-    warnings: string[];
-    lanes: AuditionLaneDescriptor[];
-}
-
-export interface AuditionBundleDescriptor {
-    auditionId: string;
-    contentSizeBytes: number;
-    clips: AuditionClipDescriptor[];
-}
+export type AudioIdentity = Pick<components['schemas']['AuditionBundle'], 'imageId' | 'documentId' | 'revision'>;
+export type AuditionLaneDescriptor = components['schemas']['AuditionLane'];
+export type AuditionClipDescriptor = components['schemas']['AuditionClip'];
+export type AuditionBundleDescriptor = components['schemas']['AuditionBundle'];
 
 export interface PlanSummary {
     partitionCount: number;
@@ -556,7 +535,8 @@ export interface ImageTransport
         contentScopeId: string,
         programs: ProgramGenerationSelection[],
     ): Promise<JobState>;
-    preview(sessionId: number, objectKey: string, binCount: number): Promise<PreviewEnvelope>;
+    audioIdentity(sessionId: number): AudioIdentity;
+    preview(sessionId: number, objectKey: string, binCount: number, signal?: AbortSignal): Promise<PreviewEnvelope>;
     prepareAuditionBundle(
         sessionId: number,
         objectKeys: readonly string[],

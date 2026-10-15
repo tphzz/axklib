@@ -108,6 +108,8 @@ struct FileIdentity {
 };
 
 [[nodiscard]] AXK_API Result<Wave> decode_wave(std::span<const std::byte> bytes, std::string source_name = {});
+[[nodiscard]] AXK_API Result<std::vector<std::int16_t>>
+decode_packed_pcm(std::span<const std::byte> bytes, std::size_t first_frame, std::size_t frame_count);
 [[nodiscard]] AXK_API Result<WaveHeader> decode_wave_header(std::span<const std::byte> header, std::uint64_t file_size,
                                                             std::string source_name = {});
 [[nodiscard]] AXK_API std::optional<FileIdentity> identify_file(std::string_view name);

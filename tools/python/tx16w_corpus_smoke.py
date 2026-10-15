@@ -84,7 +84,7 @@ def main() -> int:
                 before = [digest(path) for path in paths]
                 expected = {"format": "yamaha.tx16w", "filesystemName": "FAT12" if len(paths) == 1 else "sources",
                             "deviceView": "yamaha-native", "minimumFiles": 1,
-                            "allObjectDetails": True, **case["expected"]}
+                            "allObjectDetails": True, "wavePreviews": True, **case["expected"]}
                 try:
                     row.update(run_case(
                         server, paths[0], expected, args.output / f"{row['id']}.log",

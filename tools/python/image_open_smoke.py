@@ -344,7 +344,7 @@ def check_image(
                 raise RuntimeError("expected nonempty Device view")
         if "objectCount" in expected and (document or {}).get("objectCount", 0) != expected["objectCount"]:
             raise RuntimeError("object count differs")
-        native = inspect_native(get, native_path(), document, summary["revision"], expected, maximum_entries) if document else {}
+        native = inspect_native(get, native_path(), document, summary["revision"], expected, maximum_entries, summary["imageId"]) if document else {}
         return {
             **native,
             "format": image_format,

@@ -13,18 +13,29 @@ function setup() {
     const details = new Map(['sample', 'a', 'b', 'bank'].map((id) => [id, mappingDetail(id)]));
     details.set('program', fixture.document.detail!);
     const lane = {
+        role: 'MONO' as const,
+        sourceObjectId: 'wave',
+        sampleWidthBytes: 2,
+        loopStartFrame: 0,
+        loopLengthFrames: 0,
         sampleRate: fixtureRate,
         frameCount: fixtureFrames,
         contentOffsetBytes: 0,
         wavSizeBytes: 44 + fixtureFrames * 2,
     };
     const transport = {
+        audioIdentity: () => ({ imageId: 'image-1', documentId: 'document-1', revision: 1 }),
         objectDetail: vi.fn(async (_: number, id: string) => details.get(id)!),
         programEditorCatalog: vi.fn(async () => fixture.catalog),
-        prepareAuditionBundle: vi.fn(async () => ({
+        prepareAuditionBundle: vi.fn(async (_session: number, objectIds: readonly string[]) => ({
             auditionId: 'test',
+            imageId: 'image-1',
+            documentId: 'document-1',
+            revision: 1,
             contentSizeBytes: lane.wavSizeBytes,
-            clips: [{ lanes: [lane] }],
+            clips: [
+                { objectId: objectIds[0]!, direction: 'FORWARD' as const, looping: false, warnings: [], lanes: [lane] },
+            ],
         })),
         readAuditionContent: vi.fn(async () => fixtureWave()),
         deleteAudition: vi.fn(async () => {}),

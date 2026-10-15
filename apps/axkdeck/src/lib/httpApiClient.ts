@@ -543,8 +543,9 @@ export class AxklibHttpApiClient {
         path: string,
         body?: unknown,
         headers: Record<string, string> = {},
+        signal?: AbortSignal,
     ): Promise<Result> {
-        return this.fetchJson(method, path, body, headers);
+        return this.fetchJson(method, path, body, headers, signal);
     }
 
     async connectEvents(
@@ -594,11 +595,15 @@ export class AxklibHttpApiClient {
         path: string,
         body?: unknown,
         headers: Record<string, string> = {},
+        signal?: AbortSignal,
     ): Promise<Result> {
-        const response = await this.fetchResponse(method, path, body === undefined ? undefined : JSON.stringify(body), {
-            ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
-            ...headers,
-        });
+        const response = await this.fetchResponse(
+            method,
+            path,
+            body === undefined ? undefined : JSON.stringify(body),
+            { ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...headers },
+            signal,
+        );
         return this.readEnvelope<Result>(response);
     }
 

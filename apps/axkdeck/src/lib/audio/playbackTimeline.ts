@@ -1,19 +1,21 @@
 export interface PlaybackTimeline {
     frameCount: number;
     sampleRate: number;
-    loopMode: number;
+    direction: 'FORWARD' | 'REVERSE';
+    looping: boolean;
     loopStartFrame: number;
     loopLengthFrames: number;
 }
 
 export function isReversePlayback(timeline: PlaybackTimeline): boolean {
-    return timeline.loopMode === 3 || timeline.loopMode === 5;
+    return timeline.direction === 'REVERSE';
 }
 
 export function isForwardLoop(timeline: PlaybackTimeline): boolean {
     const loopEnd = timeline.loopStartFrame + timeline.loopLengthFrames;
     return (
-        (timeline.loopMode === 1 || timeline.loopMode === 2) &&
+        timeline.looping &&
+        timeline.direction === 'FORWARD' &&
         timeline.loopLengthFrames > 0 &&
         timeline.loopStartFrame >= 0 &&
         loopEnd <= timeline.frameCount

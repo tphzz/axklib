@@ -404,11 +404,17 @@ struct ImageWaveformPreviewLane {
     std::uint64_t loop_start_frame{};
     std::uint64_t loop_length_frames{};
     std::vector<ImagePreviewBin> bins;
+    std::uint16_t native_bit_depth{};
+    bool sample_rate_approximate{};
 };
 
 struct ImageWaveformPreview {
     std::string object_id;
     std::vector<ImageWaveformPreviewLane> lanes;
+    std::string image_id;
+    std::string document_id;
+    std::uint64_t revision{};
+    std::vector<std::string> warnings;
 };
 
 struct ImageAuditionLane {
@@ -425,8 +431,8 @@ struct ImageAuditionLane {
 
 struct ImageAuditionClip {
     std::string object_id;
-    std::uint8_t loop_mode{};
-    std::string loop_mode_label;
+    std::string direction;
+    bool looping{};
     std::vector<std::string> warnings;
     std::vector<ImageAuditionLane> lanes;
 };
@@ -435,6 +441,9 @@ struct ImageAudition {
     std::string audition_id;
     std::uint64_t content_size_bytes{};
     std::vector<ImageAuditionClip> clips;
+    std::string image_id;
+    std::string document_id;
+    std::uint64_t revision{};
 };
 
 struct ImageAuditionRange {
@@ -583,9 +592,11 @@ class ImageSessionManager {
                       std::optional<std::string_view> cursor = std::nullopt);
     [[nodiscard]] Result<ImageWaveformPreview> preview(const ImageDocumentRef &target, std::string_view owner_id,
                                                        std::string_view object_id, std::size_t bin_count,
+                                                       std::uint64_t expected_revision,
                                                        const CancellationToken &cancellation = {});
     [[nodiscard]] Result<ImageAudition> prepare_audition(const ImageDocumentRef &target, std::string_view owner_id,
                                                          const std::vector<std::string> &object_ids,
+                                                         std::uint64_t expected_revision,
                                                          const CancellationToken &cancellation = {},
                                                          bool stored_pcm = false);
     [[nodiscard]] Result<ImageAuditionRange> audition_range(std::string_view audition_id, std::string_view owner_id,

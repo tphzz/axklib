@@ -17,38 +17,7 @@
 
 namespace axk::app::formats::a_series {
 
-struct PcmMember {
-    std::string object_id;
-    std::string role;
-    std::uint16_t output_width{};
-    std::uint32_t sample_rate{};
-    std::uint64_t stored_frame_count{};
-    std::uint64_t playback_start_frame{};
-    std::uint64_t playback_length_frames{};
-    std::uint64_t source_loop_start{};
-    std::uint64_t source_loop_length{};
-    std::uint64_t physical_first_frame{};
-    std::uint64_t frame_count{};
-    std::uint64_t loop_start{};
-    std::uint64_t loop_length{};
-};
-
-struct PcmSource {
-    std::vector<PcmMember> members;
-    std::uint8_t loop_mode{};
-    std::string loop_mode_label;
-    std::vector<std::string> warnings;
-};
-
-enum class PcmReadWindow : std::uint8_t { stored_pcm, playback };
-
-struct AuditionEntry {
-    ImageAudition descriptor;
-    std::vector<PcmSource> sources;
-    std::chrono::steady_clock::time_point last_access;
-};
-
-struct SessionState final : NativeDocumentState {
+struct SessionState final : NativeDocumentState, NativeAudioProvider {
     [[nodiscard]] static Result<std::unique_ptr<SessionState>>
     create(std::shared_ptr<const axk::formats::a_series::Document> document, const ImageSourceRef &source,
            diagnostic_sink *diagnostics = nullptr);
@@ -60,7 +29,7 @@ struct SessionState final : NativeDocumentState {
                                                                std::string_view object_id) const override;
     [[nodiscard]] NativeFilesystemBindings filesystem_bindings() const override;
     [[nodiscard]] Result<void> preserve_identity(const NativeDocumentState &previous) override;
-    void clear_transient_state() noexcept override { auditions.clear(); }
+    [[nodiscard]] const NativeAudioProvider *audio() const noexcept override { return this; }
     std::shared_ptr<const axk::formats::a_series::Document> document;
     ImageSourceRef source_reference;
     std::shared_ptr<const MediaContainer> media;
@@ -70,19 +39,18 @@ struct SessionState final : NativeDocumentState {
     std::unordered_map<std::string, std::uint64_t> waveform_cluster_counts_by_id;
     std::vector<CatalogIssue> catalog_issues;
     std::unordered_map<std::uint64_t, std::pair<std::uint64_t, VolumeCapacityReport>> volume_capacity_cache;
-    std::unordered_map<std::string, AuditionEntry> auditions;
 
-    [[nodiscard]] Result<PcmMember> prepare_member(std::string object_id, std::string role,
-                                                   const CurrentSbnkMember *sample_member,
-                                                   PcmReadWindow read_window) const;
-    [[nodiscard]] Result<PcmSource> prepare_source(std::string_view object_id, PcmReadWindow read_window,
-                                                   std::span<const ImageRelationshipItem> relationships) const;
+    [[nodiscard]] Result<native::PcmMember> prepare_member(std::string object_id, std::string role,
+                                                           const CurrentSbnkMember *sample_member,
+                                                           native::PcmReadWindow read_window) const;
+    [[nodiscard]] Result<native::PcmSource> prepare_source(std::string_view object_id,
+                                                           native::PcmReadWindow read_window) const override;
     [[nodiscard]] Result<std::vector<std::byte>> read_object_range(std::string_view object_id, std::uint64_t offset,
                                                                    std::size_t size,
                                                                    const CancellationToken &cancellation) const;
-    [[nodiscard]] Result<std::vector<std::byte>> read_member_pcm(const PcmMember &member, std::uint64_t first_frame,
-                                                                 std::size_t frame_count,
-                                                                 const CancellationToken &cancellation) const;
+    [[nodiscard]] Result<std::vector<std::byte>> read_member_pcm(const native::PcmMember &member,
+                                                                 std::uint64_t first_frame, std::size_t frame_count,
+                                                                 const CancellationToken &cancellation) const override;
 };
 
 [[nodiscard]] inline SessionState &state(NativeDocumentState &document) {

@@ -129,7 +129,8 @@ describe('AudioImportAuditionController', () => {
             timeline: {
                 frameCount: 441,
                 sampleRate: 44_100,
-                loopMode: 4,
+                direction: 'FORWARD',
+                looping: false,
                 loopStartFrame: 0,
                 loopLengthFrames: 0,
             },
@@ -161,7 +162,8 @@ describe('AudioImportAuditionController', () => {
             timeline: {
                 frameCount: 44_100,
                 sampleRate: 44_100,
-                loopMode: 1,
+                direction: 'FORWARD',
+                looping: true,
                 loopStartFrame: 4_410,
                 loopLengthFrames: 22_050,
             },
@@ -191,7 +193,8 @@ describe('AudioImportAuditionController', () => {
             timeline: {
                 frameCount: 3,
                 sampleRate: 44_100,
-                loopMode: 4,
+                direction: 'FORWARD',
+                looping: false,
                 loopStartFrame: 0,
                 loopLengthFrames: 0,
             },
@@ -224,7 +227,8 @@ describe('AudioImportAuditionController', () => {
             timeline: {
                 frameCount: 441,
                 sampleRate: 44_100,
-                loopMode: 4,
+                direction: 'FORWARD',
+                looping: false,
                 loopStartFrame: 0,
                 loopLengthFrames: 0,
             },

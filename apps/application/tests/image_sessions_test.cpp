@@ -499,7 +499,7 @@ TEST_F(ImageSessionTest, OpensReadOnlyAxkObjectDirectoryThroughSandboxHandles) {
     ASSERT_TRUE(wave_data) << wave_data.error().message;
     ASSERT_FALSE(wave_data->items.empty());
     const auto audition = sessions.prepare_audition({opened->image_id, "document-a-series-source-1"}, "owner-a",
-                                                    {wave_data->items.front().id});
+                                                    {wave_data->items.front().id}, opened->revision);
     ASSERT_TRUE(audition) << audition.error().message;
     EXPECT_GT(audition->content_size_bytes, 44U);
 
@@ -545,7 +545,7 @@ TEST_F(ImageSessionTest, OpensReadOnlyA3kArchiveWithBrowseAndAuditionCapabilitie
     ASSERT_TRUE(wave_data) << wave_data.error().message;
     ASSERT_FALSE(wave_data->items.empty());
     const auto audition = sessions.prepare_audition({opened->image_id, "document-a-series-source-1"}, "owner-a",
-                                                    {wave_data->items.front().id});
+                                                    {wave_data->items.front().id}, opened->revision);
     ASSERT_TRUE(audition) << audition.error().message;
     EXPECT_GT(audition->content_size_bytes, 44U);
 
@@ -709,7 +709,7 @@ TEST_F(ImageSessionTest, AttachesSelectedOrNearbyCompanionSegmentsOnlyOnRequest)
     ASSERT_TRUE(complete_objects) << complete_objects.error().message;
     ASSERT_EQ(complete_objects->items.size(), 1U);
     const auto audition = sessions.prepare_audition({complete->image_id, "document-a-series-source-1"}, "owner-a",
-                                                    {complete_objects->items.front().id});
+                                                    {complete_objects->items.front().id}, complete->revision);
     ASSERT_TRUE(audition) << audition.error().message;
     EXPECT_GT(audition->content_size_bytes, 44U);
     ASSERT_TRUE(sessions.close(complete->image_id, "owner-a"));
@@ -723,8 +723,8 @@ TEST_F(ImageSessionTest, AttachesSelectedOrNearbyCompanionSegmentsOnlyOnRequest)
     ASSERT_TRUE(sibling_objects) << sibling_objects.error().message;
     ASSERT_EQ(sibling_objects->items.size(), 1U);
     const auto object_id = sibling_objects->items.front().id;
-    const auto rejected =
-        sessions.prepare_audition({incomplete->image_id, "document-a-series-source-1"}, "owner-a", {object_id});
+    const auto rejected = sessions.prepare_audition({incomplete->image_id, "document-a-series-source-1"}, "owner-a",
+                                                    {object_id}, incomplete->revision);
     ASSERT_FALSE(rejected);
     EXPECT_EQ(rejected.error().code, "companion_disks_required");
     EXPECT_NE(rejected.error().message.find("Add extracted companion disk folders"), std::string::npos);
@@ -756,8 +756,9 @@ TEST_F(ImageSessionTest, AttachesSelectedOrNearbyCompanionSegmentsOnlyOnRequest)
     ASSERT_TRUE(refreshed_objects) << refreshed_objects.error().message;
     ASSERT_EQ(refreshed_objects->items.size(), 1U);
     EXPECT_EQ(refreshed_objects->items.front().id, object_id);
-    const auto sibling_audition = sessions.prepare_audition({attached->image_id, "document-a-series-source-1"},
-                                                            "owner-a", {refreshed_objects->items.front().id});
+    const auto sibling_audition =
+        sessions.prepare_audition({attached->image_id, "document-a-series-source-1"}, "owner-a",
+                                  {refreshed_objects->items.front().id}, attached->revision);
     ASSERT_TRUE(sibling_audition) << sibling_audition.error().message;
     EXPECT_GT(sibling_audition->content_size_bytes, 44U);
     EXPECT_FALSE(reservations.try_acquire(
@@ -867,7 +868,7 @@ TEST_F(ImageSessionTest, AttachesACompleteMissingStereoLaneAlongsideContinuation
     ASSERT_TRUE(samples) << samples.error().message;
     ASSERT_EQ(samples->items.size(), 1U);
     const auto rejected = sessions.prepare_audition({opened->image_id, "document-a-series-source-1"}, "owner-a",
-                                                    {samples->items.front().id});
+                                                    {samples->items.front().id}, opened->revision);
     ASSERT_FALSE(rejected);
     EXPECT_EQ(rejected.error().code, "companion_disks_required");
 
@@ -881,7 +882,7 @@ TEST_F(ImageSessionTest, AttachesACompleteMissingStereoLaneAlongsideContinuation
     ASSERT_TRUE(attached_wave_data) << attached_wave_data.error().message;
     EXPECT_EQ(attached_wave_data->items.size(), 2U);
     const auto audition = sessions.prepare_audition({attached->image_id, "document-a-series-source-1"}, "owner-a",
-                                                    {samples->items.front().id});
+                                                    {samples->items.front().id}, attached->revision);
     ASSERT_TRUE(audition) << audition.error().message;
     ASSERT_EQ(audition->clips.size(), 1U);
     EXPECT_EQ(audition->clips.front().lanes.size(), 2U);
@@ -1091,8 +1092,8 @@ TEST_F(ImageSessionTest, RefreshedDocumentKeepsObjectIdentityAndReplacesAudition
     ASSERT_TRUE(objects);
     ASSERT_FALSE(objects->items.empty());
     const auto object_id = objects->items.front().id;
-    const auto audition =
-        sessions.prepare_audition({opened->image_id, "document-a-series-source-1"}, "owner", {object_id});
+    const auto audition = sessions.prepare_audition({opened->image_id, "document-a-series-source-1"}, "owner",
+                                                    {object_id}, opened->revision);
     ASSERT_TRUE(audition) << audition.error().message;
     std::vector<std::byte> before_pcm;
     {
@@ -1117,8 +1118,8 @@ TEST_F(ImageSessionTest, RefreshedDocumentKeepsObjectIdentityAndReplacesAudition
     ASSERT_TRUE(files_after) << files_after.error().message;
     ASSERT_EQ(files_after->items.size(), 1U);
     EXPECT_EQ(files_after->items.front().id, files_before->items.front().id);
-    const auto fresh_audition =
-        sessions.prepare_audition({opened->image_id, "document-a-series-source-1"}, "owner", {object_id});
+    const auto fresh_audition = sessions.prepare_audition({opened->image_id, "document-a-series-source-1"}, "owner",
+                                                          {object_id}, refreshed->revision);
     ASSERT_TRUE(fresh_audition) << fresh_audition.error().message;
     const auto after = sessions.audition_range(fresh_audition->audition_id, "owner", 44U, 32U);
     ASSERT_TRUE(after);
@@ -1137,8 +1138,7 @@ TEST_F(ImageSessionTest, AdapterRetainsItsDecodedDocumentAndPcmReaders) {
     ASSERT_NE(wave, (*adapter)->objects.end());
     EXPECT_GT((*adapter)->descriptors_by_id.at(wave->id)->size, 0U);
     EXPECT_NE((*adapter)->snapshots_by_id.at(wave->id), nullptr);
-    const auto source = (*adapter)->prepare_source(wave->id, axk::app::formats::a_series::PcmReadWindow::stored_pcm,
-                                                   (*adapter)->relationships);
+    const auto source = (*adapter)->prepare_source(wave->id, axk::native::PcmReadWindow::stored_pcm);
     ASSERT_TRUE(source) << source.error().message;
     ASSERT_FALSE(source->members.empty());
     const auto pcm = (*adapter)->read_member_pcm(source->members.front(), 0U, 8U, {});
@@ -1777,17 +1777,20 @@ TEST_F(ImageSessionTest, BuildsBoundedPreviewForOpaqueWaveformIdentifier) {
     ASSERT_TRUE(objects);
     const auto waveform = std::ranges::find(objects->items, "SMPL", &axk::app::ImageObjectItem::type);
     ASSERT_NE(waveform, objects->items.end());
-    const auto preview =
-        sessions.preview({opened->image_id, "document-a-series-source-1"}, "owner-a", waveform->id, 32U);
+    const auto preview = sessions.preview({opened->image_id, "document-a-series-source-1"}, "owner-a", waveform->id,
+                                          32U, opened->revision);
     ASSERT_TRUE(preview) << preview.error().message;
     EXPECT_EQ(preview->object_id, waveform->id);
     ASSERT_EQ(preview->lanes.size(), 1U);
     EXPECT_EQ(preview->lanes.front().bins.size(), 32U);
     EXPECT_GT(preview->lanes.front().stored_frame_count, 0U);
     EXPECT_GT(preview->lanes.front().sample_rate, 0U);
-    EXPECT_TRUE(sessions.preview({opened->image_id, "document-a-series-source-1"}, "owner-a", waveform->id, 1024U));
-    EXPECT_FALSE(sessions.preview({opened->image_id, "document-a-series-source-1"}, "owner-a", waveform->id, 4097U));
-    EXPECT_FALSE(sessions.preview({opened->image_id, "document-a-series-source-1"}, "owner-a", "object-unknown", 32U));
+    EXPECT_TRUE(sessions.preview({opened->image_id, "document-a-series-source-1"}, "owner-a", waveform->id, 1024U,
+                                 opened->revision));
+    EXPECT_FALSE(sessions.preview({opened->image_id, "document-a-series-source-1"}, "owner-a", waveform->id, 4097U,
+                                  opened->revision));
+    EXPECT_FALSE(sessions.preview({opened->image_id, "document-a-series-source-1"}, "owner-a", "object-unknown", 32U,
+                                  opened->revision));
 }
 
 TEST_F(ImageSessionTest, ReturnsDecodedObjectDetailWithoutContentPayloads) {
@@ -1870,11 +1873,12 @@ TEST_F(ImageSessionTest, RejectsUnsupportedWaveDataTransferControlsForPreviewAnd
             if (std::string_view{type} == "SMPL") {
                 EXPECT_EQ(detail->at("object").at("decoded").at("pcmTransferControl").at("value"), control);
             }
-            const auto preview = sessions.preview({opened->image_id, "document-a-series-source-1"}, "owner-a", id, 32U);
+            const auto preview = sessions.preview({opened->image_id, "document-a-series-source-1"}, "owner-a", id, 32U,
+                                                  opened->revision);
             ASSERT_FALSE(preview);
             EXPECT_EQ(preview.error().code, "audition_unsupported");
-            const auto audition =
-                sessions.prepare_audition({opened->image_id, "document-a-series-source-1"}, "owner-a", {id});
+            const auto audition = sessions.prepare_audition({opened->image_id, "document-a-series-source-1"}, "owner-a",
+                                                            {id}, opened->revision);
             ASSERT_FALSE(audition);
             EXPECT_EQ(audition.error().code, "audition_unsupported");
             EXPECT_EQ(audition.error().context.object_id, id);
@@ -1893,7 +1897,7 @@ TEST_F(ImageSessionTest, PreparesOwnerBoundRangeReadableWavAndInvalidatesItWithT
     ASSERT_FALSE(objects->items.empty());
 
     const auto audition = sessions.prepare_audition({opened->image_id, "document-a-series-source-1"}, "owner-a",
-                                                    {objects->items.front().id});
+                                                    {objects->items.front().id}, opened->revision);
     ASSERT_TRUE(audition) << audition.error().message;
     ASSERT_EQ(audition->clips.size(), 1U);
     ASSERT_EQ(audition->clips.front().lanes.size(), 1U);
@@ -1934,8 +1938,8 @@ TEST_F(ImageSessionTest, PreparesOneOrderedBundleAndReadsAcrossLaneBoundaries) {
     ASSERT_FALSE(wave_data->items.empty());
 
     const std::vector object_ids{samples->items.front().id, wave_data->items.front().id};
-    const auto audition =
-        sessions.prepare_audition({opened->image_id, "document-a-series-source-1"}, "owner-a", object_ids);
+    const auto audition = sessions.prepare_audition({opened->image_id, "document-a-series-source-1"}, "owner-a",
+                                                    object_ids, opened->revision);
     ASSERT_TRUE(audition) << audition.error().message;
     ASSERT_EQ(audition->clips.size(), 2U);
     EXPECT_EQ(audition->clips[0].object_id, object_ids[0]);
@@ -1968,7 +1972,7 @@ TEST_F(ImageSessionTest, PreparesSampleAuditionFromConfirmedLinkedWaveData) {
     EXPECT_EQ(detail->at("editing").at("profile"), "a-series/sample");
 
     const auto audition = sessions.prepare_audition({opened->image_id, "document-a-series-source-1"}, "owner-a",
-                                                    {objects->items.front().id});
+                                                    {objects->items.front().id}, opened->revision);
     ASSERT_TRUE(audition) << audition.error().message;
     ASSERT_EQ(audition->clips.size(), 1U);
     ASSERT_EQ(audition->clips.front().lanes.size(), 1U);
@@ -2073,8 +2077,8 @@ TEST_F(ImageSessionTest, PreviewsAndAuditionsAuthoredLoopedSampleFromItsFullWave
     ASSERT_TRUE(samples) << samples.error().message;
     ASSERT_EQ(samples->items.size(), 1U);
 
-    const auto preview =
-        sessions.preview({opened->image_id, "document-a-series-source-1"}, "owner-a", samples->items.front().id, 32U);
+    const auto preview = sessions.preview({opened->image_id, "document-a-series-source-1"}, "owner-a",
+                                          samples->items.front().id, 32U, opened->revision);
     ASSERT_TRUE(preview) << preview.error().message;
     ASSERT_EQ(preview->lanes.size(), 1U);
     EXPECT_EQ(preview->lanes.front().stored_frame_count, 404U);
@@ -2083,7 +2087,7 @@ TEST_F(ImageSessionTest, PreviewsAndAuditionsAuthoredLoopedSampleFromItsFullWave
     EXPECT_EQ(preview->lanes.front().loop_start_frame, 17U);
     EXPECT_EQ(preview->lanes.front().loop_length_frames, 335U);
     const auto audition = sessions.prepare_audition({opened->image_id, "document-a-series-source-1"}, "owner-a",
-                                                    {samples->items.front().id});
+                                                    {samples->items.front().id}, opened->revision);
     ASSERT_TRUE(audition) << audition.error().message;
     ASSERT_EQ(audition->clips.front().lanes.size(), 1U);
     EXPECT_EQ(audition->clips.front().lanes.front().frame_count, 400U);
@@ -2105,6 +2109,7 @@ TEST_F(ImageSessionTest, InvokesAuditionPreparationThroughTheApplicationRegistry
     const auto result = registry.invoke("auditions.prepare",
                                         {{"imageId", opened->image_id},
                                          {"documentId", "document-a-series-source-1"},
+                                         {"expectedRevision", opened->revision},
                                          {"objectIds", {objects->items.front().id}}},
                                         {.owner_id = "owner-a",
                                          .request_id = "request-a",
@@ -2143,7 +2148,7 @@ TEST_F(ImageSessionTest, PreviewsStoredWaveDataWithSamplePlaybackWindowAndAuditi
     EXPECT_EQ(wave->waveform->storage_state, "COMPLETE");
 
     const auto sample_preview =
-        sessions.preview({opened->image_id, "document-a-series-source-1"}, "owner-a", sample.id, 32U);
+        sessions.preview({opened->image_id, "document-a-series-source-1"}, "owner-a", sample.id, 32U, opened->revision);
     ASSERT_TRUE(sample_preview) << sample_preview.error().message;
     ASSERT_EQ(sample_preview->lanes.size(), 1U);
     const auto &sample_preview_lane = sample_preview->lanes.front();
@@ -2157,8 +2162,8 @@ TEST_F(ImageSessionTest, PreviewsStoredWaveDataWithSamplePlaybackWindowAndAuditi
     EXPECT_EQ(sample_preview_lane.loop_length_frames, 8U);
     EXPECT_EQ(sample_preview_lane.bins.size(), 32U);
 
-    const auto stored_audition =
-        sessions.prepare_audition({opened->image_id, "document-a-series-source-1"}, "owner-a", {sample.id}, {}, true);
+    const auto stored_audition = sessions.prepare_audition({opened->image_id, "document-a-series-source-1"}, "owner-a",
+                                                           {sample.id}, opened->revision, {}, true);
     ASSERT_TRUE(stored_audition) << stored_audition.error().message;
     ASSERT_EQ(stored_audition->clips.front().lanes.size(), 1U);
     EXPECT_EQ(stored_audition->clips.front().lanes.front().frame_count, 132U);
@@ -2166,10 +2171,10 @@ TEST_F(ImageSessionTest, PreviewsStoredWaveDataWithSamplePlaybackWindowAndAuditi
     ASSERT_TRUE(stored_pcm) << stored_pcm.error().message;
     EXPECT_EQ(stored_pcm->bytes.size(), 264U);
 
-    const auto sample_audition =
-        sessions.prepare_audition({opened->image_id, "document-a-series-source-1"}, "owner-a", {sample.id});
-    const auto wave_audition =
-        sessions.prepare_audition({opened->image_id, "document-a-series-source-1"}, "owner-a", {wave->id});
+    const auto sample_audition = sessions.prepare_audition({opened->image_id, "document-a-series-source-1"}, "owner-a",
+                                                           {sample.id}, opened->revision);
+    const auto wave_audition = sessions.prepare_audition({opened->image_id, "document-a-series-source-1"}, "owner-a",
+                                                         {wave->id}, opened->revision);
     ASSERT_TRUE(sample_audition) << sample_audition.error().message;
     ASSERT_TRUE(wave_audition) << wave_audition.error().message;
     ASSERT_EQ(sample_audition->clips.size(), 1U);
@@ -2180,7 +2185,8 @@ TEST_F(ImageSessionTest, PreviewsStoredWaveDataWithSamplePlaybackWindowAndAuditi
     const auto &sample_lane = sample_clip.lanes.front();
     const auto &wave_lane = wave_audition->clips.front().lanes.front();
     EXPECT_EQ(sample_lane.frame_count, 32U);
-    EXPECT_EQ(sample_clip.loop_mode, 1U);
+    EXPECT_EQ(sample_clip.direction, "FORWARD");
+    EXPECT_TRUE(sample_clip.looping);
     EXPECT_EQ(sample_lane.loop_start_frame, 8U);
     EXPECT_EQ(sample_lane.loop_length_frames, 8U);
     EXPECT_EQ(wave_lane.frame_count, 32U);
@@ -2196,7 +2202,7 @@ TEST_F(ImageSessionTest, PreviewsStoredWaveDataWithSamplePlaybackWindowAndAuditi
     EXPECT_EQ(sample_pcm->bytes, wave_pcm->bytes);
 
     const auto wave_preview =
-        sessions.preview({opened->image_id, "document-a-series-source-1"}, "owner-a", wave->id, 32U);
+        sessions.preview({opened->image_id, "document-a-series-source-1"}, "owner-a", wave->id, 32U, opened->revision);
     ASSERT_TRUE(wave_preview) << wave_preview.error().message;
     ASSERT_EQ(wave_preview->lanes.size(), 1U);
     const auto &wave_preview_lane = wave_preview->lanes.front();
@@ -2218,7 +2224,7 @@ TEST_F(ImageSessionTest, RejectsSamplePlaybackWindowsOutsideStoredWaveData) {
     ASSERT_TRUE(objects) << objects.error().message;
     ASSERT_FALSE(objects->items.empty());
     const auto audition = sessions.prepare_audition({opened->image_id, "document-a-series-source-1"}, "owner-a",
-                                                    {objects->items.front().id});
+                                                    {objects->items.front().id}, opened->revision);
     ASSERT_FALSE(audition);
     EXPECT_EQ(audition.error().code, "invalid_audio_range");
     EXPECT_EQ(audition.error().context.object_id, objects->items.front().id);
@@ -2234,8 +2240,8 @@ TEST_F(ImageSessionTest, UsesIndependentStereoMemberWindowsAndPadsTheShorterLane
     ASSERT_TRUE(objects) << objects.error().message;
     ASSERT_FALSE(objects->items.empty());
 
-    const auto preview =
-        sessions.preview({opened->image_id, "document-a-series-source-1"}, "owner-a", objects->items.front().id, 32U);
+    const auto preview = sessions.preview({opened->image_id, "document-a-series-source-1"}, "owner-a",
+                                          objects->items.front().id, 32U, opened->revision);
     ASSERT_TRUE(preview) << preview.error().message;
     ASSERT_EQ(preview->lanes.size(), 2U);
     EXPECT_EQ(preview->lanes[0].role, "LEFT");
@@ -2253,12 +2259,13 @@ TEST_F(ImageSessionTest, UsesIndependentStereoMemberWindowsAndPadsTheShorterLane
     EXPECT_EQ(preview->lanes[1].loop_length_frames, 8U);
 
     const auto audition = sessions.prepare_audition({opened->image_id, "document-a-series-source-1"}, "owner-a",
-                                                    {objects->items.front().id});
+                                                    {objects->items.front().id}, opened->revision);
     ASSERT_TRUE(audition) << audition.error().message;
     ASSERT_EQ(audition->clips.size(), 1U);
     const auto &clip = audition->clips.front();
     ASSERT_EQ(clip.lanes.size(), 2U);
-    EXPECT_EQ(clip.loop_mode, 1U);
+    EXPECT_EQ(clip.direction, "FORWARD");
+    EXPECT_TRUE(clip.looping);
     EXPECT_TRUE(clip.warnings.empty());
     EXPECT_EQ(clip.lanes[0].frame_count, 32U);
     EXPECT_EQ(clip.lanes[0].loop_start_frame, 8U);
@@ -2282,14 +2289,15 @@ TEST_F(ImageSessionTest, PreservesMixedStereoLaneRatesForIndependentClientNormal
     ASSERT_FALSE(objects->items.empty());
 
     const auto audition = sessions.prepare_audition({opened->image_id, "document-a-series-source-1"}, "owner-a",
-                                                    {objects->items.front().id});
+                                                    {objects->items.front().id}, opened->revision);
     ASSERT_TRUE(audition) << audition.error().message;
     ASSERT_EQ(audition->clips.size(), 1U);
     const auto &clip = audition->clips.front();
     ASSERT_EQ(clip.lanes.size(), 2U);
     EXPECT_EQ(clip.lanes[0].sample_rate, 48'000U);
     EXPECT_EQ(clip.lanes[1].sample_rate, 32'000U);
-    EXPECT_EQ(clip.loop_mode, 0U);
+    EXPECT_EQ(clip.direction, "FORWARD");
+    EXPECT_FALSE(clip.looping);
     EXPECT_NE(std::ranges::find(clip.warnings,
                                 "Sample member formats differ; audition will normalize each lane independently"),
               clip.warnings.end());
@@ -2306,7 +2314,7 @@ TEST_F(ImageSessionTest, PreparesSampleAuditionWhenTheNamedWaveDataHasAStaleCach
     ASSERT_FALSE(objects->items.empty());
 
     const auto audition = sessions.prepare_audition({opened->image_id, "document-a-series-source-1"}, "owner-a",
-                                                    {objects->items.front().id});
+                                                    {objects->items.front().id}, opened->revision);
     ASSERT_TRUE(audition) << audition.error().message;
     ASSERT_EQ(audition->clips.size(), 1U);
     ASSERT_EQ(audition->clips.front().lanes.size(), 1U);
@@ -2323,7 +2331,7 @@ TEST_F(ImageSessionTest, ActiveAuditionRangesKeepTheOwningImageSessionAlive) {
     ASSERT_TRUE(objects);
     ASSERT_FALSE(objects->items.empty());
     const auto audition = sessions.prepare_audition({opened->image_id, "document-a-series-source-1"}, "owner-a",
-                                                    {objects->items.front().id});
+                                                    {objects->items.front().id}, opened->revision);
     ASSERT_TRUE(audition) << audition.error().message;
 
     now += std::chrono::seconds{4};

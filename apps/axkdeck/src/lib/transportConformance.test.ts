@@ -120,13 +120,19 @@ async function exerciseReadContract(transport: ImageTransport, source: FileLocat
 
     const preview = await transport.preview(image.sessionId, objects.objects[0]!.key, 16);
     expect(preview).toEqual({
-        objectId: 'wave-1',
+        imageId: 'image-1',
+        documentId: 'document-a-series-source-1',
+        revision: 1,
+        warnings: [],
+        objectId: 'sample-1',
         lanes: [
             {
                 role: 'MONO',
                 sourceObjectId: 'wave-1',
                 sampleRate: 44_100,
                 sampleWidthBytes: 2,
+                nativeBitDepth: 16,
+                sampleRateApproximate: false,
                 storedFrameCount: 4,
                 playbackStartFrame: 0,
                 playbackLengthFrames: 4,
@@ -165,7 +171,11 @@ describe('ImageTransport shared read contract', () => {
         const transport = new InMemoryImageTransport({
             opened,
             preview: {
-                objectId: 'wave-1',
+                imageId: 'image-1',
+                documentId: 'document-a-series-source-1',
+                revision: 1,
+                warnings: [],
+                objectId: 'sample-1',
                 lanes: [
                     {
                         role: 'MONO',
@@ -173,6 +183,8 @@ describe('ImageTransport shared read contract', () => {
                         sampleRate: 44_100,
                         storedFrameCount: 4,
                         sampleWidthBytes: 2,
+                        nativeBitDepth: 16,
+                        sampleRateApproximate: false,
                         playbackStartFrame: 0,
                         playbackLengthFrames: 4,
                         loopStartFrame: 0,
@@ -375,13 +387,19 @@ describe('ImageTransport shared read contract', () => {
                 }
                 if (url.pathname.endsWith('/preview')) {
                     return json({
-                        objectId: 'wave-1',
+                        imageId: 'image-1',
+                        documentId: 'document-a-series-source-1',
+                        revision: 1,
+                        warnings: [],
+                        objectId: 'sample-1',
                         lanes: [
                             {
                                 role: 'MONO',
                                 sourceObjectId: 'wave-1',
                                 sampleRate: 44_100,
                                 sampleWidthBytes: 2,
+                                nativeBitDepth: 16,
+                                sampleRateApproximate: false,
                                 storedFrameCount: 4,
                                 playbackStartFrame: 0,
                                 playbackLengthFrames: 4,

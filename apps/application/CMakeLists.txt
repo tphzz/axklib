@@ -32,7 +32,7 @@ add_library(axk_application STATIC src/alteration_journal.cpp src/alteration_jou
                                    src/filesystem_file_publication.cpp src/filesystem_native.cpp
                                    src/filesystem_native_publication.cpp src/filesystem_paths.cpp
                                    src/filesystem_roots.cpp src/filesystem_support.cpp src/filesystem_tree.cpp
-                                   src/image_session_access.cpp src/image_session_allocation_map.cpp src/formats/a_series/audition.cpp
+                                   src/image_session_access.cpp src/image_session_allocation_map.cpp src/image_audio.cpp
                                    src/image_allocation_map.cpp
                                    src/image_filesystem.cpp src/image_filesystem_index.cpp src/image_filesystem_edits.cpp
                                    src/image_filesystem_attributes.cpp
@@ -86,7 +86,7 @@ add_library(axklib::application ALIAS axk_application)
 target_sources(axk_application PRIVATE src/image_document_discovery.cpp src/image_document_browsing.cpp src/native_document_snapshot.cpp
   src/conversion_plan_store.cpp src/conversion_operations.cpp src/conversion_sources.cpp src/prepared_session_commit.cpp
   src/image_source_read.cpp src/image_filesystem_workspace.cpp src/formats/a_series/admission.cpp
-  src/formats/tx16w/session_state.cpp src/formats/tx16w/admission.cpp)
+  src/formats/tx16w/session_state.cpp src/formats/tx16w/audio.cpp src/formats/tx16w/admission.cpp)
 set_target_properties(axk_application PROPERTIES POSITION_INDEPENDENT_CODE ON CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
 target_sources(axk_application PRIVATE src/device_provider.cpp src/device_xml.cpp src/device_source.cpp src/device_sessions.cpp
                                        src/device_patch_alignment.cpp src/device_transactions.cpp src/image_device_mutation.cpp

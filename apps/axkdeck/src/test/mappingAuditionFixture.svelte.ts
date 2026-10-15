@@ -15,12 +15,18 @@ export class MappingAuditionFixture {
     readonly mapping: MappingAudition;
     constructor() {
         const lane = {
+            role: 'MONO' as const,
+            sourceObjectId: 'wave',
+            sampleWidthBytes: 2,
+            loopStartFrame: 0,
+            loopLengthFrames: 0,
             sampleRate: fixtureRate,
             frameCount: fixtureFrames,
             contentOffsetBytes: 0,
             wavSizeBytes: 44 + fixtureFrames * 2,
         };
         const transport = {
+            audioIdentity: () => ({ imageId: 'image-1', documentId: 'document-1', revision: 1 }),
             objectDetail: async (_: number, id: string) => {
                 const detail = mappingDetail(id);
                 if (detail.editing?.profile === 'a-series/sample') {
@@ -35,10 +41,21 @@ export class MappingAuditionFixture {
                 }
                 return detail;
             },
-            prepareAuditionBundle: async () => ({
+            prepareAuditionBundle: async (_session: number, objectIds: readonly string[]) => ({
                 auditionId: 'mapping-fixture',
+                imageId: 'image-1',
+                documentId: 'document-1',
+                revision: 1,
                 contentSizeBytes: lane.wavSizeBytes,
-                clips: [{ lanes: [lane] }],
+                clips: [
+                    {
+                        objectId: objectIds[0]!,
+                        direction: 'FORWARD' as const,
+                        looping: false,
+                        warnings: [],
+                        lanes: [lane],
+                    },
+                ],
             }),
             readAuditionContent: async () => fixtureWave(),
             deleteAudition: async () => {},

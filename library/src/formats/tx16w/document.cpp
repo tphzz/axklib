@@ -292,6 +292,37 @@ Result<Wave> Document::read_wave(std::string_view id, const CancellationToken &c
     return wave;
 }
 
+Result<std::vector<std::int16_t>> Document::read_wave_frames(std::string_view id, std::uint64_t first_frame,
+                                                             std::size_t frame_count,
+                                                             const CancellationToken &cancellation) const {
+    const auto found = object(id);
+    if (!found)
+        return std::unexpected(found.error());
+    const auto *header = std::get_if<WaveHeader>(&(*found)->value);
+    if (!header)
+        return std::unexpected(document_error("Native object is not a TX16W Wave"));
+    const auto frames = static_cast<std::uint64_t>(header->attack_frames) + header->repeat_frames;
+    if (first_frame > frames || frame_count > frames - first_frame)
+        return std::unexpected(document_error("TX16W PCM range exceeds the declared Wave"));
+    auto bytes = prefix(*sources_, (*found)->location, 32U, cancellation);
+    if (!bytes)
+        return std::unexpected(bytes.error());
+    const auto current = decode_wave_header(*bytes, (*found)->location.length, header->name);
+    if (!current || *current != *header)
+        return std::unexpected(make_error(ErrorCode::transaction_stale, ErrorCategory::object,
+                                          "TX16W Wave metadata changed after opening"));
+    if (frame_count == 0U)
+        return std::vector<std::int16_t>{};
+    auto location = (*found)->location;
+    const auto skip = static_cast<std::size_t>(first_frame % 2U);
+    location.offset += 32U + (first_frame / 2U) * 3U;
+    location.length = ((static_cast<std::uint64_t>(frame_count) + skip + 1U) / 2U) * 3U;
+    bytes = sources_->read(location, cancellation);
+    if (!bytes)
+        return std::unexpected(bytes.error());
+    return decode_packed_pcm(*bytes, skip, frame_count);
+}
+
 native::FormatProvider provider() {
     return {{std::string{format_id}, "Yamaha TX16W", {"yamaha-native"}},
             [](const native::SourceSet &sources, const CancellationToken &cancellation) -> Result<native::Recognition> {

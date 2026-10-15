@@ -134,6 +134,15 @@ export interface InMemoryImageTransportOptions {
 }
 
 export class InMemoryImageTransport implements ImageTransport {
+    audioIdentity(sessionId: number): ReturnType<ImageTransport['audioIdentity']> {
+        const configured = this.options.operations?.audioIdentity;
+        if (configured) return configured(sessionId);
+        if (this.options.preview) {
+            const { imageId, documentId, revision } = this.options.preview;
+            return { imageId, documentId, revision };
+        }
+        throw this.unsupported('audioIdentity');
+    }
     selectDocument(
         sessionId: number,
         documentId: string | null | undefined,
@@ -492,10 +501,15 @@ export class InMemoryImageTransport implements ImageTransport {
         return this.invoke('startProgramAssignmentCleanup', [sessionId, contentScopeId, assignments]);
     }
 
-    async preview(sessionId: number, objectKey: string, binCount: number): Promise<PreviewEnvelope> {
+    async preview(
+        sessionId: number,
+        objectKey: string,
+        binCount: number,
+        signal?: AbortSignal,
+    ): Promise<PreviewEnvelope> {
         this.calls.push('preview');
         const configured = this.options.operations?.preview;
-        if (configured) return configured(sessionId, objectKey, binCount);
+        if (configured) return configured(sessionId, objectKey, binCount, signal);
         if (this.options.preview) return this.options.preview;
         throw this.unsupported('preview');
     }

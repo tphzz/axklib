@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { HttpImageTransport } from './httpTransport';
 import { serverDirectoryLocation, clientUploadLocation, serverFileLocation } from './storageLocations';
 import type { FileLocation } from './storageLocations';
+import { nativeWorkspaceFixture } from '../test/nativeWorkspaceFixture';
 
 const serverFile = (relativePath: string) => serverFileLocation({ rootId: 'workspace', relativePath });
 
@@ -26,6 +27,42 @@ function completedImageOpen(result: unknown, jobId = 'job-image-open'): Response
         },
         202,
     );
+}
+
+function audioImageSummary() {
+    const workspace = nativeWorkspaceFixture();
+    return {
+        imageId: 'audio-image',
+        revision: 3,
+        sources: workspace.sources,
+        documents: [{ ...workspace.documents[0]!, formatId: 'yamaha.tx16w', profile: 'yamaha-native' }],
+        discovery: workspace.discovery,
+    };
+}
+
+function audioPreview() {
+    return {
+        imageId: 'audio-image',
+        documentId: 'document-a-series-source-1',
+        revision: 3,
+        objectId: 'tx:wave+1',
+        warnings: [],
+        lanes: [
+            {
+                role: 'MONO',
+                sourceObjectId: 'tx:wave+1',
+                sampleRate: 33333,
+                sampleWidthBytes: 2,
+                nativeBitDepth: 12,
+                storedFrameCount: 5,
+                playbackStartFrame: 0,
+                playbackLengthFrames: 5,
+                loopStartFrame: 2,
+                loopLengthFrames: 3,
+                bins: [{ minimum: -32768, maximum: 32752 }],
+            },
+        ],
+    };
 }
 
 class OpeningWebSocket {
@@ -712,6 +749,137 @@ describe('HttpImageTransport', () => {
             },
         ]);
     });
+
+    it.each([
+        {},
+        { imageId: 'other-image' },
+        { documentId: 'other-document' },
+        { revision: 2 },
+        { objectId: 'other-wave' },
+    ])('binds preview requests and replies to the selected identity: %j', async (replyIdentity) => {
+        let query: URLSearchParams | undefined;
+        vi.stubGlobal(
+            'fetch',
+            vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+                const url = new URL(String(input));
+                if (url.pathname.endsWith('/images') && init?.method === 'POST')
+                    return completedImageOpen(audioImageSummary());
+                if (url.pathname.endsWith('/preview')) {
+                    query = url.searchParams;
+                    return json({ ...audioPreview(), ...replyIdentity });
+                }
+                throw new Error(`unexpected request ${init?.method} ${url}`);
+            }),
+        );
+        const transport = new HttpImageTransport({
+            baseUrl: 'http://127.0.0.1:4000/api/v1',
+            bearerToken: 'secret',
+            mode: 'remote',
+        });
+        const opened = await transport.openImage([serverFile('TONE.W01')]);
+        const pending = transport.preview(opened.sessionId, 'tx:wave+1', 32);
+        if (Object.keys(replyIdentity).length) {
+            await expect(pending).rejects.toThrow();
+        } else {
+            const preview = await pending;
+            expect(preview).toMatchObject({ imageId: 'audio-image', revision: 3, objectId: 'tx:wave+1' });
+            expect(preview.lanes[0]!.bins).toEqual([{ minimum: -1, maximum: 32752 / 32768 }]);
+        }
+        expect(query?.get('expectedRevision')).toBe('3');
+        expect(query?.get('objectId')).toBe('tx:wave+1');
+    });
+
+    it.each([{}, { imageId: 'other-image' }, { documentId: 'other-document' }, { revision: 2 }])(
+        'binds audition jobs to the requested image revision: %j',
+        async (replyIdentity) => {
+            let body: unknown;
+            vi.stubGlobal(
+                'fetch',
+                vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+                    const url = new URL(String(input));
+                    if (url.pathname.endsWith('/images') && init?.method === 'POST')
+                        return completedImageOpen(audioImageSummary());
+                    if (url.pathname.endsWith('/system/capabilities')) {
+                        return json({
+                            apiVersion: 'v1',
+                            operations: [
+                                {
+                                    id: 'auditions.prepare',
+                                    method: 'POST',
+                                    route: '/api/v1/auditions',
+                                    implemented: true,
+                                    mode: 'job',
+                                    operationClass: 'read',
+                                    requiresIdempotency: false,
+                                    variant: null,
+                                },
+                            ],
+                        });
+                    }
+                    if (url.pathname.endsWith('/auditions') && init?.method === 'POST') {
+                        body = JSON.parse(String(init.body));
+                        return json({ jobId: 'audio-job', operationId: 'auditions.prepare', state: 'QUEUED' }, 202);
+                    }
+                    throw new Error(`unexpected request ${init?.method} ${url}`);
+                }),
+            );
+            const transport = new HttpImageTransport({
+                baseUrl: 'http://127.0.0.1:4000/api/v1',
+                bearerToken: 'secret',
+                mode: 'remote',
+            });
+            const opened = await transport.openImage([serverFile('TONE.W01')]);
+            const result = {
+                imageId: 'audio-image',
+                documentId: opened.documentId,
+                revision: 3,
+                auditionId: 'audition-native',
+                contentSizeBytes: 54,
+                clips: [
+                    {
+                        objectId: 'tx:wave+1',
+                        direction: 'FORWARD',
+                        looping: true,
+                        warnings: [],
+                        lanes: [
+                            {
+                                role: 'MONO',
+                                sourceObjectId: 'tx:wave+1',
+                                sampleRate: 33333,
+                                sampleWidthBytes: 2,
+                                nativeBitDepth: 12,
+                                frameCount: 5,
+                                contentOffsetBytes: 0,
+                                wavSizeBytes: 54,
+                                loopStartFrame: 2,
+                                loopLengthFrames: 3,
+                            },
+                        ],
+                    },
+                ],
+                ...replyIdentity,
+            };
+            const wait = vi.spyOn(transport, 'waitForJob').mockResolvedValue({
+                jobId: 2,
+                kind: 'auditions.prepare',
+                status: 'completed',
+                result,
+            });
+            try {
+                const pending = transport.prepareAuditionBundle(opened.sessionId, ['tx:wave+1']);
+                if (Object.keys(replyIdentity).length) await expect(pending).rejects.toThrow();
+                else await expect(pending).resolves.toEqual(result);
+                expect(body).toEqual({
+                    imageId: 'audio-image',
+                    documentId: opened.documentId,
+                    expectedRevision: 3,
+                    objectIds: ['tx:wave+1'],
+                });
+            } finally {
+                wait.mockRestore();
+            }
+        },
+    );
 
     it('assembles complete audition audio with the server-advertised range limit', async () => {
         const requestedRanges: string[] = [];

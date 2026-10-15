@@ -395,7 +395,7 @@ axk::app::formats::a_series::SessionState::object_detail(const ImageDocumentCont
         conversion = object_format_conversion(*snapshot->second, *payload, writable);
         Json sources = Json::array();
         if (sample) {
-            const auto pcm = prepare_source(object_id, formats::a_series::PcmReadWindow::stored_pcm, relationships);
+            const auto pcm = prepare_source(object_id, native::PcmReadWindow::stored_pcm);
             if (pcm)
                 for (const auto &member : pcm->members)
                     sources.push_back({{"objectId", member.object_id},

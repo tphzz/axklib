@@ -834,7 +834,7 @@ TEST_F(DeviceSessions, SfsEditingUsesTheSameSessionPipelineWithoutCopyingTheDevi
     ASSERT_TRUE(restored_samples) << restored_samples.error().message;
     ASSERT_EQ(restored_samples->items.size(), 1U);
     const auto restored_preview = images.preview({opened->image_id, "document-a-series-source-1"}, "owner",
-                                                 restored_samples->items.front().id, 16U);
+                                                 restored_samples->items.front().id, 16U, opened->revision);
     ASSERT_TRUE(restored_preview) << restored_preview.error().message;
     ASSERT_FALSE(restored_preview->lanes.empty());
     const auto result = registry.invoke("images.alter",
@@ -896,6 +896,6 @@ TEST_F(DeviceSessions, SfsEditingUsesTheSameSessionPipelineWithoutCopyingTheDevi
     ASSERT_TRUE(reopened_detail);
     EXPECT_EQ(reopened_detail->at("editing").at("parameters").at("level").get<unsigned>(), 80U);
     EXPECT_TRUE(images.preview({reopened->image_id, "document-a-series-source-1"}, "owner",
-                               reopened_samples->items.front().id, 16U));
+                               reopened_samples->items.front().id, 16U, reopened->revision));
 }
 } // namespace

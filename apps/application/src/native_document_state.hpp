@@ -9,6 +9,7 @@
 
 #include "axklib/application/image_sessions.hpp"
 #include "axklib/native/document.hpp"
+#include "native_audio.hpp"
 #include "native_filesystem_bindings.hpp"
 
 namespace axk::app {
@@ -24,7 +25,9 @@ struct NativeDocumentState {
                                                                        std::string_view object_id) const = 0;
     [[nodiscard]] virtual NativeFilesystemBindings filesystem_bindings() const = 0;
     [[nodiscard]] virtual Result<void> preserve_identity(const NativeDocumentState &previous) = 0;
-    virtual void clear_transient_state() noexcept = 0;
+    virtual void clear_transient_state() noexcept { auditions.clear(); }
+    [[nodiscard]] virtual const NativeAudioProvider *audio() const noexcept { return nullptr; }
+    std::unordered_map<std::string, AuditionEntry> auditions;
 
     std::shared_ptr<const native::Document> native_document;
     std::unordered_map<std::string, std::string> native_object_ids;

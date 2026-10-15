@@ -163,8 +163,8 @@ interface TestAuditionDescriptor {
     sampleWidthBytes: number;
     frameCount: number;
     wavSizeBytes: number;
-    loopMode: number;
-    loopModeLabel: string;
+    direction: 'FORWARD' | 'REVERSE';
+    looping: boolean;
     loopStartFrame: number;
     loopLengthFrames: number;
     warnings: string[];
@@ -179,8 +179,8 @@ function descriptor(overrides: Partial<TestAuditionDescriptor> = {}): TestAuditi
         sampleWidthBytes: 2,
         frameCount: 48_000,
         wavSizeBytes: 96_044,
-        loopMode: 0,
-        loopModeLabel: 'off',
+        direction: 'FORWARD',
+        looping: false,
         loopStartFrame: 0,
         loopLengthFrames: 0,
         warnings: [],
@@ -191,11 +191,14 @@ function descriptor(overrides: Partial<TestAuditionDescriptor> = {}): TestAuditi
 function auditionBundle(value: TestAuditionDescriptor, objectIds: readonly string[]): AuditionBundleDescriptor {
     return {
         auditionId: value.auditionId,
+        imageId: 'image-1',
+        documentId: 'document-1',
+        revision: 1,
         contentSizeBytes: value.wavSizeBytes * objectIds.length,
         clips: objectIds.map((objectId, index) => ({
             objectId,
-            loopMode: value.loopMode,
-            loopModeLabel: value.loopModeLabel,
+            direction: value.direction,
+            looping: value.looping,
             warnings: value.warnings,
             lanes: [
                 {
@@ -216,6 +219,7 @@ function auditionBundle(value: TestAuditionDescriptor, objectIds: readonly strin
 
 function transportFor(value: TestAuditionDescriptor): ImageTransport {
     return {
+        audioIdentity: () => ({ imageId: 'image-1', documentId: 'document-1', revision: 1 }),
         prepareAuditionBundle: vi.fn(async (_sessionId: number, objectIds: readonly string[]) => {
             events.push('prepare');
             return auditionBundle(value, objectIds);
@@ -315,16 +319,70 @@ describe('AuditionController', () => {
     });
 
     it.each([
-        { loopMode: 0, outputTimestamp: true },
-        { loopMode: 3, outputTimestamp: true },
-        { loopMode: 0, outputTimestamp: false },
-        { loopMode: 3, outputTimestamp: false },
-    ])(
-        'keeps mode $loopMode moving until audible completion (timestamp=$outputTimestamp)',
-        async ({ loopMode, outputTimestamp }) => {
+        { sequence: false, changed: 'revision' },
+        { sequence: false, changed: 'documentId' },
+        { sequence: true, changed: 'revision' },
+        { sequence: true, changed: 'documentId' },
+    ] as const)(
+        'rejects cached audio after $changed changes during resume (sequence=$sequence)',
+        async ({ sequence, changed }) => {
+            installAudio();
+            const transport = transportFor(descriptor());
+            let identity = transport.audioIdentity(1);
+            transport.audioIdentity = () => identity;
+            const updates: AuditionState[] = [];
+            const controller = new AuditionController(transport, (state) => updates.push(state));
+            await controller.play(1, 'SMPL-1');
+            await controller.play(1, 'SMPL-2');
+            await controller.stop();
+            const context = MockAudioContext.instances[0]!;
+            let resume!: () => void;
+            context.resume.mockImplementationOnce(
+                () =>
+                    new Promise<void>((resolve) => {
+                        resume = resolve;
+                    }),
+            );
+            const completed = vi.fn();
+
+            const playback = sequence
+                ? controller.playSequence(1, ['SMPL-1', 'SMPL-2'], completed)
+                : controller.play(1, 'SMPL-1');
+            await Promise.resolve();
+            await Promise.resolve();
+            expect(transport.prepareAuditionBundle).toHaveBeenCalledTimes(2);
+            identity =
+                changed === 'revision' ? { ...identity, revision: 2 } : { ...identity, documentId: 'document-2' };
+            resume();
+            await playback;
+            if (sequence) await vi.waitFor(() => expect(updates.at(-1)?.status).not.toBe('preparing'));
+
+            expect(context.sources).toHaveLength(2);
+            expect(updates.at(-1)).toMatchObject({ status: 'failed' });
+            if (sequence) {
+                expect(completed).toHaveBeenCalledExactlyOnceWith(
+                    expect.objectContaining({
+                        status: 'failed',
+                        playedCount: 0,
+                        skippedCount: 2,
+                    }),
+                );
+            }
+            await controller.dispose();
+        },
+    );
+
+    it.each([
+        { direction: 'FORWARD', outputTimestamp: true },
+        { direction: 'REVERSE', outputTimestamp: true },
+        { direction: 'FORWARD', outputTimestamp: false },
+        { direction: 'REVERSE', outputTimestamp: false },
+    ] as const)(
+        'keeps $direction moving until audible completion (timestamp=$outputTimestamp)',
+        async ({ direction, outputTimestamp }) => {
             installAudio();
             vi.useFakeTimers();
-            const transport = transportFor(descriptor({ frameCount: 12_000, wavSizeBytes: 24_044, loopMode }));
+            const transport = transportFor(descriptor({ frameCount: 12_000, wavSizeBytes: 24_044, direction }));
             MockAudioContext.nextBuffers = [new MockAudioBuffer(12_000)];
             const updates: AuditionState[] = [];
             const controller = new AuditionController(transport, (state) => updates.push(state));
@@ -347,7 +405,7 @@ describe('AuditionController', () => {
             await vi.advanceTimersByTimeAsync(50);
             animationCallbacks.at(-1)?.(0);
             expect(updates.at(-1)?.status).toBe('playing');
-            if (loopMode === 3) expect(updates.at(-1)!.playheadFrame).toBeLessThan(renderEndFrame);
+            if (direction === 'REVERSE') expect(updates.at(-1)!.playheadFrame).toBeLessThan(renderEndFrame);
             else expect(updates.at(-1)!.playheadFrame).toBeGreaterThan(renderEndFrame);
 
             context.currentTime = 1.37;
@@ -530,7 +588,7 @@ describe('AuditionController', () => {
                 frameCount: 100,
                 sampleRate: 100,
                 wavSizeBytes: 244,
-                loopMode: 1,
+                looping: true,
                 loopStartFrame: 10,
                 loopLengthFrames: 20,
             }),
@@ -551,7 +609,7 @@ describe('AuditionController', () => {
         const frameCount = 260;
         const sampleRate = 44_100;
         const transport = transportFor(
-            descriptor({ frameCount, sampleRate, wavSizeBytes: 44 + frameCount * 2, loopMode: 0 }),
+            descriptor({ frameCount, sampleRate, wavSizeBytes: 44 + frameCount * 2, looping: false }),
         );
         MockAudioContext.nextBuffers = [new MockAudioBuffer(frameCount, 1, sampleRate)];
         const diagnostics: Record<string, unknown>[] = [];
@@ -629,7 +687,7 @@ describe('AuditionController', () => {
             frameCount: frameCounts[0],
             sampleRate: sourceSampleRate,
             wavSizeBytes: 44 + frameCounts[0]! * 2,
-            loopMode: 1,
+            looping: true,
             loopStartFrame: 0,
             loopLengthFrames: frameCounts[0],
         });
@@ -716,8 +774,7 @@ describe('AuditionController', () => {
                 .slice(0, index)
                 .reduce((total, candidate) => total + candidate.lanes[0]!.wavSizeBytes, 0);
             if (index === bundle.clips.length - 1) {
-                clip.loopMode = 1;
-                clip.loopModeLabel = 'forward';
+                clip.looping = true;
                 clip.lanes[0]!.loopStartFrame = 10;
                 clip.lanes[0]!.loopLengthFrames = 100;
             }
@@ -762,7 +819,7 @@ describe('AuditionController', () => {
                 frameCount: 100,
                 sampleRate: 100,
                 wavSizeBytes: 244,
-                loopMode: 1,
+                looping: true,
                 loopStartFrame: 10,
                 loopLengthFrames: 20,
             }),
@@ -787,12 +844,15 @@ describe('AuditionController', () => {
         const transport = transportFor(descriptor());
         vi.mocked(transport.prepareAuditionBundle).mockResolvedValueOnce({
             auditionId: 'audition-mixed',
+            imageId: 'image-1',
+            documentId: 'document-1',
+            revision: 1,
             contentSizeBytes: 488,
             clips: [
                 {
                     objectId: 'SBNK-MIXED',
-                    loopMode: 0,
-                    loopModeLabel: 'off',
+                    direction: 'FORWARD',
+                    looping: false,
                     warnings: ['Sample member formats differ'],
                     lanes: [
                         {
@@ -1003,7 +1063,7 @@ describe('AuditionController', () => {
         const buffer = new MockAudioBuffer(3, 1, 3, [1, 2, 3]);
         MockAudioContext.nextBuffers = [buffer];
         const transport = transportFor(
-            descriptor({ frameCount: 3, sampleRate: 3, wavSizeBytes: 50, loopMode: 3, loopModeLabel: 'reverse' }),
+            descriptor({ frameCount: 3, sampleRate: 3, wavSizeBytes: 50, direction: 'REVERSE' }),
         );
         const controller = new AuditionController(transport, () => undefined);
 

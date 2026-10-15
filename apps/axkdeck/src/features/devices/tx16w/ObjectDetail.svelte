@@ -1,9 +1,18 @@
 <script lang="ts">
     import type { components } from '../../../lib/generated/axklibApiV1';
-    import type { OpenedImage } from '../../../lib/transport';
+    import type { PreviewEnvelope, OpenedImage } from '../../../lib/transport';
+    import InspectorShell from '../../../lib/components/InspectorShell.svelte';
+    import InspectorSection from '../../../lib/components/InspectorSection.svelte';
+    import Waveform from '../../../lib/components/Waveform.svelte';
+    import { previewTimeline } from '../../../lib/audio/documentAudio.svelte';
+    import { waveformPlayheadRatio } from '../../../lib/waveformTimeline';
     import InspectorModeFooter from '../../../lib/components/InspectorModeFooter.svelte';
     let {
         detail,
+        preview,
+        audioError = '',
+        playingObjectId = null,
+        playheadFrame = 0,
         relationships,
         objects,
         sources,
@@ -11,6 +20,10 @@
         onrevealFiles,
     }: {
         detail: components['schemas']['Tx16wObjectDetail'] | null;
+        preview?: PreviewEnvelope;
+        audioError?: string;
+        playingObjectId?: string | null;
+        playheadFrame?: number;
         relationships: components['schemas']['ImageRelationshipItem'][];
         objects: components['schemas']['ImageObjectItem'][];
         sources: OpenedImage['sources'];
@@ -18,7 +31,8 @@
         onrevealFiles: (id: string) => void;
     } = $props();
     const labels: Record<string, string> = {
-        sampleRate: 'Sample rate',
+        sampleRate: 'Sample rate (Hz)',
+        nativeBitDepth: 'Native bit depth',
         attackFrames: 'Attack frames',
         repeatFrames: 'Repeat frames',
         looped: 'Looped',
@@ -28,6 +42,8 @@
         writeProtected: 'Write protected',
         kind: 'Native kind',
     };
+    const scope = $derived(`yamaha.tx16w:${detail?.type ?? 'empty'}`);
+    const timeline = $derived(previewTimeline(preview));
     function objectName(id: string) {
         return objects.find((object) => object.id === id)?.name || id;
     }
@@ -43,23 +59,52 @@
     }
 </script>
 
-<aside class="tx-inspector" aria-label="TX16W inspector">
-    <header>
-        <h2>{detail?.name || 'Object details'}</h2>
-        <span>{detail?.type ?? ''}</span>
-    </header>
-    <div class="detail-scroll">
-        {#if detail}
-            <dl>
-                {#each Object.entries(detail.details).filter(([key, value]) => key !== 'type' && !Array.isArray(value)) as [key, value] (key)}
+{#snippet footer()}
+    {#if detail}<InspectorModeFooter mode="files" onclick={() => detail && onrevealFiles(detail.objectId)} />{/if}
+{/snippet}
+<InspectorShell heading="Object details" label="TX16W inspector" {footer}>
+    {#if detail}
+        <div class="inspector-title">
+            <span>{detail.type}</span>
+            <h3>{detail.name}</h3>
+        </div>
+        {#if detail.details.type === 'wave'}
+            <InspectorSection
+                {scope}
+                sectionId="preview"
+                title="Preview"
+                class="inspector-preview"
+                defaultExpanded={true}
+            >
+                <div class="inspector-wave">
+                    <Waveform
+                        values={preview?.lanes[0]?.bins ?? []}
+                        large
+                        {timeline}
+                        playheadRatio={playingObjectId === detail.objectId
+                            ? waveformPlayheadRatio(timeline, playheadFrame, timeline.sampleRate)
+                            : 0}
+                    />
+                </div>
+                {#if audioError}<p role="alert">{audioError}</p>{/if}
+                {#each preview?.warnings ?? [] as warning}<p class="warning">{warning}</p>{/each}
+                {#if detail.details.sampleRateApproximate && !preview}
+                    <p class="warning">Sample rate is uncertain; audition uses 33,333 Hz. Duration is approximate.</p>
+                {/if}
+            </InspectorSection>
+        {/if}
+        <InspectorSection {scope} sectionId="properties" title="Properties" defaultExpanded={true}>
+            <dl class="metadata-list">
+                {#each Object.entries(detail.details).filter(([key, value]) => key !== 'type' && key !== 'sampleRateApproximate' && !Array.isArray(value)) as [key, value] (key)}
                     <div>
                         <dt>{labels[key] ?? key}</dt>
                         <dd>{typeof value === 'boolean' ? (value ? 'Yes' : 'No') : value}</dd>
                     </div>
                 {/each}
             </dl>
-            {#if detail.details.type === 'voice'}
-                <h3>Key regions</h3>
+        </InspectorSection>
+        {#if detail.details.type === 'voice'}
+            <InspectorSection {scope} sectionId="key-regions" title="Key regions" defaultExpanded={true}>
                 <table>
                     <thead><tr><th>Timbre</th><th>Keys</th><th>Fade</th></tr></thead><tbody>
                         {#each detail.details.regions as region}<tr
@@ -69,11 +114,12 @@
                             >{/each}
                     </tbody>
                 </table>
-            {:else if detail.details.type === 'performance'}
-                <h3>Voice assignments</h3>
+            </InspectorSection>
+        {:else if detail.details.type === 'performance'}
+            <InspectorSection {scope} sectionId="voice-assignments" title="Voice assignments" defaultExpanded={true}>
                 {#each detail.details.voices as voice, index}
                     <h4>Part {index + 1}</h4>
-                    <dl>
+                    <dl class="metadata-list">
                         <div>
                             <dt>Voice slot</dt>
                             <dd>{voice.voiceSlot}</dd>
@@ -104,36 +150,62 @@
                         </div>
                     </dl>
                 {/each}
-            {:else if detail.details.type === 'setup'}
-                <h3>Wave slots</h3>
+            </InspectorSection>
+        {:else if detail.details.type === 'setup'}
+            <InspectorSection {scope} sectionId="wave-slots" title="Wave slots" defaultExpanded={true}>
                 <table>
                     <thead><tr><th>Slot</th><th>Name</th></tr></thead><tbody>
                         {#each detail.details.waves as wave}<tr><td>{wave.slot}</td><td>{wave.name}</td></tr>{/each}
                     </tbody>
                 </table>
-            {/if}
-            <h3>Relationships</h3>
+            </InspectorSection>
+        {/if}
+        <InspectorSection {scope} sectionId="relationships" title="Relationships" defaultExpanded={false}>
             {#each relationships as edge (edge.id)}
-                <div class="relationship">
-                    <strong>{edge.type}</strong><span class:unresolved={edge.quality !== 'RESOLVED'}
-                        >{edge.quality}</span
-                    >
-                    <p>{edge.basis}</p>
-                    {#if edge.sourceObjectId !== detail.objectId}<button
-                            type="button"
-                            onclick={() => onselect(edge.sourceObjectId)}>{objectName(edge.sourceObjectId)}</button
-                        >{/if}
-                    {#if edge.targetObjectId && edge.targetObjectId !== detail.objectId}<button
-                            type="button"
-                            onclick={() => onselect(edge.targetObjectId!)}>{objectName(edge.targetObjectId)}</button
-                        >{/if}
-                    {#each edge.candidateObjectIds as id}<button type="button" onclick={() => onselect(id)}
-                            >Candidate: {objectName(id)}</button
-                        >{/each}
+                <div class="inspector-relationship-group">
+                    <h5>{edge.type}</h5>
+                    <dl class="metadata-list">
+                        <div>
+                            <dt>Resolution</dt>
+                            <dd class:unresolved={edge.quality !== 'RESOLVED'}>{edge.quality}</dd>
+                        </div>
+                        <div>
+                            <dt>Reference</dt>
+                            <dd>{edge.basis}</dd>
+                        </div>
+                    </dl>
+                    <ul>
+                        {#if edge.sourceObjectId !== detail.objectId}<li>
+                                <button type="button" onclick={() => onselect(edge.sourceObjectId)}
+                                    ><strong>{objectName(edge.sourceObjectId)}</strong></button
+                                >
+                            </li>{/if}
+                        {#if edge.targetObjectId && edge.targetObjectId !== detail.objectId}<li>
+                                <button type="button" onclick={() => onselect(edge.targetObjectId!)}
+                                    ><strong>{objectName(edge.targetObjectId)}</strong></button
+                                >
+                            </li>{/if}
+                        {#each edge.candidateObjectIds as id}<li>
+                                <button type="button" onclick={() => onselect(id)}
+                                    ><strong>Candidate: {objectName(id)}</strong></button
+                                >
+                            </li>{/each}
+                    </ul>
                 </div>
-            {:else}<p>No relationships</p>{/each}
-            <h3>Source locations</h3>
-            {#each detail.locations as location}<dl>
+            {:else}<p class="inspector-relationships-empty">No relationships</p>{/each}
+        </InspectorSection>
+        <InspectorSection {scope} sectionId="stored-format" title="Stored format" defaultExpanded={false}>
+            <dl class="metadata-list">
+                <div>
+                    <dt>Format</dt>
+                    <dd>{detail.formatId}</dd>
+                </div>
+                <div>
+                    <dt>Profile</dt>
+                    <dd>{detail.profile}</dd>
+                </div>
+            </dl>
+            {#each detail.locations as location}<dl class="metadata-list">
                     <div>
                         <dt>Source</dt>
                         <dd>{sourceName(location.memberId)}</dd>
@@ -147,60 +219,19 @@
                         <dd>{location.offset} + {location.length}</dd>
                     </div>
                 </dl>{/each}
-        {:else}<p>No object selected</p>{/if}
-    </div>
-    {#if detail}<InspectorModeFooter mode="files" onclick={() => detail && onrevealFiles(detail.objectId)} />{/if}
-</aside>
+        </InspectorSection>
+    {:else}<div class="inspector-empty"><p class="empty-copy">No object selected</p></div>{/if}
+</InspectorShell>
 
 <style>
-    .tx-inspector {
-        display: flex;
-        flex-direction: column;
-        min-height: 0;
-        overflow: hidden;
+    .warning {
+        color: var(--color-warning, #e0b765);
         font-size: 11px;
-    }
-    header {
-        padding: 10px;
-        border-bottom: 1px solid var(--color-border);
-    }
-    h2 {
-        font-size: 13px;
-        margin: 0 0 4px;
-        overflow-wrap: anywhere;
-    }
-    h3 {
-        font-size: 11px;
-        margin: 16px 0 8px;
-    }
-    h4 {
-        font-size: 10px;
-        margin: 8px 0;
-    }
-    .detail-scroll {
-        overflow: auto;
-        padding: 0 10px;
-        flex: 1;
-    }
-    dl {
-        margin: 8px 0;
-    }
-    dl div {
-        display: grid;
-        grid-template-columns: 100px 1fr;
-        gap: 8px;
-        padding: 3px 0;
-    }
-    dt {
-        color: var(--color-text-muted);
-    }
-    dd {
-        margin: 0;
-        overflow-wrap: anywhere;
     }
     table {
         width: 100%;
         border-collapse: collapse;
+        font-size: 8.5px;
     }
     th,
     td {
@@ -208,33 +239,16 @@
         padding: 4px;
         border-bottom: 1px solid var(--color-border);
     }
-    th,
-    header span {
+    th {
         font-size: 10px;
         color: var(--color-text-muted);
     }
-    .relationship {
-        padding: 6px 0;
-        border-bottom: 1px solid var(--color-border);
-        overflow-wrap: anywhere;
-    }
-    .relationship span {
-        margin-left: 8px;
+    h4 {
+        margin: 8px 0 2px;
+        font-size: 10px;
+        color: var(--color-text-muted);
     }
     .unresolved {
         color: #e0b765;
-    }
-    .relationship p {
-        margin: 4px 0;
-    }
-    .relationship button {
-        background: none;
-        border: 0;
-        color: var(--color-accent, #72b7cf);
-        text-align: left;
-        font-size: 11px;
-        padding: 3px 0;
-        display: block;
-        overflow-wrap: anywhere;
     }
 </style>

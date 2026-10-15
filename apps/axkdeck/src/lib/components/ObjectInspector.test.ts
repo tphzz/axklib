@@ -77,6 +77,10 @@ function samplePreview(
         preview:
             previewState === 'ready'
                 ? {
+                      imageId: 'image-1',
+                      documentId: 'document-1',
+                      revision: 1,
+                      warnings: [],
                       objectId: item.objectId,
                       lanes: waveData.map((entry, index) => ({
                           role: entry.role === 'left' ? 'LEFT' : 'RIGHT',
@@ -84,6 +88,8 @@ function samplePreview(
                           sampleRate: entry.waveData.object.sampleRate,
                           storedFrameCount: entry.waveData.object.storedFrameCount,
                           sampleWidthBytes: 2,
+                          nativeBitDepth: 16,
+                          sampleRateApproximate: false,
                           playbackStartFrame: entry.waveData.object.waveStartFrame,
                           playbackLengthFrames: entry.waveData.object.waveLengthFrames,
                           loopStartFrame: entry.waveData.object.loopStartFrame ?? 0,

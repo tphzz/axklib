@@ -1,13 +1,46 @@
-#include "formats/a_series/session_state.hpp"
 #include "image_sessions_internal.hpp"
+#include "native_audio.hpp"
 
+#include <algorithm>
+#include <array>
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <format>
+#include <limits>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <string_view>
 #include <unordered_set>
+#include <utility>
+#include <vector>
+
+namespace {
+axk::app::Result<void> validate_source(const axk::native::PcmSource &source) {
+    if (source.members.empty() || source.members.size() > 2U)
+        return std::unexpected(axk::app::Error{"audition_unsupported", "Audio requires one or two member lanes"});
+    for (const auto &member : source.members) {
+        if ((member.output_width != 1U && member.output_width != 2U) || member.sample_rate == 0U ||
+            member.sample_rate > std::numeric_limits<std::uint32_t>::max() / member.output_width ||
+            member.frame_count == 0U || member.physical_first_frame > member.stored_frame_count ||
+            member.frame_count > member.stored_frame_count - member.physical_first_frame ||
+            member.playback_start_frame > member.stored_frame_count ||
+            member.playback_length_frames > member.stored_frame_count - member.playback_start_frame)
+            return std::unexpected(
+                axk::app::Error{"invalid_audio_range", "Invalid native PCM window or representation"});
+        if (source.looping && (member.loop_length == 0U || member.loop_start > member.frame_count ||
+                               member.loop_length > member.frame_count - member.loop_start))
+            return std::unexpected(axk::app::Error{"invalid_audio_range", "Native loop exceeds its PCM window"});
+    }
+    return {};
+}
+} // namespace
 
 axk::app::Result<axk::app::ImageWaveformPreview>
 axk::app::ImageSessionManager::preview(const ImageDocumentRef &target, std::string_view owner_id,
                                        std::string_view object_id, std::size_t bin_count,
-                                       const CancellationToken &cancellation) {
+                                       std::uint64_t expected_revision, const CancellationToken &cancellation) {
     const auto session = implementation_->owned(target.image_id, owner_id);
     if (!session)
         return std::unexpected(session.error());
@@ -15,19 +48,28 @@ axk::app::ImageSessionManager::preview(const ImageDocumentRef &target, std::stri
     auto selected = Implementation::document(**session, target.document_id);
     if (!selected)
         return std::unexpected(selected.error());
-    if ((*selected)->native->format_id() != "yamaha.a-series")
-        return std::unexpected(
-            session_error("native_format_unsupported", "This operation requires an A-series document"));
+    if ((*session)->revision != expected_revision)
+        return std::unexpected(session_error("image_revision_stale", "Image revision changed", true));
+    if ((*session)->mutating || (*session)->invalidated)
+        return std::unexpected(session_error("entry_in_use", "Image session is unavailable", true));
+    const auto *audio = (*selected)->native->audio();
+    if (!audio)
+        return std::unexpected(session_error("audition_unsupported", "This document has no audio provider"));
     if (auto verified = (*session)->sources.native_sources->verify(cancellation); !verified)
         return std::unexpected(session_error("image_source_changed", verified.error().message));
     if (bin_count == 0U || bin_count > 4096U)
         return std::unexpected(session_error("invalid_preview", "preview bin count is outside the configured range"));
-    auto source = axk::app::formats::a_series::state(*(*selected)->native)
-                      .prepare_source(object_id, formats::a_series::PcmReadWindow::stored_pcm,
-                                      (*selected)->native->relationships);
+    auto source = audio->prepare_source(object_id, native::PcmReadWindow::stored_pcm);
     if (!source)
         return std::unexpected(source.error());
-    ImageWaveformPreview result{.object_id = std::string{object_id}, .lanes = {}};
+    if (const auto valid = validate_source(*source); !valid)
+        return std::unexpected(valid.error());
+    ImageWaveformPreview result{.object_id = std::string{object_id},
+                                .lanes = {},
+                                .image_id = target.image_id,
+                                .document_id = target.document_id,
+                                .revision = expected_revision,
+                                .warnings = source->warnings};
     result.lanes.reserve(source->members.size());
     constexpr std::size_t chunk_frames = 16U * 1024U;
     for (const auto &member : source->members) {
@@ -41,16 +83,20 @@ axk::app::ImageSessionManager::preview(const ImageDocumentRef &target, std::stri
                                       .playback_length_frames = member.playback_length_frames,
                                       .loop_start_frame = member.source_loop_start,
                                       .loop_length_frames = member.source_loop_length,
-                                      .bins = {}};
+                                      .bins = {},
+                                      .native_bit_depth = member.native_bit_depth,
+                                      .sample_rate_approximate = member.sample_rate_approximate};
         lane.bins.assign(used_bins,
                          {std::numeric_limits<std::int32_t>::max(), std::numeric_limits<std::int32_t>::min()});
         for (std::uint64_t first = 0U; first < member.frame_count; first += chunk_frames) {
             const auto count =
                 static_cast<std::size_t>(std::min<std::uint64_t>(chunk_frames, member.frame_count - first));
-            auto pcm = axk::app::formats::a_series::state(*(*selected)->native)
-                           .read_member_pcm(member, first, count, cancellation);
+            auto pcm = audio->read_member_pcm(member, first, count, cancellation);
             if (!pcm)
                 return std::unexpected(pcm.error());
+            if (pcm->size() != count * member.output_width)
+                return std::unexpected(
+                    session_error("invalid_audio_range", "Native PCM read returned an incomplete range"));
             for (std::size_t frame = 0U; frame < count; ++frame) {
                 const auto absolute_frame = first + frame;
                 const auto bin = static_cast<std::size_t>(absolute_frame * used_bins / member.frame_count);
@@ -72,10 +118,9 @@ axk::app::ImageSessionManager::preview(const ImageDocumentRef &target, std::stri
     return result;
 }
 
-axk::app::Result<axk::app::ImageAudition>
-axk::app::ImageSessionManager::prepare_audition(const ImageDocumentRef &target, std::string_view owner_id,
-                                                const std::vector<std::string> &object_ids,
-                                                const CancellationToken &cancellation, bool stored_pcm) {
+axk::app::Result<axk::app::ImageAudition> axk::app::ImageSessionManager::prepare_audition(
+    const ImageDocumentRef &target, std::string_view owner_id, const std::vector<std::string> &object_ids,
+    std::uint64_t expected_revision, const CancellationToken &cancellation, bool stored_pcm) {
     if (object_ids.empty() || object_ids.size() > implementation_->maximum_audition_clips) {
         return std::unexpected(
             session_error("invalid_request", std::format("audition must contain between 1 and {} unique objects",
@@ -95,13 +140,20 @@ axk::app::ImageSessionManager::prepare_audition(const ImageDocumentRef &target, 
     auto selected = Implementation::document(**session, target.document_id);
     if (!selected)
         return std::unexpected(selected.error());
-    if ((*selected)->native->format_id() != "yamaha.a-series")
-        return std::unexpected(
-            session_error("native_format_unsupported", "This operation requires an A-series document"));
+    if ((*session)->revision != expected_revision)
+        return std::unexpected(session_error("image_revision_stale", "Image revision changed", true));
+    if ((*session)->mutating || (*session)->invalidated)
+        return std::unexpected(session_error("entry_in_use", "Image session is unavailable", true));
+    const auto *audio = (*selected)->native->audio();
+    if (!audio)
+        return std::unexpected(session_error("audition_unsupported", "This document has no audio provider"));
     if (auto verified = (*session)->sources.native_sources->verify(cancellation); !verified)
         return std::unexpected(session_error("image_source_changed", verified.error().message));
     ImageAudition descriptor;
-    std::vector<formats::a_series::PcmSource> sources;
+    descriptor.image_id = target.image_id;
+    descriptor.document_id = target.document_id;
+    descriptor.revision = expected_revision;
+    std::vector<native::PcmSource> sources;
     descriptor.clips.reserve(object_ids.size());
     sources.reserve(object_ids.size());
     for (const auto &object_id : object_ids) {
@@ -121,19 +173,18 @@ axk::app::ImageSessionManager::prepare_audition(const ImageDocumentRef &target, 
             attach_object_context(error);
             return error;
         };
-        auto source = axk::app::formats::a_series::state(*(*selected)->native)
-                          .prepare_source(object_id,
-                                          stored_pcm ? formats::a_series::PcmReadWindow::stored_pcm
-                                                     : formats::a_series::PcmReadWindow::playback,
-                                          (*selected)->native->relationships);
+        auto source = audio->prepare_source(object_id, stored_pcm ? native::PcmReadWindow::stored_pcm
+                                                                  : native::PcmReadWindow::playback);
         if (!source) {
             auto error = std::move(source.error());
             attach_object_context(error);
             return std::unexpected(std::move(error));
         }
+        if (const auto valid = validate_source(*source); !valid)
+            return std::unexpected(valid.error());
         ImageAuditionClip clip{.object_id = object_id,
-                               .loop_mode = source->loop_mode,
-                               .loop_mode_label = source->loop_mode_label,
+                               .direction = source->reverse ? "REVERSE" : "FORWARD",
+                               .looping = source->looping,
                                .warnings = source->warnings,
                                .lanes = {}};
         clip.lanes.reserve(source->members.size());
@@ -169,16 +220,15 @@ axk::app::ImageSessionManager::prepare_audition(const ImageDocumentRef &target, 
     descriptor.audition_id = *audition_id;
     const auto now = implementation_->clock();
     std::vector<std::string> expired_auditions;
-    std::erase_if(axk::app::formats::a_series::state(*(*selected)->native).auditions, [&](const auto &entry) {
+    std::erase_if((*selected)->native->auditions, [&](const auto &entry) {
         const auto expired = entry.second.last_access + std::chrono::minutes{10} <= now;
         if (expired)
             expired_auditions.push_back(entry.first);
         return expired;
     });
-    if (axk::app::formats::a_series::state(*(*selected)->native).auditions.size() >= 256U)
+    if ((*selected)->native->auditions.size() >= 256U)
         return std::unexpected(session_error("audition_capacity_exhausted", "audition capacity is exhausted", true));
-    axk::app::formats::a_series::state(*(*selected)->native)
-        .auditions.emplace(*audition_id, formats::a_series::AuditionEntry{descriptor, std::move(sources), now});
+    (*selected)->native->auditions.emplace(*audition_id, AuditionEntry{descriptor, std::move(sources), now});
     {
         const std::scoped_lock manager_lock{implementation_->mutex};
         for (const auto &expired : expired_auditions)
@@ -214,11 +264,16 @@ axk::app::ImageSessionManager::audition_range(std::string_view audition_id, std:
     auto selected = Implementation::document(*session, document_id);
     if (!selected)
         return std::unexpected(selected.error());
-    const auto found =
-        axk::app::formats::a_series::state(*(*selected)->native).auditions.find(std::string{audition_id});
-    if (found == axk::app::formats::a_series::state(*(*selected)->native).auditions.end())
+    const auto found = (*selected)->native->auditions.find(std::string{audition_id});
+    if (found == (*selected)->native->auditions.end())
         return std::unexpected(session_error("audition_not_found", "audition does not exist"));
     auto &entry = found->second;
+    const auto *audio = (*selected)->native->audio();
+    if (!audio || entry.descriptor.revision != session->revision ||
+        entry.last_access + std::chrono::minutes{10} <= implementation_->clock())
+        return std::unexpected(session_error("audition_not_found", "Audition expired or its document changed"));
+    if (auto verified = session->sources.native_sources->verify(cancellation); !verified)
+        return std::unexpected(session_error("image_source_changed", verified.error().message));
     session->last_access = implementation_->clock();
     entry.last_access = session->last_access;
     const auto total_size = entry.descriptor.content_size_bytes;
@@ -277,10 +332,12 @@ axk::app::ImageSessionManager::audition_range(std::string_view audition_id, std:
             const auto first_frame = data_offset / lane.sample_width_bytes;
             const auto first_byte = static_cast<std::size_t>(data_offset % lane.sample_width_bytes);
             const auto frame_count = (first_byte + data_count + lane.sample_width_bytes - 1U) / lane.sample_width_bytes;
-            auto pcm = axk::app::formats::a_series::state(*(*selected)->native)
-                           .read_member_pcm(source.members[lane_index], first_frame, frame_count, cancellation);
+            auto pcm = audio->read_member_pcm(source.members[lane_index], first_frame, frame_count, cancellation);
             if (!pcm)
                 return std::unexpected(pcm.error());
+            if (pcm->size() != frame_count * lane.sample_width_bytes)
+                return std::unexpected(
+                    session_error("invalid_audio_range", "Native PCM read returned an incomplete range"));
             result.bytes.insert(result.bytes.end(), pcm->begin() + static_cast<std::ptrdiff_t>(first_byte),
                                 pcm->begin() + static_cast<std::ptrdiff_t>(first_byte + data_count));
         }
@@ -309,7 +366,7 @@ axk::app::Result<void> axk::app::ImageSessionManager::delete_audition(std::strin
     auto selected = Implementation::document(*session, document_id);
     if (!selected)
         return std::unexpected(selected.error());
-    axk::app::formats::a_series::state(*(*selected)->native).auditions.erase(std::string{audition_id});
+    (*selected)->native->auditions.erase(std::string{audition_id});
     const std::scoped_lock manager_lock{implementation_->mutex};
     implementation_->audition_sessions.erase(std::string{audition_id});
     return {};

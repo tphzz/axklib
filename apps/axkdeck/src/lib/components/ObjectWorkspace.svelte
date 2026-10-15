@@ -1,5 +1,4 @@
 <script lang="ts">
-    import { onDestroy } from 'svelte';
     import {
         collectionPageStep,
         focusCollectionIndex,
@@ -18,12 +17,12 @@
     import { compareNamedItems } from '../naturalSort';
     import type { SamplerObject } from '../transport';
     import type { ObjectRenameTarget, PackageExportObject, Program, WaveDataItem, WorkspaceView } from '../types';
-    import { waveformPlayheadRatio, type WaveformTimeline } from '../waveformTimeline';
+    import type { WaveformTimeline } from '../waveformTimeline';
     import CollectionToolbar from './CollectionToolbar.svelte';
-    import Icon from './Icon.svelte';
+    import CollectionRow from './CollectionRow.svelte';
+    import WaveCollectionRow from './WaveCollectionRow.svelte';
     import ObjectContextMenu from './ObjectContextMenu.svelte';
     import ObjectSizeIdentity from './ObjectSizeIdentity.svelte';
-    import ViewportWaveform from './ViewportWaveform.svelte';
 
     interface Props {
         programs: Program[];
@@ -94,7 +93,6 @@
         onselectionchange = () => undefined,
         onselectionlimit = () => undefined,
     }: Props = $props();
-    let prefetchTimer: ReturnType<typeof setTimeout> | undefined;
     let objectMenu = $state<{
         target: SamplerObject;
         renameTarget: ObjectRenameTarget | null;
@@ -102,21 +100,6 @@
         left: number;
         top: number;
     } | null>(null);
-
-    onDestroy(() => clearPrefetch());
-
-    function schedulePrefetch(item: WaveDataItem): void {
-        clearPrefetch();
-        prefetchTimer = setTimeout(() => {
-            prefetchTimer = undefined;
-            onprefetch(item);
-        }, 150);
-    }
-
-    function clearPrefetch(): void {
-        if (prefetchTimer !== undefined) clearTimeout(prefetchTimer);
-        prefetchTimer = undefined;
-    }
 
     function seek(event: MouseEvent, item: WaveDataItem): void {
         const bounds = (event.currentTarget as HTMLElement).getBoundingClientRect();
@@ -342,10 +325,10 @@
     >
         {#if view === 'programs'}
             {#each filteredPrograms as program, index (program.id)}
-                <button
+                <CollectionRow
                     type="button"
-                    class:active={activeObjectId === program.objectId}
-                    class:selected={selection.items.some((item) => item.objectId === program.objectId)}
+                    active={activeObjectId === program.objectId}
+                    selected={selection.items.some((item) => item.objectId === program.objectId)}
                     class="program-row"
                     data-collection-object-id={program.objectId}
                     data-navigation-index={index}
@@ -362,7 +345,7 @@
                     <span class="program-identity">
                         <ObjectSizeIdentity name={program.name} object={program.object} />
                     </span>
-                </button>
+                </CollectionRow>
             {:else}
                 <p class="empty-copy">No matching Programs</p>
             {/each}
@@ -378,77 +361,28 @@
                     displayDurationSeconds:
                         item.object.sampleRate > 0 ? item.object.storedFrameCount / item.object.sampleRate : 0,
                 }}
-                <!-- The composite row owns its pointer context menu; the selection button retains the keyboard path. -->
-                <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
-                <div
-                    class:active={activeObjectId === item.objectKey}
-                    class:selected={selection.items.some((selected) => selected.objectId === item.objectKey)}
-                    class="wave-data-row"
-                    role="group"
-                    aria-label={`${item.name} Wave Data`}
+                <WaveCollectionRow
+                    objectId={item.objectKey}
+                    name={item.name}
+                    {index}
+                    active={activeObjectId === item.objectKey}
+                    selected={selection.items.some((selected) => selected.objectId === item.objectKey)}
+                    metadata={`${item.note} · ${item.duration}`}
+                    format={`${item.sampleRate} · ${item.bitDepth} · ${formatStoredSize(item.storedSizeBytes)}`}
+                    values={item.waveform}
+                    {timeline}
+                    playing={playingObjectId === item.objectKey}
+                    preparing={preparingObjectId === item.objectKey}
+                    {playheadFrame}
+                    onselect={(event) => selectWaveData(event, item)}
+                    onseek={(event) => selectWaveData(event, item, true)}
+                    onpreview={(bins) => onpreviewrequest(item, bins)}
+                    onplay={() => onplay(item)}
+                    {onstop}
+                    onprefetch={() => onprefetch(item)}
                     oncontextmenu={(event) => openObjectMenu(event, item.object, waveDataRenameTarget(item))}
-                >
-                    <button
-                        class="wave-data-selection"
-                        data-collection-object-id={item.objectKey}
-                        data-navigation-index={index}
-                        type="button"
-                        aria-label={`Inspect ${item.name}`}
-                        aria-pressed={selection.items.some((selected) => selected.objectId === item.objectKey)}
-                        onclick={(event) => selectWaveData(event, item)}
-                        onkeydown={(event) =>
-                            handleObjectKeyboard(event, index, item.object, waveDataRenameTarget(item))}
-                    ></button>
-                    <strong class="wave-data-identity">{item.name}</strong>
-                    <span class="wave-data-meta">{item.note} · {item.duration}</span>
-                    <button
-                        class="waveform-seek"
-                        type="button"
-                        aria-label={`Seek ${item.name}`}
-                        onclick={(event) => selectWaveData(event, item, true)}
-                    >
-                        <ViewportWaveform
-                            values={item.waveform}
-                            {timeline}
-                            onvisible={(bins) => onpreviewrequest(item, bins)}
-                            playheadRatio={playingObjectId === item.objectKey && item.object.storedFrameCount > 0
-                                ? waveformPlayheadRatio(timeline, playheadFrame, item.object.sampleRate)
-                                : 0}
-                        />
-                    </button>
-                    <span class="wave-data-format"
-                        >{item.sampleRate} · {item.bitDepth} · {formatStoredSize(item.storedSizeBytes)}</span
-                    >
-                    <button
-                        class="wave-data-playback icon-button"
-                        type="button"
-                        aria-label={playingObjectId === item.objectKey || preparingObjectId === item.objectKey
-                            ? `Stop ${item.name}`
-                            : `Play ${item.name}`}
-                        title={preparingObjectId === item.objectKey
-                            ? 'Stop preparing audio'
-                            : playingObjectId === item.objectKey
-                              ? 'Stop'
-                              : 'Play'}
-                        onpointerenter={() => schedulePrefetch(item)}
-                        onpointerleave={clearPrefetch}
-                        onfocus={() => schedulePrefetch(item)}
-                        onblur={clearPrefetch}
-                        onclick={(event) => {
-                            event.stopPropagation();
-                            clearPrefetch();
-                            if (playingObjectId === item.objectKey || preparingObjectId === item.objectKey) onstop();
-                            else onplay(item);
-                        }}
-                    >
-                        <Icon
-                            name={playingObjectId === item.objectKey || preparingObjectId === item.objectKey
-                                ? 'stop'
-                                : 'play'}
-                            size={13}
-                        />
-                    </button>
-                </div>
+                    onkeydown={(event) => handleObjectKeyboard(event, index, item.object, waveDataRenameTarget(item))}
+                />
             {/each}
         {:else}
             <p class="empty-copy">No matching Wave Data</p>

@@ -1,6 +1,6 @@
 import { tick } from 'svelte';
 
-import type { ObjectSelectionMode } from './objectSelection';
+import type { CollectionSelectionMode } from './collectionSelection';
 
 export type CollectionRevealAlignment = 'nearest' | 'center';
 
@@ -41,7 +41,7 @@ export function collectionPageStep(currentTarget: EventTarget | null): number {
     return Math.max(1, Math.floor(container.clientHeight / measuredExtent) - 1);
 }
 
-export function keyboardSelectionMode(event: KeyboardEvent): ObjectSelectionMode {
+export function keyboardSelectionMode(event: KeyboardEvent): CollectionSelectionMode {
     if (!event.shiftKey) return 'replace';
     return event.ctrlKey || event.metaKey ? 'add-range' : 'range';
 }

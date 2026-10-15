@@ -212,16 +212,26 @@ Result<Wave> decode_wave(std::span<const std::byte> bytes, std::string source_na
     Wave result;
     static_cast<WaveHeader &>(result) = std::move(*header);
     const auto logical_frames = static_cast<std::uint64_t>(result.attack_frames) + result.repeat_frames;
-    const auto packed_bytes = ((logical_frames + 1U) / 2U) * 3U;
-    result.pcm.reserve(static_cast<std::size_t>(logical_frames));
-    const auto pcm_end = header_size + static_cast<std::size_t>(packed_bytes);
-    for (std::size_t offset = header_size; offset < pcm_end; offset += 3U) {
-        const auto first = std::to_integer<std::uint32_t>(bytes[offset]);
-        const auto middle = std::to_integer<std::uint32_t>(bytes[offset + 1U]);
-        const auto second = std::to_integer<std::uint32_t>(bytes[offset + 2U]);
-        result.pcm.push_back(expand_pcm(static_cast<std::uint16_t>((first << 4U) | (middle >> 4U))));
-        if (result.pcm.size() < logical_frames)
-            result.pcm.push_back(expand_pcm(static_cast<std::uint16_t>((second << 4U) | (middle & 0x0fU))));
+    auto pcm = decode_packed_pcm(bytes.subspan(header_size), 0U, static_cast<std::size_t>(logical_frames));
+    if (!pcm)
+        return std::unexpected(pcm.error());
+    result.pcm = std::move(*pcm);
+    return result;
+}
+
+Result<std::vector<std::int16_t>> decode_packed_pcm(std::span<const std::byte> bytes, std::size_t first_frame,
+                                                    std::size_t frame_count) {
+    const auto available = (bytes.size() / 3U) * 2U;
+    if (first_frame > available || frame_count > available - first_frame)
+        return std::unexpected(parse_error(ErrorCode::container_truncated, "TX16W packed PCM range is truncated", {}));
+    std::vector<std::int16_t> result;
+    result.reserve(frame_count);
+    for (std::size_t index = first_frame; index < first_frame + frame_count; ++index) {
+        const auto offset = (index / 2U) * 3U;
+        const auto middle = std::to_integer<std::uint16_t>(bytes[offset + 1U]);
+        const auto high = std::to_integer<std::uint32_t>(bytes[offset + (index % 2U == 0U ? 0U : 2U)]);
+        const auto low = index % 2U == 0U ? middle >> 4U : middle & 0x0fU;
+        result.push_back(expand_pcm(static_cast<std::uint16_t>((high << 4U) | low)));
     }
     return result;
 }

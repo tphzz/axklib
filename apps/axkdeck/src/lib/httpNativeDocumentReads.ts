@@ -2,6 +2,7 @@ import type { AxklibHttpApiClient } from './httpApiClient';
 import type { ApiContentItem, ApiObjectItem, ApiPage, ApiRelationshipItem, SessionState } from './httpTransportModels';
 import type { NativeObjectDetail, PreviewEnvelope } from './transport';
 import { documentPath } from './httpNativeDocuments';
+import { sameAudioIdentity } from './audio/audioIdentity';
 import { normalizeWaveformPreview } from './waveformPreview';
 
 export class HttpNativeDocumentReads {
@@ -47,11 +48,19 @@ export class HttpNativeDocumentReads {
         return detail;
     }
 
-    async preview(sessionId: number, objectId: string, bins: number) {
+    async preview(sessionId: number, objectId: string, bins: number, signal?: AbortSignal) {
         const session = this.session(sessionId);
-        const query = new URLSearchParams({ objectId, bins: String(bins) });
-        const result = await this.client.request<PreviewEnvelope>('GET', `${documentPath(session)}/preview?${query}`);
-        if (this.session(sessionId) !== session) throw new Error('Native document changed during loading');
+        const identity = { imageId: session.remoteId, documentId: session.documentId!, revision: session.revision };
+        const query = new URLSearchParams({ objectId, bins: String(bins), expectedRevision: String(session.revision) });
+        const result = await this.client.request<PreviewEnvelope>(
+            'GET',
+            `${documentPath(session)}/preview?${query}`,
+            undefined,
+            {},
+            signal,
+        );
+        if (this.session(sessionId) !== session || !sameAudioIdentity(result, identity) || result.objectId !== objectId)
+            throw new Error('Native document changed during loading');
         return normalizeWaveformPreview(result);
     }
 }

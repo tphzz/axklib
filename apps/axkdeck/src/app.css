@@ -3582,6 +3582,7 @@ input:focus-visible {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  container-type: inline-size;
 }
 
 .wave-data-row {
@@ -3697,6 +3698,41 @@ input:focus-visible {
 
 .wave-data-format {
   text-align: right;
+}
+
+@container (max-width: 520px) {
+  .wave-data-row {
+    height: 72px;
+    min-height: 72px;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 26px;
+    grid-template-rows: 14px 12px 28px;
+    row-gap: 4px;
+  }
+
+  .wave-data-identity {
+    grid-column: 1 / 3;
+    grid-row: 1;
+  }
+
+  .wave-data-meta {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  .wave-data-format {
+    grid-column: 2;
+    grid-row: 2;
+  }
+
+  .wave-data-playback {
+    grid-column: 3;
+    grid-row: 1 / 3;
+  }
+
+  .wave-data-row .waveform-seek {
+    grid-column: 1 / -1;
+    grid-row: 3;
+  }
 }
 
 @media (max-width: 1200px) {

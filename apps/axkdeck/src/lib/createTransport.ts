@@ -40,6 +40,9 @@ import type {
 import type { DirectoryListing, DirectoryRef, FileRef, SandboxRoot } from './storageLocations';
 
 class UnavailableTransport implements ImageTransport {
+    audioIdentity(): ReturnType<ImageTransport['audioIdentity']> {
+        throw new Error('No server connection');
+    }
     selectDocument(): Promise<OpenedImage> {
         return this.unavailable();
     }

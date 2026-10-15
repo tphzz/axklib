@@ -1,3 +1,4 @@
+import { WaveformPreviewQueue } from '../../lib/audio/waveformPreviewQueue';
 import { AuditionController, type AuditionState } from '../../lib/audio/auditionController';
 import { inspectorSelectionStopsPlayback } from '../../lib/audio/playbackSelection';
 import { matchesSearch, playbackRowVisible } from '../../lib/auditionVisibility';
@@ -71,14 +72,13 @@ export class AuditionWorkflow {
     private readonly controller: AuditionController;
     private pendingObjectId = '';
     private sampleBankPlaybackGeneration = 0;
-    private readonly previewQueue: { target: PreviewTarget; generation: number; bins: number }[] = [];
+    private readonly previews: WaveformPreviewQueue;
     private readonly previewPending = new Set<string>();
     private readonly previewFailed = new Set<string>();
-    private previewInflight = 0;
-    private previewGeneration = 0;
     private auditionabilityCache?: AuditionabilityIndex;
 
     constructor(private readonly dependencies: AuditionWorkflowDependencies) {
+        this.previews = new WaveformPreviewQueue(dependencies.transport);
         this.controller = new AuditionController(dependencies.transport, (state) => {
             this.state = state;
             if (
@@ -246,8 +246,7 @@ export class AuditionWorkflow {
     }
 
     resetPreviewQueue(): void {
-        this.previewGeneration += 1;
-        this.previewQueue.length = 0;
+        this.previews.reset();
         this.previewPending.clear();
         this.previewFailed.clear();
         this.dependencies.catalog.samplePreviewStates = {};
@@ -271,12 +270,7 @@ export class AuditionWorkflow {
                 ? { ...candidate, previewState: 'loading' }
                 : candidate,
         );
-        this.previewQueue.push({
-            target: { kind: 'wave-data', objectId: item.objectKey, itemId: item.id },
-            generation: this.previewGeneration,
-            bins,
-        });
-        this.drainPreviewQueue();
+        this.loadPreview({ kind: 'wave-data', objectId: item.objectKey, itemId: item.id }, bins);
     }
 
     requestSampleWaveformPreview(item: SampleStructureItem): void {
@@ -295,12 +289,7 @@ export class AuditionWorkflow {
             ...catalog.samplePreviewStates,
             [item.objectId]: { preview: null, previewState: 'loading' },
         };
-        this.previewQueue.push({
-            target: { kind: 'sample', objectId: item.objectId },
-            generation: this.previewGeneration,
-            bins: 1024,
-        });
-        this.drainPreviewQueue();
+        this.loadPreview({ kind: 'sample', objectId: item.objectId }, 1024);
     }
 
     async playWaveData(item: WaveDataItem): Promise<void> {
@@ -543,6 +532,7 @@ export class AuditionWorkflow {
     }
 
     dispose(): Promise<void> {
+        this.previews.reset();
         return this.controller.dispose();
     }
 
@@ -616,62 +606,51 @@ export class AuditionWorkflow {
         });
     }
 
-    private drainPreviewQueue(): void {
-        while (this.previewInflight < 2 && this.previewQueue.length > 0) {
-            const sessionId = this.dependencies.sessionId();
-            if (sessionId === null) return;
-            const queued = this.previewQueue.shift();
-            if (!queued) return;
-            const { target, generation, bins } = queued;
-            this.previewInflight += 1;
-            void this.dependencies.transport
-                .preview(sessionId, target.objectId, bins)
-                .then((preview) => {
-                    if (this.dependencies.sessionId() !== sessionId || this.previewGeneration !== generation) return;
-                    const catalog = this.dependencies.catalog;
-                    if (target.kind === 'wave-data') {
-                        const lane = preview.lanes[0];
-                        if (!lane || lane.sourceObjectId !== target.objectId) {
-                            throw new Error('Wave Data preview did not return its physical waveform lane');
-                        }
-                        catalog.waveData = catalog.waveData.map((candidate) =>
-                            candidate.id === target.itemId && candidate.waveform.length <= lane.bins.length
-                                ? { ...candidate, waveform: lane.bins, previewState: 'ready' }
-                                : candidate,
-                        );
-                    } else {
-                        catalog.samplePreviewStates = {
-                            ...catalog.samplePreviewStates,
-                            [target.objectId]: { preview, previewState: 'ready' },
-                        };
-                    }
-                })
-                .catch((error) => {
-                    if (this.dependencies.sessionId() !== sessionId || this.previewGeneration !== generation) return;
-                    this.previewFailed.add(target.objectId);
-                    const catalog = this.dependencies.catalog;
-                    if (target.kind === 'wave-data') {
-                        catalog.waveData = catalog.waveData.map((candidate) =>
-                            candidate.id === target.itemId && candidate.previewState !== 'ready'
-                                ? { ...candidate, previewState: 'failed' }
-                                : candidate,
-                        );
-                    } else {
-                        catalog.samplePreviewStates = {
-                            ...catalog.samplePreviewStates,
-                            [target.objectId]: { preview: null, previewState: 'failed' },
-                        };
-                    }
-                    this.dependencies.setStatus(userFacingMessage(error));
-                })
-                .finally(() => {
-                    if (this.previewGeneration === generation)
-                        this.previewPending.delete(
-                            target.kind === 'wave-data' ? `${target.objectId}/${bins}` : target.objectId,
-                        );
-                    this.previewInflight -= 1;
-                    this.drainPreviewQueue();
-                });
-        }
+    private loadPreview(target: PreviewTarget, bins: number): void {
+        const sessionId = this.dependencies.sessionId();
+        if (sessionId === null) return;
+        const key = target.kind === 'wave-data' ? `${target.objectId}/${bins}` : target.objectId;
+        this.previews.request(
+            sessionId,
+            target.objectId,
+            bins,
+            (preview) => {
+                this.previewPending.delete(key);
+                const catalog = this.dependencies.catalog;
+                if (target.kind === 'wave-data') {
+                    const lane = preview.lanes[0];
+                    if (!lane || lane.sourceObjectId !== target.objectId)
+                        throw new Error('Wave Data preview did not return its physical waveform lane');
+                    catalog.waveData = catalog.waveData.map((candidate) =>
+                        candidate.id === target.itemId && candidate.waveform.length <= lane.bins.length
+                            ? { ...candidate, waveform: lane.bins, previewState: 'ready' }
+                            : candidate,
+                    );
+                } else {
+                    catalog.samplePreviewStates = {
+                        ...catalog.samplePreviewStates,
+                        [target.objectId]: { preview, previewState: 'ready' },
+                    };
+                }
+            },
+            (error) => {
+                this.previewPending.delete(key);
+                this.previewFailed.add(target.objectId);
+                const catalog = this.dependencies.catalog;
+                if (target.kind === 'wave-data') {
+                    catalog.waveData = catalog.waveData.map((candidate) =>
+                        candidate.id === target.itemId && candidate.previewState !== 'ready'
+                            ? { ...candidate, previewState: 'failed' }
+                            : candidate,
+                    );
+                } else {
+                    catalog.samplePreviewStates = {
+                        ...catalog.samplePreviewStates,
+                        [target.objectId]: { preview: null, previewState: 'failed' },
+                    };
+                }
+                this.dependencies.setStatus(userFacingMessage(error));
+            },
+        );
     }
 }

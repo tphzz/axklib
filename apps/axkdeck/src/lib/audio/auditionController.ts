@@ -1,6 +1,6 @@
 import { audioDiagnosticsEnabled, reportDiagnostic, type DiagnosticLevel } from '../diagnostics';
 import { AxklibApiError } from '../httpApiClient';
-import type { ImageTransport } from '../transport';
+import type { AudioIdentity, ImageTransport } from '../transport';
 import { userFacingMessage } from '../userFacingMessage';
 import { AuditionAssetStore, isAbortError } from './auditionAssetStore';
 import { initialPlaybackFrame, playbackFrameAtTime, playbackOffsetSeconds } from './playbackTimeline';
@@ -24,6 +24,7 @@ import type {
     ScheduledSequenceSegment,
 } from './auditionPlaybackState';
 import { HeldVoices, type PrepareVoices } from './heldVoices';
+import { sameAudioIdentity } from './audioIdentity';
 
 export type {
     AuditionControllerOptions,
@@ -151,6 +152,7 @@ export class AuditionController {
 
         let failedObjectId = firstObjectId;
         try {
+            const identity = { ...this.transport.audioIdentity(sessionId) };
             const output = this.ensureContext();
             const context = output.context;
             const resumed = this.resumeContext(output, run);
@@ -164,6 +166,7 @@ export class AuditionController {
                 decodedBytes: retainedDecodedBytes,
                 preparationDurationMs: Math.round(monotonicNow() - run.startedAt),
             });
+            this.assertAudioIdentity(sessionId, identity);
             this.startSequence(entries, run, context, sequenceGeneration);
         } catch (error) {
             if (
@@ -225,6 +228,7 @@ export class AuditionController {
         this.update({ objectId, status: 'preparing', playheadFrame: 0 });
 
         try {
+            const identity = { ...this.transport.audioIdentity(sessionId) };
             const output = this.ensureContext();
             const context = output.context;
             // Resume synchronously from the click handler before any network await.
@@ -234,14 +238,22 @@ export class AuditionController {
                 : this.assets.load(sessionId, objectId, context, false, run);
             let [, entry] = await Promise.all([resumed, loaded]);
             if (generation !== this.generation) return;
+            this.assertAudioIdentity(sessionId, identity);
             // An oversized speculative request may finish just as an explicit play promotes it.
             if (!entry) entry = await this.assets.load(sessionId, objectId, context, false, run);
             if (generation !== this.generation || !entry) return;
             this.assets.finishRequest();
+            this.assertAudioIdentity(sessionId, identity);
             this.startPlayback(entry, initialPlaybackFrame(entry.descriptor), run, context);
         } catch (error) {
             if (generation !== this.generation || isAbortError(error)) return;
             await this.fail(error, objectId, run);
+        }
+    }
+
+    private assertAudioIdentity(sessionId: number, expected: AudioIdentity): void {
+        if (!sameAudioIdentity(expected, this.transport.audioIdentity(sessionId))) {
+            throw new Error('Audio document changed before playback could start.');
         }
     }
 

@@ -7,10 +7,13 @@
 #include <utility>
 
 #include "axklib/audio.hpp"
-#include "axklib/lookups.hpp"
 #include "image_sessions_internal.hpp"
 
 namespace axk::app::formats::a_series {
+
+using native::PcmMember;
+using native::PcmReadWindow;
+using native::PcmSource;
 
 Result<PcmMember> SessionState::prepare_member(std::string object_id, std::string role,
                                                const CurrentSbnkMember *sample_member,
@@ -54,6 +57,7 @@ Result<PcmMember> SessionState::prepare_member(std::string object_id, std::strin
     return PcmMember{.object_id = std::move(object_id),
                      .role = std::move(role),
                      .output_width = smpl->stored_sample_width_bytes.value,
+                     .native_bit_depth = static_cast<std::uint16_t>(smpl->stored_sample_width_bytes.value * 8U),
                      .stored_frame_count = physical_frame_count,
                      .playback_start_frame = playback_first_frame,
                      .playback_length_frames = playback_frame_count,
@@ -61,8 +65,7 @@ Result<PcmMember> SessionState::prepare_member(std::string object_id, std::strin
                      .frame_count = used_frame_count};
 }
 
-Result<PcmSource> SessionState::prepare_source(std::string_view object_id, PcmReadWindow read_window,
-                                               std::span<const ImageRelationshipItem> relationships) const {
+Result<PcmSource> SessionState::prepare_source(std::string_view object_id, PcmReadWindow read_window) const {
     const auto snapshot = snapshots_by_id.find(std::string{object_id});
     if (snapshot == snapshots_by_id.end())
         return std::unexpected(session_error("object_not_found", "image object does not exist"));
@@ -123,10 +126,8 @@ Result<PcmSource> SessionState::prepare_source(std::string_view object_id, PcmRe
     }
 
     PcmSource source;
-    source.loop_mode =
+    auto loop_mode =
         sample ? sample->loop_mode : std::get<CurrentSmpl>(snapshot->second->object.payload).loop_mode.value;
-    source.loop_mode_label =
-        sample ? sample->loop_mode_label : std::get<CurrentSmpl>(snapshot->second->object.payload).loop_mode_label;
     for (auto &pending : pending_members) {
         auto member =
             prepare_member(std::move(pending.object_id), std::move(pending.role), pending.sample_member, read_window);
@@ -146,20 +147,19 @@ Result<PcmSource> SessionState::prepare_source(std::string_view object_id, PcmRe
             source.warnings.emplace_back(
                 std::format("{} loop starts before its playback window; playback will use one-shot mode",
                             pending.sample_member ? "Sample" : "Wave Data"));
-            source.loop_mode = 0U;
-            source.loop_mode_label = current_label(CurrentLookup::current_smpl_loop_mode_labels, 0);
+            loop_mode = 0U;
+
         } else {
             member->loop_start = read_window == PcmReadWindow::playback
                                      ? member->source_loop_start - member->playback_start_frame
                                      : member->source_loop_start;
             member->loop_length = member->source_loop_length;
         }
-        if ((source.loop_mode == 1U || source.loop_mode == 2U) &&
+        if ((loop_mode == 1U || loop_mode == 2U) &&
             (member->loop_length == 0U || member->loop_start >= member->frame_count ||
              member->loop_length > member->frame_count - member->loop_start)) {
             source.warnings.emplace_back("Invalid loop bounds; playback will use one-shot mode");
-            source.loop_mode = 0U;
-            source.loop_mode_label = current_label(CurrentLookup::current_smpl_loop_mode_labels, 0);
+            loop_mode = 0U;
         }
         source.members.push_back(std::move(*member));
     }
@@ -173,7 +173,7 @@ Result<PcmSource> SessionState::prepare_source(std::string_view object_id, PcmRe
             source.warnings.emplace_back(
                 "Sample member formats differ; audition will normalize each lane independently");
         }
-        if (source.loop_mode == 1U || source.loop_mode == 2U) {
+        if (loop_mode == 1U || loop_mode == 2U) {
             const auto equal_time = [](std::uint64_t left_frames, std::uint32_t left_rate, std::uint64_t right_frames,
                                        std::uint32_t right_rate) {
                 const auto left_divisor = std::gcd(left_frames, static_cast<std::uint64_t>(left_rate));
@@ -188,17 +188,18 @@ Result<PcmSource> SessionState::prepare_source(std::string_view object_id, PcmRe
                 });
             if (incompatible_loop) {
                 source.warnings.emplace_back("Sample member loop timings differ; playback will use one-shot mode");
-                source.loop_mode = 0U;
-                source.loop_mode_label = current_label(CurrentLookup::current_smpl_loop_mode_labels, 0);
+                loop_mode = 0U;
             }
         }
     }
-    if (source.loop_mode == 0U) {
+    if (loop_mode == 0U) {
         for (auto &member : source.members) {
             member.loop_start = 0U;
             member.loop_length = 0U;
         }
     }
+    source.reverse = loop_mode == 3U || loop_mode == 5U;
+    source.looping = loop_mode == 1U || loop_mode == 2U;
     return source;
 }
 

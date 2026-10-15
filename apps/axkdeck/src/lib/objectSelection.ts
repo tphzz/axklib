@@ -1,4 +1,5 @@
 import type { PackageExportObject } from './types';
+import { updateCollectionSelection, collectionSelectionMode } from './collectionSelection';
 
 export type ObjectSelectionMode = 'replace' | 'toggle' | 'range' | 'add-range' | 'all';
 
@@ -48,44 +49,19 @@ export function updatePackageExportSelection(
     targetId: string,
     mode: ObjectSelectionMode,
 ): PackageExportSelectionUpdate {
-    const target = domain.find((item) => item.objectId === targetId);
-    if (!target) throw new Error('Selected object is no longer available');
-
-    const selected = new Map(current.items.map((item) => [item.objectId, item]));
-    const domainIds = new Set(domain.map((item) => item.objectId));
-    const anchorId = current.anchors[domainKey] ?? '';
-    let nextAnchorId = targetId;
-    if (mode === 'replace') {
-        selected.clear();
-        selected.set(target.objectId, target);
-    } else if (mode === 'toggle') {
-        if (selected.has(target.objectId)) selected.delete(target.objectId);
-        else selected.set(target.objectId, target);
-    } else if (mode === 'range' || mode === 'add-range') {
-        const start = visible.findIndex((item) => item.objectId === anchorId);
-        const end = visible.findIndex((item) => item.objectId === targetId);
-        const range = start < 0 || end < 0 ? [target] : visible.slice(Math.min(start, end), Math.max(start, end) + 1);
-        nextAnchorId = start < 0 ? targetId : anchorId;
-        if (mode === 'range') {
-            for (const objectId of domainIds) selected.delete(objectId);
-        }
-        for (const item of range) selected.set(item.objectId, item);
-    } else {
-        for (const item of visible) selected.set(item.objectId, item);
-    }
-
-    if (selected.size > maximumPackageExportRoots) return { selection: current, limitExceeded: true };
-
-    return {
-        selection: {
-            items: [...selected.values()].sort(comparePackageRoots),
-            anchors: { ...current.anchors, [domainKey]: nextAnchorId },
-        },
-        limitExceeded: false,
-    };
+    const result = updateCollectionSelection(
+        current,
+        domainKey,
+        domain,
+        visible,
+        targetId,
+        mode,
+        maximumPackageExportRoots,
+    );
+    if (!result.limitExceeded) result.selection.items.sort(comparePackageRoots);
+    return result;
 }
 
 export function selectionMode(event: MouseEvent): ObjectSelectionMode {
-    if (event.shiftKey) return event.ctrlKey || event.metaKey ? 'add-range' : 'range';
-    return event.ctrlKey || event.metaKey ? 'toggle' : 'replace';
+    return collectionSelectionMode(event);
 }

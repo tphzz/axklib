@@ -66,7 +66,6 @@ export interface WorkspaceProps {
     importAudio: () => void;
     importMidi: () => void;
     convertDocument?: () => void;
-    addDocumentCompanions?: () => void;
     programs: Program[];
     sampleBanks: SampleStructureItem[];
     samples: SampleStructureItem[];

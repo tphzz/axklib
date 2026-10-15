@@ -4,6 +4,7 @@ import type {
     AuditionLaneDescriptor,
     ImageTransport,
 } from '../transport';
+import { audioIdentityKey, sameAudioIdentity } from './audioIdentity';
 import { isReversePlayback } from './playbackTimeline';
 import type {
     AuditionAssetEventSink,
@@ -70,7 +71,7 @@ export class AuditionAssetStore {
     }
 
     key(sessionId: number, objectId: string): string {
-        return `${sessionId}:${objectId}`;
+        return `${sessionId}:${audioIdentityKey(this.transport.audioIdentity(sessionId))}:${objectId}`;
     }
 
     beginRequest(key: string): void {
@@ -237,12 +238,23 @@ export class AuditionAssetStore {
         run?: PlaybackRun,
         workingSetPolicy?: WorkingSetPolicy,
     ): Promise<Map<string, CachedAudition>> {
+        const identity = this.transport.audioIdentity(sessionId);
+        const checkIdentity = () => {
+            if (signal.aborted) throw abortError();
+            try {
+                if (sameAudioIdentity(identity, this.transport.audioIdentity(sessionId))) return;
+            } catch {
+                /* A closed session invalidates pending audio too. */
+            }
+            throw abortError();
+        };
         let auditionId: string | undefined;
         try {
             const prepareStarted = monotonicNow();
             const bundle = await this.transport.prepareAuditionBundle(sessionId, objectIds, signal);
             auditionId = bundle.auditionId;
-            if (signal.aborted) throw abortError();
+            checkIdentity();
+            if (!sameAudioIdentity(identity, bundle)) throw abortError();
             this.validateBundle(bundle, objectIds);
             if (run) {
                 this.emit(run, 'audition_bundle_prepared', {
@@ -289,7 +301,7 @@ export class AuditionAssetStore {
                 bundle.contentSizeBytes,
                 signal,
             );
-            if (signal.aborted) throw abortError();
+            checkIdentity();
             if (run) {
                 this.emit(run, 'audio_bundle_fetch_completed', {
                     byteCount: content.byteLength,
@@ -322,7 +334,7 @@ export class AuditionAssetStore {
                         return decoded;
                     }),
                 );
-                if (signal.aborted) throw abortError();
+                checkIdentity();
                 const frameCount = Math.max(...laneBuffers.map((buffer) => buffer.length));
                 const buffer =
                     laneBuffers.length === 1
@@ -341,8 +353,8 @@ export class AuditionAssetStore {
                     sampleWidthBytes: Math.max(...clip.lanes.map((lane) => lane.sampleWidthBytes)),
                     frameCount: firstLane.frameCount,
                     wavSizeBytes: clip.lanes.reduce((total, lane) => total + lane.wavSizeBytes, 0),
-                    loopMode: clip.loopMode,
-                    loopModeLabel: clip.loopModeLabel,
+                    direction: clip.direction,
+                    looping: clip.looping,
                     loopStartFrame: firstLane.loopStartFrame,
                     loopLengthFrames: firstLane.loopLengthFrames,
                     warnings: clip.warnings,
@@ -354,7 +366,7 @@ export class AuditionAssetStore {
                 }
                 const weightBytes = buffer.length * buffer.numberOfChannels * Float32Array.BYTES_PER_ELEMENT;
                 const entry: CachedAudition = {
-                    key: this.key(sessionId, clip.objectId),
+                    key: `${sessionId}:${audioIdentityKey(identity)}:${clip.objectId}`,
                     sessionId,
                     objectId: clip.objectId,
                     descriptor,
@@ -362,7 +374,6 @@ export class AuditionAssetStore {
                     weightBytes,
                     transient: weightBytes > this.cacheBudgetBytes || this.maximumCacheEntries === 0,
                 };
-                if (!entry.transient) this.addCacheEntry(entry);
                 entries.set(clip.objectId, entry);
             }
             if (run) {
@@ -372,6 +383,10 @@ export class AuditionAssetStore {
                     decodedBytes: [...entries.values()].reduce((total, entry) => total + entry.weightBytes, 0),
                 });
             }
+            await this.transport.deleteAudition(auditionId).catch(() => undefined);
+            auditionId = undefined;
+            checkIdentity();
+            for (const entry of entries.values()) if (!entry.transient) this.addCacheEntry(entry);
             return entries;
         } finally {
             if (auditionId) await this.transport.deleteAudition(auditionId).catch(() => undefined);

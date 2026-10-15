@@ -255,7 +255,8 @@ export class MappingAudition implements MappingAudio {
         const rate = buffer.sampleRate;
         const schedule = planDirectPlayback(
             {
-                loopMode: plan.loopMode,
+                direction: plan.reverse ? 'REVERSE' : 'FORWARD',
+                looping: plan.loopMode === 1 || plan.loopMode === 2,
                 loopStartFrame: loopStart - plan.start,
                 loopLengthFrames: loopLength,
                 frameCount: plan.length,

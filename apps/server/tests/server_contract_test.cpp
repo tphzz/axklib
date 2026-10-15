@@ -523,6 +523,20 @@ TEST(ServerContract, EveryOpenApiOperationIdIsUnique) {
     EXPECT_TRUE(std::ranges::contains(operation_ids, "operations.dispatch.image.builds"));
 }
 
+TEST(ServerContract, AuditionRequestsRequireAnExplicitRevision) {
+    const auto document =
+        axk::server::build_openapi_document(axk::server::embedded_openapi(), axk::app::make_operation_registry());
+    auto request = nlohmann::json{{"imageId", "image-1"},
+                                  {"documentId", "document-1"},
+                                  {"objectIds", nlohmann::json::array({"wave-1"})},
+                                  {"expectedRevision", 2U}};
+    EXPECT_TRUE(axk::server::validate_openapi_value(document, "AuditionPrepareRequest", request));
+    request.erase("expectedRevision");
+    EXPECT_FALSE(axk::server::validate_openapi_value(document, "AuditionPrepareRequest", request));
+    request["expectedRevision"] = 0U;
+    EXPECT_FALSE(axk::server::validate_openapi_value(document, "AuditionPrepareRequest", request));
+}
+
 TEST(ServerContract, EveryHttpResponseCarriesRequestIdAndPaginationIsBounded) {
     const auto document =
         axk::server::build_openapi_document(axk::server::embedded_openapi(), axk::app::make_operation_registry());

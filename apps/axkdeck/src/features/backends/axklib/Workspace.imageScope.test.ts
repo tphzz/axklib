@@ -60,7 +60,7 @@ describe('Workspace image scope', () => {
         await waitFor(() => expect(fixture.workflow.documentId).toBe('alternative'));
         await selectImage('source-3');
         await fireEvent.click(screen.getByRole('button', { name: 'Waves' }));
-        await fireEvent.click(await screen.findByRole('button', { name: 'Wave 20' }));
+        await fireEvent.click(await screen.findByRole('button', { name: 'Inspect Wave 20' }));
         await fireEvent.click(await screen.findByRole('button', { name: 'To Files' }));
         await screen.findByText('File 4', { selector: '.file-name span[title]' });
         expect(image().value).toBe('source-4');
@@ -118,8 +118,8 @@ describe('Workspace image scope', () => {
         await screen.findByRole('combobox', { name: 'Image' });
         await selectImage('source-3');
         await fireEvent.click(screen.getByRole('button', { name: 'Waves' }));
-        await screen.findByRole('button', { name: 'Wave 20' });
-        await fireEvent.click(screen.getByRole('button', { name: 'Wave 20' }));
+        await screen.findByRole('button', { name: 'Inspect Wave 20' });
+        await fireEvent.click(screen.getByRole('button', { name: 'Inspect Wave 20' }));
         await fireEvent.input(screen.getByRole('searchbox', { name: 'Search Waves' }), {
             target: { value: 'Wave 2' },
         });

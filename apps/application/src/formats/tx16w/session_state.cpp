@@ -40,7 +40,8 @@ SessionState::SessionState(std::shared_ptr<const axk::tx16w::Document> document)
     for (const auto &object : catalog.objects) {
         ImageObjectItem item{};
         item.id = object.id;
-        native_object_ids.emplace(object.id, object.id);
+        if (object.type != "native-file")
+            native_object_ids.emplace(object.id, object.id);
         item.type = object.type;
         item.name = object.name;
         item.format = "yamaha.tx16w";
@@ -93,11 +94,14 @@ Result<nlohmann::ordered_json> SessionState::object_detail(const ImageDocumentCo
         [](const auto &item) -> Json {
             using T = std::decay_t<decltype(item)>;
             if constexpr (std::is_same_v<T, axk::tx16w::WaveHeader>) {
-                return {{"type", "wave"},
-                        {"sampleRate", item.sample_rate},
-                        {"attackFrames", item.attack_frames},
-                        {"repeatFrames", item.repeat_frames},
-                        {"looped", item.looped}};
+                return {
+                    {"type", "wave"},
+                    {"sampleRate", item.sample_rate},
+                    {"sampleRateApproximate", item.sample_rate_source == axk::tx16w::SampleRateSource::defaulted_33333},
+                    {"nativeBitDepth", 12},
+                    {"attackFrames", item.attack_frames},
+                    {"repeatFrames", item.repeat_frames},
+                    {"looped", item.looped}};
             } else if constexpr (std::is_same_v<T, axk::tx16w::Voice>) {
                 auto regions = Json::array();
                 for (const auto &region : item.regions)

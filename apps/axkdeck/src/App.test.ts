@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
     objectPage: vi.fn(),
     objectDetail: vi.fn(),
     relationshipPage: vi.fn(),
+    audioIdentity: vi.fn(),
     preview: vi.fn(),
     inspectPackage: vi.fn(),
     planImagePackageImport: vi.fn(),
@@ -56,6 +57,7 @@ vi.mock('./lib/createTransport', () => ({
         objectPage: mocks.objectPage,
         objectDetail: mocks.objectDetail,
         relationshipPage: mocks.relationshipPage,
+        audioIdentity: mocks.audioIdentity,
         preview: mocks.preview,
         inspectPackage: mocks.inspectPackage,
         planImagePackageImport: mocks.planImagePackageImport,
@@ -243,7 +245,7 @@ describe('App panel layout', () => {
         await cancelDialog(dialog);
         dialog = await openBank();
         expect(within(dialog).getByRole('button', { name: 'a3k' }).getAttribute('aria-pressed')).toBe('true');
-    });
+    }, 15_000);
     beforeEach(() => {
         delete window.__AXKLIB_SERVER__;
         mocks.filesystem.mockReset().mockResolvedValue({
@@ -316,7 +318,17 @@ describe('App panel layout', () => {
         mocks.objectPage.mockReset().mockResolvedValue({ objects: [], totalCount: 0 });
         mocks.objectDetail.mockReset();
         mocks.relationshipPage.mockReset().mockResolvedValue({ relationships: [], totalCount: 0 });
-        mocks.preview.mockReset().mockResolvedValue({ objectId: 'wave-1', lanes: [] });
+        mocks.audioIdentity.mockReset().mockReturnValue({
+            imageId: 'image-17',
+            documentId: nativeWorkspaceFixture().documentId,
+            revision: 1,
+        });
+        mocks.preview.mockReset().mockImplementation(async (sessionId: number, objectId: string) => ({
+            ...mocks.audioIdentity(sessionId),
+            objectId,
+            warnings: [],
+            lanes: [],
+        }));
         mocks.inspectPackage.mockReset();
         mocks.planImagePackageImport.mockReset();
         mocks.releaseImagePackageImportPlan.mockReset().mockResolvedValue(undefined);

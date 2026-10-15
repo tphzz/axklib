@@ -392,10 +392,13 @@ crow::response ServerApplication::image_preview_response(const crow::request &re
         return std::move(*denied);
     const auto *object_id = request.url_params.get("objectId");
     const auto bins = parse_unsigned(request.url_params.get("bins") == nullptr ? "" : request.url_params.get("bins"));
-    if (object_id == nullptr || *object_id == '\0' || !bins || *bins > std::numeric_limits<std::size_t>::max())
-        return error_response(400, {"invalid_preview", "objectId and an unsigned bins value are required"}, id);
-    const auto preview =
-        images_.preview({image_id, document_id}, request_owner(request), object_id, static_cast<std::size_t>(*bins));
+    const auto revision = parse_unsigned(
+        request.url_params.get("expectedRevision") == nullptr ? "" : request.url_params.get("expectedRevision"));
+    if (object_id == nullptr || *object_id == '\0' || !bins || *bins > std::numeric_limits<std::size_t>::max() ||
+        !revision || *revision == 0U)
+        return error_response(400, {"invalid_preview", "objectId, bins and expectedRevision are required"}, id);
+    const auto preview = images_.preview({image_id, document_id}, request_owner(request), object_id,
+                                         static_cast<std::size_t>(*bins), *revision);
     if (!preview)
         return error_response(status_for_error(preview.error()), preview.error(), id);
     Json lanes = Json::array();
@@ -408,15 +411,24 @@ crow::response ServerApplication::image_preview_response(const crow::request &re
                          {"sampleRate", lane.sample_rate},
                          {"storedFrameCount", lane.stored_frame_count},
                          {"sampleWidthBytes", lane.sample_width_bytes},
+                         {"nativeBitDepth", lane.native_bit_depth},
+                         {"sampleRateApproximate", lane.sample_rate_approximate},
                          {"playbackStartFrame", lane.playback_start_frame},
                          {"playbackLengthFrames", lane.playback_length_frames},
                          {"loopStartFrame", lane.loop_start_frame},
                          {"loopLengthFrames", lane.loop_length_frames},
                          {"bins", std::move(values)}});
     }
-    return json_response(
-        200, {{"data", {{"objectId", preview->object_id}, {"lanes", std::move(lanes)}}}, {"meta", {{"requestId", id}}}},
-        id);
+    return json_response(200,
+                         {{"data",
+                           {{"objectId", preview->object_id},
+                            {"imageId", preview->image_id},
+                            {"documentId", preview->document_id},
+                            {"revision", preview->revision},
+                            {"warnings", preview->warnings},
+                            {"lanes", std::move(lanes)}}},
+                          {"meta", {{"requestId", id}}}},
+                         id);
 }
 
 crow::response ServerApplication::audition_content_response(const crow::request &request,

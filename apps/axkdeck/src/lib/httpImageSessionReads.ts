@@ -1,3 +1,4 @@
+import { documentTarget } from './httpNativeDocuments';
 import { HttpImageSessions } from './httpImageSessions';
 import type { FilesystemEdit, FilesystemPage, FilesystemQuery, FilesystemImportEntry } from './filesystem';
 import type {
@@ -97,8 +98,12 @@ export class HttpImageSessionReads {
     nativeObjectDetail(sessionId: number, objectId: string) {
         return this.imageSessions.native.detail(sessionId, objectId);
     }
-    preview(sessionId: number, objectId: string, bins: number) {
-        return this.imageSessions.native.preview(sessionId, objectId, bins);
+    audioIdentity(sessionId: number) {
+        const session = this.imageSessions.get(sessionId);
+        return { ...documentTarget(session), revision: session.revision };
+    }
+    preview(sessionId: number, objectId: string, bins: number, signal?: AbortSignal) {
+        return this.imageSessions.native.preview(sessionId, objectId, bins, signal);
     }
 
     keepImageAlive(sessionId: number): Promise<void> {

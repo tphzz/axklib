@@ -1979,14 +1979,19 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
             assert isinstance(
                 waveform["waveform"]["embeddedContainerName"], str
             ), waveform
-            preview_query = urlencode({"objectId": waveform["id"], "bins": 16})
+            preview_query = urlencode({"objectId": waveform["id"], "bins": 16, "expectedRevision": revision})
             status, preview = http_request(
                 port, "GET", f"/api/v1/images/{image_id}/documents/{document_id}/preview?{preview_query}"
             )
             assert status == 200 and "frameCount" not in preview["data"], preview
+            assert preview["data"]["imageId"] == image_id, preview
+            assert preview["data"]["documentId"] == document_id, preview
+            assert preview["data"]["revision"] == revision, preview
+            assert isinstance(preview["data"]["warnings"], list), preview
             assert len(preview["data"]["lanes"]) == 1, preview
             preview_lane = preview["data"]["lanes"][0]
             assert preview_lane["role"] == "MONO", preview
+            assert preview_lane["nativeBitDepth"] == preview_lane["sampleWidthBytes"] * 8, preview
             assert preview_lane["sampleRate"] == waveform["waveform"]["sampleRate"], preview
             assert (
                 preview_lane["storedFrameCount"]
@@ -2009,18 +2014,39 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 == waveform["waveform"]["loopLengthFrames"]
             ), preview
             assert len(preview_lane["bins"]) == 16, preview
+            for preview_revision, expected_status in ((None, 400), (revision + 1, 409)):
+                query = {"objectId": waveform["id"], "bins": 16}
+                if preview_revision is not None:
+                    query["expectedRevision"] = preview_revision
+                status, rejected_preview = http_request(
+                    port, "GET",
+                    f"/api/v1/images/{image_id}/documents/{document_id}/preview?{urlencode(query)}",
+                )
+                assert status == expected_status, rejected_preview
+            status, rejected_audition = http_request(
+                port, "POST", "/api/v1/auditions",
+                {"documentId": document_id, "imageId": image_id, "objectIds": [waveform["id"]]},
+            )
+            assert status == 400, rejected_audition
             status, submitted = http_request(
                 port,
                 "POST",
                 "/api/v1/auditions",
-                {"documentId": "document-a-series-source-1", "imageId": image_id, "objectIds": [waveform["id"]]},
+                {"documentId": document_id, "imageId": image_id, "objectIds": [waveform["id"]], "expectedRevision": revision},
             )
             assert status == 202, submitted
             audition_job = wait_for_job(port, str(submitted["data"]["jobId"]), process)
             assert audition_job["state"] == "COMPLETED", audition_job
             audition = audition_job["result"]
+            assert audition["imageId"] == image_id, audition
+            assert audition["documentId"] == document_id, audition
+            assert audition["revision"] == revision, audition
             audition_id = str(audition["auditionId"])
             assert audition["clips"][0]["objectId"] == waveform["id"]
+            assert audition["clips"][0]["direction"] in ("FORWARD", "REVERSE"), audition
+            assert isinstance(audition["clips"][0]["looping"], bool), audition
+            assert "loopMode" not in audition["clips"][0], audition
+            assert "loopModeLabel" not in audition["clips"][0], audition
             assert audition["clips"][0]["lanes"][0]["contentOffsetBytes"] == 0
             assert audition["contentSizeBytes"] == audition["clips"][0]["lanes"][0][
                 "wavSizeBytes"

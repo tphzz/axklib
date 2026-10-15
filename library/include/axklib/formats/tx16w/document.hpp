@@ -45,6 +45,9 @@ class Document final : public native::Document {
     [[nodiscard]] std::span<const NativeFile> native_files() const noexcept;
     [[nodiscard]] Result<const NativeObject *> object(std::string_view id) const;
     [[nodiscard]] Result<Wave> read_wave(std::string_view id, const CancellationToken &cancellation = {}) const;
+    [[nodiscard]] Result<std::vector<std::int16_t>> read_wave_frames(std::string_view id, std::uint64_t first_frame,
+                                                                     std::size_t frame_count,
+                                                                     const CancellationToken &cancellation = {}) const;
 
   private:
     explicit Document(std::shared_ptr<const native::SourceSet> sources);

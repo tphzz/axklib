@@ -37,12 +37,18 @@ afterEach(() => {
 
 function envelope(count: number): PreviewEnvelope {
     return {
+        imageId: 'image-1',
+        documentId: 'document-1',
+        revision: 1,
+        warnings: [],
         objectId: 'A',
         lanes: ['LEFT', 'RIGHT'].map((role) => ({
             role,
             sourceObjectId: `wave-${role}`,
             sampleRate: 44100,
             sampleWidthBytes: 2,
+            nativeBitDepth: 16,
+            sampleRateApproximate: false,
             storedFrameCount: 16384,
             playbackStartFrame: 0,
             playbackLengthFrames: 16384,

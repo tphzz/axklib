@@ -168,15 +168,21 @@
             },
         } as unknown as ObjectDetail;
     }
+    const audioIdentity = () => ({ imageId: 'image-1', documentId: 'document-1', revision: 1 });
     const transport = {
+        audioIdentity,
         objectDetail: async (_: number, id: string) => detail(id),
         preview: async (_: number, objectId: string, count: number): Promise<PreviewEnvelope> => ({
+            ...audioIdentity(),
+            warnings: [],
             objectId,
             lanes: (stereo ? (['LEFT', 'RIGHT'] as const) : (['MONO'] as const)).map((role) => ({
                 role,
                 sourceObjectId: `${objectId}-${role}`,
                 sampleRate: fixtureRate,
                 sampleWidthBytes: 2,
+                nativeBitDepth: 16,
+                sampleRateApproximate: false,
                 storedFrameCount: fixtureFrames,
                 playbackStartFrame: 0,
                 playbackLengthFrames: fixtureFrames,
@@ -242,11 +248,17 @@
             return { jobId: 1, kind: 'edit', status: 'completed' };
         },
         prepareAuditionBundle: async () => ({
+            ...audioIdentity(),
+            warnings: [],
             auditionId: 'fixture',
             contentSizeBytes: wavBytes * (stereo ? 2 : 1),
             clips: [
                 {
                     objectId: selected,
+                    direction: 'FORWARD',
+                    looping: true,
+                    loopStartFrame: 20401,
+                    loopLengthFrames: 42195,
                     lanes: Array.from({ length: stereo ? 2 : 1 }, (_, index) => ({
                         sampleRate: fixtureRate,
                         frameCount: fixtureFrames,

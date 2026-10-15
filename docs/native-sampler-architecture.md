@@ -58,6 +58,40 @@ source locations and missing/ambiguous relationships. Switches are guarded and
 reject stale replies. TX16W conversion uses a retained directional plan; native
 TX16W writing remains unsupported.
 
+## Native Audio And Workspace Parity
+
+`library/include/axklib/native/audio.hpp` defines frame windows, PCM precision,
+playback direction, looping and uncertainty without sampler-specific mode codes.
+Each application format adapter implements `NativeAudioProvider`: it resolves
+native audio relationships and reads bounded PCM windows. A-series loop values
+stay in its adapter. TX16W decodes packed 12-bit samples on demand into 16-bit PCM;
+attack/repeat boundaries determine its forward loop. An unproven sample rate
+uses the documented 33,333 Hz default with a warning and approximate duration.
+This is wave audition, not Performance or Voice synthesis.
+
+The common `image_audio.cpp` service owns preview envelopes, retained auditions,
+WAV byte ranges, authorization, revision checks, cancellation and resource limits.
+The same document-scoped preview and audition operations serve both formats.
+Requests carry the expected revision; responses identify image, native document
+and revision. Frontend preview and PCM caches use all three identities and reject
+late replies after switching documents, replacing sources or changing revision.
+Preview work uses one bounded queue shared by native presentations.
+
+Device presentations reuse `CollectionRow`, `WaveCollectionRow`, the collection
+selection reducer, keyboard navigation, `InspectorShell` and `InspectorSection`.
+Formats provide semantics and capabilities, not parallel interaction styles.
+Whole-row activation includes metadata and padding; modified selection retains
+the inspected object. Per-document/per-tab state survives source switches, while
+removed IDs are pruned on refresh. Inspector expansion preferences belong to
+the application context and are keyed by format-qualified object kind.
+
+TX16W exposes Performances, Voices, Timbres, Waves and Setups. Opaque native files
+remain in Files and diagnostics, not a Device collection or native binding.
+Its structural root owns `Convert...`; companion selection uses the existing
+Open/recovery dialog rather than an additional root context-menu action. The
+workspace interaction and panel defaults are specified in the repository's
+AGENTS.md and verified against A-series browser geometry.
+
 ## Conversion Structure
 
 Keep native decoding in `library/{include/axklib,src}/formats/<format>/` and

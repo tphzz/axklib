@@ -1586,18 +1586,40 @@
           "contentSizeBytes": {
             "minimum": 45,
             "type": "integer"
+          },
+          "documentId": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "imageId": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "revision": {
+            "minimum": 1,
+            "type": "integer"
           }
         },
         "required": [
           "auditionId",
           "contentSizeBytes",
-          "clips"
+          "clips",
+          "imageId",
+          "documentId",
+          "revision"
         ],
         "type": "object"
       },
       "AuditionClip": {
         "additionalProperties": false,
         "properties": {
+          "direction": {
+            "enum": [
+              "FORWARD",
+              "REVERSE"
+            ],
+            "type": "string"
+          },
           "lanes": {
             "items": {
               "$ref": "#/components/schemas/AuditionLane"
@@ -1606,13 +1628,8 @@
             "minItems": 1,
             "type": "array"
           },
-          "loopMode": {
-            "maximum": 255,
-            "minimum": 0,
-            "type": "integer"
-          },
-          "loopModeLabel": {
-            "type": "string"
+          "looping": {
+            "type": "boolean"
           },
           "objectId": {
             "minLength": 1,
@@ -1627,10 +1644,10 @@
         },
         "required": [
           "objectId",
-          "loopMode",
-          "loopModeLabel",
           "warnings",
-          "lanes"
+          "lanes",
+          "direction",
+          "looping"
         ],
         "type": "object"
       },
@@ -1699,6 +1716,10 @@
             "minLength": 1,
             "type": "string"
           },
+          "expectedRevision": {
+            "minimum": 1,
+            "type": "integer"
+          },
           "imageId": {
             "minLength": 1,
             "type": "string"
@@ -1725,7 +1746,8 @@
         "required": [
           "imageId",
           "objectIds",
-          "documentId"
+          "documentId",
+          "expectedRevision"
         ],
         "type": "object"
       },
@@ -8128,6 +8150,11 @@
             "minimum": 0,
             "type": "integer"
           },
+          "nativeBitDepth": {
+            "maximum": 16,
+            "minimum": 1,
+            "type": "integer"
+          },
           "playbackLengthFrames": {
             "minimum": 1,
             "type": "integer"
@@ -8147,6 +8174,9 @@
             "maximum": 4294967295,
             "minimum": 1,
             "type": "integer"
+          },
+          "sampleRateApproximate": {
+            "type": "boolean"
           },
           "sampleWidthBytes": {
             "enum": [
@@ -8174,7 +8204,9 @@
           "playbackLengthFrames",
           "loopStartFrame",
           "loopLengthFrames",
-          "bins"
+          "bins",
+          "nativeBitDepth",
+          "sampleRateApproximate"
         ],
         "type": "object"
       },
@@ -8184,6 +8216,14 @@
           "data": {
             "additionalProperties": false,
             "properties": {
+              "documentId": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "imageId": {
+                "minLength": 1,
+                "type": "string"
+              },
               "lanes": {
                 "items": {
                   "$ref": "#/components/schemas/ImagePreviewLane"
@@ -8195,11 +8235,25 @@
               "objectId": {
                 "minLength": 1,
                 "type": "string"
+              },
+              "revision": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "warnings": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
               }
             },
             "required": [
               "objectId",
-              "lanes"
+              "lanes",
+              "imageId",
+              "documentId",
+              "revision",
+              "warnings"
             ],
             "type": "object"
           },
@@ -16508,6 +16562,10 @@
               "looped": {
                 "type": "boolean"
               },
+              "nativeBitDepth": {
+                "const": 12,
+                "type": "integer"
+              },
               "repeatFrames": {
                 "minimum": 0,
                 "type": "integer"
@@ -16515,6 +16573,9 @@
               "sampleRate": {
                 "minimum": 0,
                 "type": "integer"
+              },
+              "sampleRateApproximate": {
+                "type": "boolean"
               },
               "type": {
                 "const": "wave"
@@ -16525,7 +16586,9 @@
               "sampleRate",
               "attackFrames",
               "repeatFrames",
-              "looped"
+              "looped",
+              "sampleRateApproximate",
+              "nativeBitDepth"
             ],
             "type": "object"
           },
@@ -18340,6 +18403,7 @@
                 "default": {
                   "value": {
                     "documentId": "x",
+                    "expectedRevision": 1,
                     "imageId": "x",
                     "objectIds": [
                       "x"
@@ -44562,7 +44626,7 @@
                 }
               }
             },
-            "description": "Bounded physical Wave Data or Sample playback-window min/max lanes",
+            "description": "Bounded document-scoped PCM min/max lanes",
             "headers": {
               "X-Request-Id": {
                 "$ref": "#/components/headers/XRequestId"
@@ -44633,6 +44697,15 @@
           "schema": {
             "minLength": 1,
             "type": "string"
+          }
+        },
+        {
+          "in": "query",
+          "name": "expectedRevision",
+          "required": true,
+          "schema": {
+            "minimum": 1,
+            "type": "integer"
           }
         }
       ]
