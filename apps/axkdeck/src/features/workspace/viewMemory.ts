@@ -38,26 +38,48 @@ export function shellViewState(): ShellViewState {
 }
 
 export function retainWorkspaceScroll(node: HTMLElement, state: ShellViewState) {
+    type Position = { top: number; left: number };
+    const restored = new WeakMap<HTMLElement, { key: string; pending?: Position; applied: Position }>();
     const lists = () =>
         Array.from(node.querySelectorAll<HTMLElement>('[data-navigation-list], .image-tree-scroll, .object-scroll'));
     const key = (element: HTMLElement, index: number) =>
         `${element.getAttribute('aria-label') ?? element.className}:${index}`;
+    const position = (element: HTMLElement): Position => ({ top: element.scrollTop, left: element.scrollLeft });
+    const matches = (left: Position, right: Position) =>
+        Math.abs(left.top - right.top) < 1 && Math.abs(left.left - right.left) < 1;
     const restore = () =>
         lists().forEach((element, index) => {
-            const position = state.scroll.get(key(element, index));
-            if (position) {
-                element.scrollTop = position.top;
-                element.scrollLeft = position.left;
+            const id = key(element, index);
+            let record = restored.get(element);
+            if (record?.key !== id) {
+                record = { key: id, pending: state.scroll.get(id) ?? { top: 0, left: 0 }, applied: position(element) };
+                restored.set(element, record);
             }
+            if (!record.pending) return;
+            const current = position(element);
+            if (!matches(current, record.applied)) {
+                record.pending = undefined;
+                state.scroll.set(id, current);
+                return;
+            }
+            // Retry clamped restoration while rows load, but never replay it over live navigation.
+            element.scrollTop = record.pending.top;
+            element.scrollLeft = record.pending.left;
+            record.applied = position(element);
+            if (matches(record.applied, record.pending)) record.pending = undefined;
         });
     const capture = (event: Event) => {
         const index = lists().indexOf(event.target as HTMLElement);
         if (index < 0) return;
         const element = event.target as HTMLElement;
-        state.scroll.set(key(element, index), { top: element.scrollTop, left: element.scrollLeft });
+        const current = position(element);
+        const record = restored.get(element);
+        if (record?.pending && matches(current, record.applied)) return;
+        if (record) record.pending = undefined;
+        state.scroll.set(key(element, index), current);
     };
     const observer = new MutationObserver(restore);
-    observer.observe(node, { childList: true, subtree: true });
+    observer.observe(node, { childList: true, subtree: true, attributes: true, attributeFilter: ['aria-label'] });
     node.addEventListener('scroll', capture, true);
     restore();
     return {

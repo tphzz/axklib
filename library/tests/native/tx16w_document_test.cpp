@@ -2,9 +2,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -80,6 +83,70 @@ TEST(Tx16wDocument, BrowsesWaveHeadersWithoutReadingPcmAndKeepsDuplicateOccurren
     EXPECT_FALSE((*opened)->read_wave("missing"));
 }
 
+TEST(Tx16wDocument, WaveDisplayNamesExcludePathsWithoutChangingSourceLocationsOrLazyReads) {
+    for (const auto *path : {"Tone.W01", "/Tone.W01", "/Folder/Tone.W01", "Folder\\Tone.W01"}) {
+        SCOPED_TRACE(path);
+        auto counted = std::make_shared<CountingReader>(wave());
+        const auto sources = axk::native::SourceSet::create({member("one", {{"wave", path, false, 0U, counted}})});
+        ASSERT_TRUE(sources);
+        const auto opened = axk::tx16w::Document::open(*sources);
+        ASSERT_TRUE(opened) << opened.error().message;
+        ASSERT_EQ((*opened)->native_objects().size(), 1U);
+        const auto &object = (*opened)->native_objects().front();
+        const auto *header = std::get_if<axk::tx16w::WaveHeader>(&object.value);
+        ASSERT_NE(header, nullptr);
+        EXPECT_EQ(header->name, "Tone.W01");
+        EXPECT_EQ(header->native_slot, std::optional<std::uint8_t>{0U});
+        EXPECT_EQ((*opened)->catalog().objects.front().name, "Tone.W01");
+        EXPECT_EQ((*opened)->catalog().nodes.back().name, "Tone.W01");
+        EXPECT_EQ(object.id, "tx16w:3:one:3:fat:4:wave:0");
+        EXPECT_EQ(object.location.member_id, "one");
+        EXPECT_EQ(object.location.root_id, "fat");
+        EXPECT_EQ(object.location.entry_id, "wave");
+        EXPECT_EQ(object.location.offset, 0U);
+        EXPECT_EQ(object.location.length, 100000U);
+        EXPECT_EQ((*sources)->members().front().roots.front().entries.front().path, path);
+        EXPECT_EQ(counted->bytes_read, 32U);
+        const auto frames = (*opened)->read_wave_frames(object.id, 0U, 2U);
+        ASSERT_TRUE(frames) << frames.error().message;
+        EXPECT_EQ(*frames, (std::vector<std::int16_t>{32752, -32768}));
+        const auto decoded = (*opened)->read_wave(object.id);
+        ASSERT_TRUE(decoded) << decoded.error().message;
+        EXPECT_EQ(decoded->name, header->name);
+        EXPECT_EQ(decoded->source_member, "one");
+        EXPECT_EQ(decoded->pcm, *frames);
+    }
+}
+
+TEST(Tx16wDocument, PreservesEveryInitializedPerformanceSlotRegardlessOfNameOrContent) {
+    auto performances = file(5120U);
+    for (std::size_t slot = 0U; slot < 32U; ++slot)
+        text(performances, 16U + slot * 146U + 0x78U, "init performance");
+    performances[16U + 12U * 146U + 66U] = std::byte{99U};
+    const auto sources = axk::native::SourceSet::create({member("one", {entry("/SET.U01", std::move(performances))})});
+    ASSERT_TRUE(sources);
+    const auto opened = axk::tx16w::Document::open(*sources);
+    ASSERT_TRUE(opened) << opened.error().message;
+    ASSERT_EQ((*opened)->native_objects().size(), 32U);
+    ASSERT_EQ((*opened)->catalog().objects.size(), 32U);
+    std::set<std::string> ids;
+    for (std::size_t slot = 0U; slot < 32U; ++slot) {
+        const auto &summary = (*opened)->catalog().objects[slot];
+        EXPECT_EQ(summary.name, "init performance");
+        EXPECT_TRUE(ids.insert(summary.id).second);
+        const auto object = (*opened)->object(summary.id);
+        ASSERT_TRUE(object);
+        const auto *performance = std::get_if<axk::tx16w::Performance>(&(*object)->value);
+        ASSERT_NE(performance, nullptr);
+        EXPECT_EQ(performance->slot, static_cast<std::uint8_t>(slot));
+        EXPECT_EQ(performance->name, summary.name);
+        EXPECT_EQ(performance->voices.front().volume, static_cast<std::uint8_t>(slot == 12U ? 99U : 0U));
+        EXPECT_EQ((*object)->location.entry_id, "/SET.U01");
+        EXPECT_EQ((*object)->location.offset, 16U + slot * 146U);
+        EXPECT_EQ((*object)->location.length, 146U);
+    }
+}
+
 TEST(Tx16wDocument, KeepsAnUnmatchedSetupAndItsMissingNativeReferencesBrowseable) {
     auto setup = file(1536U);
     text(setup, 0xf0U + 7U, "MISSING");
@@ -101,8 +168,8 @@ TEST(Tx16wDocument, DoesNotResolveIdenticalWaveFilesByContentOrMemberOrder) {
     auto setup = file(1536U);
     text(setup, 0xf0U + 7U, "TONE");
     const auto sources =
-        axk::native::SourceSet::create({member("one", {entry("SET.S01", std::move(setup)), entry("TONE.W01", wave())}),
-                                        member("two", {entry("TONE.W01", wave())})});
+        axk::native::SourceSet::create({member("one", {entry("SET.S01", std::move(setup)), entry("/TONE.W01", wave())}),
+                                        member("two", {entry("/Folder/TONE.W01", wave())})});
     ASSERT_TRUE(sources);
     const auto opened = axk::tx16w::Document::open(*sources);
     ASSERT_TRUE(opened);
@@ -111,7 +178,13 @@ TEST(Tx16wDocument, DoesNotResolveIdenticalWaveFilesByContentOrMemberOrder) {
     ASSERT_NE(reference, relationships.end());
     EXPECT_EQ(reference->resolution, axk::native::Resolution::ambiguous);
     EXPECT_FALSE(reference->target_id);
-    EXPECT_EQ(reference->candidates.size(), 2U);
+    ASSERT_EQ(reference->candidates.size(), 2U);
+    EXPECT_NE(reference->candidates.front(), reference->candidates.back());
+    for (const auto &id : reference->candidates) {
+        const auto summary = std::ranges::find((*opened)->catalog().objects, id, &axk::native::ObjectSummary::id);
+        ASSERT_NE(summary, (*opened)->catalog().objects.end());
+        EXPECT_EQ(summary->name, "TONE.W01");
+    }
 }
 
 TEST(Tx16wDocument, IgnoresExtensionOnlyMatchesAndReportsMalformedNativeFiles) {

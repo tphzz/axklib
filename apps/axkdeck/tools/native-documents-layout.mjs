@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import { createServer as socketServer } from 'node:net';
 import { pathToFileURL } from 'node:url';
 import { createServer } from 'vite';
+import { checkNativeCollectionParity } from './native-collection-parity.mjs';
 
 const { chromium } = await import(
     process.env.PLAYWRIGHT_MODULE ? pathToFileURL(process.env.PLAYWRIGHT_MODULE).href : 'playwright'
@@ -28,7 +29,7 @@ async function stop() {
 const signal = () => void stop();
 process.once('SIGTERM', signal);
 process.once('SIGINT', signal);
-const deadline = setTimeout(signal, 120000);
+const deadline = setTimeout(signal, 240000);
 try {
     await server.listen();
     port = server.httpServer.address().port;
@@ -40,6 +41,10 @@ try {
         [390, 1],
         [1366, 1.25],
         [1366, 1.5],
+        [915, 1.25],
+        [915, 1.5],
+        [640, 1.25],
+        [640, 1.5],
     ]) {
         const logicalWidth = Math.ceil(width / scale);
         page = await browser.newPage({
@@ -162,6 +167,7 @@ try {
             await page.keyboard.press('Escape');
             assert(await root.evaluate((node) => node === document.activeElement));
         }
+        const collectionParity = await checkNativeCollectionParity(page, output, width, scale);
         await tabs.getByRole('button', { name: 'Waves', exact: true }).click();
         const waveRow = page.getByRole('group', { name: 'Wave 20 Wave Data', exact: true });
         await waveRow.scrollIntoViewIfNeeded();
@@ -337,7 +343,7 @@ try {
         const fileInspector = page.getByRole('complementary', { name: 'Filesystem inspector', includeHidden: true });
         assert.equal(await fileInspector.locator('.inspector-mode-footer button').count(), 1);
         if (logicalWidth > 850) {
-            const action = fileInspector.getByRole('button', { name: 'Show in TX16W disk set (60 objects)' });
+            const action = fileInspector.getByRole('button', { name: 'Show in TX16W disk set (220 objects)' });
             const actionBounds = await action.boundingBox();
             const bodyBounds = await fileInspector.locator('.inspector-body').boundingBox();
             const inspectorBounds = await fileInspector.boundingBox();
@@ -370,7 +376,7 @@ try {
         await waveRow.scrollIntoViewIfNeeded();
         await page.screenshot({ path: resolve(output, `native-${width}-${scale}.png`) });
         assert.deepEqual(errors, []);
-        results.push({ width, scale, passed: true, geometry, waveGeometry, inspectorTypography });
+        results.push({ width, scale, passed: true, geometry, collectionParity, waveGeometry, inspectorTypography });
         await page.close();
     }
 } catch (error) {

@@ -12,10 +12,6 @@ import { sampleFormatFixture } from '../../test/sampleFormatFixture';
 import ObjectSizeIdentity from './ObjectSizeIdentity.svelte';
 
 const appStyles = readFileSync(resolve(process.cwd(), 'src/app.css'), 'utf8');
-const objectSizeIdentitySource = readFileSync(
-    resolve(process.cwd(), 'src/lib/components/ObjectSizeIdentity.svelte'),
-    'utf8',
-);
 
 function program(programNumber: number, name: string): Program {
     const slot = String(programNumber).padStart(3, '0');
@@ -385,62 +381,12 @@ describe('ProgramWorkspace', () => {
             },
         });
 
-        const row = document.querySelector('.program-row');
-        expect(row?.querySelector('.object-slot')?.textContent).toBe('001');
-        expect(row?.querySelector('.program-identity .object-size-primary')?.textContent).toContain('REZO LD');
-        expect(row?.querySelector('.program-identity .object-size-secondary')?.textContent).toBe(
-            '128 B · 44 KiB incl. deps.',
-        );
-        expect(row?.querySelector('.object-size-summary')).toBeNull();
-
-        const primary = row?.querySelector('.object-size-primary strong');
-        const secondary = row?.querySelector('.object-size-secondary');
-        expect(primary).toBeTruthy();
-        expect(secondary).toBeTruthy();
-
-        const listRule = appStyles.match(/\.program-list\s*\{[^}]+\}/)?.[0];
-        const rowRule = appStyles.match(/\.program-row\s*\{[^}]+\}/)?.[0];
-        const slotRule = appStyles.match(/\.program-row \.object-slot\s*\{[^}]+\}/)?.[0];
-        const identityRule = appStyles.match(/\.program-identity\s*\{[^}]+\}/)?.[0];
-        const primaryRule = objectSizeIdentitySource.match(/\.object-size-primary strong\s*\{[^}]+\}/)?.[0];
-        const secondaryRule = objectSizeIdentitySource.match(/\.object-size-secondary\s*\{[^}]+\}/)?.[0];
-        expect(listRule).toContain('gap: 0');
-        expect(listRule).toContain('padding: 2px 6px 5px');
-        expect(rowRule).toContain('height: var(--density-row)');
-        expect(rowRule).toContain('grid-template-columns: 30px minmax(0, 1fr)');
-        expect(rowRule).toContain('gap: 4px');
-        expect(rowRule).toContain('align-items: center');
-        expect(rowRule).toContain('padding: 0');
-        expect(rowRule).toContain('font: inherit');
-        expect(slotRule).toContain('padding: 3px 6px 1px');
-        expect(identityRule).toContain('min-height: calc(var(--density-row) - 2px)');
-        expect(identityRule).toContain('padding: 2px 6px 2px 0');
-        expect(identityRule).toContain('font-size: 10px');
-        expect(identityRule).toContain('line-height: 10px');
-        expect(primaryRule).toContain('font-size: 10px');
-        expect(primaryRule).toContain('line-height: 10px');
-        expect(secondaryRule).toContain('font-size: 8.5px');
-        expect(secondaryRule).toContain('line-height: 9px');
-
-        const style = document.createElement('style');
-        style.textContent = `${listRule}\n${rowRule?.replaceAll('var(--density-row)', '26px')}\n${slotRule}\n${identityRule?.replaceAll('var(--density-row)', '26px')}\n${primaryRule}\n${secondaryRule}`;
-        document.head.append(style);
-
-        expect(getComputedStyle(row!).height).toBe('26px');
-        expect(getComputedStyle(row!).paddingTop).toBe('0px');
-        expect(getComputedStyle(row!).paddingBottom).toBe('0px');
-        expect(getComputedStyle(row!.querySelector('.object-slot')!).paddingTop).toBe('3px');
-        expect(getComputedStyle(row!.querySelector('.object-slot')!).paddingBottom).toBe('1px');
-        expect(getComputedStyle(row!.querySelector('.program-identity')!).paddingTop).toBe('2px');
-        expect(getComputedStyle(row!.querySelector('.program-identity')!).paddingRight).toBe('6px');
-        expect(getComputedStyle(row!.querySelector('.program-identity')!).paddingBottom).toBe('2px');
-        expect(getComputedStyle(row!.querySelector('.program-identity')!).paddingLeft).toBe('0px');
-        expect(getComputedStyle(primary!).fontSize).toBe('10px');
-        expect(getComputedStyle(primary!).lineHeight).toBe('10px');
-        expect(getComputedStyle(secondary!).fontSize).toBe('8.5px');
-        expect(getComputedStyle(secondary!).lineHeight).toBe('9px');
-
-        style.remove();
+        const row = screen.getByRole('button', { name: /001.*REZO LD/ });
+        expect(row.querySelector('.collection-row-slot')?.textContent).toBe('001');
+        expect(row.querySelector('.collection-row-identity strong')?.textContent).toBe('REZO LD');
+        expect(row.querySelector('.collection-row-identity small')?.textContent).toBe('128 B · 44 KiB incl. deps.');
+        expect(row.children).toHaveLength(2);
+        expect(row.closest('.compact-collection-list')).not.toBeNull();
     });
 
     it('tracks the clicked part independently when two parts use the same Program', () => {

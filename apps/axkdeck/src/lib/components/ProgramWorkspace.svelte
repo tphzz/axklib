@@ -405,31 +405,26 @@
     {#if presentation === 'single'}
         <div
             class:empty-collection={filteredPrograms.length === 0}
-            class="collection-body program-list"
+            class="collection-body compact-collection-list"
             data-collection-list="programs"
             data-navigation-list
         >
             {#each filteredPrograms as program, index (program.id)}
                 <CollectionRow
-                    type="button"
+                    slotLabel={program.slot}
                     active={activeObjectId === program.objectId}
                     selected={selection.items.some((item) => item.objectId === program.objectId)}
-                    class="program-row"
                     data-collection-object-id={program.objectId}
                     data-navigation-index={index}
-                    aria-pressed={selection.items.some((item) => item.objectId === program.objectId)}
                     onclick={(event) => selectProgram(event, program)}
                     oncontextmenu={(event) => openMenu(event, program)}
                     onkeydown={(event) => navigatePrograms(event, index)}
                 >
-                    <span class="object-slot">{program.slot}</span>
-                    <span class="program-identity">
-                        <ObjectSizeIdentity
-                            name={program.name}
-                            object={program.object}
-                            metadata={program.assignmentSummary}
-                        />
-                    </span>
+                    <ObjectSizeIdentity
+                        name={program.name}
+                        object={program.object}
+                        metadata={program.assignmentSummary}
+                    />
                 </CollectionRow>
             {:else}
                 <p class="empty-copy">No matching Programs</p>

@@ -83,7 +83,7 @@ try {
                 for (const [index, record] of records.entries()) {
                     await page.getByLabel('Source Program', { exact: true }).selectOption(String(index));
                     const label = record.format.format === 'A3000' ? 'a3k' : record.format.format === 'A4000_A5000' ? 'a4k/a5k' : '?';
-                    await page.waitForFunction(expected => document.querySelector('.program-row .format-badge')?.textContent.trim() === expected, label);
+                    await page.waitForFunction(expected => document.querySelector('.collection-row .format-badge')?.textContent.trim() === expected, label);
                     assert.equal(await page.locator('aside .format-badge').textContent(), label);
                     assert.ok((await page.locator('aside').textContent()).includes(record.format.parameterTailBytes === null ? 'Unavailable' : `${record.format.parameterTailBytes} bytes`));
                     await page.getByRole('button', { name: 'Multi Part view', exact: true }).click();
@@ -92,7 +92,7 @@ try {
                 }
                 await page.screenshot({ path: resolve(output, `${width}-unknown.png`) });
                 await page.getByLabel('Source Program', { exact: true }).selectOption('0');
-                const row = page.locator('.program-row');
+                const row = page.locator('.collection-row');
                 const original = await row.boundingBox();
                 await row.hover();
                 await page.getByRole('tooltip').waitFor();

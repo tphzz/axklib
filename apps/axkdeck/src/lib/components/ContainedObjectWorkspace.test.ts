@@ -79,6 +79,28 @@ const noAuditionableSamples = {
 };
 
 describe('ContainedObjectWorkspace', () => {
+    it('uses the shared compact identity for the contained Wave Data lane', () => {
+        const wave = waveform('Wave with a long native name');
+        render(ContainedObjectWorkspace, {
+            ...callbacks,
+            ...noAuditionableSamples,
+            view: 'samples',
+            sampleBanks: [],
+            samples: [],
+            waveData: [wave],
+            activeSampleBankId: '',
+            activeSampleId: 'sample',
+            activeWaveDataId: '',
+            queries: { primary: '', secondary: '', tertiary: '' },
+        });
+        const row = screen.getByRole('button', { name: `Inspect ${wave.name}` });
+        const name = row.querySelector('strong')!;
+        const metadata = row.querySelector('small')!;
+        expect(name.parentElement?.parentElement).toBe(metadata.parentElement);
+        expect(name.title).toBe(wave.name);
+        expect(metadata.title).toBe(`${wave.note} · ${wave.duration}`);
+    });
+
     it('marks stereo Samples in both Sample collection contexts', () => {
         const bank = structure('SBAC', 'Pads');
         const stereo = structure('SBNK', 'Stereo Pad');
@@ -402,8 +424,7 @@ describe('ContainedObjectWorkspace', () => {
         expect(rowRule).toContain('border-bottom-color: rgb(61 68 72 / 72%)');
     });
 
-    it('distinguishes inspected rows from export-selected rows in every collection layout', () => {
-        expect(appStyles).toContain('.program-row.active:not(.selected)');
+    it('distinguishes inspected rows from export-selected rows in specialized collection layouts', () => {
         expect(appStyles).toContain('.sequence-row.active:not(.selected)');
         expect(appStyles).toContain('.contained-row.active:not(.selected)');
         expect(appStyles).toContain('.wave-data-row.active:not(.selected)');

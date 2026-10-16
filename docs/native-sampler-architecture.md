@@ -22,6 +22,13 @@ Objects retain their storage occurrence identity. Equal names or bytes do not
 merge separate objects. Missing and ambiguous references remain explicit;
 conversion eligibility is a separate decision from native browsing.
 
+Native format modules also own object display names. TX16W Waves use the source
+filename, including its extension and original case, without directory prefixes.
+Their filesystem paths and source-member locations remain unchanged and separate
+from the name. API catalogs, object details and Device navigation share that
+display name. Performance slots named `init performance` remain individually
+addressable records; neither equal names nor equal contents imply an empty slot.
+
 Conversions prioritize explicitly supported directions and fidelity. The design
 does not require a universal sampler model, an automatic chain of converters or
 a runtime plugin system. Generic HTTP resources can expose format-specific

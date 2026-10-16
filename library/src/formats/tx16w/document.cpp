@@ -4,6 +4,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <string>
 #include <utility>
 
 #include "axklib/formats/tx16w/dependencies.hpp"
@@ -156,7 +157,10 @@ Result<std::shared_ptr<const Document>> Document::open(std::shared_ptr<const nat
                             {"tx16w.unknown-sample-rate", native::Severity::warning,
                              "Wave sample rate is uncertain; 33,333 Hz is only a decoding default",
                              occurrence_id(*location)});
-                    add(*location, *identity, std::move(*wave), "wave", entry.path);
+                    const auto separator = entry.path.find_last_of("/\\");
+                    wave->name = entry.path.substr(separator == std::string::npos ? 0U : separator + 1U);
+                    auto name = wave->name;
+                    add(*location, *identity, std::move(*wave), "wave", std::move(name));
                     result->files_.back().decoded = true;
                     continue;
                 }

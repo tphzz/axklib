@@ -18,6 +18,7 @@
     import { orderedVisibleSamples } from '../sampleRelationships';
     import type { ObjectRenameTarget, PackageExportObject, SampleStructureItem, WaveDataItem } from '../types';
     import CollectionToolbar from './CollectionToolbar.svelte';
+    import CollectionIdentity from './CollectionIdentity.svelte';
     import type {
         ContainedObjectMenuState,
         ContainedSelectableItem as SelectableItem,
@@ -533,7 +534,7 @@
                             oncontextmenu={(event) => openObjectMenu(event, 'wave-data', orderedWaveData, item)}
                             onkeydown={(event) => handleContainedKeyboard(event, 'wave-data', index, item)}
                         >
-                            <strong>{item.name}</strong><small>{item.note} · {item.duration}</small>
+                            <CollectionIdentity name={item.name} metadata={`${item.note} · ${item.duration}`} />
                         </button>
                         <button
                             class="contained-playback icon-button"

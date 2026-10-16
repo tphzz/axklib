@@ -5,6 +5,7 @@
     import type { ImageTransport, NativeDocumentSummary, OpenedImage } from '../../../lib/transport';
     import type { DevicePresentationState, WorkspacePresentation } from '../../workspace/contracts';
     import CollectionRow from '../../../lib/components/CollectionRow.svelte';
+    import CollectionIdentity from '../../../lib/components/CollectionIdentity.svelte';
     import WaveCollectionRow from '../../../lib/components/WaveCollectionRow.svelte';
     import {
         emptyCollectionSelection,
@@ -310,6 +311,8 @@
         {#if error}<p role="alert">{error}</p>{/if}
         <div
             class="collection-body"
+            class:compact-collection-list={kind !== 'wave'}
+            class:empty-collection={visible.length === 0}
             class:wave-data-list={kind === 'wave'}
             data-collection-list={kind}
             data-navigation-list
@@ -359,7 +362,10 @@
                         onclick={(event) => select(object.id, collectionSelectionMode(event))}
                         onkeydown={(event) => navigate(event, index)}
                     >
-                        <strong>{object.name || object.id}</strong><small>{object.sizeBytes.toLocaleString()} B</small>
+                        <CollectionIdentity
+                            name={object.name || object.id}
+                            metadata={`${object.sizeBytes.toLocaleString()} B`}
+                        />
                     </CollectionRow>
                 {/if}
             {:else}<p class="empty-copy">

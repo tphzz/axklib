@@ -58,7 +58,7 @@ window.runCapacityRefreshChecks = async function () {
         assert(button('Retry capacity inspection'), 'Retry action missing');
         button('Restore inspection').click(); button('Retry capacity inspection').click();
         await revisionReady(8, 'volume-8');
-        document.querySelector('.program-row').click();
+        document.querySelector('.collection-row').click();
         await wait(() => !panel(), 'Program selection did not show object inspector');
         button('Complete floppy import').click();
         await wait(() => document.querySelector('[data-tree-id="volume-9"]'), 'Final tree did not refresh');

@@ -147,7 +147,7 @@ describe('Program lower-zone selection', () => {
         const { view, selectProgram } = setup();
         const toggle = view.getByRole('button', { name: 'Editor panel' });
         expect(toggle.getAttribute('aria-pressed')).toBe('false');
-        await fireEvent.click(view.container.querySelector<HTMLButtonElement>('.program-row')!);
+        await fireEvent.click(view.container.querySelector<HTMLButtonElement>('.collection-row')!);
 
         expect(selectProgram).toHaveBeenCalledOnce();
         expect(toggle.getAttribute('aria-pressed')).toBe('true');

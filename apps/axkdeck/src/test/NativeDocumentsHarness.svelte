@@ -7,16 +7,23 @@
     import FilesInspector from '../features/files/FilesInspector.svelte';
     import { provideInspectorPanels } from '../lib/inspectorPanels.svelte';
     import ImageNavigator from '../lib/components/ImageNavigator.svelte';
+    import ProgramWorkspace from '../lib/components/ProgramWorkspace.svelte';
+    import { emptyPackageExportSelection } from '../lib/objectSelection';
     import { ViewMemory, shellViewState } from '../features/workspace/viewMemory';
     import { provideASeriesPreferences, ASeriesPreferences } from '../lib/aSeriesPreferences.svelte';
     import { nativeWorkspaceFixture } from './nativeWorkspaceFixture';
-    import { nativeDocumentFixture, nativeObjects, tx16wDocument } from './nativeDocumentFixture';
+    import {
+        nativeCollectionFixture,
+        collectionDocument as tx16wDocument,
+        collectionObjects as nativeObjects,
+        collectionPrograms,
+    } from './nativeCollectionFixture';
     import type { ImageLocation } from '../lib/storageLocations';
     import type { DevicePresentationState, WorkspacePresentation } from '../features/workspace/contracts';
 
     provideASeriesPreferences(new ASeriesPreferences());
     provideInspectorPanels();
-    const transport = nativeDocumentFixture();
+    const transport = nativeCollectionFixture();
     const memory = new ViewMemory();
     const sources = [
         ...nativeWorkspaceFixture().sources,
@@ -36,6 +43,9 @@
     let mode = $state<'device' | 'files'>('device');
     let reveal = $state('');
     let conversions = $state(0);
+    let programQuery = $state('');
+    let activeProgram = $state('');
+    let programSelection = $state(emptyPackageExportSelection());
     const remember = $derived(memory.forDocument(1, documentId));
     async function select(id: string | null) {
         documentId = id;
@@ -98,6 +108,24 @@
         volumeActionsEnabled={false}
         partitionActionsEnabled={false}
         onimageaction={() => undefined}
+    />
+{/snippet}
+{#snippet aSeriesContent()}
+    <ProgramWorkspace
+        programs={collectionPrograms}
+        contexts={null}
+        contextsLoading={false}
+        contextsError=""
+        presentation="single"
+        selectedPartNumber={null}
+        activeObjectId={activeProgram}
+        query={programQuery}
+        onquerychange={(value) => (programQuery = value)}
+        onpresentationchange={() => undefined}
+        onprogramselect={(program) => (activeProgram = program.objectId)}
+        onpartselect={() => undefined}
+        selection={programSelection}
+        onselectionchange={(value) => (programSelection = value)}
     />
 {/snippet}
 {#snippet filesInspector()}
@@ -164,7 +192,7 @@
         />
     {:else}
         {@render shell(
-            { navigation: aSeriesNavigation, content: files },
+            { navigation: aSeriesNavigation, content: aSeriesContent, inspector: filesInspector },
             { lowerOpen: false, setLowerOpen: () => undefined, showObject: async () => undefined },
         )}
     {/if}

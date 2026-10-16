@@ -2,6 +2,7 @@
     import { objectSizeSummary, objectSizeTooltip } from '../objectSizePresentation';
     import type { SamplerObject } from '../transport';
     import Icon from './Icon.svelte';
+    import CollectionIdentity from './CollectionIdentity.svelte';
     import SampleFormatBadge from '../../features/object-editor/SampleFormatBadge.svelte';
     import ProgramFormatBadge from '../../features/object-editor/ProgramFormatBadge.svelte';
     import { objectEditors } from '../../features/object-editor/context';
@@ -22,8 +23,7 @@
     );
 </script>
 
-<span class="object-size-primary">
-    <strong title={tooltip}>{name}</strong>
+{#snippet indicators()}
     <span
         class="object-size-indicator object-size-dirty"
         class:dirty
@@ -38,42 +38,16 @@
     {/if}
     {#if object.sampleFormat}<SampleFormatBadge format={object.sampleFormat} />{/if}
     {#if object.programFormat}<ProgramFormatBadge format={object.programFormat} />{/if}
-</span>
-<small class="object-size-secondary" title={metadata ? `${metadata}\n${tooltip}` : tooltip}>
-    {metadata ? `${metadata} · ` : ''}{objectSizeSummary(object)}
-</small>
+{/snippet}
+<CollectionIdentity
+    {name}
+    metadata={`${metadata ? `${metadata} · ` : ''}${objectSizeSummary(object)}`}
+    nameTitle={`${name}\n${tooltip}`}
+    metadataTitle={metadata ? `${metadata}\n${tooltip}` : tooltip}
+    {indicators}
+/>
 
 <style>
-    .object-size-primary {
-        display: flex;
-        min-width: 0;
-        align-items: center;
-        gap: 3px;
-    }
-
-    .object-size-primary strong {
-        display: block;
-        min-width: 0;
-        overflow: hidden;
-        color: var(--color-text-strong);
-        font-size: 10px;
-        font-weight: 600;
-        line-height: 10px;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-
-    .object-size-secondary {
-        display: block;
-        margin-top: 0;
-        overflow: hidden;
-        color: var(--color-text-muted);
-        font-size: 8.5px;
-        line-height: 9px;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-
     .object-size-indicator {
         display: inline-flex;
         flex: 0 0 auto;

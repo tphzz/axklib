@@ -5,6 +5,8 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -63,6 +65,84 @@ class Tx16wCompanions : public testing::Test {
         ASSERT_TRUE(output);
     }
 };
+
+TEST_F(Tx16wCompanions, WaveNamesAgreeAcrossCatalogDetailsAndAudioWithoutLosingFileNavigation) {
+    write("catalog/nested/Tone.W01", odd_wave(true));
+    const auto sandbox = axk::app::Sandbox::create({{"root", "Root", root, false}});
+    ASSERT_TRUE(sandbox);
+    axk::app::ImageSessionManager sessions{*sandbox};
+    const auto opened = sessions.open({{{"root", "catalog", axk::app::ImageSourceKind::directory}}, {}}, "owner");
+    ASSERT_TRUE(opened) << opened.error().message;
+    ASSERT_EQ(opened->documents.size(), 1U);
+    const axk::app::ImageDocumentRef target{opened->image_id, opened->documents.front().id};
+    const auto objects = sessions.objects(target, "owner", 100U);
+    ASSERT_TRUE(objects);
+    ASSERT_EQ(objects->items.size(), 1U);
+    const auto &object = objects->items.front();
+    EXPECT_EQ(object.name, "Tone.W01");
+    const auto detail = sessions.object_detail(target, "owner", object.id);
+    ASSERT_TRUE(detail) << detail.error().message;
+    EXPECT_EQ(detail->at("name"), object.name);
+    EXPECT_EQ(detail->at("locations").at(0).at("entryId"), "nested/Tone.W01");
+    const auto files = sessions.filesystem(opened->image_id, "owner", opened->revision,
+                                           {.object_id = object.id, .document_id = target.document_id});
+    ASSERT_TRUE(files) << files.error().message;
+    ASSERT_EQ(files->items.size(), 1U);
+    EXPECT_EQ(files->items.front().path, "nested/Tone.W01");
+    EXPECT_EQ(files->items.front().name, object.name);
+    EXPECT_EQ(files->items.front().source_member_id, opened->sources.front().id);
+    ASSERT_EQ(files->items.front().bindings.size(), 1U);
+    EXPECT_EQ(files->items.front().bindings.front().document_id, target.document_id);
+    EXPECT_EQ(files->items.front().bindings.front().object_id, std::optional<std::string>{object.id});
+    const auto preview = sessions.preview(target, "owner", object.id, 5U, opened->revision);
+    ASSERT_TRUE(preview) << preview.error().message;
+    EXPECT_EQ(preview->object_id, object.id);
+    EXPECT_EQ(preview->document_id, target.document_id);
+    EXPECT_EQ(preview->revision, opened->revision);
+}
+
+TEST_F(Tx16wCompanions, ListsAndInspectsEverySameNamedPerformanceAcrossPages) {
+    auto performances = bytes(5120U);
+    for (std::size_t slot = 0U; slot < 32U; ++slot) {
+        const auto offset = 16U + slot * 146U;
+        std::ranges::copy(std::string_view{"init performance"}, performances.data() + offset + 0x78U);
+        if (slot == 12U)
+            performances[offset + 66U] = 99;
+    }
+    write("catalog/SET.U01", performances);
+    const auto sandbox = axk::app::Sandbox::create({{"root", "Root", root, false}});
+    ASSERT_TRUE(sandbox);
+    axk::app::ImageSessionManager sessions{*sandbox};
+    const auto opened = sessions.open({{{"root", "catalog/SET.U01"}}, {}}, "owner");
+    ASSERT_TRUE(opened) << opened.error().message;
+    ASSERT_EQ(opened->documents.size(), 1U);
+    const axk::app::ImageDocumentRef target{opened->image_id, opened->documents.front().id};
+    std::optional<std::string> cursor;
+    std::set<std::string> ids;
+    std::set<std::uint8_t> slots;
+    do {
+        const auto page = sessions.objects(target, "owner", 7U, cursor, "performance");
+        ASSERT_TRUE(page) << page.error().message;
+        EXPECT_EQ(page->total_count, 32U);
+        for (const auto &object : page->items) {
+            EXPECT_EQ(object.name, "init performance");
+            ASSERT_TRUE(ids.insert(object.id).second);
+            const auto detail = sessions.object_detail(target, "owner", object.id);
+            ASSERT_TRUE(detail) << detail.error().message;
+            EXPECT_EQ(detail->at("name"), object.name);
+            EXPECT_EQ(detail->at("objectId"), object.id);
+            const auto slot = detail->at("details").at("slot").get<std::uint8_t>();
+            EXPECT_LT(slot, std::uint8_t{32U});
+            EXPECT_TRUE(slots.insert(slot).second);
+            EXPECT_EQ(detail->at("details").at("voices").at(0).at("volume"), slot == 12U ? 99U : 0U);
+            EXPECT_EQ(detail->at("locations").at(0).at("offset"), 16U + slot * 146U);
+            EXPECT_EQ(detail->at("locations").at(0).at("length"), 146U);
+        }
+        cursor = page->next_cursor;
+    } while (cursor);
+    EXPECT_EQ(ids.size(), 32U);
+    EXPECT_EQ(slots.size(), 32U);
+}
 
 TEST_F(Tx16wCompanions, PreviewsOddPackedWaveWithExactAmplitudeAndAttackRepeatLoopBounds) {
     write("TONE.W01", odd_wave(true));

@@ -315,7 +315,7 @@
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div
-        class:program-list={view === 'programs'}
+        class:compact-collection-list={view === 'programs'}
         class:wave-data-list={view === 'wave-data'}
         class:empty-collection={emptyCollection}
         class="collection-body"
@@ -326,13 +326,11 @@
         {#if view === 'programs'}
             {#each filteredPrograms as program, index (program.id)}
                 <CollectionRow
-                    type="button"
+                    slotLabel={program.slot}
                     active={activeObjectId === program.objectId}
                     selected={selection.items.some((item) => item.objectId === program.objectId)}
-                    class="program-row"
                     data-collection-object-id={program.objectId}
                     data-navigation-index={index}
-                    aria-pressed={selection.items.some((item) => item.objectId === program.objectId)}
                     onclick={(event) => {
                         if (updateSelection(selectionMode(event), program.objectId) === 'replace')
                             onprogramselect(program);
@@ -341,10 +339,7 @@
                     onkeydown={(event) =>
                         handleObjectKeyboard(event, index, program.object, programRenameTarget(program))}
                 >
-                    <span class="object-slot">{program.slot}</span>
-                    <span class="program-identity">
-                        <ObjectSizeIdentity name={program.name} object={program.object} />
-                    </span>
+                    <ObjectSizeIdentity name={program.name} object={program.object} />
                 </CollectionRow>
             {:else}
                 <p class="empty-copy">No matching Programs</p>

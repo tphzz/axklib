@@ -69,7 +69,7 @@ describe('workspace capacity after import refresh', () => {
 
     it('keeps explicit Program inspection across a refresh', async () => {
         await setup();
-        await fireEvent.click(document.querySelector('.program-row')!);
+        await fireEvent.click(document.querySelector('.collection-row')!);
         expect(screen.queryByRole('complementary', { name: 'Volume inspector' })).toBeNull();
         await fireEvent.click(screen.getByRole('button', { name: 'Complete floppy import' }));
         await waitFor(() => expect(document.querySelector('[data-tree-id="volume-2"]')).toBeTruthy());

@@ -44,7 +44,7 @@ std::vector<std::byte> wave() {
 
 TEST(Tx16wConversionDocument, KeepsOccurrencesAndDefersPcmMaterialization) {
     const auto sources = axk::native::SourceSet::create(
-        {member("one", {entry("TONE.W01", wave())}), member("two", {entry("TONE.W01", wave())})});
+        {member("one", {entry("/TONE.W01", wave())}), member("two", {entry("/Folder/TONE.W01", wave())})});
     ASSERT_TRUE(sources);
     const auto document = axk::tx16w::Document::open(*sources);
     ASSERT_TRUE(document);
@@ -52,10 +52,13 @@ TEST(Tx16wConversionDocument, KeepsOccurrencesAndDefersPcmMaterialization) {
     ASSERT_TRUE(inspection);
     ASSERT_EQ(inspection->waves.size(), 2U);
     EXPECT_TRUE(inspection->waves.front().pcm.empty());
+    EXPECT_EQ(inspection->waves.front().name, "TONE.W01");
+    EXPECT_EQ(inspection->waves.back().name, "TONE.W01");
     EXPECT_NE(inspection->wave_object_ids.front(), inspection->wave_object_ids.back());
     const auto plan = axk::tx16w::a_series::plan_import(*inspection, {}, axk::tx16w::ImportMode::wave_data_only);
     ASSERT_TRUE(plan);
     ASSERT_EQ(plan->wave_data.size(), 2U);
+    EXPECT_EQ(plan->wave_data.front().name, "TONE");
     EXPECT_NE(plan->wave_data.front().name, plan->wave_data.back().name);
 }
 
@@ -92,7 +95,7 @@ TEST(Tx16wConversionDocument, PreparesReviewedPatchesWithoutChangingTheDestinati
     ASSERT_TRUE(axk::write_hds_image(manifest, path, true));
     const auto target = axk::FileReader::open(path);
     ASSERT_TRUE(target);
-    const auto sources = axk::native::SourceSet::create({member("one", {entry("TONE.W01", wave())})});
+    const auto sources = axk::native::SourceSet::create({member("one", {entry("/Folder/TONE.W01", wave())})});
     ASSERT_TRUE(sources);
     const auto document = axk::tx16w::Document::open(*sources);
     ASSERT_TRUE(document);
@@ -105,6 +108,9 @@ TEST(Tx16wConversionDocument, PreparesReviewedPatchesWithoutChangingTheDestinati
     auto plan = registry.prepare("yamaha.tx16w-to-a-series", request);
     ASSERT_TRUE(plan) << plan.error().message;
     ASSERT_TRUE((*plan)->report().executable);
+    ASSERT_EQ((*plan)->report().actions.size(), 1U);
+    EXPECT_EQ((*plan)->report().actions.front().name, "TONE");
+    EXPECT_EQ((*plan)->report().actions.front().source_object, (*document)->native_objects().front().id);
     EXPECT_FALSE((*plan)->patches().empty());
     EXPECT_FALSE((*plan)->acknowledge({}));
     for (const auto &patch : (*plan)->patches()) {

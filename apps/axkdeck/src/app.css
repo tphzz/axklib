@@ -773,71 +773,10 @@ input:focus-visible {
   grid-column: 1;
 }
 
-.program-list {
+.compact-collection-list {
   display: flex;
   flex-direction: column;
   gap: 0;
-  padding: 2px 6px 5px;
-}
-
-.program-row {
-  display: grid;
-  width: 100%;
-  height: var(--density-row);
-  min-width: 0;
-  min-height: var(--density-row);
-  grid-template-columns: 30px minmax(0, 1fr);
-  align-items: center;
-  gap: 4px;
-  padding: 0;
-  overflow: hidden;
-  color: var(--color-text);
-  border: 1px solid transparent;
-  border-bottom-color: var(--color-border);
-  background: transparent;
-  cursor: pointer;
-  text-align: left;
-  transition: 130ms ease;
-  font: inherit;
-}
-
-.program-row .object-slot {
-  align-self: stretch;
-  padding: 3px 6px 1px;
-  line-height: 10px;
-}
-
-.program-row:hover {
-  border-color: rgb(104 151 187 / 42%);
-  border-radius: 5px;
-  background: #293036;
-}
-
-.program-row.active {
-  border-color: rgb(104 151 187 / 68%);
-  border-radius: 5px;
-}
-
-.program-row.active:not(.selected) {
-  background: rgb(104 151 187 / 10%);
-}
-
-.program-row.selected {
-  border-color: rgb(104 151 187 / 68%);
-  border-radius: 5px;
-  background: linear-gradient(120deg, rgb(55 91 119 / 68%), rgb(49 60 68 / 68%));
-}
-
-.program-identity {
-  display: flex;
-  min-width: 0;
-  min-height: calc(var(--density-row) - 2px);
-  flex-direction: column;
-  justify-content: center;
-  padding: 2px 6px 2px 0;
-  overflow: hidden;
-  font-size: 10px;
-  line-height: 10px;
 }
 
 .program-system-info {
@@ -3249,23 +3188,6 @@ input:focus-visible {
   text-align: left;
 }
 
-.object-size-primary {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 3px;
-}
-
-.object-size-primary strong {
-  min-width: 0;
-}
-
-.object-size-indicator {
-  display: inline-flex;
-  flex: 0 0 auto;
-  color: var(--color-accent);
-}
-
 .contained-playback {
   width: 24px;
   height: 24px;
@@ -3275,28 +3197,6 @@ input:focus-visible {
 .contained-playback:disabled {
   cursor: default;
   opacity: 0.35;
-}
-
-.contained-list strong,
-.contained-list small {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.contained-list strong {
-  color: var(--color-text-strong);
-  font-size: 10px;
-  font-weight: 600;
-  line-height: 10px;
-}
-
-.contained-list small {
-  margin-top: 0;
-  color: var(--color-text-muted);
-  font-size: 8.5px;
-  line-height: 9px;
 }
 
 .editor-panel {
