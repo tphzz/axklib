@@ -51,9 +51,9 @@ axk::app::formats::a_series::SessionState::preserve_identity(const NativeDocumen
         static_cast<void>(key);
         map_id(id);
     }
-    for (auto &content : fresh.content) {
-        if (content.object_id)
-            map_id(*content.object_id);
+    for (auto &content_item : fresh.content) {
+        if (content_item.object_id)
+            map_id(*content_item.object_id);
     }
     for (auto &relationship : fresh.relationships) {
         map_id(relationship.source_object_id);
