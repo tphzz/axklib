@@ -1,6 +1,7 @@
 #include "posix_authorization.hpp"
 #include "detail.hpp"
 
+#include <algorithm>
 #include <cerrno>
 #include <chrono>
 #include <cstddef>
@@ -19,6 +20,8 @@
 
 namespace rawdisk::detail {
 namespace {
+
+constexpr std::size_t authorization_descriptor_capacity = 512U;
 
 class Child {
   public:
@@ -70,15 +73,18 @@ Result<PosixFd> validate_authorized_fd(PosixFd fd, Access access) {
     return fd;
 }
 
-Result<PosixFd> receive_authorized_fd(int socket, pid_t child, Access access, AuthorizationDeadline deadline) {
+Result<PosixFd> receive_authorized_fd(int socket, pid_t child, Access access, AuthorizationDeadline deadline,
+                                      decltype(&::recvmsg) receive_message) {
     if (child <= 0)
         return fail(Errc::invalid_argument);
     Child process(child);
     std::vector<PosixFd> descriptors;
-    descriptors.reserve(16U);
+    descriptors.reserve(authorization_descriptor_capacity);
     char byte{};
     iovec iov{&byte, 1};
-    alignas(cmsghdr) char control[CMSG_SPACE(sizeof(int) * 16)]{};
+    // XNU installs rights before copying control data out; reserve its full FD limit.
+    // https://github.com/apple-oss-distributions/xnu/blob/main/bsd/kern/uipc_usrreq.c
+    alignas(cmsghdr) char control[CMSG_SPACE(sizeof(int) * authorization_descriptor_capacity)]{};
     msghdr message{};
     message.msg_iov = &iov;
     message.msg_iovlen = 1;
@@ -98,27 +104,45 @@ Result<PosixFd> receive_authorized_fd(int socket, pid_t child, Access access, Au
             return fail(errno_code(errno));
         if (polled == 0)
             return fail(Errc::authorization_timeout);
-        received = ::recvmsg(socket, &message, MSG_DONTWAIT);
+        message.msg_controllen = sizeof control;
+        message.msg_flags = 0;
+        received = receive_message(socket, &message, MSG_DONTWAIT);
         if (received < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK))
             continue;
         if (received < 0)
             return fail(errno_code(errno));
         break;
     }
-    bool malformed = (message.msg_flags & (MSG_CTRUNC | MSG_TRUNC)) != 0;
-    for (auto *header = CMSG_FIRSTHDR(&message); header; header = CMSG_NXTHDR(&message, header)) {
-        if (header->cmsg_level != SOL_SOCKET || header->cmsg_type != SCM_RIGHTS || header->cmsg_len < CMSG_LEN(0)) {
+    bool malformed = (message.msg_flags & (MSG_CTRUNC | MSG_TRUNC)) != 0 || message.msg_controllen > sizeof control;
+    const auto control_size = std::min<std::size_t>(message.msg_controllen, sizeof control);
+    for (std::size_t offset = 0; control_size - offset >= CMSG_LEN(0);) {
+        auto *header = reinterpret_cast<cmsghdr *>(control + offset);
+        const auto length = static_cast<std::size_t>(header->cmsg_len);
+        if (length < CMSG_LEN(0)) {
             malformed = true;
-            continue;
+            break;
         }
-        const auto bytes = header->cmsg_len - CMSG_LEN(0);
-        if (bytes % sizeof(int) != 0U)
+        const auto remaining = control_size - offset;
+        const auto bytes = std::min(length, remaining) - CMSG_LEN(0);
+        if (header->cmsg_level != SOL_SOCKET || header->cmsg_type != SCM_RIGHTS) {
             malformed = true;
-        for (std::size_t offset = 0; offset + sizeof(int) <= bytes; offset += sizeof(int)) {
-            int descriptor = -1;
-            std::memcpy(&descriptor, CMSG_DATA(header) + offset, sizeof descriptor);
-            descriptors.emplace_back(descriptor);
+        } else {
+            if (bytes % sizeof(int) != 0U)
+                malformed = true;
+            for (std::size_t index = 0; index + sizeof(int) <= bytes; index += sizeof(int)) {
+                int descriptor = -1;
+                std::memcpy(&descriptor, CMSG_DATA(header) + index, sizeof descriptor);
+                descriptors.emplace_back(descriptor);
+            }
         }
+        if (length > remaining) {
+            malformed = true;
+            break;
+        }
+        const auto advance = CMSG_SPACE(length - CMSG_LEN(0));
+        if (advance > remaining)
+            break;
+        offset += advance;
     }
     if (malformed || descriptors.size() > 1U)
         return fail(Errc::helper_protocol);

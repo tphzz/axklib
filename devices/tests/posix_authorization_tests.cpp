@@ -5,6 +5,7 @@
 #include <cerrno>
 #include <chrono>
 #include <cstddef>
+#include <cstdio>
 #include <cstring>
 #include <system_error>
 #include <utility>
@@ -33,12 +34,29 @@ enum class Reply {
     cancelled,
     missing,
     extra,
+    many,
     truncated,
     wrong_access,
     failed_after_send,
     hung,
     hung_after_send
 };
+
+ssize_t receive_truncated_rights(int socket, msghdr *message, int flags) {
+    const bool full_capacity = message->msg_controllen >= CMSG_SPACE(sizeof(int) * 512U);
+    CHECK(full_capacity);
+    const auto received = ::recvmsg(socket, message, flags);
+    if (received == 1 && full_capacity) {
+        auto *header = CMSG_FIRSTHDR(message);
+        CHECK(header);
+        if (header) {
+            // Darwin can preserve the original cmsg_len after truncating the copied control data.
+            header->cmsg_len = static_cast<decltype(header->cmsg_len)>(message->msg_controllen + sizeof(int) * 16U);
+            message->msg_flags |= MSG_CTRUNC;
+        }
+    }
+    return received;
+}
 
 Result<PosixFd> fake_authorization(Reply reply) {
     int sockets[2];
@@ -64,7 +82,9 @@ Result<PosixFd> fake_authorization(Reply reply) {
         iovec iov{&byte, 1};
         std::array<int, 32> descriptors{};
         descriptors.fill(fd);
-        const std::size_t count = reply == Reply::truncated ? 32U : reply == Reply::extra ? 2U : 1U;
+        const std::size_t count = reply == Reply::truncated || reply == Reply::many ? 32U
+                                  : reply == Reply::extra                           ? 2U
+                                                                                    : 1U;
         alignas(cmsghdr) char control[CMSG_SPACE(sizeof(int) * 32)]{};
         msghdr message{};
         message.msg_iov = &iov;
@@ -90,11 +110,21 @@ Result<PosixFd> fake_authorization(Reply reply) {
     }
     const auto timeout = reply == Reply::hung || reply == Reply::hung_after_send ? std::chrono::milliseconds(30)
                                                                                  : std::chrono::milliseconds(3000);
+    auto receive = reply == Reply::truncated ? &receive_truncated_rights : &::recvmsg;
     auto result =
-        receive_authorized_fd(ours.get(), child, Access::ReadOnly, std::chrono::steady_clock::now() + timeout);
+        receive_authorized_fd(ours.get(), child, Access::ReadOnly, std::chrono::steady_clock::now() + timeout, receive);
     int status{};
     CHECK(::waitpid(child, &status, WNOHANG) == -1 && errno == ECHILD);
     return result;
+}
+
+void check_rejected_reply(Reply reply, Errc expected) {
+    const int before = descriptor_count();
+    CHECK(err(fake_authorization(reply)) == expected);
+    const int after = descriptor_count();
+    if (after != before)
+        std::fprintf(stderr, "Reply %d descriptor count: before=%d after=%d\n", static_cast<int>(reply), before, after);
+    CHECK(after == before);
 }
 
 } // namespace
@@ -107,14 +137,16 @@ int main() {
         if (result)
             CHECK((::fcntl(result->get(), F_GETFD) & FD_CLOEXEC) != 0);
     }
-    CHECK(err(fake_authorization(Reply::cancelled)) == Errc::elevation_cancelled);
-    CHECK(err(fake_authorization(Reply::missing)) == Errc::elevation_failed);
-    CHECK(err(fake_authorization(Reply::extra)) == Errc::helper_protocol);
-    CHECK(err(fake_authorization(Reply::truncated)) == Errc::helper_protocol);
-    CHECK(err(fake_authorization(Reply::wrong_access)) == Errc::helper_protocol);
-    CHECK(err(fake_authorization(Reply::failed_after_send)) == Errc::elevation_failed);
-    CHECK(err(fake_authorization(Reply::hung)) == Errc::authorization_timeout);
-    CHECK(err(fake_authorization(Reply::hung_after_send)) == Errc::authorization_timeout);
+    CHECK(descriptor_count() == before);
+    check_rejected_reply(Reply::cancelled, Errc::elevation_cancelled);
+    check_rejected_reply(Reply::missing, Errc::elevation_failed);
+    check_rejected_reply(Reply::extra, Errc::helper_protocol);
+    check_rejected_reply(Reply::many, Errc::helper_protocol);
+    check_rejected_reply(Reply::truncated, Errc::helper_protocol);
+    check_rejected_reply(Reply::wrong_access, Errc::helper_protocol);
+    check_rejected_reply(Reply::failed_after_send, Errc::elevation_failed);
+    check_rejected_reply(Reply::hung, Errc::authorization_timeout);
+    check_rejected_reply(Reply::hung_after_send, Errc::authorization_timeout);
     CHECK(descriptor_count() == before);
 #if defined(__APPLE__)
     ElevationOptions options;
