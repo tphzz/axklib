@@ -112,10 +112,38 @@ TEST_F(ImageSourcesTest, RejectsSameSizedReplacementAndRetainsSandboxLifetime) {
         sources = std::move(*opened);
     }
     ASSERT_TRUE(sources.native_sources->verify());
-    std::filesystem::rename(root / "folder", root / "original");
-    std::filesystem::create_directory(root / "folder");
-    std::ofstream(root / "folder" / "three.bin") << "third file";
+    const auto directory = root / "folder";
+    const auto file = directory / "three.bin";
+    const auto directory_time = std::filesystem::last_write_time(directory);
+    const auto file_time = std::filesystem::last_write_time(file);
+    const auto original = root / "original.bin";
+    std::error_code error;
+    std::filesystem::rename(file, original, error);
+    ASSERT_FALSE(error) << error.message();
+    ASSERT_TRUE(std::filesystem::copy_file(original, file));
+    std::filesystem::last_write_time(file, file_time);
+    std::filesystem::last_write_time(directory, directory_time);
+    ASSERT_EQ(std::filesystem::file_size(file), std::filesystem::file_size(original));
     EXPECT_FALSE(sources.native_sources->verify());
+}
+
+TEST_F(ImageSourcesTest, RejectsDirectoryReplacementWithMatchingMembership) {
+    // Windows cannot rename a parent while its child files are held open.
+    const auto directory = root / "empty";
+    ASSERT_TRUE(std::filesystem::create_directory(directory));
+    const auto directory_time = std::filesystem::last_write_time(directory);
+    auto sandbox = axk::app::Sandbox::create({{"root", "Root", root, true}});
+    ASSERT_TRUE(sandbox);
+    const std::vector<axk::app::ImageSourceRef> references{{"root", "empty", axk::app::ImageSourceKind::directory}};
+    auto sources = axk::app::admit_image_sources(*sandbox, nullptr, nullptr, references, "owner");
+    ASSERT_TRUE(sources) << sources.error().message;
+    ASSERT_TRUE(sources->native_sources->verify());
+    std::error_code error;
+    std::filesystem::rename(directory, root / "original", error);
+    ASSERT_FALSE(error) << error.message();
+    ASSERT_TRUE(std::filesystem::create_directory(directory));
+    std::filesystem::last_write_time(directory, directory_time);
+    EXPECT_FALSE(sources->native_sources->verify());
 }
 
 TEST_F(ImageSourcesTest, RejectsHardLinkAliasesInsideSelectedDirectories) {
