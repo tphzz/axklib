@@ -1,0 +1,36 @@
+name: macOS CI
+
+on:
+  workflow_dispatch:
+    inputs:
+      debug:
+        description: "Debug"
+        required: false
+        default: false
+        type: boolean
+      notarize_macos:
+        description: "Notarize"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-macos-only-${{ github.ref }}-${{ inputs.debug && 'debug' || 'release' }}
+  cancel-in-progress: false
+  queue: max
+
+jobs:
+  macos:
+    name: macOS
+    concurrency:
+      group: native-apple-silicon-host
+      cancel-in-progress: false
+      queue: max
+    uses: ./.github/workflows/native-macos-platform.yml
+    with:
+      debug: ${{ inputs.debug }}
+      notarize_macos: ${{ inputs.notarize_macos }}
+      run_static_checks: true
