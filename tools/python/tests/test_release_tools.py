@@ -18,6 +18,13 @@ import release_metadata
 import version_metadata
 
 
+def native_workflow_text(root: Path) -> str:
+    """Include the called macOS jobs when inspecting the full release pipeline."""
+    native = (root / ".github" / "workflows" / "native.yml").read_text(encoding="utf-8")
+    macos = (root / ".github/workflows/native-macos-platform.yml").read_text(encoding="utf-8")
+    return native.replace("  draft-release:\n", macos.split("jobs:\n", 1)[1] + "\n  draft-release:\n", 1)
+
+
 def action_reference_count(workflow: str, action: str, version: str) -> int:
     return len(
         re.findall(
@@ -653,7 +660,7 @@ def test_release_assets_reject_obsolete_sdk_archive(tmp_path: Path) -> None:
 
 def test_native_workflow_is_manual_and_creates_only_release_drafts() -> None:
     root = Path(__file__).resolve().parents[3]
-    workflow = (root / ".github/workflows/native.yml").read_text(encoding="utf-8")
+    workflow = native_workflow_text(root)
     native_platform = (root / ".github/workflows/native-platform.yml").read_text(
         encoding="utf-8"
     )
@@ -697,7 +704,7 @@ def test_native_workflow_is_manual_and_creates_only_release_drafts() -> None:
 
 def test_native_workflow_does_not_retain_legacy_windows_pfx_signing() -> None:
     root = Path(__file__).resolve().parents[3]
-    workflow = (root / ".github/workflows/native.yml").read_text(encoding="utf-8")
+    workflow = native_workflow_text(root)
 
     assert "sign_windows_desktop" not in workflow
     assert "WINDOWS_CERTIFICATE" not in workflow
@@ -707,7 +714,7 @@ def test_native_workflow_does_not_retain_legacy_windows_pfx_signing() -> None:
 
 def test_native_workflow_uses_official_dependency_and_incremental_build_caches() -> None:
     root = Path(__file__).resolve().parents[3]
-    workflow = (root / ".github/workflows/native.yml").read_text(encoding="utf-8")
+    workflow = native_workflow_text(root)
     native_platform = (root / ".github/workflows/native-platform.yml").read_text(
         encoding="utf-8"
     )
@@ -828,7 +835,7 @@ def test_native_workflow_recovers_only_isolated_vcpkg_tool_extraction_state() ->
 
 def test_native_workflow_builds_monorepo_desktop_packages_from_tested_servers() -> None:
     root = Path(__file__).resolve().parents[3]
-    workflow = (root / ".github/workflows/native.yml").read_text(encoding="utf-8")
+    workflow = native_workflow_text(root)
     native_platform = (root / ".github/workflows/native-platform.yml").read_text(
         encoding="utf-8"
     )
@@ -905,7 +912,7 @@ def test_desktop_contract_and_rpm_inspection_are_cross_platform() -> None:
             encoding="utf-8"
         )
     )
-    workflow = (root / ".github/workflows/native.yml").read_text(encoding="utf-8")
+    workflow = native_workflow_text(root)
     native_platform = (root / ".github/workflows/native-platform.yml").read_text(
         encoding="utf-8"
     )
@@ -999,7 +1006,7 @@ def test_windows_desktop_bundle_uses_branded_gui_startup() -> None:
 
 def test_native_workflow_transfers_macos_slices_as_run_scoped_artifacts() -> None:
     root = Path(__file__).resolve().parents[3]
-    workflow = (root / ".github/workflows/native.yml").read_text(encoding="utf-8")
+    workflow = native_workflow_text(root)
     macos_helper = (root / "tools/release/build_macos_slices.sh").read_text(
         encoding="utf-8"
     )
@@ -1011,10 +1018,9 @@ def test_native_workflow_transfers_macos_slices_as_run_scoped_artifacts() -> Non
         "  draft-release:\n", 1
     )[0]
     assert "bash tools/release/build_macos_slices.sh" in slices_job
-    slices_needs = slices_job.split("    needs:\n", 1)[1].split(
-        "    runs-on:", 1
-    )[0]
-    assert "- native-windows-arm64" in slices_needs
+    assert "    needs:" not in slices_job
+    caller = workflow.split("  macos:\n", 1)[1].split("  macos-slices:\n", 1)[0]
+    assert "needs: native-windows-arm64" in caller
     assert "name: slice-macos-x64-${{ github.run_id }}" in slices_job
     assert "name: slice-macos-arm64-${{ github.run_id }}" in slices_job
     assert "retention-days: 2" in slices_job
@@ -1035,7 +1041,7 @@ def test_native_workflow_transfers_macos_slices_as_run_scoped_artifacts() -> Non
 
 def test_workflows_use_only_the_required_self_hosted_runner_labels() -> None:
     root = Path(__file__).resolve().parents[3]
-    native_workflow = (root / ".github/workflows/native.yml").read_text(encoding="utf-8")
+    native_workflow = native_workflow_text(root)
     native_platform = (root / ".github/workflows/native-platform.yml").read_text(
         encoding="utf-8"
     )
@@ -1058,7 +1064,7 @@ def test_workflows_use_only_the_required_self_hosted_runner_labels() -> None:
 
 def test_workflows_cancel_builds_but_serialize_signing_and_publication() -> None:
     root = Path(__file__).resolve().parents[3]
-    native_workflow = (root / ".github/workflows/native.yml").read_text(encoding="utf-8")
+    native_workflow = native_workflow_text(root)
     docs_workflow = (root / ".github/workflows/publish-docs.yml").read_text(encoding="utf-8")
 
     architecture = native_workflow.split("  architecture:\n", 1)[1].split(
@@ -1098,7 +1104,6 @@ def test_workflows_cancel_builds_but_serialize_signing_and_publication() -> None
         release_tools,
         desktop_static,
         native_platform,
-        macos_slices,
     ):
         assert "concurrency:" in cancelable_job
         assert "cancel-in-progress: true" in cancelable_job
@@ -1110,10 +1115,11 @@ def test_workflows_cancel_builds_but_serialize_signing_and_publication() -> None
     assert "needs:\n      - macos-slices" in macos_universal
     assert "native-windows-x64" not in macos_universal.split("runs-on:", 1)[0]
     assert (
-        "needs:\n      - native-windows-x64\n      - macos-universal"
+        "needs:\n      - native-windows-x64\n      - macos"
         in draft_release
     )
     assert "group: native-macos-signing" in macos_universal
+    assert "cancel-in-progress: false" in macos_slices
     assert "cancel-in-progress: false" in macos_universal
     assert "group: native-draft-release" in draft_release
     assert "cancel-in-progress: false" in draft_release
@@ -1123,7 +1129,7 @@ def test_workflows_cancel_builds_but_serialize_signing_and_publication() -> None
 
 def test_windows_and_macos_self_hosted_preflights_are_explicit() -> None:
     root = Path(__file__).resolve().parents[3]
-    workflow = (root / ".github/workflows/native.yml").read_text(encoding="utf-8")
+    workflow = native_workflow_text(root)
     native_job = (root / ".github/workflows/native-platform.yml").read_text(
         encoding="utf-8"
     )
@@ -1203,7 +1209,7 @@ def test_windows_and_macos_self_hosted_preflights_are_explicit() -> None:
 
 def test_self_hosted_tool_jobs_do_not_depend_on_runner_node_or_python() -> None:
     root = Path(__file__).resolve().parents[3]
-    workflow = (root / ".github/workflows/native.yml").read_text(encoding="utf-8")
+    workflow = native_workflow_text(root)
     release_tools = workflow.split("  release-tools:\n", 1)[1].split(
         "  desktop-static:\n", 1
     )[0]
@@ -1255,7 +1261,7 @@ def test_self_hosted_tool_jobs_do_not_depend_on_runner_node_or_python() -> None:
 
 def test_macos_signing_uses_persistent_runner_state_without_credential_secrets() -> None:
     root = Path(__file__).resolve().parents[3]
-    workflow = (root / ".github/workflows/native.yml").read_text(encoding="utf-8")
+    workflow = native_workflow_text(root)
     universal_job = workflow.split("  macos-universal:\n", 1)[1].split(
         "  draft-release:\n", 1
     )[0]
@@ -1287,7 +1293,7 @@ def test_macos_signing_uses_persistent_runner_state_without_credential_secrets()
 
 def test_native_workflow_notarizes_and_verifies_the_uploaded_macos_dmg() -> None:
     root = Path(__file__).resolve().parents[3]
-    workflow = (root / ".github/workflows/native.yml").read_text(encoding="utf-8")
+    workflow = native_workflow_text(root)
     universal_job = workflow.split("  macos-universal:\n", 1)[1].split(
         "  draft-release:\n", 1
     )[0]
@@ -1318,7 +1324,7 @@ def test_native_workflow_notarizes_and_verifies_the_uploaded_macos_dmg() -> None
 
 def test_macos_lipo_verifies_each_architecture_in_a_separate_invocation() -> None:
     root = Path(__file__).resolve().parents[3]
-    workflow = (root / ".github/workflows/native.yml").read_text(encoding="utf-8")
+    workflow = native_workflow_text(root)
     checks: dict[str, list[str]] = {}
     for line in workflow.splitlines():
         if line.strip().startswith("lipo ") and "-verify_arch" in line:
@@ -1351,7 +1357,7 @@ def test_desktop_release_keeps_host_macros_unstripped_without_changing_app_profi
 
 def test_native_workflow_builds_tests_and_packages_server_on_every_release_target() -> None:
     root = Path(__file__).resolve().parents[3]
-    workflow = (root / ".github/workflows/native.yml").read_text(encoding="utf-8")
+    workflow = native_workflow_text(root)
     native_platform = (root / ".github/workflows/native-platform.yml").read_text(
         encoding="utf-8"
     )
@@ -1392,7 +1398,7 @@ def test_native_workflow_builds_tests_and_packages_server_on_every_release_targe
 
 def test_release_workflow_excludes_server_smoke_tests_but_keeps_them_registered() -> None:
     root = Path(__file__).resolve().parents[3]
-    workflow = (root / ".github/workflows/native.yml").read_text(encoding="utf-8")
+    workflow = native_workflow_text(root)
     native_platform = (root / ".github/workflows/native-platform.yml").read_text(
         encoding="utf-8"
     )
@@ -1483,7 +1489,7 @@ def test_release_tests_preserve_linux_abi_and_translate_macos_intel_discovery() 
 
 def test_native_workflow_checks_contract_and_generates_source_aware_server_sbom() -> None:
     root = Path(__file__).resolve().parents[3]
-    workflow = (root / ".github/workflows/native.yml").read_text(encoding="utf-8")
+    workflow = native_workflow_text(root)
     native_platform = (root / ".github/workflows/native-platform.yml").read_text(
         encoding="utf-8"
     )

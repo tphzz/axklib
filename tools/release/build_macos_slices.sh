@@ -136,7 +136,7 @@ build_desktop_slice() {
   AXKLIB_VERSION_METADATA_FILE="$build_directory/version_metadata.json" \
   AXKLIB_PACKAGE_BASENAME_FILE="$build_directory/package_basename.txt" \
   CARGO_TARGET_DIR="$cargo_target_directory" \
-    cargo test \
+    cargo +1.85 test --locked \
       --manifest-path "$source_directory/apps/axkdeck/src-tauri/Cargo.toml" \
       --target "$rust_target"
   (
@@ -147,6 +147,7 @@ build_desktop_slice() {
     AXKLIB_PACKAGE_BASENAME_FILE="$build_directory/package_basename.txt" \
     AXKDECK_BUILD_NUMBER="${GITHUB_RUN_NUMBER:-0}" \
     CARGO_TARGET_DIR="$cargo_target_directory" \
+    RUSTUP_TOOLCHAIN=1.85 \
       pnpm desktop:build -- --target "$rust_target" --no-bundle
   )
   verify_thin_architecture "$sidecar" "$architecture"
@@ -197,6 +198,7 @@ build_slice() {
     -DCMAKE_OSX_SYSROOT="$sdk_path" \
     -DCMAKE_OSX_DEPLOYMENT_TARGET="$deployment_target" \
     -DAXK_BUILD_SERVER=ON \
+    -DAXK_BUILD_DEVICES=ON \
     -DAXK_BUILD_SHARED_SDK=OFF \
     -DBUILD_TESTING=ON \
     -DAXK_CLI_SBOM_FILE="$build_directory/axklib-cli.spdx.json" \
@@ -241,6 +243,10 @@ build_slice() {
     verify_deployment_target "$binary"
   done
   verify_runtime_closure "$stage"
+
+  python "$source_directory/tools/python/device_capability_smoke.py" \
+    --server "$server" --architecture "$architecture" \
+    --output-directory "$build_directory/device-capability-smoke"
 
   build_desktop_slice "$architecture" "$rust_target" "$build_directory" "$server"
   package_slice "$platform" "$build_directory" "$stage"

@@ -22,6 +22,14 @@ before and after the read-only run within the directory profile's bounds.
 Exit codes are 0 for complete success, 1 for failures and 2 for missing coverage.
 It is read-only and does not establish release readiness.
 
+`device_capability_smoke.py` starts an isolated, owned local sidecar with device
+support enabled, checks only version and operation-registry metadata, and shuts
+it down. It never enumerates, opens, authorizes or recovers a device. Use
+`--server`, `--output-directory`, and, on macOS, `--architecture x86_64|arm64`
+to check each architecture of a packaged universal server. Logs and `result.json`
+include the build identity and outcome, not credentials. Native device-policy
+tests and separate manual hardware acceptance remain required.
+
 `image_open_extended.py` uses the same opening/navigation checks for a separate
 manifest of up to 256 cases, without enlarging the default 16-case smoke bound.
 Its Linux supervisor requires `prlimit` and `timeout`: each sequential worker

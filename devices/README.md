@@ -82,10 +82,12 @@ and [V6 ConfigUtil](https://github.com/rabbitholecomputing/SCSI2SD-util-V6/blob/
   Delete and Rename each use one native transaction; no whole-device copy or
   whole-device hash is required.
 
-Writes are gated to Linux x64 and Windows x64. Other SDK targets remain
-read-only pending manual qualification. SDK compilation alone does not qualify
-physical writes. macOS does not yet have the required Disk Arbitration write
-claim and remains read-only in the integrated interface.
+Writes are enabled for Linux x64, Windows x64, and macOS Intel/ARM64 builds with
+device support. Other SDK targets remain read-only. On macOS a Disk Arbitration
+claim and serviced mount/eject approval callbacks remain alive until the writable
+descriptor closes. Mounted media, competing claims and uncertain mount state
+refuse write access; the app does not unmount media automatically. Disappearance
+invalidates the handle. Authorization still uses Apple's `authopen`.
 
 ## Interrupted Writes
 

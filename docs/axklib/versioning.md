@@ -204,6 +204,13 @@ successful run. A matching published release is never deleted automatically
 and causes the workflow to fail. Debug builds remain available only as
 workflow artifacts.
 
+The separate manual **macOS CI** workflow reuses Native CI's macOS jobs for
+faster platform-specific iterations. It always delivers signed universal DMG
+and CLI workflow artifacts, leaves the all-platform draft release untouched,
+and offers optional notarization (off by default). Device access is compiled
+into both slices; packaged capability checks do not qualify physical writes.
+See the [remote macOS validation checklist](../macos-device-validation.md).
+
 The version fields in `docs/pyproject.toml` and `tools/python/pyproject.toml`
 version their independent Python environments. They are not monorepo product
 version sources.

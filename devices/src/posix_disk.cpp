@@ -22,6 +22,7 @@
 #include <linux/fs.h>
 #include <sys/sysmacros.h>
 #elif defined(__APPLE__)
+#include "macos_claim.hpp"
 #include <sys/disk.h>
 #include <sys/mount.h>
 #else
@@ -58,9 +59,16 @@ class PosixDisk final : public BlockDevice {
     std::uint32_t sector_size() const noexcept override { return ss_; }
     std::uint64_t sector_count() const noexcept override { return count_; }
     bool writable() const noexcept override { return writable_; }
+#if defined(__APPLE__)
+    void retain_claim(std::unique_ptr<detail::MacosWriteClaim> claim) { claim_ = std::move(claim); }
+#endif
 
   protected:
     Result<void> read_raw(std::uint64_t off, std::span<std::byte> out) override {
+#if defined(__APPLE__)
+        if (claim_ && !claim_->valid())
+            return detail::fail(Errc::device_changed);
+#endif
         for (std::size_t done = 0; done < out.size();) {
             const ssize_t n = ::pread(fd_.get(), out.data() + done, out.size() - done, static_cast<off_t>(off + done));
             if (n < 0) {
@@ -76,6 +84,10 @@ class PosixDisk final : public BlockDevice {
     }
 
     Result<void> write_raw(std::uint64_t off, std::span<const std::byte> in) override {
+#if defined(__APPLE__)
+        if (claim_ && !claim_->valid())
+            return detail::fail(Errc::device_changed);
+#endif
         written_ = true; // set first: a failed write may still have changed sectors
         for (std::size_t done = 0; done < in.size();) {
             const ssize_t n = ::pwrite(fd_.get(), in.data() + done, in.size() - done, static_cast<off_t>(off + done));
@@ -92,6 +104,10 @@ class PosixDisk final : public BlockDevice {
     }
 
     Result<void> flush_raw() override {
+#if defined(__APPLE__)
+        if (claim_ && !claim_->valid())
+            return detail::fail(Errc::device_changed);
+#endif
         if (::fsync(fd_.get()) != 0)
             return detail::fail(last_errno());
 #if defined(__APPLE__)
@@ -102,6 +118,10 @@ class PosixDisk final : public BlockDevice {
     }
 
   private:
+#if defined(__APPLE__)
+    // The descriptor closes before the mount/eject protection is released.
+    std::unique_ptr<detail::MacosWriteClaim> claim_;
+#endif
     Fd fd_;
     std::uint32_t ss_;
     std::uint64_t count_;
@@ -205,15 +225,15 @@ Result<void> check_not_mounted(const std::string &raw_path) {
             return detail::fail(last_errno());
         if (static_cast<std::size_t>(got) < mounts.size()) {
             mounts.resize(static_cast<std::size_t>(got));
-            break;
+            for (const auto &m : mounts) {
+                const std::string_view from = m.f_mntfromname;
+                if (from.starts_with(base) && (from.size() == base.size() || from[base.size()] == 's'))
+                    return detail::fail(Errc::device_busy);
+            }
+            return {};
         }
     }
-    for (const auto &m : mounts) {
-        const std::string_view from = m.f_mntfromname;
-        if (from.starts_with(base) && (from.size() == base.size() || from[base.size()] == 's'))
-            return detail::fail(Errc::device_busy);
-    }
-    return {};
+    return detail::fail(Errc::device_busy);
 }
 
 Result<Fd> open_macos(const DeviceInfo &info, bool rw) {
@@ -247,6 +267,13 @@ Result<std::unique_ptr<BlockDevice>> detail::open_platform(const DeviceInfo &inf
 #if defined(__linux__)
     auto fd = open_linux(info, rw);
 #else
+    std::unique_ptr<detail::MacosWriteClaim> claim;
+    if (rw) {
+        auto acquired = detail::MacosWriteClaim::acquire(info);
+        if (!acquired)
+            return fail(acquired.error());
+        claim = std::move(*acquired);
+    }
     auto fd = open_macos(info, rw);
 #endif
     if (!fd)
@@ -268,9 +295,13 @@ Result<std::unique_ptr<BlockDevice>> detail::open_platform(const DeviceInfo &inf
             return fail(Errc::write_protected);
 #else
         std::uint32_t is_writable = 0;
-        if (::ioctl(fd->get(), DKIOCISWRITABLE, &is_writable) == 0 && !is_writable)
+        if (::ioctl(fd->get(), DKIOCISWRITABLE, &is_writable) != 0)
+            return fail(last_errno());
+        if (!is_writable)
             return fail(Errc::write_protected);
-        // Re-check after opening: closes the window in which Disk Arbitration could have mounted it.
+        // Keep the claim while revalidating the authorized descriptor.
+        if (!claim->valid())
+            return fail(Errc::device_changed);
         if (auto m = check_not_mounted(info.path); !m)
             return fail(m.error());
 #endif
@@ -282,7 +313,11 @@ Result<std::unique_ptr<BlockDevice>> detail::open_platform(const DeviceInfo &inf
     if (geo->sector_size != info.sector_size || std::uint64_t{geo->sector_size} * geo->sector_count != info.size_bytes)
         return fail(Errc::device_changed);
 
-    return std::make_unique<PosixDisk>(std::move(*fd), geo->sector_size, geo->sector_count, rw, true);
+    auto device = std::make_unique<PosixDisk>(std::move(*fd), geo->sector_size, geo->sector_count, rw, true);
+#if defined(__APPLE__)
+    device->retain_claim(std::move(claim));
+#endif
+    return device;
 }
 
 Result<std::unique_ptr<BlockDevice>> detail::open_image_platform(const std::filesystem::path &path, Access access,

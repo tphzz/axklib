@@ -317,7 +317,9 @@ std::shared_ptr<DeviceProvider> native_device_provider(const std::filesystem::pa
 }
 
 bool native_device_writes_qualified() noexcept {
-#if defined(AXK_BUILD_DEVICES) && (defined(__linux__) || defined(_WIN32)) && (defined(__x86_64__) || defined(_M_X64))
+#if defined(AXK_BUILD_DEVICES) &&                                                                                      \
+    ((defined(__APPLE__) && (defined(__x86_64__) || defined(__aarch64__))) ||                                          \
+     ((defined(__linux__) || defined(_WIN32)) && (defined(__x86_64__) || defined(_M_X64))))
     return true;
 #else
     return false;
