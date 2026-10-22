@@ -26,6 +26,7 @@ struct Fake {
     std::mutex mutex;
     std::vector<std::function<void()>> pending;
     DADiskRef disk{};
+    DADiskRef unrelated_disk = reinterpret_cast<DADiskRef>(CFDictionaryCreateMutable(nullptr, 0, nullptr, nullptr));
     DADiskMountApprovalCallback mount{};
     DADiskEjectApprovalCallback eject{};
     DADiskDisappearedCallback disappeared{};
@@ -42,6 +43,11 @@ struct Fake {
     bool disk_failed{};
     bool complete = true;
     DAReturn claim_status = kDAReturnSuccess;
+
+    ~Fake() {
+        if (unrelated_disk)
+            CFRelease(unrelated_disk);
+    }
 };
 
 Fake *fake{};
@@ -140,6 +146,9 @@ void service_event(std::function<void()> event) {
 void lifecycle() {
     Fake state;
     fake = &state;
+    CHECK(state.unrelated_disk);
+    if (!state.unrelated_disk)
+        return;
     auto acquired = MacosWriteClaim::acquire(device(), api(), 1s);
     CHECK(acquired);
     if (!acquired)
@@ -157,7 +166,7 @@ void lifecycle() {
                 CFRelease(denied);
             }
         }
-        CHECK(state.mount(nullptr, state.context) == nullptr);
+        CHECK(state.mount(state.unrelated_disk, state.context) == nullptr);
     });
     CHECK(state.unclaims == 0U);
     claim.reset();
@@ -199,6 +208,9 @@ void disappearance_and_uncertain_matching() {
     for (bool uncertain : {false, true}) {
         Fake state;
         fake = &state;
+        CHECK(state.unrelated_disk);
+        if (!state.unrelated_disk)
+            continue;
         auto claim = MacosWriteClaim::acquire(device(), api(), 1s);
         CHECK(claim);
         if (!claim)
@@ -211,7 +223,7 @@ void disappearance_and_uncertain_matching() {
                 if (denied)
                     CFRelease(denied);
             } else {
-                state.disappeared(nullptr, state.context);
+                state.disappeared(state.unrelated_disk, state.context);
                 CHECK((*claim)->valid());
                 state.disappeared(state.disk, state.context);
             }
