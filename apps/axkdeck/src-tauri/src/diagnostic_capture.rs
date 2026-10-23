@@ -323,7 +323,38 @@ pub fn diagnostic_log_level() -> &'static str {
 mod tests {
     use super::*;
     use std::io::{Read, Write};
-    use std::net::TcpListener;
+    use std::net::{TcpListener, TcpStream};
+
+    fn configure_capture_stream(stream: &TcpStream) {
+        // Windows accepts sockets in the listener's nonblocking mode.
+        stream.set_nonblocking(false).unwrap();
+        let timeout = Some(Duration::from_secs(3));
+        stream.set_read_timeout(timeout).unwrap();
+        stream.set_write_timeout(timeout).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn capture_stream_resets_inherited_nonblocking_mode() {
+        use rustix::fs::{OFlags, fcntl_getfl};
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let _client =
+            TcpStream::connect_timeout(&listener.local_addr().unwrap(), Duration::from_secs(3))
+                .unwrap();
+        let (stream, _) = listener.accept().unwrap();
+        stream.set_nonblocking(true).unwrap();
+        assert!(fcntl_getfl(&stream).unwrap().contains(OFlags::NONBLOCK));
+
+        configure_capture_stream(&stream);
+
+        assert!(!fcntl_getfl(&stream).unwrap().contains(OFlags::NONBLOCK));
+        assert_eq!(stream.read_timeout().unwrap(), Some(Duration::from_secs(3)));
+        assert_eq!(
+            stream.write_timeout().unwrap(),
+            Some(Duration::from_secs(3))
+        );
+    }
 
     fn capture_reply(body: &str, level: Level) -> (Result<(), String>, String) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
@@ -344,9 +375,7 @@ mod tests {
                     Err(error) => panic!("capture listener: {error}"),
                 }
             };
-            socket
-                .set_read_timeout(Some(Duration::from_secs(3)))
-                .unwrap();
+            configure_capture_stream(&socket);
             let mut request = Vec::new();
             let mut buffer = [0_u8; 1024];
             loop {
