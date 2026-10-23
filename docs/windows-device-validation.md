@@ -1,7 +1,8 @@
 # Windows Device Reconnection Check
 
-Use the installer from **Windows x64 CI** or **Windows ARM64 CI**, matching the
-test computer. These workflows produce test artifacts, not a published release.
+Use the installer from **10 Build - Windows x64** or **11 Build - Windows ARM64**,
+matching the test computer. These workflows produce test artifacts, not a
+published release.
 Record the application's source identity from its startup log before testing.
 
 These checks open devices read-only. Do not use Save, Import, Delete, restore or

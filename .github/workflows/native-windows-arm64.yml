@@ -1,4 +1,5 @@
-name: Windows ARM64 CI
+name: 11 Build - Windows ARM64
+run-name: "${{ github.workflow }} | ${{ github.ref_name }} | ${{ inputs.debug && 'Debug' || 'Release' }}"
 
 on:
   workflow_dispatch:

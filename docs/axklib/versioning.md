@@ -155,6 +155,44 @@ source identity through `sdk_build_info()`. `build_info` contains
 its string pointers refer to literals in the loaded library and remain valid
 for the process lifetime.
 
+## Workflow Names
+
+The Actions sidebar groups workflows by role:
+
+| Workflow | Purpose | File in `.github/workflows/` |
+| --- | --- | --- |
+| **00 Full - All Platforms** | All targets; Release builds publish a draft | `native.yml` |
+| **10 Build - Windows x64** | One platform's test artifacts | `native-windows-x64.yml` |
+| **11 Build - Windows ARM64** | One platform's test artifacts | `native-windows-arm64.yml` |
+| **12 Build - macOS Universal** | Universal macOS test artifacts | `native-macos.yml` |
+| **13 Build - Linux x64** | One platform's test artifacts | `native-linux-x64.yml` |
+| **14 Build - Linux ARM64** | One platform's test artifacts | `native-linux-arm64.yml` |
+| **30 Deploy - Docs** | Documentation deployment | `publish-docs.yml` |
+| **90 Helper - Checks** | Shared prerequisite checks | `native-checks.yml` |
+| **91 Helper - Linux/Windows** | Shared native build recipe | `native-platform.yml` |
+| **92 Helper - macOS Universal** | Shared macOS build recipe | `native-macos-platform.yml` |
+
+The numbers group navigation; they do not specify execution order. Start a
+**Full** or **Build** workflow, not a **Helper**. Helpers accept only
+`workflow_call`, so they have no **Run workflow** button. GitHub's generated
+`pages-build-deployment` entry is outside this naming scheme.
+
+The six native entry points use run titles such as
+`10 Build - Windows x64 | v0.6.0 | Release`. The title reflects the selected
+source branch and Debug/Release mode. GitHub documents these display fields as
+[`name` and `run-name`](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#run-name).
+
+Keep display metadata consistent on `main` and the branch being built. If their
+build logic differs, synchronize only top-level `name` and `run-name` fields.
+Keep workflow filenames, job IDs and reusable-workflow paths stable. Commands
+can continue to use filenames, for example:
+
+```bash
+gh workflow run native-windows-x64.yml --ref v0.6.0
+```
+
+The naming policy is checked by `tools/python/tests/test_workflow_names.py`.
+
 ## Build And Artifact Names
 
 CMake writes `version_metadata.json` and `package_basename.txt` to the build
@@ -162,7 +200,7 @@ root. Release and SBOM tools consume these generated files rather than parsing
 separate version declarations. A Git-state change refreshes compiled source
 identity metadata; an unchanged state does not rewrite generated files.
 
-Manual Native CI builds use these names:
+Manual native builds use these artifact names:
 
 | Build | Example archive stem |
 | --- | --- |
@@ -185,7 +223,7 @@ a tagged release and the source identity for a non-release build. On macOS,
 while the complete semantic version and source identity remain embedded in the
 application runtime metadata.
 
-After every successful Release-configuration Native CI run, the workflow
+After every successful Release run of **00 Full - All Platforms**, the workflow
 collects CLI archives for Linux x64, Linux ARM64, Windows x64, Windows ARM64,
 and universal macOS into an unpublished GitHub draft release. The same draft
 contains axkdeck DEB and RPM installers for both Linux
@@ -193,9 +231,9 @@ architectures, NSIS installers for both Windows architectures, and one universal
 macOS DMG. `axklib-server` is shipped in those desktop installers rather than as
 a standalone release asset. The C++ library is distributed as source rather
 than as a prebuilt SDK archive. The Windows installers are currently unsigned;
-Native CI does not accept or retain exportable PFX signing credentials. GitHub
-displays the digest for each asset, so the
-workflow does not attach checksum or release-manifest sidecars. Branch
+the full-platform workflow does not accept or retain exportable PFX signing
+credentials. GitHub displays the digest for each asset, so the workflow does
+not attach checksum or release-manifest sidecars. Branch
 `features/packages` targets the prerelease draft and generated tag
 `features/packages-preview`; a semantic-version tag build targets an
 unpublished release with that exact tag. Semantic-version prereleases are
@@ -204,19 +242,20 @@ successful run. A matching published release is never deleted automatically
 and causes the workflow to fail. Debug builds remain available only as
 workflow artifacts.
 
-For faster iterations, **Linux x64 CI**, **Linux ARM64 CI**, **Windows x64 CI**
-and **Windows ARM64 CI** each build one target, using the same build, test and
-packaging recipe as Native CI. Each first runs the shared architecture,
-release-tool and desktop-static checks. Select the source branch in **Run
-workflow** and leave **Debug** off for Release artifacts. These runs upload
+For faster iterations, **10 Build - Windows x64**, **11 Build - Windows ARM64**,
+**13 Build - Linux x64** and **14 Build - Linux ARM64** each build one target,
+using the same build, test and packaging recipe as the full-platform workflow.
+Each first runs the shared architecture, release-tool and desktop-static checks.
+Select the source branch in **Run workflow** and leave **Debug** off for Release
+artifacts. These runs upload
 installers and CLI archives without creating or replacing a draft release.
-Native CI remains the full-platform build and the only draft-release publisher.
+**00 Full - All Platforms** remains the only draft-release publisher.
 Windows device reconnection has a separate
 [read-only validation checklist](../windows-device-validation.md).
 
-The separate manual **macOS CI** workflow reuses Native CI's macOS jobs for
-faster platform-specific iterations. It always delivers signed universal DMG
-and CLI workflow artifacts, leaves the all-platform draft release untouched,
+The separate manual **12 Build - macOS Universal** workflow reuses the same
+macOS jobs for faster platform-specific iterations. It always delivers signed
+universal DMG and CLI workflow artifacts, leaves the all-platform draft release untouched,
 and offers optional notarization (off by default). Device access is compiled
 into both slices; packaged capability checks do not qualify physical writes.
 See the [remote macOS validation checklist](../macos-device-validation.md).

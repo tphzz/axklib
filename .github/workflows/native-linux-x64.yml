@@ -1,4 +1,5 @@
-name: Linux x64 CI
+name: 13 Build - Linux x64
+run-name: "${{ github.workflow }} | ${{ github.ref_name }} | ${{ inputs.debug && 'Debug' || 'Release' }}"
 
 on:
   workflow_dispatch:

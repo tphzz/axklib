@@ -1,6 +1,7 @@
 # Remote macOS Device Check
 
-Build through **macOS CI**, selecting the source branch in **Run workflow**.
+Build through **12 Build - macOS Universal**, selecting the source branch in
+**Run workflow**.
 Leave **Debug** off for Release artifacts. Notarization is optional and off by
 default; a signed build without notarization is not a Gatekeeper qualification.
 Download the universal DMG from that run and install it on the test Mac.
