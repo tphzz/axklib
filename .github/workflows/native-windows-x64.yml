@@ -1,0 +1,45 @@
+name: Windows x64 CI
+
+on:
+  workflow_dispatch:
+    inputs:
+      debug:
+        description: "Debug"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-windows-x64-only-${{ github.ref }}-${{ inputs.debug && 'debug' || 'release' }}
+  cancel-in-progress: false
+  queue: max
+
+jobs:
+  checks:
+    uses: ./.github/workflows/native-checks.yml
+    with:
+      debug: ${{ inputs.debug }}
+
+  native:
+    name: Windows x64
+    needs: checks
+    concurrency:
+      group: native-x64-host
+      cancel-in-progress: false
+      queue: max
+    uses: ./.github/workflows/native-platform.yml
+    with:
+      debug: ${{ inputs.debug }}
+      name: Windows x64
+      runner_labels: '["self-hosted","Windows","X64"]'
+      artifact: windows-x64
+      desktop_platform: windows
+      desktop_architecture: x64
+      triplet: x64-windows-axk
+      build_testing: "ON"
+      run_tests: true
+      msvc_arch: x64
+      msvc_component: Microsoft.VisualStudio.Component.VC.Tools.x86.x64
