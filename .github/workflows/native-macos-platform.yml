@@ -1,4 +1,4 @@
-name: Native macOS build
+name: 92 Helper - macOS Universal
 
 on:
   workflow_call:

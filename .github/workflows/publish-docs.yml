@@ -1,4 +1,4 @@
-name: Publish Docs
+name: 30 Deploy - Docs
 
 on:
   push:

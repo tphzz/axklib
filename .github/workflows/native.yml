@@ -1,4 +1,5 @@
-name: Native CI
+name: 00 Full - All Platforms
+run-name: "${{ github.workflow }} | ${{ github.ref_name }} | ${{ inputs.debug && 'Debug' || 'Release' }}"
 
 on:
   workflow_dispatch:

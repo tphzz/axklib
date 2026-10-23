@@ -1,4 +1,5 @@
-name: macOS CI
+name: 12 Build - macOS Universal
+run-name: "${{ github.workflow }} | ${{ github.ref_name }} | ${{ inputs.debug && 'Debug' || 'Release' }}"
 
 on:
   workflow_dispatch:
