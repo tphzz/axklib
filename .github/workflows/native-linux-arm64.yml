@@ -1,0 +1,43 @@
+name: Linux ARM64 CI
+
+on:
+  workflow_dispatch:
+    inputs:
+      debug:
+        description: "Debug"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-linux-arm64-only-${{ github.ref }}-${{ inputs.debug && 'debug' || 'release' }}
+  cancel-in-progress: false
+  queue: max
+
+jobs:
+  checks:
+    uses: ./.github/workflows/native-checks.yml
+    with:
+      debug: ${{ inputs.debug }}
+
+  native:
+    name: Linux ARM64
+    needs: checks
+    concurrency:
+      group: native-apple-silicon-host
+      cancel-in-progress: false
+      queue: max
+    uses: ./.github/workflows/native-platform.yml
+    with:
+      debug: ${{ inputs.debug }}
+      name: Linux ARM64
+      runner_labels: '["self-hosted","Linux","ARM64","jammy","docker"]'
+      artifact: linux-arm64
+      desktop_platform: linux
+      desktop_architecture: arm64
+      triplet: arm64-linux-axk
+      build_testing: "ON"
+      run_tests: true

@@ -36,6 +36,12 @@ Every device and configured target selection is explicit.
 Refresh retains each tab's selection only while the same device connection
 and geometry remain available; it never selects a replacement automatically.
 
+Windows identifies a connection using the USB-parent and disk PnP instance IDs
+and their last-arrival timestamps, not numeric device-node handles. The desktop
+server and UAC helper compare the same identity. Unavailable or malformed
+identity properties refuse access; reconnecting requires Refresh and an explicit
+new selection. See the [Windows reconnection check](../docs/windows-device-validation.md).
+
 Selecting a carrier in SCSI2SDv6 automatically reads only its final two 512-byte
 sectors, read-only. Native admission requires `BCFG`, at least one enabled target,
 recognized types, unique enabled IDs, supported sector packing, and disjoint

@@ -122,4 +122,6 @@ nav:
       - REST And WebSocket Server: axklib/server.md
       - OpenAPI Reference: axklib/openapi.md
       - Native Dependencies: native-dependencies.md
+      - Windows Device Reconnection: windows-device-validation.md
+      - Remote macOS Device Check: macos-device-validation.md
   - Yamaha Glossary: axklib/glossary.md

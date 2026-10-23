@@ -204,6 +204,16 @@ successful run. A matching published release is never deleted automatically
 and causes the workflow to fail. Debug builds remain available only as
 workflow artifacts.
 
+For faster iterations, **Linux x64 CI**, **Linux ARM64 CI**, **Windows x64 CI**
+and **Windows ARM64 CI** each build one target, using the same build, test and
+packaging recipe as Native CI. Each first runs the shared architecture,
+release-tool and desktop-static checks. Select the source branch in **Run
+workflow** and leave **Debug** off for Release artifacts. These runs upload
+installers and CLI archives without creating or replacing a draft release.
+Native CI remains the full-platform build and the only draft-release publisher.
+Windows device reconnection has a separate
+[read-only validation checklist](../windows-device-validation.md).
+
 The separate manual **macOS CI** workflow reuses Native CI's macOS jobs for
 faster platform-specific iterations. It always delivers signed universal DMG
 and CLI workflow artifacts, leaves the all-platform draft release untouched,

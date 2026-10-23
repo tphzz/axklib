@@ -133,6 +133,9 @@ struct TestServer {
                         return detail::fail(std::make_error_code(std::errc::no_such_file_or_directory));
                     if (info.model == "fail-system")
                         return detail::fail(std::error_code(1234, std::system_category()));
+                    if (info.model == "identity-bound" &&
+                        (info.carrier_id != "usb-parent" || info.connection_id != std::string(1000, 'D')))
+                        return detail::fail(Errc::device_connection_changed);
                     return open_image(info.path, access, info.sector_size ? info.sector_size : 512);
                 });
             server_side->shutdown();
@@ -324,6 +327,34 @@ static void test_remote_roundtrip() {
     for (auto &t : ts)
         t.join();
     CHECK(bad == 0);
+}
+
+static void test_remote_connection_identity() {
+    auto [client, server] = make_pipe();
+    TestServer srv(std::move(server));
+    auto session = detail::RemoteSession::start(std::move(client));
+    CHECK(session.has_value());
+    if (!session)
+        return;
+    DeviceInfo info{.path = make_image("remote-identity.img", 4096).string(),
+                    .model = "identity-bound",
+                    .serial = "test-serial",
+                    .size_bytes = 4096,
+                    .sector_size = 512,
+                    .carrier_id = "usb-parent",
+                    .connection_id = std::string(1000, 'D')};
+    auto opened = (*session)->open(info, Access::ReadOnly);
+    CHECK(opened.has_value());
+    if (opened)
+        opened->reset();
+    const auto fresh = info;
+    info.connection_id += ":new-arrival";
+    CHECK(err((*session)->open(info, Access::ReadOnly)) == Errc::device_connection_changed);
+    CHECK(!(*session)->broken());
+    opened = (*session)->open(fresh, Access::ReadOnly);
+    CHECK(opened.has_value());
+    if (opened)
+        opened->reset();
 }
 
 static void test_remote_handle_limit() {
@@ -659,6 +690,7 @@ int main() {
     test_image_validation();
     test_threads();
     test_remote_roundtrip();
+    test_remote_connection_identity();
     test_remote_handle_limit();
     test_server_robustness();
     test_client_robustness();

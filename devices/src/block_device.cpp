@@ -1,5 +1,8 @@
 #include "rawdisk/block_device.hpp"
 #include "detail.hpp"
+#if defined(_WIN32)
+#include "win32_identity.hpp"
+#endif
 
 #include <algorithm>
 #include <cstring>
@@ -135,8 +138,14 @@ Result<std::unique_ptr<BlockDevice>> open_device(const DeviceInfo &expected, Acc
 
         const auto it =
             std::ranges::find_if(*devices, [&](const DeviceInfo &d) { return detail::same_identity(d, expected); });
-        if (it == devices->end())
+        if (it == devices->end()) {
+#if defined(_WIN32)
+            const auto current = std::ranges::find(*devices, expected.path, &DeviceInfo::path);
+            if (current != devices->end())
+                return detail::fail(detail::win32_identity_mismatch(*current, expected));
+#endif
             return detail::fail(Errc::device_changed);
+        }
 
         auto dev = detail::open_platform(*it, access);
         if (!dev)

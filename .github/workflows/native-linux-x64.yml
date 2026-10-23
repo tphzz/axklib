@@ -1,0 +1,43 @@
+name: Linux x64 CI
+
+on:
+  workflow_dispatch:
+    inputs:
+      debug:
+        description: "Debug"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-linux-x64-only-${{ github.ref }}-${{ inputs.debug && 'debug' || 'release' }}
+  cancel-in-progress: false
+  queue: max
+
+jobs:
+  checks:
+    uses: ./.github/workflows/native-checks.yml
+    with:
+      debug: ${{ inputs.debug }}
+
+  native:
+    name: Linux x64
+    needs: checks
+    concurrency:
+      group: native-x64-host
+      cancel-in-progress: false
+      queue: max
+    uses: ./.github/workflows/native-platform.yml
+    with:
+      debug: ${{ inputs.debug }}
+      name: Linux x64
+      runner_labels: '["self-hosted","Linux","X64","jammy","docker"]'
+      artifact: linux-x64
+      desktop_platform: linux
+      desktop_architecture: x64
+      triplet: x64-linux-axk
+      build_testing: "ON"
+      run_tests: true

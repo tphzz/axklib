@@ -21,6 +21,14 @@ class Category final : public std::error_category {
             return "medium is write-protected";
         case Errc::device_changed:
             return "device is gone or no longer matches the selected one";
+        case Errc::device_identity_unavailable:
+            return "Windows could not verify the device connection identity; refresh and select the device again";
+        case Errc::device_connection_changed:
+            return "device connection changed; refresh and select the device again";
+        case Errc::device_descriptor_changed:
+            return "device model, serial number or USB transport changed; select the device again";
+        case Errc::device_geometry_changed:
+            return "device capacity or sector size changed; select the device again";
         case Errc::device_busy:
             return "disk is mounted or in use, or the image is locked";
         case Errc::not_a_usb_disk:
@@ -78,11 +86,15 @@ class Category final : public std::error_category {
         case Errc::write_protected:
             return std::errc::read_only_file_system;
         case Errc::device_changed:
+        case Errc::device_connection_changed:
+        case Errc::device_descriptor_changed:
+        case Errc::device_geometry_changed:
         case Errc::not_a_usb_disk:
             return std::errc::no_such_device;
         case Errc::device_busy:
             return std::errc::device_or_resource_busy;
         case Errc::capacity_unreadable:
+        case Errc::device_identity_unavailable:
             return std::errc::io_error;
         case Errc::elevation_cancelled:
             return std::errc::operation_canceled;

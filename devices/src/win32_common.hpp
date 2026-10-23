@@ -2,6 +2,7 @@
 
 #include "detail.hpp"
 #include "rawdisk/block_device.hpp"
+#include "win32_identity.hpp"
 
 #include <memory>
 #include <string>
@@ -43,7 +44,7 @@ class Handle {
 };
 
 bool is_elevated() noexcept;
-std::pair<std::string, std::string> win32_usb_identity(HANDLE disk);
+Result<Win32UsbIdentity> win32_usb_identity(HANDLE disk);
 
 // Elevated helper session shared by all devices opened through it (win32_elevation.cpp).
 Result<std::shared_ptr<RemoteSession>> win32_elevated_session(const ElevationOptions &options);

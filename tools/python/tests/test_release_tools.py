@@ -19,9 +19,11 @@ import version_metadata
 
 
 def native_workflow_text(root: Path) -> str:
-    """Include the called macOS jobs when inspecting the full release pipeline."""
+    """Include shared prerequisites and macOS jobs when inspecting the release pipeline."""
     native = (root / ".github" / "workflows" / "native.yml").read_text(encoding="utf-8")
+    checks = (root / ".github/workflows/native-checks.yml").read_text(encoding="utf-8")
     macos = (root / ".github/workflows/native-macos-platform.yml").read_text(encoding="utf-8")
+    native = native.replace("  native-linux-x64:\n", checks.split("jobs:\n", 1)[1] + "\n  native-linux-x64:\n", 1)
     return native.replace("  draft-release:\n", macos.split("jobs:\n", 1)[1] + "\n  draft-release:\n", 1)
 
 
@@ -845,7 +847,8 @@ def test_native_workflow_builds_monorepo_desktop_packages_from_tested_servers() 
     )
 
     assert "desktop-static:" in workflow
-    assert "needs:\n      - release-tools\n      - desktop-static" in workflow
+    assert "uses: ./.github/workflows/native-checks.yml" in workflow
+    assert workflow.count("    needs: checks\n") == 2
     assert action_reference_count(workflow_with_platform, "astral-sh/setup-uv", "v8.3.2") == 4
     assert (
         workflow_with_platform.count("uv --project tools/python run python tools/python/generate_sbom.py") == 4
@@ -1107,11 +1110,11 @@ def test_workflows_cancel_builds_but_serialize_signing_and_publication() -> None
     ):
         assert "concurrency:" in cancelable_job
         assert "cancel-in-progress: true" in cancelable_job
-    assert "native-${{ inputs.artifact }}-${{ github.ref }}" in native_platform
+    assert "native-${{ github.workflow }}-${{ inputs.artifact }}-${{ github.ref }}" in native_platform
     assert "needs: native-linux-x64" in native_windows_x64
     assert "needs: native-linux-arm64" in native_windows_arm64
-    assert "needs:\n      - release-tools\n      - desktop-static" in native_linux_x64
-    assert "needs:\n      - release-tools\n      - desktop-static" in native_linux_arm64
+    assert "needs: checks" in native_linux_x64
+    assert "needs: checks" in native_linux_arm64
     assert "needs:\n      - macos-slices" in macos_universal
     assert "native-windows-x64" not in macos_universal.split("runs-on:", 1)[0]
     assert (

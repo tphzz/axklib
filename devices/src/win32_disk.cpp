@@ -262,14 +262,17 @@ Result<std::unique_ptr<BlockDevice>> open_direct(const DeviceInfo &info, Access 
     auto geo = query_geometry(h.h);
     if (!geo)
         return fail(geo.error());
-    if (!desc->usb || desc->model != info.model || desc->serial != info.serial ||
-        geo->sector_size != info.sector_size || geo->size_bytes != info.size_bytes)
-        return fail(Errc::device_changed);
+    if (!desc->usb || desc->model != info.model || desc->serial != info.serial)
+        return fail(Errc::device_descriptor_changed);
+    if (geo->sector_size != info.sector_size || geo->size_bytes != info.size_bytes)
+        return fail(Errc::device_geometry_changed);
     const auto identity = detail::win32_usb_identity(h.h);
-    if (identity.first != info.carrier_id || identity.second != info.connection_id)
-        return fail(Errc::device_changed);
+    if (!identity)
+        return fail(identity.error());
+    if (identity->carrier_id != info.carrier_id || identity->connection_id != info.connection_id)
+        return fail(Errc::device_connection_changed);
     if (!detail::valid_sector_size(geo->sector_size) || geo->size_bytes % geo->sector_size != 0)
-        return fail(Errc::device_changed);
+        return fail(Errc::device_geometry_changed);
 
     if (rw) {
         DWORD n = 0;
@@ -323,8 +326,11 @@ Result<std::vector<DeviceInfo>> detail::list_platform() {
         d.sector_size = geo->sector_size;
         d.removable = desc->removable;
         auto identity = detail::win32_usb_identity(h.h);
-        d.carrier_id = std::move(identity.first);
-        d.connection_id = std::move(identity.second);
+        if (identity) {
+            d.carrier_id = std::move(identity->carrier_id);
+            d.connection_id = std::move(identity->connection_id);
+        }
+        // Unidentifiable disks are not selectable, but preserve the descriptor for stale-open diagnostics.
         out.push_back(std::move(d));
     }
     return out;

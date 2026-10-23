@@ -25,99 +25,19 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  architecture:
-    name: Architecture
-    runs-on: [self-hosted, Linux, X64, jammy, docker]
-    concurrency:
-      group: native-architecture-${{ github.ref }}-${{ inputs.debug && 'debug' || 'release' }}
-      cancel-in-progress: true
-    steps:
-      - name: Checkout axklib
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.13.14"
-      - name: Enforce architecture budgets
-        run: cmake -DAXK_SOURCE_ROOT="${GITHUB_WORKSPACE}" -P cmake/ArchitectureCheck.cmake
-
-  release-tools:
-    name: Release tools
-    needs: architecture
-    runs-on: [self-hosted, Linux, X64, jammy, docker]
-    concurrency:
-      group: native-release-tools-${{ github.ref }}-${{ inputs.debug && 'debug' || 'release' }}
-      cancel-in-progress: true
-    steps:
-      - name: Checkout axklib
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          submodules: recursive
-          fetch-depth: 0
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.13.14"
-      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
-        with:
-          version: "0.10.4"
-          enable-cache: true
-      - name: Validate release tools
-        run: |
-          uv --project tools/python run ruff check tools/python
-          uv --project tools/python run mypy tools/python
-          uv --project tools/python run pytest tools/python/tests
-      - name: Validate selected release ref
-        run: |
-          cmake -DAXK_VERSION_SOURCE_DIR="${GITHUB_WORKSPACE}" \
-            -DAXK_VERSION_PROJECT_MODULE="${GITHUB_WORKSPACE}/library/cmake/AxkProjectVersion.cmake" \
-            -DAXK_VERSION_OUTPUT_METADATA="${GITHUB_WORKSPACE}/build/version_metadata.json" \
-            -P library/cmake/GenerateProjectVersion.cmake
-          python tools/python/release_metadata.py release-target \
-            --version-metadata-file build/version_metadata.json \
-            --ref-type "${GITHUB_REF_TYPE}" --ref-name "${GITHUB_REF_NAME}"
-  desktop-static:
-    name: Desktop static checks
-    needs: architecture
-    runs-on: [self-hosted, Linux, X64, jammy, docker]
-    concurrency:
-      group: native-desktop-static-${{ github.ref }}-${{ inputs.debug && 'debug' || 'release' }}
-      cancel-in-progress: true
-    steps:
-      - name: Checkout axklib
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
-        with:
-          node-version: 22
-      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
-        with:
-          version: 10.15.1
-          standalone: true
-          cache: true
-          cache_dependency_path: apps/axkdeck/pnpm-lock.yaml
-      - name: Install desktop dependencies
-        working-directory: apps/axkdeck
-        run: pnpm install --frozen-lockfile
-      - name: Validate desktop sources
-        working-directory: apps/axkdeck
-        run: |
-          pnpm version:check
-          pnpm version:test
-          pnpm contract:check
-          pnpm format:check
-          pnpm test
-          pnpm check
-          pnpm build
-      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
-        with:
-          toolchain: "1.85"
-          components: rustfmt
-      - name: Validate Rust formatting
-        run: cargo fmt --manifest-path apps/axkdeck/src-tauri/Cargo.toml -- --check
+  checks:
+    name: Prerequisite checks
+    uses: ./.github/workflows/native-checks.yml
+    with:
+      debug: ${{ inputs.debug }}
 
   native-linux-x64:
     name: Linux x64
-    needs:
-      - release-tools
-      - desktop-static
+    needs: checks
+    concurrency:
+      group: native-x64-host
+      cancel-in-progress: false
+      queue: max
     uses: ./.github/workflows/native-platform.yml
     with:
       debug: ${{ inputs.debug }}
@@ -133,6 +53,10 @@ jobs:
   native-windows-x64:
     name: Windows x64
     needs: native-linux-x64
+    concurrency:
+      group: native-x64-host
+      cancel-in-progress: false
+      queue: max
     uses: ./.github/workflows/native-platform.yml
     with:
       debug: ${{ inputs.debug }}
@@ -153,9 +77,7 @@ jobs:
       group: native-apple-silicon-host
       cancel-in-progress: false
       queue: max
-    needs:
-      - release-tools
-      - desktop-static
+    needs: checks
     uses: ./.github/workflows/native-platform.yml
     with:
       debug: ${{ inputs.debug }}

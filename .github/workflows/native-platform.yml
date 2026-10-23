@@ -47,7 +47,7 @@ jobs:
     name: ${{ inputs.name }}
     runs-on: ${{ fromJSON(inputs.runner_labels) }}
     concurrency:
-      group: native-${{ inputs.artifact }}-${{ github.ref }}-${{ inputs.debug && 'debug' || 'release' }}
+      group: native-${{ github.workflow }}-${{ inputs.artifact }}-${{ github.ref }}-${{ inputs.debug && 'debug' || 'release' }}
       cancel-in-progress: true
     steps:
       - name: Checkout axklib

@@ -13,6 +13,7 @@
 
 #if defined(AXK_BUILD_DEVICES)
 #include "device_candidates.hpp"
+#include "device_errors.hpp"
 #include "rawdisk/block_device.hpp"
 #include "rawdisk/ownership.hpp"
 #include "rawdisk/scsi2sd/v6.hpp"
@@ -23,7 +24,7 @@ namespace axk::app {
 namespace {
 
 #if defined(AXK_BUILD_DEVICES)
-Error device_error(const std::error_code &error) { return {"device_access_failed", error.message()}; }
+using device_detail::native_error;
 
 class NativeTransport final : public DeviceTransport {
   public:
@@ -57,7 +58,7 @@ class NativeTransport final : public DeviceTransport {
         auto opened = rawdisk::open_device(info_, rawdisk::Access::ReadWrite);
         if (!opened) {
             invalidated_ = true;
-            return std::unexpected(device_error(opened.error()));
+            return std::unexpected(native_error(opened.error()));
         }
         device_ = std::move(*opened);
         return verify_locked();
@@ -101,7 +102,7 @@ class NativeTransport final : public DeviceTransport {
             return std::unexpected(Error{"device_write_protected", "write overlaps SCSI2SD configuration sectors"});
         if (auto written = device_->write(offset / sector_size(), bytes); !written) {
             invalidated_ = true;
-            return std::unexpected(device_error(written.error()));
+            return std::unexpected(native_error(written.error()));
         }
         return {};
     }
@@ -110,7 +111,7 @@ class NativeTransport final : public DeviceTransport {
         if (invalidated_ || !device_)
             return std::unexpected(Error{"device_disconnected", "device session is disconnected"});
         if (auto flushed = device_->flush(); !flushed)
-            return std::unexpected(device_error(flushed.error()));
+            return std::unexpected(native_error(flushed.error()));
         return {};
     }
 
@@ -119,7 +120,11 @@ class NativeTransport final : public DeviceTransport {
         if (invalidated_ || !device_)
             return std::unexpected(Error{"device_disconnected", "device session is disconnected; select it again"});
         auto devices = rawdisk::list_usb_devices();
-        if (!devices || std::ranges::find(*devices, info_) == devices->end()) {
+        if (!devices) {
+            invalidated_ = true;
+            return std::unexpected(native_error(devices.error()));
+        }
+        if (std::ranges::find(*devices, info_) == devices->end()) {
             invalidated_ = true;
             return std::unexpected(Error{"device_changed", "device connection identity changed; select it again"});
         }
@@ -150,7 +155,7 @@ class NativeProvider final : public DeviceProvider {
     Result<std::vector<DeviceCandidate>> list() override {
         auto devices = rawdisk::list_usb_devices();
         if (!devices)
-            return std::unexpected(device_error(devices.error()));
+            return std::unexpected(native_error(devices.error()));
         const std::scoped_lock lock{mutex_};
         return device_detail::refresh_candidates(candidates_, *devices, [] { return secure_random_hex(16U); });
     }
@@ -172,13 +177,13 @@ class NativeProvider final : public DeviceProvider {
         const auto info = found->second;
         auto directory = rawdisk::carrier_lease_directory();
         if (!directory)
-            return std::unexpected(device_error(directory.error()));
+            return std::unexpected(native_error(directory.error()));
         auto lease = rawdisk::claim_carrier(*directory, info.carrier_id);
         if (!lease)
-            return std::unexpected(device_error(lease.error()));
+            return std::unexpected(native_error(lease.error()));
         auto opened = rawdisk::open_device(info, rawdisk::Access::ReadOnly);
         if (!opened)
-            return std::unexpected(device_error(opened.error()));
+            return std::unexpected(native_error(opened.error()));
         std::vector<DeviceTargetDescription> targets;
         std::vector<rawdisk::Range> protected_ranges;
         std::map<std::uint64_t, std::vector<std::byte>> layout_guards;
@@ -190,7 +195,7 @@ class NativeProvider final : public DeviceProvider {
                         continue;
                     auto config = rawdisk::scsi2sd::v6::read_config(**opened, *lba);
                     if (!config)
-                        return std::unexpected(device_error(config.error()));
+                        return std::unexpected(native_error(config.error()));
                     if (rawdisk::scsi2sd::v6::decode(*config))
                         return std::unexpected(
                             Error{"device_layout_required", "select the stored SCSI2SD layout for this carrier"});
@@ -214,7 +219,7 @@ class NativeProvider final : public DeviceProvider {
                         return std::unexpected(
                             Error{"device_layout_invalid",
                                   "The SCSI2SDv6 configuration has invalid or unsupported target geometry."});
-                    return std::unexpected(device_error(config.error()));
+                    return std::unexpected(native_error(config.error()));
                 }
                 layout_confirmed = true;
                 const auto bytes = rawdisk::scsi2sd::v6::encode(*config);
@@ -231,7 +236,7 @@ class NativeProvider final : public DeviceProvider {
                 if (lba) {
                     auto bytes = rawdisk::scsi2sd::v6::read_config(**opened, *lba);
                     if (!bytes)
-                        return std::unexpected(device_error(bytes.error()));
+                        return std::unexpected(native_error(bytes.error()));
                     auto stored = rawdisk::scsi2sd::v6::decode(*bytes);
                     layout_confirmed =
                         stored && rawdisk::scsi2sd::same_target_layout(stored->targets, xml_config->targets);
@@ -277,7 +282,7 @@ class NativeProvider final : public DeviceProvider {
                     return std::unexpected(Error{"device_layout_invalid", "layout guard range is too large"});
                 std::vector<std::byte> bytes(static_cast<std::size_t>(size));
                 if (auto read = (*opened)->read(range.begin, bytes); !read)
-                    return std::unexpected(device_error(read.error()));
+                    return std::unexpected(native_error(read.error()));
                 layout_guards.emplace(range.begin, std::move(bytes));
             }
         }

@@ -111,7 +111,8 @@ endif()
 
 if(RAWDISK_BUILD_TESTS)
     enable_testing()
-    foreach(t rawdisk_tests layout_tests v6_primary_tests open_tests cancellation_tests probe_tests ownership_tests)
+    foreach(t rawdisk_tests layout_tests v6_primary_tests open_tests cancellation_tests probe_tests ownership_tests
+            win32_identity_tests)
         if(t STREQUAL "rawdisk_tests")
             add_executable(${t} tests/tests.cpp)
         else()
