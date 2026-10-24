@@ -12,6 +12,7 @@
 #include "axklib/writer.hpp"
 #include "download_reader.hpp"
 #include "http_headers.hpp"
+#include "request_read_diagnostics.hpp"
 #include "route_registration.hpp"
 #include "server_support.hpp"
 
@@ -277,12 +278,17 @@ crow::response ServerApplication::image_object_response(const crow::request &req
     const auto id = request_id(request);
     if (auto denied = guard(request, id))
         return std::move(*denied);
-    const auto metadata = images_.object_detail({image_id, document_id}, request_owner(request), object_id);
+    RequestReadDiagnostics diagnostics{diagnostics_, id, image_id, document_id, object_id};
+    const auto metadata =
+        images_.object_detail({image_id, document_id}, request_owner(request), object_id, &diagnostics);
     if (!metadata)
         return error_response(status_for_error(metadata.error()), metadata.error(), id);
-    return json_response(
+    const auto started = diagnostics.serialization_start();
+    auto response = json_response(
         200, {{"data", openapi_validator_.wire_value("ImageObjectDetail", *metadata)}, {"meta", {{"requestId", id}}}},
         id);
+    diagnostics.serialized(started);
+    return response;
 }
 
 crow::response ServerApplication::image_relationships_response(const crow::request &request,
@@ -397,10 +403,12 @@ crow::response ServerApplication::image_preview_response(const crow::request &re
     if (object_id == nullptr || *object_id == '\0' || !bins || *bins > std::numeric_limits<std::size_t>::max() ||
         !revision || *revision == 0U)
         return error_response(400, {"invalid_preview", "objectId, bins and expectedRevision are required"}, id);
+    RequestReadDiagnostics diagnostics{diagnostics_, id, image_id, document_id, object_id};
     const auto preview = images_.preview({image_id, document_id}, request_owner(request), object_id,
-                                         static_cast<std::size_t>(*bins), *revision);
+                                         static_cast<std::size_t>(*bins), *revision, {}, &diagnostics);
     if (!preview)
         return error_response(status_for_error(preview.error()), preview.error(), id);
+    const auto started = diagnostics.serialization_start();
     Json lanes = Json::array();
     for (const auto &lane : preview->lanes) {
         Json values = Json::array();
@@ -419,16 +427,18 @@ crow::response ServerApplication::image_preview_response(const crow::request &re
                          {"loopLengthFrames", lane.loop_length_frames},
                          {"bins", std::move(values)}});
     }
-    return json_response(200,
-                         {{"data",
-                           {{"objectId", preview->object_id},
-                            {"imageId", preview->image_id},
-                            {"documentId", preview->document_id},
-                            {"revision", preview->revision},
-                            {"warnings", preview->warnings},
-                            {"lanes", std::move(lanes)}}},
-                          {"meta", {{"requestId", id}}}},
-                         id);
+    auto response = json_response(200,
+                                  {{"data",
+                                    {{"objectId", preview->object_id},
+                                     {"imageId", preview->image_id},
+                                     {"documentId", preview->document_id},
+                                     {"revision", preview->revision},
+                                     {"warnings", preview->warnings},
+                                     {"lanes", std::move(lanes)}}},
+                                   {"meta", {{"requestId", id}}}},
+                                  id);
+    diagnostics.serialized(started);
+    return response;
 }
 
 crow::response ServerApplication::audition_content_response(const crow::request &request,
@@ -436,7 +446,8 @@ crow::response ServerApplication::audition_content_response(const crow::request 
     const auto id = request_id(request);
     if (auto denied = guard(request, id))
         return std::move(*denied);
-    const auto metadata = images_.audition_range(audition_id, request_owner(request), 0U, 0U);
+    RequestReadDiagnostics diagnostics{diagnostics_, id, {}, {}, audition_id};
+    const auto metadata = images_.audition_range(audition_id, request_owner(request), 0U, 0U, {}, &diagnostics);
     if (!metadata)
         return error_response(status_for_error(metadata.error()), metadata.error(), id);
     const auto total = metadata->total_size;
@@ -460,9 +471,10 @@ crow::response ServerApplication::audition_content_response(const crow::request 
         return response;
     }
     auto bytes = images_.audition_range(audition_id, request_owner(request), range->offset,
-                                        static_cast<std::size_t>(range->length));
+                                        static_cast<std::size_t>(range->length), {}, &diagnostics);
     if (!bytes)
         return error_response(status_for_error(bytes.error()), bytes.error(), id);
+    const auto started = diagnostics.serialization_start();
     response.code = range_header.empty() ? 200 : 206;
     response.body.assign(reinterpret_cast<const char *>(bytes->bytes.data()), bytes->bytes.size());
     if (!range_header.empty()) {
@@ -474,6 +486,7 @@ crow::response ServerApplication::audition_content_response(const crow::request 
     response.set_header("Accept-Ranges", "bytes");
     response.set_header("Cache-Control", "no-store");
     response.set_header("X-Request-Id", id);
+    diagnostics.serialized(started);
     return response;
 }
 

@@ -19,10 +19,12 @@ describe.each([false, true])('WaveCanvas physical pixels with overview=%s', (ove
         vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, width, height));
         const bins = Array.from({ length: 1024 }, () => ({ minimum: -0.25, maximum: 0.25 }));
         const frames = 8192;
-        const view = render(WaveCanvas, { bins, frames, overview });
+        const ondraw = vi.fn();
+        const view = render(WaveCanvas, { bins, frames, overview, ondraw });
         const canvas = view.container.querySelector('canvas')!;
         await waitFor(() => expect(canvas.width).toBe(Math.round(width * ratio)));
         expect(canvas.height).toBe(Math.round(height * ratio));
+        expect(ondraw).toHaveBeenLastCalledWith({ bins: bins.length, width: canvas.width, height: canvas.height });
         const envelopeCalls = context.fillRect.mock.calls.slice(-(canvas.width + 1));
         expect(envelopeCalls).toHaveLength(canvas.width + 1);
         for (const rectangle of envelopeCalls) {

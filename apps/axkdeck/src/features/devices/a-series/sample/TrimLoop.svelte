@@ -18,6 +18,7 @@
     import { hoverHelp } from '../../../../lib/components/hoverHelp.svelte';
     import type { PreviewEnvelope, ObjectDetail } from '../../../../lib/transport';
     import { userFacingMessage } from '../../../../lib/userFacingMessage';
+    import { reportWaveformReadDraw, readTrace, readContext } from '../../../../lib/readDiagnostics';
     let {
         document,
         preview,
@@ -64,7 +65,13 @@
             lanes.every((lane) => lane.bins.length >= Math.min(count, lane.storedFrameCount))
         )
             return;
+        const trace = readTrace(
+            'preview-refinement-delay',
+            { bins: count },
+            readContext(document.sessionId, detail.object.id),
+        );
         const timer = setTimeout(() => {
+            trace?.finish('started');
             previewLoading = true;
             void audio.transport
                 .preview(document.sessionId, detail.object.id, count)
@@ -83,6 +90,7 @@
         }, 100);
         return () => {
             clearTimeout(timer);
+            trace?.finish('cancelled');
         };
     });
     const rate = $derived(lanes[0]?.sampleRate ?? view.source?.sampleRate ?? 44100);
@@ -209,6 +217,15 @@
                         {end}
                         {markers}
                         onresolution={(bins) => (previewBins = bins)}
+                        ondraw={(draw) =>
+                            reportWaveformReadDraw(
+                                document.sessionId,
+                                document.detail!.object.id,
+                                detailedPreview && detailedPreview.detail === document.detail
+                                    ? detailedPreview.envelope
+                                    : preview?.preview,
+                                draw,
+                            )}
                     />
                 </div>
             {/each}

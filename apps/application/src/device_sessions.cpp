@@ -1,4 +1,5 @@
 #include "device_sessions_internal.hpp"
+#include "read_diagnostics.hpp"
 
 #include <algorithm>
 #include <array>
@@ -182,7 +183,11 @@ Result<OpenedDeviceSource> DeviceSessionManager::open_source(std::string_view id
     return OpenedDeviceSource{
         source,
         [value = *connection, revision = (*connection)->revision]() -> Result<void> {
-            const std::scoped_lock access{value->io};
+            std::unique_lock access{value->io, std::defer_lock};
+            {
+                const ReadDiagnosticTimer wait{ReadMetric::connection_wait};
+                access.lock();
+            }
             if (value->invalidated || value->revision != revision)
                 return std::unexpected(
                     Error{"device_disconnected", "device session is invalidated or its revision changed"});

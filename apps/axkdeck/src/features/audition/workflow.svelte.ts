@@ -20,6 +20,7 @@ import { userFacingMessage } from '../../lib/userFacingMessage';
 import type { CatalogWorkflow } from '../catalog/workflow.svelte';
 import type { CachedAudition } from '../../lib/audio/auditionTypes';
 import type { PackageExportSelectionState } from '../../lib/objectSelection';
+import { beginSampleRead, clearSampleRead } from '../../lib/readDiagnostics';
 
 export interface LaneQueries {
     primary: string;
@@ -246,6 +247,7 @@ export class AuditionWorkflow {
     }
 
     resetPreviewQueue(): void {
+        clearSampleRead();
         this.previews.reset();
         this.previewPending.clear();
         this.previewFailed.clear();
@@ -537,6 +539,10 @@ export class AuditionWorkflow {
     }
 
     private setEditorObject(objectId: string): void {
+        beginSampleRead(this.dependencies.transport, this.dependencies.sessionId(), objectId, {
+            autoplay: this.autoplay,
+            previewCache: this.dependencies.catalog.samplePreviewStates[objectId]?.previewState ?? 'absent',
+        });
         this.dependencies.catalog.editorObjectIds[this.dependencies.workspaceView()] = objectId;
     }
 

@@ -1,5 +1,6 @@
 #include "image_sessions_internal.hpp"
 #include "native_audio.hpp"
+#include "read_diagnostics.hpp"
 
 #include <algorithm>
 #include <array>
@@ -37,14 +38,17 @@ axk::app::Result<void> validate_source(const axk::native::PcmSource &source) {
 }
 } // namespace
 
-axk::app::Result<axk::app::ImageWaveformPreview>
-axk::app::ImageSessionManager::preview(const ImageDocumentRef &target, std::string_view owner_id,
-                                       std::string_view object_id, std::size_t bin_count,
-                                       std::uint64_t expected_revision, const CancellationToken &cancellation) {
+axk::app::Result<axk::app::ImageWaveformPreview> axk::app::ImageSessionManager::preview(
+    const ImageDocumentRef &target, std::string_view owner_id, std::string_view object_id, std::size_t bin_count,
+    std::uint64_t expected_revision, const CancellationToken &cancellation, diagnostic_sink *diagnostics) {
+    ReadDiagnosticScope trace{diagnostics, "image_preview_read"};
+    ReadDiagnosticScope::add(ReadMetric::requested_bins, bin_count);
     const auto session = implementation_->owned(target.image_id, owner_id);
     if (!session)
         return std::unexpected(session.error());
+    trace.phase("lock-wait");
     const std::scoped_lock access{(*session)->access_mutex};
+    trace.phase("metadata");
     auto selected = Implementation::document(**session, target.document_id);
     if (!selected)
         return std::unexpected(selected.error());
@@ -55,10 +59,12 @@ axk::app::ImageSessionManager::preview(const ImageDocumentRef &target, std::stri
     const auto *audio = (*selected)->native->audio();
     if (!audio)
         return std::unexpected(session_error("audition_unsupported", "This document has no audio provider"));
+    trace.phase("source-verify");
     if (auto verified = (*session)->sources.native_sources->verify(cancellation); !verified)
         return std::unexpected(session_error("image_source_changed", verified.error().message));
     if (bin_count == 0U || bin_count > 4096U)
         return std::unexpected(session_error("invalid_preview", "preview bin count is outside the configured range"));
+    trace.phase("source-prepare");
     auto source = audio->prepare_source(object_id, native::PcmReadWindow::stored_pcm);
     if (!source)
         return std::unexpected(source.error());
@@ -71,8 +77,11 @@ axk::app::ImageSessionManager::preview(const ImageDocumentRef &target, std::stri
                                 .revision = expected_revision,
                                 .warnings = source->warnings};
     result.lanes.reserve(source->members.size());
+    trace.phase("pcm-scan");
+    ReadDiagnosticScope::add(ReadMetric::lanes, source->members.size());
     constexpr std::size_t chunk_frames = 16U * 1024U;
     for (const auto &member : source->members) {
+        ReadDiagnosticScope::add(ReadMetric::stored_frames, member.stored_frame_count);
         const auto used_bins = static_cast<std::size_t>(std::min<std::uint64_t>(bin_count, member.frame_count));
         ImageWaveformPreviewLane lane{.role = member.role,
                                       .source_object_id = member.object_id,
@@ -91,12 +100,18 @@ axk::app::ImageSessionManager::preview(const ImageDocumentRef &target, std::stri
         for (std::uint64_t first = 0U; first < member.frame_count; first += chunk_frames) {
             const auto count =
                 static_cast<std::size_t>(std::min<std::uint64_t>(chunk_frames, member.frame_count - first));
-            auto pcm = audio->read_member_pcm(member, first, count, cancellation);
+            auto pcm = [&] {
+                const ReadDiagnosticTimer timer{ReadMetric::pcm_time};
+                ReadDiagnosticScope::add(ReadMetric::pcm_calls, 1U);
+                return audio->read_member_pcm(member, first, count, cancellation);
+            }();
             if (!pcm)
                 return std::unexpected(pcm.error());
             if (pcm->size() != count * member.output_width)
                 return std::unexpected(
                     session_error("invalid_audio_range", "Native PCM read returned an incomplete range"));
+            ReadDiagnosticScope::add(ReadMetric::pcm_bytes, pcm->size());
+            const ReadDiagnosticTimer binning{ReadMetric::binning_time};
             for (std::size_t frame = 0U; frame < count; ++frame) {
                 const auto absolute_frame = first + frame;
                 const auto bin = static_cast<std::size_t>(absolute_frame * used_bins / member.frame_count);
@@ -115,12 +130,16 @@ axk::app::ImageSessionManager::preview(const ImageDocumentRef &target, std::stri
         }
         result.lanes.push_back(std::move(lane));
     }
+    trace.complete();
     return result;
 }
 
-axk::app::Result<axk::app::ImageAudition> axk::app::ImageSessionManager::prepare_audition(
-    const ImageDocumentRef &target, std::string_view owner_id, const std::vector<std::string> &object_ids,
-    std::uint64_t expected_revision, const CancellationToken &cancellation, bool stored_pcm) {
+axk::app::Result<axk::app::ImageAudition>
+axk::app::ImageSessionManager::prepare_audition(const ImageDocumentRef &target, std::string_view owner_id,
+                                                const std::vector<std::string> &object_ids,
+                                                std::uint64_t expected_revision, const CancellationToken &cancellation,
+                                                bool stored_pcm, diagnostic_sink *diagnostics) {
+    ReadDiagnosticScope trace{diagnostics, "image_audition_prepare_read"};
     if (object_ids.empty() || object_ids.size() > implementation_->maximum_audition_clips) {
         return std::unexpected(
             session_error("invalid_request", std::format("audition must contain between 1 and {} unique objects",
@@ -136,7 +155,9 @@ axk::app::Result<axk::app::ImageAudition> axk::app::ImageSessionManager::prepare
     const auto session = implementation_->owned(target.image_id, owner_id);
     if (!session)
         return std::unexpected(session.error());
+    trace.phase("lock-wait");
     const std::scoped_lock access{(*session)->access_mutex};
+    trace.phase("metadata");
     auto selected = Implementation::document(**session, target.document_id);
     if (!selected)
         return std::unexpected(selected.error());
@@ -147,8 +168,10 @@ axk::app::Result<axk::app::ImageAudition> axk::app::ImageSessionManager::prepare
     const auto *audio = (*selected)->native->audio();
     if (!audio)
         return std::unexpected(session_error("audition_unsupported", "This document has no audio provider"));
+    trace.phase("source-verify");
     if (auto verified = (*session)->sources.native_sources->verify(cancellation); !verified)
         return std::unexpected(session_error("image_source_changed", verified.error().message));
+    trace.phase("source-prepare");
     ImageAudition descriptor;
     descriptor.image_id = target.image_id;
     descriptor.document_id = target.document_id;
@@ -236,13 +259,15 @@ axk::app::Result<axk::app::ImageAudition> axk::app::ImageSessionManager::prepare
         implementation_->audition_sessions.emplace(*audition_id,
                                                    Implementation::AuditionOwner{*session, target.document_id});
     }
+    trace.complete();
     return descriptor;
 }
 
 axk::app::Result<axk::app::ImageAuditionRange>
 axk::app::ImageSessionManager::audition_range(std::string_view audition_id, std::string_view owner_id,
                                               std::uint64_t offset, std::size_t size,
-                                              const CancellationToken &cancellation) {
+                                              const CancellationToken &cancellation, diagnostic_sink *diagnostics) {
+    ReadDiagnosticScope trace{diagnostics, "image_audition_range_read"};
     std::shared_ptr<Implementation::Session> session;
     std::string document_id;
     {
@@ -260,7 +285,9 @@ axk::app::ImageSessionManager::audition_range(std::string_view audition_id, std:
     }
     if (!session || session->owner_id != owner_id)
         return std::unexpected(session_error("audition_not_found", "audition does not exist"));
+    trace.phase("lock-wait");
     const std::scoped_lock access_lock{session->access_mutex};
+    trace.phase("metadata");
     auto selected = Implementation::document(*session, document_id);
     if (!selected)
         return std::unexpected(selected.error());
@@ -272,6 +299,7 @@ axk::app::ImageSessionManager::audition_range(std::string_view audition_id, std:
     if (!audio || entry.descriptor.revision != session->revision ||
         entry.last_access + std::chrono::minutes{10} <= implementation_->clock())
         return std::unexpected(session_error("audition_not_found", "Audition expired or its document changed"));
+    trace.phase("source-verify");
     if (auto verified = session->sources.native_sources->verify(cancellation); !verified)
         return std::unexpected(session_error("image_source_changed", verified.error().message));
     session->last_access = implementation_->clock();
@@ -279,6 +307,7 @@ axk::app::ImageSessionManager::audition_range(std::string_view audition_id, std:
     const auto total_size = entry.descriptor.content_size_bytes;
     if (offset > total_size || size > total_size - offset)
         return std::unexpected(session_error("invalid_audio_range", "audio byte range exceeds the audition"));
+    trace.phase("pcm-read");
     ImageAuditionRange result{.total_size = total_size, .bytes = {}};
     result.bytes.reserve(size);
     const auto requested_end = offset + size;
@@ -332,18 +361,24 @@ axk::app::ImageSessionManager::audition_range(std::string_view audition_id, std:
             const auto first_frame = data_offset / lane.sample_width_bytes;
             const auto first_byte = static_cast<std::size_t>(data_offset % lane.sample_width_bytes);
             const auto frame_count = (first_byte + data_count + lane.sample_width_bytes - 1U) / lane.sample_width_bytes;
-            auto pcm = audio->read_member_pcm(source.members[lane_index], first_frame, frame_count, cancellation);
+            auto pcm = [&] {
+                const ReadDiagnosticTimer timer{ReadMetric::pcm_time};
+                ReadDiagnosticScope::add(ReadMetric::pcm_calls, 1U);
+                return audio->read_member_pcm(source.members[lane_index], first_frame, frame_count, cancellation);
+            }();
             if (!pcm)
                 return std::unexpected(pcm.error());
             if (pcm->size() != frame_count * lane.sample_width_bytes)
                 return std::unexpected(
                     session_error("invalid_audio_range", "Native PCM read returned an incomplete range"));
+            ReadDiagnosticScope::add(ReadMetric::pcm_bytes, pcm->size());
             result.bytes.insert(result.bytes.end(), pcm->begin() + static_cast<std::ptrdiff_t>(first_byte),
                                 pcm->begin() + static_cast<std::ptrdiff_t>(first_byte + data_count));
         }
     }
     if (result.bytes.size() != size)
         return std::unexpected(session_error("invalid_audio_range", "audition bundle range is incomplete"));
+    trace.complete();
     return result;
 }
 

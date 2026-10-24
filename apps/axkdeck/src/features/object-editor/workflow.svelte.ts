@@ -11,6 +11,7 @@ import { AxklibApiError } from '../../lib/httpErrors';
 import { CapacityWriteRejected } from '../../lib/httpCapacityGate';
 import { userFacingMessage } from '../../lib/userFacingMessage';
 import { measureDiagnostic, reportDiagnostic } from '../../lib/diagnostics';
+import { readTrace, readContext, finishReadTrace } from '../../lib/readDiagnostics';
 import type { ImageTransport, ObjectDetail, JobState } from '../../lib/transport';
 import type { ObjectStorageFormat, ObjectFormatConversionRequest } from '../../lib/objectEditing';
 import { conversionFormat, conversionRequest, sameConversionIdentity } from './formatConversion';
@@ -161,11 +162,15 @@ export class ObjectEditorWorkflow {
         return this.documents.find((item) => item.sessionId === sessionId && item.detail?.object.id === objectId);
     }
     async load(sessionId: number, objectId: string): Promise<ObjectEditorDocument | null> {
+        const trace = readTrace('editor-load', { sessionId, objectId }, readContext(sessionId, objectId));
         const existing = this.find(sessionId, objectId);
-        if (existing) return existing;
+        if (existing) {
+            trace?.finish('cache-hit');
+            return existing;
+        }
         const key = `${sessionId}:${objectId}`;
         const pending = this.loading.get(key);
-        if (pending) return pending;
+        if (pending) return finishReadTrace(trace, () => pending);
         const generation = this.generation;
         const task = this.dependencies.transport
             .objectDetail(sessionId, objectId)
@@ -189,7 +194,7 @@ export class ObjectEditorWorkflow {
                 if (this.loading.get(key) === task) this.loading.delete(key);
             });
         this.loading.set(key, task);
-        return task;
+        return finishReadTrace(trace, () => task);
     }
     async check(document: ObjectEditorDocument): Promise<boolean> {
         const old = document.detail!,

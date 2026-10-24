@@ -1,4 +1,5 @@
 #include "device_sessions_internal.hpp"
+#include "read_diagnostics.hpp"
 
 #include <algorithm>
 #include <array>
@@ -10,6 +11,7 @@
 #include <memory>
 #include <span>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -53,6 +55,76 @@ class GuardProgress final : public axk::ProgressSink {
     std::vector<axk::Progress> events;
     void report(const axk::Progress &progress) noexcept override { events.push_back(progress); }
 };
+
+class ReadCapture final : public axk::diagnostic_sink {
+  public:
+    std::vector<axk::diagnostic_event> events;
+    bool enabled(axk::diagnostic_level) const noexcept override { return true; }
+    void report(const axk::diagnostic_event &event) override { events.push_back(event); }
+    std::uint64_t total(std::string_view name) const {
+        for (const auto &metric : events.back().metrics)
+            if (metric.name == name)
+                return metric.value;
+        return 0U;
+    }
+};
+
+TEST(DeviceReadDiagnostics, DistinguishesColdPagesWarmCacheAndStreamingWithoutChangingBytes) {
+    auto connection = std::make_shared<Connection>();
+    auto transport = std::make_shared<GuardTransport>();
+    connection->device.transport = transport;
+    Source source{connection, {"target", "Target", 4096U, 2U * 1024U * 1024U, 512U, true, {}, {}}};
+    std::vector<std::byte> bytes(32768U);
+    ReadCapture cold;
+    {
+        ReadDiagnosticScope trace{&cold, "test"};
+        ASSERT_TRUE(source.read_exact_at(0U, bytes));
+        trace.complete();
+    }
+    EXPECT_EQ(cold.total("transportReads"), 8U);
+    EXPECT_EQ(cold.total("transportReadBytes"), bytes.size());
+    EXPECT_EQ(cold.total("readLe4KiB"), 8U);
+    EXPECT_EQ(cold.total("cacheMisses"), 8U);
+    EXPECT_TRUE(std::ranges::all_of(bytes, [](auto byte) { return byte == std::byte{0x42}; }));
+    ReadCapture warm;
+    {
+        ReadDiagnosticScope trace{&warm, "test"};
+        ASSERT_TRUE(source.read_exact_at(0U, bytes));
+        trace.complete();
+    }
+    EXPECT_EQ(warm.total("transportReads"), 0U);
+    EXPECT_EQ(warm.total("cacheHits"), 8U);
+    ReadCapture streamed;
+    bytes.resize(65536U);
+    {
+        ReadDiagnosticScope trace{&streamed, "test"};
+        ASSERT_TRUE(source.read_exact_at(65536U, bytes));
+        trace.complete();
+    }
+    EXPECT_EQ(streamed.total("transportReads"), 1U);
+    EXPECT_EQ(streamed.total("readLe64KiB"), 1U);
+    EXPECT_EQ(streamed.total("cacheHits"), 0U);
+    EXPECT_TRUE(std::ranges::all_of(bytes, [](auto byte) { return byte == std::byte{0x42}; }));
+}
+
+TEST(DeviceReadDiagnostics, FailedReadsRemainFailuresAndInvalidateTheConnection) {
+    auto connection = std::make_shared<Connection>();
+    auto transport = std::make_shared<GuardTransport>();
+    transport->fail_reads = true;
+    connection->device.transport = transport;
+    Source source{connection, {"target", "Target", 0U, 2U * 1024U * 1024U, 512U, true, {}, {}}};
+    std::array<std::byte, 512U> bytes{};
+    ReadCapture capture;
+    {
+        ReadDiagnosticScope trace{&capture, "test"};
+        EXPECT_FALSE(source.read_exact_at(0U, bytes));
+    }
+    EXPECT_EQ(capture.total("failedReads"), 1U);
+    EXPECT_EQ(capture.events.back().outcome, "failed");
+    EXPECT_TRUE(connection->invalidated);
+    EXPECT_FALSE(source.read_exact_at(0U, bytes));
+    EXPECT_EQ(transport->reads.size(), 1U);
+}
 
 class DeviceGuardReads : public testing::Test {
   protected:

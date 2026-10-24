@@ -1793,6 +1793,66 @@ TEST_F(ImageSessionTest, BuildsBoundedPreviewForOpaqueWaveformIdentifier) {
                                   opened->revision));
 }
 
+TEST_F(ImageSessionTest, ReadDiagnosticsPreservePreviewPcmDetailsAndRejectedRequests) {
+    class Capture final : public axk::diagnostic_sink {
+      public:
+        std::vector<axk::diagnostic_event> events;
+        bool enabled(axk::diagnostic_level) const noexcept override { return true; }
+        void report(const axk::diagnostic_event &event) override { events.push_back(event); }
+    } capture;
+    axk::app::ImageSessionManager sessions{*sandbox_};
+    const auto opened = sessions.open({{{"workspace", "fixture.hds"}}, {}}, "owner-a");
+    ASSERT_TRUE(opened);
+    const axk::app::ImageDocumentRef target{opened->image_id, "document-a-series-source-1"};
+    const auto objects = sessions.objects(target, "owner-a", 64U, std::nullopt, "SMPL");
+    ASSERT_TRUE(objects);
+    ASSERT_FALSE(objects->items.empty());
+    const auto &object = objects->items.front().id;
+    const auto baseline = sessions.preview(target, "owner-a", object, 32U, opened->revision);
+    const auto traced = sessions.preview(target, "owner-a", object, 32U, opened->revision, {}, &capture);
+    ASSERT_TRUE(baseline);
+    ASSERT_TRUE(traced);
+    ASSERT_EQ(traced->lanes.size(), baseline->lanes.size());
+    for (std::size_t lane = 0U; lane < traced->lanes.size(); ++lane) {
+        const auto &actual = traced->lanes[lane].bins;
+        const auto &expected = baseline->lanes[lane].bins;
+        ASSERT_EQ(actual.size(), expected.size());
+        for (std::size_t bin = 0U; bin < actual.size(); ++bin) {
+            EXPECT_EQ(actual[bin].minimum, expected[bin].minimum);
+            EXPECT_EQ(actual[bin].maximum, expected[bin].maximum);
+        }
+    }
+    ASSERT_FALSE(capture.events.empty());
+    EXPECT_EQ(capture.events.back().event, "image_preview_read");
+    EXPECT_EQ(capture.events.back().phase, "total");
+    EXPECT_EQ(capture.events.back().outcome, "success");
+    const auto detail = sessions.object_detail(target, "owner-a", object);
+    const auto traced_detail = sessions.object_detail(target, "owner-a", object, &capture);
+    ASSERT_TRUE(detail);
+    ASSERT_TRUE(traced_detail);
+    EXPECT_EQ(*traced_detail, *detail);
+    const auto audition = sessions.prepare_audition(target, "owner-a", {object}, opened->revision, {}, false, &capture);
+    ASSERT_TRUE(audition);
+    const auto size = static_cast<std::size_t>(audition->content_size_bytes);
+    const auto pcm = sessions.audition_range(audition->audition_id, "owner-a", 0U, size);
+    const auto traced_pcm = sessions.audition_range(audition->audition_id, "owner-a", 0U, size, {}, &capture);
+    ASSERT_TRUE(pcm);
+    ASSERT_TRUE(traced_pcm);
+    EXPECT_EQ(traced_pcm->bytes, pcm->bytes);
+    EXPECT_FALSE(sessions.preview(target, "owner-a", object, 32U, opened->revision + 1U, {}, &capture));
+    EXPECT_EQ(capture.events.back().outcome, "failed");
+    axk::CancellationSource cancelled;
+    cancelled.cancel();
+    const auto cancelled_baseline =
+        sessions.preview(target, "owner-a", object, 32U, opened->revision, cancelled.token());
+    const auto cancelled_trace =
+        sessions.preview(target, "owner-a", object, 32U, opened->revision, cancelled.token(), &capture);
+    ASSERT_FALSE(cancelled_baseline);
+    ASSERT_FALSE(cancelled_trace);
+    EXPECT_EQ(cancelled_trace.error().code, cancelled_baseline.error().code);
+    EXPECT_EQ(capture.events.back().outcome, "failed");
+}
+
 TEST_F(ImageSessionTest, ReturnsDecodedObjectDetailWithoutContentPayloads) {
     axk::app::ImageSessionManager sessions{*sandbox_, 2U, 64U};
     const auto opened = sessions.open({{{"workspace", "fixture.hds"}}, {}}, "owner-a");

@@ -1,5 +1,6 @@
 import type { AudioIdentity, ImageTransport, PreviewEnvelope } from '../transport';
 import { sameAudioIdentity } from './audioIdentity';
+import { readContext, readTrace, type ReadTrace } from '../readDiagnostics';
 
 interface Request {
     sessionId: number;
@@ -9,6 +10,7 @@ interface Request {
     generation: number;
     loaded: (preview: PreviewEnvelope) => void;
     failed: (error: unknown) => void;
+    trace?: ReadTrace;
 }
 
 // One bounded queue is shared by all device presentations; reset aborts old document reads.
@@ -34,12 +36,14 @@ export class WaveformPreviewQueue {
             generation: this.generation,
             loaded,
             failed,
+            trace: readTrace('preview-queue', { sessionId, objectId, bins }, readContext(sessionId, objectId)),
         });
         this.drain();
     }
 
     reset(): void {
         this.generation++;
+        for (const request of this.queued) request.trace?.finish('cancelled');
         this.queued = [];
         for (const controller of this.active) controller.abort();
     }
@@ -58,7 +62,11 @@ export class WaveformPreviewQueue {
     private drain(): void {
         while (this.active.size < 2 && this.queued.length) {
             const request = this.queued.shift()!;
-            if (!this.current(request)) continue;
+            if (!this.current(request)) {
+                request.trace?.finish('stale');
+                continue;
+            }
+            request.trace?.finish('started');
             const controller = new AbortController();
             this.active.add(controller);
             void this.transport

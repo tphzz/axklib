@@ -7,6 +7,7 @@
 #include <nlohmann/json.hpp>
 
 #include "axklib/application/image_sessions.hpp"
+#include "operation_diagnostics.hpp"
 
 namespace {
 
@@ -35,10 +36,11 @@ axk::app::Result<void> axk::app::bind_audition_operations(OperationRegistry &reg
                 context.progress->report({axk::ProgressPhase::reading, 0U, object_ids.size(),
                                           "Preparing bounded audio sources", std::nullopt});
             }
+            OperationDiagnosticSink diagnostics{context};
             auto audition =
                 images.prepare_audition(image_document_ref(request), context.owner_id, object_ids,
                                         request.at("expectedRevision").get<std::uint64_t>(), context.cancellation,
-                                        request.value("sourceWindow", "PLAYBACK") == "STORED");
+                                        request.value("sourceWindow", "PLAYBACK") == "STORED", &diagnostics);
             if (!audition)
                 return std::unexpected(audition.error());
             if (context.progress != nullptr) {

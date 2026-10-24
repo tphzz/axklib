@@ -11,6 +11,7 @@
 
 #include "axklib/file_publication.hpp"
 #include "device_io_timing.hpp"
+#include "read_diagnostics.hpp"
 
 namespace axk::app::device_detail {
 
@@ -38,6 +39,8 @@ Result<void> save_json(const std::filesystem::path &path, const Json &value, boo
 }
 
 Result<void> verify_bound(const Connection &connection) {
+    ReadDiagnosticScope::add(ReadMetric::binding_checks, 1U);
+    const ReadDiagnosticTimer trace{ReadMetric::binding_time};
     const IoTiming timing{connection.reads.binding_checks, connection.reads.binding_nanoseconds};
     return connection.device.transport->verify_bound();
 }
@@ -75,8 +78,10 @@ axk::Result<void> read_target(const Connection &connection, const DeviceTargetDe
     const auto result = connection.device.transport->read_exact_at(target.offset + offset, bytes);
     ++connection.reads.calls;
     connection.reads.bytes += bytes.size();
-    connection.reads.nanoseconds += static_cast<std::uint64_t>(
+    const auto elapsed = static_cast<std::uint64_t>(
         std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - started).count());
+    connection.reads.nanoseconds += elapsed;
+    ReadDiagnosticScope::record_read(bytes.size(), elapsed, result.has_value());
     return result;
 }
 
@@ -143,12 +148,18 @@ Source::Source(std::shared_ptr<Connection> connection, DeviceTargetDescription t
 std::uint64_t Source::size() const noexcept { return target_.size_bytes; }
 
 axk::Result<void> Source::read_exact_at(std::uint64_t offset, std::span<std::byte> bytes) const {
-    const std::scoped_lock lock{connection_->io};
+    std::unique_lock lock{connection_->io, std::defer_lock};
+    {
+        const ReadDiagnosticTimer wait{ReadMetric::connection_wait};
+        lock.lock();
+    }
     if (connection_->invalidated || connection_->revision != revision_ || offset > size() ||
         bytes.size() > size() - offset)
         return std::unexpected(make_error(ErrorCode::io_read_failed, ErrorCategory::io, "device read is unavailable"));
     const auto sector_size = connection_->device.transport->sector_size();
-    return cache_.read(
+    const auto hits = cache_.hits;
+    const auto misses = cache_.misses;
+    auto result = cache_.read(
         size(), sector_size, offset, bytes,
         [&](std::uint64_t at, std::span<std::byte> data) {
             auto read = read_target(*connection_, target_, at, data);
@@ -171,6 +182,9 @@ axk::Result<void> Source::read_exact_at(std::uint64_t offset, std::span<std::byt
             }
             return {};
         });
+    ReadDiagnosticScope::add(ReadMetric::cache_hits, cache_.hits - hits);
+    ReadDiagnosticScope::add(ReadMetric::cache_misses, cache_.misses - misses);
+    return result;
 }
 
 Result<void> Source::seal(const CancellationToken &cancellation, ProgressSink *progress) {

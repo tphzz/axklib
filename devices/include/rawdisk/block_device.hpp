@@ -42,6 +42,7 @@ class BlockDevice {
     virtual std::uint32_t sector_size() const noexcept = 0;
     virtual std::uint64_t sector_count() const noexcept = 0;
     virtual bool writable() const noexcept = 0;
+    virtual bool uses_elevation_helper() const noexcept { return false; }
     std::uint64_t size_bytes() const noexcept { return std::uint64_t{sector_size()} * sector_count(); }
 
     // Transfers out.size() / sector_size() whole sectors starting at `lba`.

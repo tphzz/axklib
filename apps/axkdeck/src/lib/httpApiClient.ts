@@ -2,6 +2,8 @@ import type { components } from './generated/axklibApiV1';
 import { DeviceWriteTracking } from './deviceWriteTracking';
 import type { ClientUploadSource } from './clientUploadSource';
 import { AxklibApiError } from './httpErrors';
+import { captureReadHttp, captureAuditionHeaders, parsedReadEnvelope } from './httpReadDiagnostics';
+import type { ReadTrace } from './readDiagnostics';
 import {
     downloadTimeoutMs,
     fetchWithTimeout,
@@ -490,12 +492,14 @@ export class AxklibHttpApiClient {
     }
 
     async openAuditionContent(auditionId: string, start: number, end: number, signal?: AbortSignal): Promise<Response> {
-        const response = await this.fetchResponse(
-            'GET',
-            `/auditions/${encodeURIComponent(auditionId)}/content`,
-            undefined,
-            { Range: `bytes=${start}-${end}` },
-            signal,
+        const response = await captureAuditionHeaders(auditionId, start, end, () =>
+            this.fetchResponse(
+                'GET',
+                `/auditions/${encodeURIComponent(auditionId)}/content`,
+                undefined,
+                { Range: `bytes=${start}-${end}` },
+                signal,
+            ),
         );
         if (!response.ok) await this.throwResponseError(response);
         return response;
@@ -597,14 +601,20 @@ export class AxklibHttpApiClient {
         headers: Record<string, string> = {},
         signal?: AbortSignal,
     ): Promise<Result> {
-        const response = await this.fetchResponse(
+        return captureReadHttp(
             method,
             path,
-            body === undefined ? undefined : JSON.stringify(body),
-            { ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...headers },
-            signal,
+            body,
+            () =>
+                this.fetchResponse(
+                    method,
+                    path,
+                    body === undefined ? undefined : JSON.stringify(body),
+                    { ...(body === undefined ? {} : { 'Content-Type': 'application/json' }), ...headers },
+                    signal,
+                ),
+            (response, trace) => this.readEnvelope<Result>(response, trace),
         );
-        return this.readEnvelope<Result>(response);
     }
 
     private fetchResponse(
@@ -630,8 +640,9 @@ export class AxklibHttpApiClient {
         );
     }
 
-    private async readEnvelope<Result>(response: Response): Promise<Result> {
+    private async readEnvelope<Result>(response: Response, trace?: ReadTrace): Promise<Result> {
         const body = await readBoundedText(response, maximumJsonResponseBytes);
+        trace?.mark('body-read', { bodyCharacters: body.length });
         if (response.ok && body.length === 0) return undefined as Result;
         let document: ApiEnvelope<Result> & ApiErrorEnvelope;
         try {
@@ -643,6 +654,7 @@ export class AxklibHttpApiClient {
                 response.status,
             );
         }
+        parsedReadEnvelope(trace, document, response);
         if (!response.ok) this.throwDocumentError(document, response.status);
         return document.data;
     }

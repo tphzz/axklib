@@ -10,6 +10,7 @@
 
 #include "axklib/application/secure_random.hpp"
 #include "device_sessions_internal.hpp"
+#include "read_diagnostics.hpp"
 
 #if defined(AXK_BUILD_DEVICES)
 #include "device_candidates.hpp"
@@ -44,7 +45,11 @@ class NativeTransport final : public DeviceTransport {
         return result;
     }
     Result<void> verify_bound() const override {
-        const std::scoped_lock lock{mutex_};
+        std::unique_lock lock{mutex_, std::defer_lock};
+        {
+            const ReadDiagnosticTimer wait{ReadMetric::transport_wait};
+            lock.lock();
+        }
         return verify_locked();
     }
     Result<void> authorize_writes() override {
@@ -64,7 +69,11 @@ class NativeTransport final : public DeviceTransport {
         return verify_locked();
     }
     axk::Result<void> read_exact_at(std::uint64_t offset, std::span<std::byte> bytes) const override {
-        const std::scoped_lock lock{mutex_};
+        std::unique_lock lock{mutex_, std::defer_lock};
+        {
+            const ReadDiagnosticTimer wait{ReadMetric::transport_wait};
+            lock.lock();
+        }
         if (invalidated_ || !device_)
             return std::unexpected(axk::make_error(axk::ErrorCode::io_read_failed, axk::ErrorCategory::io,
                                                    "device session is disconnected"));
@@ -77,6 +86,8 @@ class NativeTransport final : public DeviceTransport {
             const auto count = std::min<std::size_t>(bytes.size(), 1024U * 1024U - within);
             const auto total = ((within + count + sector - 1U) / sector) * sector;
             std::vector<std::byte> buffer(static_cast<std::size_t>(total));
+            ReadDiagnosticScope::add(
+                device_->uses_elevation_helper() ? ReadMetric::helper_reads : ReadMetric::direct_reads, 1U);
             if (auto read = device_->read(offset / sector, buffer); !read) {
                 invalidated_ = true;
                 return std::unexpected(
@@ -119,7 +130,10 @@ class NativeTransport final : public DeviceTransport {
     Result<void> verify_locked() const {
         if (invalidated_ || !device_)
             return std::unexpected(Error{"device_disconnected", "device session is disconnected; select it again"});
-        auto devices = rawdisk::list_usb_devices();
+        auto devices = [] {
+            const ReadDiagnosticTimer enumeration{ReadMetric::enumeration_time};
+            return rawdisk::list_usb_devices();
+        }();
         if (!devices) {
             invalidated_ = true;
             return std::unexpected(native_error(devices.error()));
@@ -129,6 +143,11 @@ class NativeTransport final : public DeviceTransport {
             return std::unexpected(Error{"device_changed", "device connection identity changed; select it again"});
         }
         for (const auto &[lba, expected] : layout_guards_) {
+            const ReadDiagnosticTimer guard{ReadMetric::layout_time};
+            ReadDiagnosticScope::add(ReadMetric::layout_reads, 1U);
+            ReadDiagnosticScope::add(ReadMetric::layout_bytes, expected.size());
+            ReadDiagnosticScope::add(
+                device_->uses_elevation_helper() ? ReadMetric::helper_reads : ReadMetric::direct_reads, 1U);
             std::vector<std::byte> current(expected.size());
             if (!device_->read(lba, current) || current != expected) {
                 invalidated_ = true;

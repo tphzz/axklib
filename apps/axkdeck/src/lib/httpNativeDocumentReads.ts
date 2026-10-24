@@ -4,6 +4,7 @@ import type { NativeObjectDetail, PreviewEnvelope } from './transport';
 import { documentPath } from './httpNativeDocuments';
 import { sameAudioIdentity } from './audio/audioIdentity';
 import { normalizeWaveformPreview } from './waveformPreview';
+import { readContext, readTrace } from './readDiagnostics';
 
 export class HttpNativeDocumentReads {
     constructor(
@@ -50,6 +51,7 @@ export class HttpNativeDocumentReads {
 
     async preview(sessionId: number, objectId: string, bins: number, signal?: AbortSignal) {
         const session = this.session(sessionId);
+        const context = readContext(sessionId, objectId);
         const identity = { imageId: session.remoteId, documentId: session.documentId!, revision: session.revision };
         const query = new URLSearchParams({ objectId, bins: String(bins), expectedRevision: String(session.revision) });
         const result = await this.client.request<PreviewEnvelope>(
@@ -61,6 +63,9 @@ export class HttpNativeDocumentReads {
         );
         if (this.session(sessionId) !== session || !sameAudioIdentity(result, identity) || result.objectId !== objectId)
             throw new Error('Native document changed during loading');
-        return normalizeWaveformPreview(result);
+        const trace = readTrace('preview-normalize', { sessionId, objectId, bins }, context);
+        const preview = normalizeWaveformPreview(result);
+        trace?.finish('success');
+        return preview;
     }
 }

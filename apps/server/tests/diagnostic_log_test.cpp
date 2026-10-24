@@ -1,8 +1,40 @@
 #include "diagnostic_log.hpp"
+#include "request_read_diagnostics.hpp"
 #include <chrono>
 #include <gtest/gtest.h>
 #include <string>
 #include <vector>
+
+TEST(ReadDiagnostics, RequestAdapterKeepsCorrelationAndRespectsCapture) {
+    std::vector<std::string> lines;
+    {
+        axk::server::detail::DiagnosticLog log{true, std::chrono::steady_clock::now,
+                                               [&](const auto &line) { lines.push_back(line); }};
+        axk::server::detail::RequestReadDiagnostics sink{log, "request-1", "image-1", "document-1", "object-1"};
+        const axk::diagnostic_event event{.level = axk::diagnostic_level::debug,
+                                          .source = axk::diagnostic_source::devices,
+                                          .event = "image_preview_read",
+                                          .phase = "total",
+                                          .outcome = "success",
+                                          .duration_us = 1500U,
+                                          .metrics = {{"transportReads", 8U}}};
+        EXPECT_FALSE(sink.enabled(axk::diagnostic_level::debug));
+        sink.report(event);
+        log.set_capture(axk::diagnostic_level::debug);
+        sink.report(event);
+        const auto started = sink.serialization_start();
+        sink.serialized(started);
+    }
+    ASSERT_EQ(lines.size(), 2U);
+    const auto event = nlohmann::json::parse(lines.front());
+    EXPECT_EQ(event.at("requestId"), "request-1");
+    EXPECT_EQ(event.at("imageId"), "image-1");
+    EXPECT_EQ(event.at("documentId"), "document-1");
+    EXPECT_EQ(event.at("objectId"), "object-1");
+    EXPECT_EQ(event.at("durationMs"), 1.5);
+    EXPECT_EQ(event.at("transportReads"), 8U);
+    EXPECT_EQ(nlohmann::json::parse(lines.back()).at("phase"), "serialize");
+}
 
 TEST(DiagnosticLog, RuntimeCaptureExpiresAndWriterFailureDoesNotEscape) {
     auto now = std::chrono::steady_clock::time_point{};

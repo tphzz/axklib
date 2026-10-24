@@ -6,6 +6,7 @@ import type {
 } from '../transport';
 import { audioIdentityKey, sameAudioIdentity } from './audioIdentity';
 import { isReversePlayback } from './playbackTimeline';
+import { readContext, readTrace } from '../readDiagnostics';
 import type {
     AuditionAssetEventSink,
     AuditionControllerOptions,
@@ -124,6 +125,11 @@ export class AuditionAssetStore {
         const key = this.key(sessionId, objectId);
         const cached = this.cache.get(key);
         if (cached) {
+            readTrace(
+                'audio-cache',
+                { sessionId, objectId, speculative, decodedBytes: cached.weightBytes },
+                readContext(sessionId, objectId),
+            )?.finish('hit');
             this.cache.delete(key);
             this.cache.set(key, cached);
             if (run) this.emit(run, 'audio_cache_hit', { decodedBytes: cached.weightBytes });
@@ -132,6 +138,9 @@ export class AuditionAssetStore {
 
         const existing = this.pending.get(key);
         if (existing) {
+            readTrace('audio-cache', { sessionId, objectId, speculative }, readContext(sessionId, objectId))?.finish(
+                'pending',
+            );
             if (!speculative) existing.speculative = false;
             if (run) this.emit(run, 'audio_cache_wait', { speculative: existing.speculative });
             return existing.promise;
@@ -238,6 +247,16 @@ export class AuditionAssetStore {
         run?: PlaybackRun,
         workingSetPolicy?: WorkingSetPolicy,
     ): Promise<Map<string, CachedAudition>> {
+        const trace = readTrace(
+            speculative ? 'audio-prefetch' : 'audio-playback',
+            {
+                sessionId,
+                objectId: objectIds[0],
+                objectCount: objectIds.length,
+                speculative,
+            },
+            readContext(sessionId, objectIds[0] ?? ''),
+        );
         const identity = this.transport.audioIdentity(sessionId);
         const checkIdentity = () => {
             if (signal.aborted) throw abortError();
@@ -256,6 +275,7 @@ export class AuditionAssetStore {
             checkIdentity();
             if (!sameAudioIdentity(identity, bundle)) throw abortError();
             this.validateBundle(bundle, objectIds);
+            trace?.mark('prepared', { auditionId: bundle.auditionId, contentSizeBytes: bundle.contentSizeBytes });
             if (run) {
                 this.emit(run, 'audition_bundle_prepared', {
                     preparationDurationMs: Math.round(monotonicNow() - prepareStarted),
@@ -282,6 +302,7 @@ export class AuditionAssetStore {
                 throw new Error(workingSetPolicy?.overflowMessage ?? 'Audio is too large to audition safely');
             }
             if (speculative && estimatedBytes > this.cacheBudgetBytes) {
+                trace?.finish('skipped-budget');
                 if (run) this.emit(run, 'audio_prefetch_skipped', { estimatedDecodedBytes: estimatedBytes });
                 return new Map();
             }
@@ -308,6 +329,7 @@ export class AuditionAssetStore {
                     fetchDurationMs: Math.round(monotonicNow() - fetchStarted),
                 });
             }
+            trace?.mark('fetched', { byteCount: content.byteLength });
 
             const decodeStarted = monotonicNow();
             const entries = new Map<string, CachedAudition>();
@@ -383,12 +405,15 @@ export class AuditionAssetStore {
                     decodedBytes: [...entries.values()].reduce((total, entry) => total + entry.weightBytes, 0),
                 });
             }
+            trace?.mark('decoded', { decodedClips: entries.size });
             await this.transport.deleteAudition(auditionId).catch(() => undefined);
             auditionId = undefined;
             checkIdentity();
             for (const entry of entries.values()) if (!entry.transient) this.addCacheEntry(entry);
+            trace?.finish('success');
             return entries;
         } finally {
+            trace?.finish(signal.aborted ? 'cancelled' : 'failed');
             if (auditionId) await this.transport.deleteAudition(auditionId).catch(() => undefined);
         }
     }

@@ -311,6 +311,9 @@
         item: { objectId: selected },
         preview: {
             preview: {
+                ...audioIdentity(),
+                objectId: selected,
+                warnings: [],
                 lanes: (stereo ? ['left', 'right'] : ['mono']).map((role) => ({
                     role,
                     sampleRate: fixtureRate,

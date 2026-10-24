@@ -135,6 +135,7 @@ class RemoteDisk final : public BlockDevice {
     std::uint32_t sector_size() const noexcept override { return ss_; }
     std::uint64_t sector_count() const noexcept override { return count_; }
     bool writable() const noexcept override { return writable_; }
+    bool uses_elevation_helper() const noexcept override { return true; }
 
   protected:
     Result<void> read_raw(std::uint64_t off, std::span<std::byte> out) override {

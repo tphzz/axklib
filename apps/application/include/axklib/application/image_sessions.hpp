@@ -578,7 +578,8 @@ class ImageSessionManager {
             std::optional<std::string_view> object_type = std::nullopt,
             std::optional<std::string_view> content_scope_id = std::nullopt);
     [[nodiscard]] Result<nlohmann::ordered_json> object_detail(const ImageDocumentRef &target,
-                                                               std::string_view owner_id, std::string_view object_id);
+                                                               std::string_view owner_id, std::string_view object_id,
+                                                               diagnostic_sink *diagnostics = nullptr);
     [[nodiscard]] Result<ImagePage<ImageRelationshipItem>>
     relationships(const ImageDocumentRef &target, std::string_view owner_id, std::size_t limit,
                   std::optional<std::string_view> cursor = std::nullopt, ImageRelationshipFilter filter = {});
@@ -593,15 +594,18 @@ class ImageSessionManager {
     [[nodiscard]] Result<ImageWaveformPreview> preview(const ImageDocumentRef &target, std::string_view owner_id,
                                                        std::string_view object_id, std::size_t bin_count,
                                                        std::uint64_t expected_revision,
-                                                       const CancellationToken &cancellation = {});
+                                                       const CancellationToken &cancellation = {},
+                                                       diagnostic_sink *diagnostics = nullptr);
     [[nodiscard]] Result<ImageAudition> prepare_audition(const ImageDocumentRef &target, std::string_view owner_id,
                                                          const std::vector<std::string> &object_ids,
                                                          std::uint64_t expected_revision,
                                                          const CancellationToken &cancellation = {},
-                                                         bool stored_pcm = false);
+                                                         bool stored_pcm = false,
+                                                         diagnostic_sink *diagnostics = nullptr);
     [[nodiscard]] Result<ImageAuditionRange> audition_range(std::string_view audition_id, std::string_view owner_id,
                                                             std::uint64_t offset, std::size_t size,
-                                                            const CancellationToken &cancellation = {});
+                                                            const CancellationToken &cancellation = {},
+                                                            diagnostic_sink *diagnostics = nullptr);
     [[nodiscard]] Result<void> delete_audition(std::string_view audition_id, std::string_view owner_id);
     void cleanup();
 

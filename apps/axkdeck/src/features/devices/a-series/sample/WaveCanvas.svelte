@@ -4,6 +4,7 @@
     import { waveformPixelColumns } from '../../../../lib/waveformCanvas';
     import { observeCanvas } from '../../../../lib/observeCanvas';
     import { previewBinCount } from '../../../../lib/waveformPreview';
+    import type { WaveformReadDraw } from '../../../../lib/readDiagnostics';
     let {
         bins,
         pcm,
@@ -13,6 +14,7 @@
         markers = [],
         overview = false,
         onresolution,
+        ondraw,
     }: {
         bins: readonly WaveformBin[];
         pcm?: Float32Array;
@@ -22,6 +24,7 @@
         markers?: number[];
         overview?: boolean;
         onresolution?: (bins: number) => void;
+        ondraw?: (draw: WaveformReadDraw) => void;
     } = $props();
     let canvas: HTMLCanvasElement;
     let size = $state({ width: 1, height: 1, ratio: 1 });
@@ -78,6 +81,7 @@
         context.globalAlpha = 0.3;
         context.fillStyle = wave;
         context.fillRect(0, Math.floor(canvas.height / 2), canvas.width, 1);
+        ondraw?.({ bins: bins.length, width, height });
     }
     $effect(() => {
         columns;
