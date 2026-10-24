@@ -126,10 +126,6 @@ void ServerApplication::register_infrastructure_routes() {
              [this](const crow::request &request, const std::string &image_id, const std::string &document_id) {
                  return image_validation_response(request, image_id, document_id);
              },
-         .image_preview =
-             [this](const crow::request &request, const std::string &image_id, const std::string &document_id) {
-                 return image_preview_response(request, image_id, document_id);
-             },
          .audition_content =
              [this](const crow::request &request, const std::string &audition_id) {
                  return audition_content_response(request, audition_id);

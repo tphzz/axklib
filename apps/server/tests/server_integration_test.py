@@ -16,6 +16,7 @@ import tempfile
 import tarfile
 import time
 import zipfile
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
@@ -1979,11 +1980,16 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
             assert isinstance(
                 waveform["waveform"]["embeddedContainerName"], str
             ), waveform
-            preview_query = urlencode({"objectId": waveform["id"], "bins": 16, "expectedRevision": revision})
-            status, preview = http_request(
-                port, "GET", f"/api/v1/images/{image_id}/documents/{document_id}/preview?{preview_query}"
+            preview_request = {"imageId": image_id, "documentId": document_id, "objectId": waveform["id"],
+                               "bins": 16, "expectedRevision": revision, "readIntent": "SELECTED"}
+            status, preview_submission = http_request(
+                port, "POST", "/api/v1/image-waveform-previews", preview_request
             )
-            assert status == 200 and "frameCount" not in preview["data"], preview
+            assert status == 202, preview_submission
+            preview_job = wait_for_job(port, str(preview_submission["data"]["jobId"]), process)
+            assert preview_job["state"] == "COMPLETED", preview_job
+            preview = {"data": preview_job["result"]}
+            assert "frameCount" not in preview["data"], preview
             assert preview["data"]["imageId"] == image_id, preview
             assert preview["data"]["documentId"] == document_id, preview
             assert preview["data"]["revision"] == revision, preview
@@ -2014,25 +2020,32 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 == waveform["waveform"]["loopLengthFrames"]
             ), preview
             assert len(preview_lane["bins"]) == 16, preview
-            for preview_revision, expected_status in ((None, 400), (revision + 1, 409)):
-                query = {"objectId": waveform["id"], "bins": 16}
+            for preview_revision in (None, revision + 1):
+                request = {key: value for key, value in preview_request.items() if key != "expectedRevision"}
                 if preview_revision is not None:
-                    query["expectedRevision"] = preview_revision
+                    request["expectedRevision"] = preview_revision
                 status, rejected_preview = http_request(
-                    port, "GET",
-                    f"/api/v1/images/{image_id}/documents/{document_id}/preview?{urlencode(query)}",
+                    port, "POST", "/api/v1/image-waveform-previews", request,
                 )
-                assert status == expected_status, rejected_preview
+                if preview_revision is None:
+                    assert status == 400, rejected_preview
+                else:
+                    assert status == 202, rejected_preview
+                    stale = wait_for_job(port, str(rejected_preview["data"]["jobId"]), process)
+                    assert stale["state"] == "FAILED" and stale["error"]["code"] == "image_revision_stale", stale
+            status, _ = http_request(port, "GET", f"/api/v1/images/{image_id}/documents/{document_id}/preview")
+            assert status == 404
             status, rejected_audition = http_request(
                 port, "POST", "/api/v1/auditions",
-                {"documentId": document_id, "imageId": image_id, "objectIds": [waveform["id"]]},
+                {"documentId": document_id, "imageId": image_id, "objectIds": [waveform["id"]], "readIntent": "PLAYBACK"},
             )
             assert status == 400, rejected_audition
             status, submitted = http_request(
                 port,
                 "POST",
                 "/api/v1/auditions",
-                {"documentId": document_id, "imageId": image_id, "objectIds": [waveform["id"]], "expectedRevision": revision},
+                {"documentId": document_id, "imageId": image_id, "objectIds": [waveform["id"]],
+                 "expectedRevision": revision, "readIntent": "PLAYBACK"},
             )
             assert status == 202, submitted
             audition_job = wait_for_job(port, str(submitted["data"]["jobId"]), process)
@@ -3575,6 +3588,22 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
             assert status == 400
             status, _ = http_request(port, "GET", "/api/v1/jobs/unknown")
             assert status == 404
+            with closing(http.client.HTTPConnection("127.0.0.1", port, timeout=10)) as keepalive:
+                keepalive.request("GET", "/api/v1/roots", headers={"Authorization": f"Bearer {TOKEN}"})
+                normal = keepalive.getresponse()
+                assert normal.status == 200
+                normal.read()
+                original_socket = keepalive.sock
+                assert original_socket is not None
+                time.sleep(0.05)
+                keepalive.request("OPTIONS", "/api/v1/images", headers={
+                    "Origin": "https://allowed.example", "Access-Control-Request-Method": "POST",
+                })
+                preflight = keepalive.getresponse()
+                preflight.read()
+                assert preflight.status == 204
+                assert keepalive.sock is original_socket
+                keepalive_preflight_request_id = preflight.getheader("X-Request-Id")
             status, runtime_metrics = http_request(
                 port, "GET", "/api/v1/system/metrics"
             )
@@ -3619,12 +3648,10 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
             server_output = server_log_path.read_text(
                 encoding="utf-8", errors="replace"
             )
-            request_logs = [
-                json.loads(line)
-                for line in server_output.splitlines()
-                if line.startswith('{"durationMs"') and '"event":"http_request"' in line
-            ]
             structured_logs = [json.loads(line) for line in server_output.splitlines() if line.startswith("{")]
+            request_logs = [
+                entry for entry in structured_logs if entry.get("event") == "http_request"
+            ]
             assert all(entry.get("level") in {"error", "warning", "info", "debug", "trace"} for entry in structured_logs)
             assert not any(entry.get("event") == "invalid_log_record" for entry in structured_logs)
             for event in ("filesystem_directory_list", "filesystem_media_source_inspect"):
@@ -3655,6 +3682,8 @@ def exercise(server: Path, cli: Path, fixture: Path) -> None:
                 entry for entry in request_logs if entry["method"] == "OPTIONS"
             ]
             assert preflight_logs
+            keepalive_log = next(entry for entry in preflight_logs if entry["requestId"] == keepalive_preflight_request_id)
+            assert keepalive_log["durationMeasured"] is False and keepalive_log["durationMs"] == 0, keepalive_log
             assert all(0 <= entry["durationMs"] < 10_000 for entry in preflight_logs), (
                 preflight_logs
             )

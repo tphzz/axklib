@@ -8,6 +8,27 @@ describe('Waveform', () => {
         vi.restoreAllMocks();
     });
 
+    it('reports only a rendered nonempty waveform and redraws a cached selection', async () => {
+        vi.stubGlobal('CanvasRenderingContext2D', class {});
+        vi.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 120, 24));
+        const fillRect = vi.fn();
+        vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
+            clearRect: vi.fn(),
+            fillRect,
+        } as unknown as CanvasRenderingContext2D);
+        const ondraw = vi.fn();
+        const view = render(Waveform, { values: [], ondraw, redrawKey: false });
+        expect(ondraw).not.toHaveBeenCalled();
+        const values = [{ minimum: -1, maximum: 1 }];
+        await view.rerender({ values });
+        expect(ondraw).toHaveBeenCalledWith({ bins: 1, width: 120, height: 24 });
+        const count = ondraw.mock.calls.length;
+        await view.rerender({ redrawKey: true });
+        expect(ondraw.mock.calls.length).toBeGreaterThan(count);
+        expect(fillRect).toHaveBeenCalled();
+        view.unmount();
+    });
+
     it('observes size and monitor resolution changes and releases both subscriptions', () => {
         const observe = vi.fn();
         const disconnect = vi.fn();

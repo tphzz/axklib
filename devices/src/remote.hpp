@@ -31,7 +31,7 @@ inline constexpr std::uint32_t kMaxPayload = kMaxIoBytes + 64;
 inline constexpr std::size_t kMaxString = 4096;
 inline constexpr std::size_t kMaxOpenHandles = 16;
 
-enum class Op : std::uint16_t { hello = 1, open = 2, read = 3, write = 4, flush = 5, close = 6 };
+enum class Op : std::uint16_t { hello = 1, open = 2, read = 3, write = 4, flush = 5, close = 6, verify = 7 };
 
 struct Header {
     std::uint16_t op = 0;
@@ -65,6 +65,7 @@ class RemoteSession : public std::enable_shared_from_this<RemoteSession> {
     Result<void> read(std::uint32_t handle, std::uint64_t lba, std::span<std::byte> out);
     Result<void> write(std::uint32_t handle, std::uint64_t lba, std::span<const std::byte> in);
     Result<void> flush(std::uint32_t handle);
+    Result<void> verify_binding(std::uint32_t handle);
     void close(std::uint32_t handle) noexcept;
 
   private:

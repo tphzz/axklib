@@ -4,6 +4,7 @@
     import { waveformPlayheadRatio, type WaveformTimeline } from '../waveformTimeline';
     import Icon from './Icon.svelte';
     import ViewportWaveform from './ViewportWaveform.svelte';
+    import type { WaveformReadDraw } from '../readDiagnostics';
 
     let {
         objectId,
@@ -22,6 +23,7 @@
         onselect,
         onseek,
         onpreview,
+        ondraw,
         onplay,
         onstop,
         onprefetch = () => undefined,
@@ -44,6 +46,7 @@
         onselect: (event: MouseEvent) => void;
         onseek: (event: MouseEvent) => void;
         onpreview: (bins: number) => void;
+        ondraw?: (draw: WaveformReadDraw) => void;
         onplay: () => void;
         onstop: () => void;
         onprefetch?: () => void;
@@ -83,6 +86,8 @@
             {values}
             {timeline}
             onvisible={onpreview}
+            {ondraw}
+            redrawKey={active}
             playheadRatio={playing ? waveformPlayheadRatio(timeline, playheadFrame, timeline.sampleRate) : 0}
         />
     </button>

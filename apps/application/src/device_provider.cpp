@@ -68,6 +68,28 @@ class NativeTransport final : public DeviceTransport {
         device_ = std::move(*opened);
         return verify_locked();
     }
+    Result<void> verify_read_bound() const override {
+#if defined(_WIN32)
+        std::unique_lock lock{mutex_, std::defer_lock};
+        {
+            const ReadDiagnosticTimer wait{ReadMetric::transport_wait};
+            lock.lock();
+        }
+        if (invalidated_ || !device_)
+            return std::unexpected(Error{"device_disconnected", "device session is disconnected"});
+        auto checked = [&] {
+            const ReadDiagnosticTimer identity{ReadMetric::identity_time};
+            return device_->verify_binding();
+        }();
+        if (!checked) {
+            invalidated_ = true;
+            return std::unexpected(native_error(checked.error()));
+        }
+        return verify_layout_locked();
+#else
+        return verify_bound();
+#endif
+    }
     axk::Result<void> read_exact_at(std::uint64_t offset, std::span<std::byte> bytes) const override {
         std::unique_lock lock{mutex_, std::defer_lock};
         {
@@ -142,6 +164,9 @@ class NativeTransport final : public DeviceTransport {
             invalidated_ = true;
             return std::unexpected(Error{"device_changed", "device connection identity changed; select it again"});
         }
+        return verify_layout_locked();
+    }
+    Result<void> verify_layout_locked() const {
         for (const auto &[lba, expected] : layout_guards_) {
             const ReadDiagnosticTimer guard{ReadMetric::layout_time};
             ReadDiagnosticScope::add(ReadMetric::layout_reads, 1U);

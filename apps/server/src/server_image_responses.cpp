@@ -391,66 +391,16 @@ crow::response ServerApplication::image_validation_response(const crow::request 
         });
 }
 
-crow::response ServerApplication::image_preview_response(const crow::request &request, const std::string &image_id,
-                                                         const std::string &document_id) {
-    const auto id = request_id(request);
-    if (auto denied = guard(request, id))
-        return std::move(*denied);
-    const auto *object_id = request.url_params.get("objectId");
-    const auto bins = parse_unsigned(request.url_params.get("bins") == nullptr ? "" : request.url_params.get("bins"));
-    const auto revision = parse_unsigned(
-        request.url_params.get("expectedRevision") == nullptr ? "" : request.url_params.get("expectedRevision"));
-    if (object_id == nullptr || *object_id == '\0' || !bins || *bins > std::numeric_limits<std::size_t>::max() ||
-        !revision || *revision == 0U)
-        return error_response(400, {"invalid_preview", "objectId, bins and expectedRevision are required"}, id);
-    RequestReadDiagnostics diagnostics{diagnostics_, id, image_id, document_id, object_id};
-    const auto preview = images_.preview({image_id, document_id}, request_owner(request), object_id,
-                                         static_cast<std::size_t>(*bins), *revision, {}, &diagnostics);
-    if (!preview)
-        return error_response(status_for_error(preview.error()), preview.error(), id);
-    const auto started = diagnostics.serialization_start();
-    Json lanes = Json::array();
-    for (const auto &lane : preview->lanes) {
-        Json values = Json::array();
-        for (const auto &bin : lane.bins)
-            values.push_back({{"minimum", bin.minimum}, {"maximum", bin.maximum}});
-        lanes.push_back({{"role", lane.role},
-                         {"sourceObjectId", lane.source_object_id},
-                         {"sampleRate", lane.sample_rate},
-                         {"storedFrameCount", lane.stored_frame_count},
-                         {"sampleWidthBytes", lane.sample_width_bytes},
-                         {"nativeBitDepth", lane.native_bit_depth},
-                         {"sampleRateApproximate", lane.sample_rate_approximate},
-                         {"playbackStartFrame", lane.playback_start_frame},
-                         {"playbackLengthFrames", lane.playback_length_frames},
-                         {"loopStartFrame", lane.loop_start_frame},
-                         {"loopLengthFrames", lane.loop_length_frames},
-                         {"bins", std::move(values)}});
-    }
-    auto response = json_response(200,
-                                  {{"data",
-                                    {{"objectId", preview->object_id},
-                                     {"imageId", preview->image_id},
-                                     {"documentId", preview->document_id},
-                                     {"revision", preview->revision},
-                                     {"warnings", preview->warnings},
-                                     {"lanes", std::move(lanes)}}},
-                                   {"meta", {{"requestId", id}}}},
-                                  id);
-    diagnostics.serialized(started);
-    return response;
-}
-
 crow::response ServerApplication::audition_content_response(const crow::request &request,
                                                             const std::string &audition_id) {
     const auto id = request_id(request);
     if (auto denied = guard(request, id))
         return std::move(*denied);
     RequestReadDiagnostics diagnostics{diagnostics_, id, {}, {}, audition_id};
-    const auto metadata = images_.audition_range(audition_id, request_owner(request), 0U, 0U, {}, &diagnostics);
+    const auto metadata = images_.audition_metadata(audition_id, request_owner(request));
     if (!metadata)
         return error_response(status_for_error(metadata.error()), metadata.error(), id);
-    const auto total = metadata->total_size;
+    const auto total = metadata->content_size_bytes;
     crow::response response;
     const auto range_header = request.get_header_value("Range");
     std::optional<ByteRange> range;

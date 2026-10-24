@@ -28,6 +28,7 @@
 #include "axklib/sfs.hpp"
 #include "axklib/writer.hpp"
 #include "device_read_metrics.hpp"
+#include "read_diagnostics.hpp"
 
 namespace {
 using namespace axk::app;
@@ -40,6 +41,8 @@ struct Storage {
     std::uint64_t pcm_bytes_read{};
     std::size_t writes{};
     std::size_t upgrades{};
+    std::size_t binding_checks{};
+    std::size_t read_binding_checks{};
     std::chrono::milliseconds io_delay{};
     std::function<void(std::uint64_t, std::size_t)> before_read;
     bool fail_writes{};
@@ -59,7 +62,14 @@ class FakeTransport final : public DeviceTransport {
         return {};
     }
     Result<void> verify_bound() const override {
+        ++storage_->binding_checks;
         std::this_thread::sleep_for(storage_->io_delay);
+        if (storage_->disconnected)
+            return std::unexpected(Error{"device_changed", "test device disconnected"});
+        return {};
+    }
+    Result<void> verify_read_bound() const override {
+        ++storage_->read_binding_checks;
         if (storage_->disconnected)
             return std::unexpected(Error{"device_changed", "test device disconnected"});
         return {};
@@ -214,6 +224,26 @@ TEST_F(DeviceSessions, ConstructionDoesNotEnumerateOpenOrRecoverDevices) {
     EXPECT_EQ(provider->storage->reads, 0U);
     EXPECT_EQ(provider->storage->writes, 0U);
     EXPECT_FALSE(manager.connect("candidate", "owner"));
+}
+
+TEST_F(DeviceSessions, ReadVerificationAndMetadataSnapshotsDoNotPerformFullWriteAdmissionChecks) {
+    DeviceSessionManager manager{directory, true, true, provider};
+    const auto id = open(manager);
+    const auto source = manager.open_source(id, "disk", "owner");
+    ASSERT_TRUE(source);
+    provider->storage->binding_checks = 0U;
+    provider->storage->read_binding_checks = 0U;
+    ASSERT_TRUE(source->verify_unchanged());
+    EXPECT_EQ(provider->storage->read_binding_checks, 1U);
+    EXPECT_EQ(provider->storage->binding_checks, 0U);
+    ASSERT_TRUE(manager.status_snapshot(id, "owner"));
+    EXPECT_EQ(provider->storage->read_binding_checks, 1U);
+    ASSERT_TRUE(manager.status(id, "owner"));
+    EXPECT_EQ(provider->storage->read_binding_checks, 2U);
+    EXPECT_FALSE(manager.status_snapshot(id, "other"));
+    provider->storage->disconnected = true;
+    EXPECT_FALSE(source->verify_unchanged());
+    EXPECT_TRUE(manager.status_snapshot(id, "owner")->invalidated);
 }
 
 TEST_F(DeviceSessions, XmlInspectionDoesNotEnumerateConnectReadOrWrite) {
@@ -680,6 +710,72 @@ TEST_F(DeviceSessions, LargePayloadOriginalsStreamWithoutConsumingMetadataGuardC
     ASSERT_TRUE(manager.apply(*mutation, patches, {}, {}, {}, {}));
     EXPECT_EQ(provider->storage->bytes.back(), std::byte{0x11});
     EXPECT_EQ(provider->storage->bytes.front(), std::byte{0x42});
+}
+
+TEST_F(DeviceSessions, ForegroundReadsVerifyOnceAndCancelAtTheNextPcmBoundary) {
+    ASSERT_NO_FATAL_FAILURE(load_sfs(256U * 1024U));
+    const auto geometry = axk::open_image(std::make_shared<axk::MemoryReader>(provider->storage->bytes), "fixture.hds");
+    ASSERT_TRUE(geometry);
+    const auto &partition = geometry->partitions().front();
+    const auto wave = std::ranges::find(partition.records, "SMPL", &axk::IndexRecord::object_type);
+    ASSERT_NE(wave, partition.records.end());
+    const auto cluster_bytes = geometry->superblock().sector_size_bytes * partition.sectors_per_cluster;
+    const auto physical =
+        static_cast<std::uint64_t>(partition.start_sector) * geometry->superblock().sector_size_bytes +
+        static_cast<std::uint64_t>(wave->extents.front().cluster_offset) * cluster_bytes;
+    const auto pcm_start = ((physical + 0xacU + 4095U) / 4096U) * 4096U;
+    const auto pcm_end = ((physical + wave->data_size) / 4096U) * 4096U;
+    DeviceSessionManager devices{directory / "devices", true, true, provider};
+    const auto id = open(devices);
+    const auto sandbox = Sandbox::create({});
+    ASSERT_TRUE(sandbox);
+    ImageSessionManager images{
+        *sandbox,      8U,  100U,    std::chrono::minutes{15}, std::chrono::steady_clock::now, nullptr,
+        1024U * 1024U, 16U, &devices};
+    ImageSourceRef source;
+    source.kind = ImageSourceKind::device;
+    source.device_session_id = id;
+    source.device_target_id = "disk";
+    const auto image = images.open({{source}, {}}, "owner");
+    ASSERT_TRUE(image) << image.error().message;
+    const ImageDocumentRef target{image->image_id, "document-a-series-source-1"};
+    const auto objects = images.objects(target, "owner", 100U, {}, "SMPL");
+    ASSERT_TRUE(objects);
+    ASSERT_EQ(objects->items.size(), 1U);
+    const auto &object_id = objects->items.front().id;
+    auto checks = provider->storage->read_binding_checks;
+    ASSERT_TRUE(images.object_detail(target, "owner", object_id));
+    EXPECT_EQ(provider->storage->read_binding_checks - checks, 1U);
+    const auto audition = images.prepare_audition(target, "owner", {object_id}, image->revision);
+    ASSERT_TRUE(audition);
+    checks = provider->storage->read_binding_checks;
+    EXPECT_TRUE(images.audition_metadata(audition->audition_id, "owner"));
+    EXPECT_EQ(provider->storage->read_binding_checks, checks);
+    EXPECT_TRUE(images.audition_range(audition->audition_id, "owner", 0U, 44U));
+    EXPECT_EQ(provider->storage->read_binding_checks - checks, 1U);
+    axk::CancellationSource cancellation;
+    std::size_t pcm_reads{};
+    provider->storage->before_read = [&](std::uint64_t offset, std::size_t size) {
+        if (offset < pcm_end && offset + size > pcm_start) {
+            ++pcm_reads;
+            cancellation.cancel();
+        }
+    };
+    const auto interrupted = images.preview(target, "owner", object_id, 1024U, image->revision, cancellation.token());
+    ASSERT_FALSE(interrupted);
+    EXPECT_EQ(interrupted.error().code, "operation_cancelled");
+    EXPECT_EQ(pcm_reads, 1U);
+    provider->storage->before_read = {};
+    const auto complete = images.preview(target, "owner", object_id, 1024U, image->revision);
+    ASSERT_TRUE(complete) << complete.error().message;
+    ASSERT_EQ(complete->lanes.size(), 1U);
+    ASSERT_EQ(complete->lanes.front().bins.size(), 1024U);
+    for (const auto &bin : complete->lanes.front().bins) {
+        EXPECT_EQ(bin.minimum, 0x1212);
+        EXPECT_EQ(bin.maximum, 0x1212);
+    }
+    EXPECT_EQ(provider->storage->writes, 0U);
+    EXPECT_EQ(provider->storage->upgrades, 0U);
 }
 
 TEST_F(DeviceSessions, OpeningAndSampleRenameDoNotReadUnrelatedPcm) {

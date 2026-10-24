@@ -3,12 +3,14 @@
     import type { LinkedWaveDataItem, SampleWaveformPreview, WaveformBin } from '../types';
     import { waveformPlayheadRatio, type WaveformTimeline } from '../waveformTimeline';
     import Waveform from './Waveform.svelte';
+    import type { WaveformReadDraw } from '../readDiagnostics';
 
     interface Props {
         preview: SampleWaveformPreview;
         sampleObjectId: string;
         playingObjectId?: string | null;
         playheadFrame?: number;
+        ondraw?: (draw: WaveformReadDraw) => void;
     }
 
     interface DisplayLane {
@@ -24,7 +26,7 @@
         linked: LinkedWaveDataItem | undefined;
     }
 
-    let { preview, sampleObjectId, playingObjectId = null, playheadFrame = 0 }: Props = $props();
+    let { preview, sampleObjectId, playingObjectId = null, playheadFrame = 0, ondraw }: Props = $props();
     const lanes = $derived.by<DisplayLane[]>(() => {
         if (preview.preview) {
             return preview.preview.lanes.map((lane) => ({
@@ -80,6 +82,7 @@
                 <div class="inspector-wave-canvas">
                     <Waveform
                         values={lane.bins}
+                        {ondraw}
                         {timeline}
                         playheadRatio={playingObjectId === sampleObjectId
                             ? waveformPlayheadRatio(timeline, playheadFrame, playbackSampleRate)

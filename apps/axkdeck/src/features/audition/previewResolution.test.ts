@@ -3,6 +3,7 @@ import { AuditionWorkflow } from './workflow.svelte';
 import type { CatalogWorkflow } from '../catalog/workflow.svelte';
 import type { AudioIdentity, ImageTransport, PreviewEnvelope, SamplerObject } from '../../lib/transport';
 import type { WaveDataItem } from '../../lib/types';
+import { AuditionController } from '../../lib/audio/auditionController';
 
 function fixture(initialBins = 0) {
     const bins = (count: number) => Array.from({ length: count }, () => ({ minimum: -0.25, maximum: 0.25 }));
@@ -27,10 +28,18 @@ function fixture(initialBins = 0) {
         signal?: AbortSignal;
     }[] = [];
     const preview = vi.fn(
-        (_session: number, _objectId: string, _bins: number, signal?: AbortSignal) =>
+        (_session: number, _objectId: string, _bins: number, { signal }: Parameters<ImageTransport['preview']>[3]) =>
             new Promise<PreviewEnvelope>((resolve, reject) => requests.push({ resolve, reject, signal })),
     );
-    const catalog = { waveData: [item], samplePreviewStates: {} } as unknown as CatalogWorkflow;
+    const catalog = {
+        waveData: [item],
+        samplePreviewStates: {},
+        relationships: [],
+        sampleBanks: [],
+        samples: [],
+        editorObjectIds: {},
+        inspectorObjectId: '',
+    } as unknown as CatalogWorkflow;
     const status = vi.fn();
     const workflow = new AuditionWorkflow({
         transport: { preview, audioIdentity: () => identity } as unknown as ImageTransport,
@@ -79,11 +88,39 @@ function fixture(initialBins = 0) {
 }
 
 describe('adaptive waveform previews', () => {
+    it('retains an unchanged in-flight selection and defers audio until its actual draw without diagnostics', async () => {
+        const prefetch = vi.spyOn(AuditionController.prototype, 'prefetch').mockResolvedValue(undefined);
+        const f = fixture();
+        try {
+            await f.workflow.selectWaveData(f.catalog.waveData[0]!);
+            await f.workflow.selectWaveData(f.catalog.waveData[0]!);
+            expect(f.preview).toHaveBeenCalledOnce();
+            expect(f.requests[0]!.signal?.aborted).toBe(false);
+            f.workflow.prefetchObject('wave');
+            expect(prefetch).not.toHaveBeenCalled();
+            f.requests[0]!.resolve(f.result(1024));
+            await vi.waitFor(() => expect(f.catalog.waveData[0]!.previewState).toBe('ready'));
+            expect(prefetch).not.toHaveBeenCalled();
+            f.workflow.waveformDrawn('wave', { bins: 1024, width: 200, height: 24 });
+            expect(prefetch).toHaveBeenCalledExactlyOnceWith(1, 'wave');
+            await f.workflow.selectWaveData(f.catalog.waveData[0]!);
+            f.workflow.prefetchObject('wave');
+            expect(prefetch).toHaveBeenCalledTimes(1);
+            f.workflow.waveformDrawn('wave', { bins: 1024, width: 200, height: 24 });
+            expect(prefetch).toHaveBeenCalledTimes(1);
+        } finally {
+            await f.workflow.dispose();
+            prefetch.mockRestore();
+        }
+    });
     it('retains the visible preview while upgrading and deduplicates the requested resolution', async () => {
         const f = fixture(1024);
         f.workflow.requestWaveformPreview(f.catalog.waveData[0]!, 2048);
         f.workflow.requestWaveformPreview(f.catalog.waveData[0]!, 2048);
-        expect(f.preview).toHaveBeenCalledExactlyOnceWith(1, 'wave', 2048, expect.any(AbortSignal));
+        expect(f.preview).toHaveBeenCalledExactlyOnceWith(1, 'wave', 2048, {
+            signal: expect.any(AbortSignal),
+            readIntent: 'REFINEMENT',
+        });
         expect(f.catalog.waveData[0]!.previewState).toBe('ready');
         expect(f.catalog.waveData[0]!.waveform).toHaveLength(1024);
         f.requests[0]!.resolve(f.result(2048));

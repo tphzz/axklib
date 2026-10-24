@@ -279,6 +279,9 @@ static void test_remote_roundtrip() {
     CHECK((*dev)->sector_count() == 64);
     CHECK((*dev)->writable());
 
+    CHECK(err((*dev)->verify_binding()) == Errc::not_a_usb_disk);
+    CHECK(!(*session)->broken());
+
     const auto pat = pattern(512 * 10, 3);
     CHECK((*dev)->write(5, pat).has_value());
     std::vector<std::byte> back(pat.size());

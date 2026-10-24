@@ -1734,6 +1734,13 @@
             "type": "array",
             "uniqueItems": true
           },
+          "readIntent": {
+            "enum": [
+              "PLAYBACK",
+              "PREFETCH"
+            ],
+            "type": "string"
+          },
           "sourceWindow": {
             "default": "PLAYBACK",
             "enum": [
@@ -1747,7 +1754,8 @@
           "imageId",
           "objectIds",
           "documentId",
-          "expectedRevision"
+          "expectedRevision",
+          "readIntent"
         ],
         "type": "object"
       },
@@ -8210,60 +8218,46 @@
         ],
         "type": "object"
       },
-      "ImagePreviewResponse": {
+      "ImagePreviewRequest": {
         "additionalProperties": false,
         "properties": {
-          "data": {
-            "additionalProperties": false,
-            "properties": {
-              "documentId": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "imageId": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "lanes": {
-                "items": {
-                  "$ref": "#/components/schemas/ImagePreviewLane"
-                },
-                "maxItems": 2,
-                "minItems": 1,
-                "type": "array"
-              },
-              "objectId": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "revision": {
-                "minimum": 1,
-                "type": "integer"
-              },
-              "warnings": {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              }
-            },
-            "required": [
-              "objectId",
-              "lanes",
-              "imageId",
-              "documentId",
-              "revision",
-              "warnings"
-            ],
-            "type": "object"
+          "bins": {
+            "maximum": 4096,
+            "minimum": 1,
+            "type": "integer"
           },
-          "meta": {
-            "$ref": "#/components/schemas/ResponseMeta"
+          "documentId": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "expectedRevision": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "imageId": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "objectId": {
+            "maxLength": 512,
+            "minLength": 1,
+            "type": "string"
+          },
+          "readIntent": {
+            "enum": [
+              "SELECTED",
+              "REFINEMENT"
+            ],
+            "type": "string"
           }
         },
         "required": [
-          "data",
-          "meta"
+          "imageId",
+          "documentId",
+          "expectedRevision",
+          "objectId",
+          "bins",
+          "readIntent"
         ],
         "type": "object"
       },
@@ -12052,6 +12046,50 @@
           "expectedRevision",
           "contentScopeId",
           "documentId"
+        ],
+        "type": "object"
+      },
+      "ImageWaveformPreview": {
+        "additionalProperties": false,
+        "properties": {
+          "documentId": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "imageId": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "lanes": {
+            "items": {
+              "$ref": "#/components/schemas/ImagePreviewLane"
+            },
+            "maxItems": 2,
+            "minItems": 1,
+            "type": "array"
+          },
+          "objectId": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "revision": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "objectId",
+          "lanes",
+          "imageId",
+          "documentId",
+          "revision",
+          "warnings"
         ],
         "type": "object"
       },
@@ -18407,7 +18445,8 @@
                     "imageId": "x",
                     "objectIds": [
                       "x"
-                    ]
+                    ],
+                    "readIntent": "PLAYBACK"
                   }
                 }
               },
@@ -43527,6 +43566,369 @@
         ]
       }
     },
+    "/image-waveform-previews": {
+      "post": {
+        "operationId": "images.preview",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "examples": {
+                "default": {
+                  "value": {
+                    "bins": 1,
+                    "documentId": "x",
+                    "expectedRevision": 1,
+                    "imageId": "x",
+                    "objectId": "x",
+                    "readIntent": "SELECTED"
+                  }
+                }
+              },
+              "schema": {
+                "$ref": "#/components/schemas/ImagePreviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "success": {
+                    "value": {
+                      "data": {
+                        "error": {},
+                        "jobId": "x",
+                        "latestSequence": 1,
+                        "operationId": "x",
+                        "progress": {
+                          "completed": 0,
+                          "message": "x",
+                          "phase": "x",
+                          "total": 0
+                        },
+                        "result": {},
+                        "state": "QUEUED"
+                      },
+                      "meta": {
+                        "requestId": "request-1"
+                      }
+                    }
+                  },
+                  "warning": {
+                    "value": {
+                      "data": {
+                        "error": {},
+                        "jobId": "x",
+                        "latestSequence": 1,
+                        "operationId": "x",
+                        "progress": {
+                          "completed": 0,
+                          "message": "x",
+                          "phase": "x",
+                          "total": 0
+                        },
+                        "result": {},
+                        "state": "QUEUED"
+                      },
+                      "meta": {
+                        "requestId": "request-1",
+                        "warnings": [
+                          {
+                            "code": "example_warning",
+                            "context": {},
+                            "message": "operation completed with a warning"
+                          }
+                        ]
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/JobResponse"
+                }
+              }
+            },
+            "description": "Job accepted",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Malformed or schema-invalid request",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication is required",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authenticated caller is not authorized",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Referenced resource does not exist",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Request conflicts with current state",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Configured request limit exceeded",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unsupported or invalid domain request",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Transient server capacity exhausted",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Contained internal failure",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          }
+        },
+        "x-axklib-operation-descriptors": [
+          {
+            "cliCommand": null,
+            "cliParity": false,
+            "id": "images.preview",
+            "mode": "job",
+            "operationClass": "read",
+            "requestSchema": "ImagePreviewRequest",
+            "requiresIdempotency": false,
+            "resultSchema": "ImageWaveformPreview",
+            "variant": null
+          }
+        ],
+        "x-axklib-operation-ids": [
+          "images.preview"
+        ]
+      }
+    },
     "/images": {
       "post": {
         "operationId": "images.open",
@@ -44610,102 +45012,6 @@
           "schema": {
             "minLength": 1,
             "type": "string"
-          }
-        }
-      ]
-    },
-    "/images/{imageId}/documents/{documentId}/preview": {
-      "get": {
-        "operationId": "images.preview",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ImagePreviewResponse"
-                }
-              }
-            },
-            "description": "Bounded document-scoped PCM min/max lanes",
-            "headers": {
-              "X-Request-Id": {
-                "$ref": "#/components/headers/XRequestId"
-              }
-            }
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "examples": {
-                  "default": {
-                    "value": {
-                      "error": {
-                        "code": "invalid_request",
-                        "context": {},
-                        "message": "request could not be processed",
-                        "requestId": "request-1",
-                        "retryable": false
-                      }
-                    }
-                  }
-                },
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Request could not be completed",
-            "headers": {
-              "X-Request-Id": {
-                "$ref": "#/components/headers/XRequestId"
-              }
-            }
-          }
-        }
-      },
-      "parameters": [
-        {
-          "in": "path",
-          "name": "imageId",
-          "required": true,
-          "schema": {
-            "type": "string"
-          }
-        },
-        {
-          "in": "query",
-          "name": "objectId",
-          "required": true,
-          "schema": {
-            "type": "string"
-          }
-        },
-        {
-          "in": "query",
-          "name": "bins",
-          "required": true,
-          "schema": {
-            "maximum": 4096,
-            "minimum": 1,
-            "type": "integer"
-          }
-        },
-        {
-          "in": "path",
-          "name": "documentId",
-          "required": true,
-          "schema": {
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        {
-          "in": "query",
-          "name": "expectedRevision",
-          "required": true,
-          "schema": {
-            "minimum": 1,
-            "type": "integer"
           }
         }
       ]

@@ -102,8 +102,13 @@ export class HttpImageSessionReads {
         const session = this.imageSessions.get(sessionId);
         return { ...documentTarget(session), revision: session.revision };
     }
-    preview(sessionId: number, objectId: string, bins: number, signal?: AbortSignal) {
-        return this.imageSessions.native.preview(sessionId, objectId, bins, signal);
+    preview(
+        sessionId: number,
+        objectId: string,
+        bins: number,
+        options: import('./audioReadOptions').PreviewReadOptions,
+    ) {
+        return this.imageSessions.native.preview(sessionId, objectId, bins, options);
     }
 
     keepImageAlive(sessionId: number): Promise<void> {

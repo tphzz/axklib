@@ -9,6 +9,7 @@ from typing import Any
 from urllib.parse import quote
 
 Get = Callable[[str, dict[str, Any]], dict[str, Any]]
+RunJob = Callable[[str, dict[str, Any]], dict[str, Any]]
 
 
 def native_items(get: Get, path: str, maximum_entries: int) -> list[dict[str, Any]]:
@@ -46,6 +47,7 @@ def check_object_detail(get: Get, path: str, object_id: str, document_id: str, r
 def inspect_native(
     get: Get, path: str, document: dict[str, Any], revision: int,
     expected: dict[str, Any], maximum_entries: int, image_id: str | None = None,
+    run_job: RunJob | None = None,
 ) -> dict[str, Any]:
     objects = native_items(get, path + "/objects", maximum_entries)
     ids = {item["id"] for item in objects}
@@ -63,7 +65,9 @@ def inspect_native(
             inspected.add(item["type"])
             details += 1
         if expected.get("wavePreviews") and item["type"] == "wave":
-            check_wave_preview(get, path, item["id"], image_id, document["id"], revision)
+            if run_job is None:
+                raise RuntimeError("wave previews require completed job retrieval")
+            check_wave_preview(run_job, item["id"], image_id, document["id"], revision)
             previews += 1
     relationships = native_items(get, path + "/relationships", maximum_entries)
     for edge in relationships:
@@ -85,9 +89,12 @@ def inspect_native(
 
 
 def check_wave_preview(
-    get: Get, path: str, object_id: str, image_id: str | None, document_id: str, revision: int,
+    run_job: RunJob, object_id: str, image_id: str | None, document_id: str, revision: int,
 ) -> None:
-    preview = get(path + "/preview", {"objectId": object_id, "expectedRevision": revision, "bins": 64})
+    preview = run_job("/image-waveform-previews", {
+        "imageId": image_id, "documentId": document_id, "objectId": object_id,
+        "expectedRevision": revision, "bins": 64, "readIntent": "SELECTED",
+    })
     if image_id is None or (preview["imageId"], preview["documentId"], preview["revision"], preview["objectId"]) != (
         image_id, document_id, revision, object_id,
     ):

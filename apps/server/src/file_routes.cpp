@@ -42,8 +42,6 @@ void register_file_routes(ServerCrowApp &app, FileRoutes routes) {
         decoded_path_route(std::move(routes.image_allocation_map)));
     app.route_dynamic("/api/v1/images/<string>/documents/<string>/validation/issues")(
         decoded_path_route(std::move(routes.image_validation)));
-    app.route_dynamic("/api/v1/images/<string>/documents/<string>/preview")(
-        decoded_path_route(std::move(routes.image_preview)));
     app.route_dynamic("/api/v1/auditions/<string>/content")
         .methods(crow::HTTPMethod::Get)(std::move(routes.audition_content));
     app.route_dynamic("/api/v1/auditions/<string>")

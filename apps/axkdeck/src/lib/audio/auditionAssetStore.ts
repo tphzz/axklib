@@ -97,8 +97,19 @@ export class AuditionAssetStore {
 
     cancelSpeculativeExcept(key: string): void {
         for (const [pendingKey, pending] of this.pending) {
-            if (pendingKey !== key && pending.speculative) pending.abort.abort();
+            if (pendingKey !== key && pending.speculative) {
+                pending.abort.abort();
+                this.pending.delete(pendingKey);
+            }
         }
+    }
+
+    cancelSpeculative(): void {
+        for (const [key, pending] of this.pending)
+            if (pending.speculative) {
+                pending.abort.abort();
+                this.pending.delete(key);
+            }
     }
 
     cancelActiveRequest(replacementKey?: string): void {
@@ -137,11 +148,13 @@ export class AuditionAssetStore {
         }
 
         const existing = this.pending.get(key);
-        if (existing) {
+        if (existing && !speculative && existing.speculative) {
+            existing.abort.abort();
+            this.pending.delete(key);
+        } else if (existing) {
             readTrace('audio-cache', { sessionId, objectId, speculative }, readContext(sessionId, objectId))?.finish(
                 'pending',
             );
-            if (!speculative) existing.speculative = false;
             if (run) this.emit(run, 'audio_cache_wait', { speculative: existing.speculative });
             return existing.promise;
         }
@@ -270,7 +283,8 @@ export class AuditionAssetStore {
         let auditionId: string | undefined;
         try {
             const prepareStarted = monotonicNow();
-            const bundle = await this.transport.prepareAuditionBundle(sessionId, objectIds, signal);
+            const readIntent = speculative ? 'PREFETCH' : 'PLAYBACK';
+            const bundle = await this.transport.prepareAuditionBundle(sessionId, objectIds, { signal, readIntent });
             auditionId = bundle.auditionId;
             checkIdentity();
             if (!sameAudioIdentity(identity, bundle)) throw abortError();
@@ -317,11 +331,10 @@ export class AuditionAssetStore {
             const decoder = context ?? new OfflineAudioContext(maximumChannels, decoderFrameCount, decoderSampleRate);
 
             const fetchStarted = monotonicNow();
-            const content = await this.transport.readAuditionContent(
-                bundle.auditionId,
-                bundle.contentSizeBytes,
+            const content = await this.transport.readAuditionContent(bundle.auditionId, bundle.contentSizeBytes, {
                 signal,
-            );
+                readIntent,
+            });
             checkIdentity();
             if (run) {
                 this.emit(run, 'audio_bundle_fetch_completed', {

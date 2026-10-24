@@ -48,7 +48,9 @@ function setup() {
     let nextId = 0;
     const transport = {
         audioIdentity: vi.fn(() => ({ ...identity })),
-        prepareAuditionBundle: vi.fn(async () => bundle(identity, `asset-${++nextId}`)),
+        prepareAuditionBundle: vi.fn<ImageTransport['prepareAuditionBundle']>(async () =>
+            bundle(identity, `asset-${++nextId}`),
+        ),
         readAuditionContent: vi.fn(async () => new ArrayBuffer(52)),
         deleteAudition: vi.fn(async () => {}),
     };
@@ -66,6 +68,27 @@ function setup() {
 }
 
 describe('audition asset identity', () => {
+    it('replaces pending speculative preparation with foreground playback and cleans both resources', async () => {
+        const fixture = setup();
+        const preparation = deferred<AuditionBundleDescriptor>();
+        fixture.transport.prepareAuditionBundle.mockImplementationOnce(() => preparation.promise);
+        const speculative = fixture.store.load(1, 'wave-1', undefined, true).catch((error: unknown) => error);
+        const foreground = fixture.load();
+        try {
+            expect(fixture.transport.prepareAuditionBundle).toHaveBeenCalledTimes(2);
+            expect(fixture.transport.prepareAuditionBundle.mock.calls[1]?.[2]).toMatchObject({
+                readIntent: 'PLAYBACK',
+            });
+            expect(await foreground).not.toBeNull();
+        } finally {
+            preparation.resolve(bundle(initialIdentity, 'cancelled-prefetch'));
+            await Promise.allSettled([speculative, foreground]);
+            await fixture.store.dispose();
+        }
+        expect(await speculative).toMatchObject({ name: 'AbortError' });
+        expect(fixture.transport.deleteAudition).toHaveBeenCalledWith('cancelled-prefetch');
+    });
+
     it.each([{ imageId: 'image-2' }, { documentId: 'document-2' }, { revision: 2 }])(
         'separates cached PCM when identity changes by %j',
         async (change) => {

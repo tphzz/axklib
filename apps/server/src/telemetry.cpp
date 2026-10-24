@@ -31,7 +31,8 @@ axk::server::RequestTelemetrySnapshot axk::server::RequestTelemetry::snapshot() 
 }
 
 std::string axk::server::structured_request_log(std::string_view request_id, std::string_view method,
-                                                std::string_view path, int status, std::chrono::milliseconds duration) {
+                                                std::string_view path, int status, std::chrono::milliseconds duration,
+                                                bool duration_measured) {
     const auto query = path.find('?');
     const auto bounded_path = path.substr(0U, std::min(query, std::size_t{256U}));
     return nlohmann::json{{"event", "http_request"},
@@ -43,7 +44,8 @@ std::string axk::server::structured_request_log(std::string_view request_id, std
                           {"method", method.substr(0U, 16U)},
                           {"path", bounded_path},
                           {"status", status},
-                          {"durationMs", std::max<std::int64_t>(duration.count(), 0)}}
+                          {"durationMs", std::max<std::int64_t>(duration.count(), 0)},
+                          {"durationMeasured", duration_measured}}
         .dump();
 }
 

@@ -378,6 +378,7 @@
             onprogramselect={selectSingleProgram}
             onwavedataselect={capacitySelect.wave}
             onpreviewrequest={(item, bins) => audition.requestWaveformPreview(item, bins)}
+            onwaveformdraw={(item, draw) => audition.waveformDrawn(item.objectKey, draw)}
             onplay={(item) => void audition.playWaveData(item)}
             onprefetch={(item) => audition.prefetchObject(item.objectKey)}
             onstop={() => void audition.stop()}
@@ -434,6 +435,7 @@
                 onrelationshipnavigate={(objectId, focusTarget) =>
                     void navigateInspectorRelationship(objectId, focusTarget)}
                 onmetadatacopy={copyInspectorMetadata}
+                onwaveformdraw={(id, draw, identity) => audition.waveformDrawn(id, draw, identity)}
             />{/if}
 
         {#if canRevealFiles}<InspectorModeFooter mode="files" onclick={onrevealFiles} />{/if}

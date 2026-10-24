@@ -33,6 +33,7 @@
     } = $props();
     const editors = new ObjectEditorWorkflow({
         transport: untrack(() => transport),
+        readStarted: (sessionId, objectId) => audition.selectionReads.metadataCompletion(sessionId, objectId),
         refresh: () =>
             audition.refreshEditorWorkspace(() =>
                 imageSession.refresh(imageSession.currentSourcePreference(), 'editor'),
@@ -70,6 +71,9 @@
     mappings.forEach(provideMappingEditor);
     provideEditorAudio({
         mapping: mappingAudio,
+        get selectionReads() {
+            return audition.selectionReads;
+        },
         get transport() {
             return transport;
         },

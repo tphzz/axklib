@@ -1,5 +1,6 @@
 #pragma once
 
+#include "axklib/io.hpp"
 #include "axklib/sdk/diagnostics.hpp"
 
 #include <array>
@@ -38,6 +39,8 @@ enum class ReadMetric : std::size_t {
     lanes,
     helper_reads,
     direct_reads,
+    identity_time,
+    session_wait,
     count
 };
 
@@ -45,7 +48,8 @@ enum class ReadMetric : std::size_t {
 // cumulative snapshots: another session on the same carrier must not be attributed here.
 class ReadDiagnosticScope {
   public:
-    ReadDiagnosticScope(diagnostic_sink *sink, std::string_view event) noexcept;
+    ReadDiagnosticScope(diagnostic_sink *sink, std::string_view event,
+                        const CancellationToken *cancellation = nullptr) noexcept;
     ~ReadDiagnosticScope();
     ReadDiagnosticScope(const ReadDiagnosticScope &) = delete;
     ReadDiagnosticScope &operator=(const ReadDiagnosticScope &) = delete;
@@ -72,6 +76,7 @@ class ReadDiagnosticScope {
     std::size_t phase_count_{};
     Counters total_{};
     bool completed_{};
+    const CancellationToken *cancellation_{};
     inline static thread_local ReadDiagnosticScope *current_{};
     void close_phase(Clock::time_point now) noexcept;
     void emit(std::string_view phase, std::uint64_t duration_us, const Counters &counters,

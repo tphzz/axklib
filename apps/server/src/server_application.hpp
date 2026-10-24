@@ -122,8 +122,6 @@ class ServerApplication {
                                                  const std::string &member_id);
     crow::response image_validation_response(const crow::request &request, const std::string &image_id,
                                              const std::string &document_id);
-    crow::response image_preview_response(const crow::request &request, const std::string &image_id,
-                                          const std::string &document_id);
     crow::response audition_content_response(const crow::request &request, const std::string &audition_id);
     crow::response audition_delete_response(const crow::request &request, const std::string &audition_id);
 

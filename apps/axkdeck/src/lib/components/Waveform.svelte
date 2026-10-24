@@ -5,6 +5,7 @@
     import { observeCanvas } from '../observeCanvas';
     import { previewBinCount } from '../waveformPreview';
     import { waveformContentRatio, waveformFrameWindow, type WaveformTimeline } from '../waveformTimeline';
+    import type { WaveformReadDraw } from '../readDiagnostics';
 
     interface Props {
         values: readonly WaveformBin[];
@@ -12,9 +13,11 @@
         playheadRatio?: number;
         timeline?: WaveformTimeline;
         onresolution?: (bins: number) => void;
+        ondraw?: (draw: WaveformReadDraw) => void;
+        redrawKey?: unknown;
     }
 
-    let { values, large = false, playheadRatio = 0, timeline, onresolution }: Props = $props();
+    let { values, large = false, playheadRatio = 0, timeline, onresolution, ondraw, redrawKey }: Props = $props();
     let canvas: HTMLCanvasElement;
     const contentRatio = $derived(timeline ? waveformContentRatio(timeline) : 1);
     const normalizedPlayheadRatio = $derived(Math.max(0, Math.min(1, playheadRatio)));
@@ -45,11 +48,13 @@
         for (const column of waveformPixelColumns(values, contentRatio, bounds.width, width, height)) {
             context.fillRect(column.x, column.y, column.width, column.height);
         }
+        if (values.length && bounds.width > 1 && bounds.height > 1) ondraw?.({ bins: values.length, width, height });
     }
 
     $effect(() => {
         values;
         contentRatio;
+        redrawKey;
         draw();
     });
 

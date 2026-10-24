@@ -2111,26 +2111,27 @@ describe('App panel layout', () => {
         renderAcknowledgedApp();
 
         await chooseNestedImage();
+        await waitFor(() => expect(screen.getByRole('button', { name: 'Open' })).toHaveProperty('disabled', false));
         const first = await screen.findByRole('button', { name: /Program 1/ });
         const second = screen.getByRole('button', { name: /Program 2/ });
         const third = screen.getByRole('button', { name: /Program 3/ });
         const fourth = screen.getByRole('button', { name: /Program 4/ });
 
         await fireEvent.click(first);
-        expect(screen.getByRole('status').textContent).toContain('1 selected');
+        expect(screen.getByText('1 selected', { selector: '[role="status"]' })).toBeTruthy();
         await fireEvent.click(fourth, { shiftKey: true });
-        expect(screen.getByRole('status').textContent).toContain('4 selected');
+        expect(screen.getByText('4 selected', { selector: '[role="status"]' })).toBeTruthy();
         expect(first.classList.contains('active')).toBe(true);
         expect(fourth.classList.contains('active')).toBe(false);
 
         await fireEvent.click(second, { ctrlKey: true });
-        expect(screen.getByRole('status').textContent).toContain('3 selected');
+        expect(screen.getByText('3 selected', { selector: '[role="status"]' })).toBeTruthy();
         expect(second.classList.contains('selected')).toBe(false);
         expect(second.classList.contains('active')).toBe(false);
         expect(second.getAttribute('aria-pressed')).toBe('false');
 
         await fireEvent.click(third, { ctrlKey: true });
-        expect(screen.getByRole('status').textContent).toContain('2 selected');
+        expect(screen.getByText('2 selected', { selector: '[role="status"]' })).toBeTruthy();
         expect(third.classList.contains('selected')).toBe(false);
         expect(third.classList.contains('active')).toBe(false);
         expect(third.getAttribute('aria-pressed')).toBe('false');
@@ -2211,17 +2212,18 @@ describe('App panel layout', () => {
         renderAcknowledgedApp();
 
         await chooseNestedImage();
+        await waitFor(() => expect(screen.getByRole('button', { name: 'Open' })).toHaveProperty('disabled', false));
         await fireEvent.click(await screen.findByText('Concert Grand'));
-        expect(screen.getByRole('status').textContent).toContain('1 selected');
+        expect(screen.getByText('1 selected', { selector: '[role="status"]' })).toBeTruthy();
 
         await fireEvent.click(screen.getByRole('button', { name: /Drums/ }));
         await fireEvent.click(screen.getByRole('button', { name: 'Sample Banks' }));
         await fireEvent.click(await screen.findByRole('button', { name: 'Inspect Studio Kit' }), { ctrlKey: true });
 
-        expect(screen.getByRole('status').textContent).toContain('2 selected');
+        expect(screen.getByText('2 selected', { selector: '[role="status"]' })).toBeTruthy();
         await fireEvent.click(screen.getByRole('button', { name: 'Export 2 selected objects' }));
 
-        const dialog = await screen.findByRole('dialog', { name: 'Export axklib package' });
+        const dialog = await screen.findByRole('dialog', { name: 'Export axklib package' }, { timeout: 5_000 });
         expect(within(dialog).getByText('Partition 0 · Piano')).toBeTruthy();
         expect(within(dialog).getByText('Partition 1 · Drums')).toBeTruthy();
         expect(within(dialog).getByText('1 Program · 1 Sample Bank')).toBeTruthy();

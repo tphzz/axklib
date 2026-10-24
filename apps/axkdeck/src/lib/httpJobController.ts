@@ -61,6 +61,7 @@ export class HttpJobController {
             let connection: EventConnection | undefined;
             let reconnectAttempts = 0;
             let stableConnectionTimer: ReturnType<typeof setTimeout> | undefined;
+            let cancellationTimer: ReturnType<typeof setTimeout> | undefined;
             let settled = false;
             let cancellationRequested = false;
             let work = Promise.resolve();
@@ -77,6 +78,7 @@ export class HttpJobController {
                 if (settled) return;
                 settled = true;
                 clearStableConnectionTimer();
+                clearTimeout(cancellationTimer);
                 signal?.removeEventListener('abort', handleAbort);
                 connection?.close();
                 resolve(job);
@@ -85,18 +87,20 @@ export class HttpJobController {
                 if (settled) return;
                 settled = true;
                 clearStableConnectionTimer();
+                clearTimeout(cancellationTimer);
                 signal?.removeEventListener('abort', handleAbort);
                 connection?.close();
                 reject(reason);
             };
-            const publishSnapshot = (snapshot: ApiJobSnapshot): JobState => {
+            const publishSnapshot = (snapshot: ApiJobSnapshot): void => {
+                if (settled) return;
                 afterSequence = Math.max(afterSequence, snapshot.latestSequence ?? afterSequence);
                 const mapped = this.map(snapshot, jobId);
                 onUpdate(mapped);
                 if (this.terminal(mapped)) finish(mapped);
-                return mapped;
             };
             const publishEvent = (event: ApiJobEvent): void => {
+                if (settled) return;
                 afterSequence = event.sequence;
                 const mapped = this.mapEvent(event, jobId);
                 onUpdate(mapped);
@@ -130,10 +134,17 @@ export class HttpJobController {
             const enqueue = (task: () => Promise<void>): void => {
                 work = work.then(task).catch(fail);
             };
+            const pollCancellation = async (): Promise<void> => {
+                if (settled) return;
+                await readSnapshot();
+                if (!settled) cancellationTimer = setTimeout(() => void pollCancellation().catch(fail), 100);
+            };
             const handleAbort = (): void => {
                 if (settled || cancellationRequested) return;
                 cancellationRequested = true;
-                enqueue(async () => {
+                // Cancellation must reach the server even while event setup or
+                // replay is stalled. Reconciliation still owns event ordering.
+                void (async () => {
                     try {
                         await this.cancel(jobId);
                     } catch (reason) {
@@ -141,8 +152,8 @@ export class HttpJobController {
                         if (!settled) throw reason;
                         return;
                     }
-                    await reconcile();
-                });
+                    await pollCancellation();
+                })().catch(fail);
             };
             const handleEvent = (event: ApiJobEvent): void => {
                 if (settled || event.jobId !== remoteId || event.sequence <= afterSequence) return;
@@ -172,10 +183,15 @@ export class HttpJobController {
                                 return;
                             }
                             const delay = Math.min(2_000, 100 * 2 ** (reconnectAttempts - 1));
-                            setTimeout(() => void connect(), delay);
+                            setTimeout(() => void connect().catch(fail), delay);
                         });
                     });
+                    if (settled) {
+                        connection.close();
+                        return;
+                    }
                     await connection.opened;
+                    if (settled) return;
                     clearStableConnectionTimer();
                     stableConnectionTimer = setTimeout(markConnectionHealthy, 10_000);
                     enqueue(reconcile);
@@ -188,13 +204,13 @@ export class HttpJobController {
                         return;
                     }
                     const delay = Math.min(2_000, 100 * 2 ** (reconnectAttempts - 1));
-                    setTimeout(() => void connect(), delay);
+                    setTimeout(() => void connect().catch(fail), delay);
                 }
             };
 
             enqueue(async () => {
                 await reconcile();
-                if (!settled) await connect();
+                if (!settled) void connect().catch(fail);
             });
             signal?.addEventListener('abort', handleAbort, { once: true });
             if (signal?.aborted) handleAbort();

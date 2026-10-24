@@ -55,6 +55,10 @@ class BlockDevice {
     // Call before telling the user the card can be removed. No-op on read-only handles.
     Result<void> flush() noexcept;
 
+    // Fresh identity check on this opened device, without reopening it or listing disks.
+    // Backends without this capability fail closed; file images are not USB bindings.
+    Result<void> verify_binding() noexcept;
+
   protected:
     BlockDevice() = default;
     // Called with validated, sector-aligned ranges, kIoAlignment-aligned buffers of at most
@@ -62,6 +66,7 @@ class BlockDevice {
     virtual Result<void> read_raw(std::uint64_t offset, std::span<std::byte> out) = 0;
     virtual Result<void> write_raw(std::uint64_t offset, std::span<const std::byte> in) = 0;
     virtual Result<void> flush_raw() = 0;
+    virtual Result<void> verify_binding_raw();
     // Called once per write() with the whole validated range, before anything is written,
     // so a device can refuse a range atomically instead of failing halfway through.
     virtual Result<void> check_write(std::uint64_t /*lba*/, std::uint64_t /*sectors*/) { return {}; }

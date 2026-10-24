@@ -10,6 +10,7 @@
 #include <cstring>
 #include <cwchar>
 #include <format>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -97,6 +98,8 @@ Result<DWORD> disk_number(HANDLE h) {
     DWORD n = 0;
     if (!::DeviceIoControl(h, IOCTL_STORAGE_GET_DEVICE_NUMBER, nullptr, 0, &num, sizeof num, &n, nullptr))
         return fail(last_error());
+    if (n < sizeof num || num.DeviceType != FILE_DEVICE_DISK)
+        return fail(Errc::device_identity_unavailable);
     return num.DeviceNumber;
 }
 
@@ -162,9 +165,10 @@ Result<std::vector<Handle>> lock_and_dismount_volumes(DWORD disk) {
 class Win32Disk final : public BlockDevice {
   public:
     Win32Disk(Handle h, std::vector<Handle> locked, std::uint32_t ss, std::uint64_t count, bool writable,
-              bool is_device)
+              bool is_device, std::optional<DeviceInfo> expected = {},
+              std::optional<detail::Win32UsbIdentity> identity = {})
         : locked_(std::move(locked)), disk_(std::move(h)), ss_(ss), count_(count), writable_(writable),
-          is_device_(is_device) {}
+          is_device_(is_device), expected_(std::move(expected)), identity_(std::move(identity)) {}
 
     ~Win32Disk() override {
         if (is_device_ && written_) { // let Windows re-read a partition table we may have changed
@@ -179,6 +183,28 @@ class Win32Disk final : public BlockDevice {
     bool writable() const noexcept override { return writable_; }
 
   protected:
+    Result<void> verify_binding_raw() override {
+        if (!is_device_ || !expected_ || !identity_)
+            return fail(Errc::not_a_usb_disk);
+        const auto desc = query_descriptor(disk_.h);
+        if (!desc)
+            return fail(desc.error());
+        const auto geo = query_geometry(disk_.h);
+        if (!geo)
+            return fail(geo.error());
+        const auto number = disk_number(disk_.h);
+        if (!number)
+            return fail(number.error());
+        if (std::format(R"(\\.\PhysicalDrive{})", *number) != expected_->path)
+            return fail(Errc::device_connection_changed);
+        if (!desc->usb || desc->model != expected_->model || desc->serial != expected_->serial ||
+            desc->removable != expected_->removable)
+            return fail(Errc::device_descriptor_changed);
+        if (geo->sector_size != expected_->sector_size || geo->size_bytes != expected_->size_bytes)
+            return fail(Errc::device_geometry_changed);
+        return detail::win32_verify_usb_identity(*identity_);
+    }
+
     Result<void> read_raw(std::uint64_t off, std::span<std::byte> out) override {
         OVERLAPPED ov = at(off);
         DWORD n = 0;
@@ -223,6 +249,8 @@ class Win32Disk final : public BlockDevice {
     bool writable_;
     bool is_device_;
     bool written_ = false;
+    std::optional<DeviceInfo> expected_;
+    std::optional<detail::Win32UsbIdentity> identity_;
 };
 
 // Opens the device in this process. Fails with ERROR_ACCESS_DENIED when not elevated.
@@ -283,7 +311,7 @@ Result<std::unique_ptr<BlockDevice>> open_direct(const DeviceInfo &info, Access 
     }
 
     return std::make_unique<Win32Disk>(std::move(h), std::move(locked), geo->sector_size,
-                                       geo->size_bytes / geo->sector_size, rw, true);
+                                       geo->size_bytes / geo->sector_size, rw, true, info, *identity);
 }
 
 bool is_access_denied(const std::error_code &ec) {

@@ -1850,7 +1850,8 @@ TEST_F(ImageSessionTest, ReadDiagnosticsPreservePreviewPcmDetailsAndRejectedRequ
     ASSERT_FALSE(cancelled_baseline);
     ASSERT_FALSE(cancelled_trace);
     EXPECT_EQ(cancelled_trace.error().code, cancelled_baseline.error().code);
-    EXPECT_EQ(capture.events.back().outcome, "failed");
+    EXPECT_EQ(cancelled_trace.error().code, "operation_cancelled");
+    EXPECT_EQ(capture.events.back().outcome, "cancelled");
 }
 
 TEST_F(ImageSessionTest, ReturnsDecodedObjectDetailWithoutContentPayloads) {
@@ -2170,6 +2171,7 @@ TEST_F(ImageSessionTest, InvokesAuditionPreparationThroughTheApplicationRegistry
                                         {{"imageId", opened->image_id},
                                          {"documentId", "document-a-series-source-1"},
                                          {"expectedRevision", opened->revision},
+                                         {"readIntent", "PLAYBACK"},
                                          {"objectIds", {objects->items.front().id}}},
                                         {.owner_id = "owner-a",
                                          .request_id = "request-a",

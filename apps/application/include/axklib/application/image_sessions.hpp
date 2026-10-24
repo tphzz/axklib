@@ -606,6 +606,9 @@ class ImageSessionManager {
                                                             std::uint64_t offset, std::size_t size,
                                                             const CancellationToken &cancellation = {},
                                                             diagnostic_sink *diagnostics = nullptr);
+    [[nodiscard]] Result<ImageAudition> audition_metadata(std::string_view audition_id, std::string_view owner_id);
+    [[nodiscard]] Result<std::string> read_job_scope(const ImageDocumentRef &target, std::string_view owner_id,
+                                                     std::uint64_t expected_revision) const;
     [[nodiscard]] Result<void> delete_audition(std::string_view audition_id, std::string_view owner_id);
     void cleanup();
 

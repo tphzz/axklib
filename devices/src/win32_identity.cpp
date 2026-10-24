@@ -34,6 +34,21 @@ std::string utf8(std::wstring_view value) {
 }
 
 struct NodeApi {
+    Result<std::uint32_t> locate(const std::string &id) const {
+        const auto size =
+            ::MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, id.data(), static_cast<int>(id.size()), nullptr, 0);
+        if (size <= 0)
+            return fail(Errc::device_identity_unavailable);
+        std::wstring wide(static_cast<std::size_t>(size), L'\0');
+        if (::MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, id.data(), static_cast<int>(id.size()), wide.data(),
+                                  size) != size)
+            return fail(Errc::device_identity_unavailable);
+        DEVINST instance{};
+        const auto status = ::CM_Locate_DevNodeW(&instance, wide.data(), CM_LOCATE_DEVNODE_NORMAL);
+        if (status != CR_SUCCESS)
+            return fail(win_error(::CM_MapCrToWin32Err(status, ERROR_GEN_FAILURE)));
+        return static_cast<std::uint32_t>(instance);
+    }
     Result<std::string> device_id(std::uint32_t instance) const {
         std::array<wchar_t, MAX_DEVICE_ID_LEN> name{};
         const auto status =
@@ -68,6 +83,11 @@ struct NodeApi {
 };
 
 } // namespace
+
+Result<void> win32_verify_usb_identity(const Win32UsbIdentity &bound) {
+    NodeApi api;
+    return win32_revalidate_identity(api, bound);
+}
 
 Result<Win32UsbIdentity> win32_usb_identity(HANDLE disk) {
     STORAGE_DEVICE_NUMBER wanted{};

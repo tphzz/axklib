@@ -26,6 +26,13 @@ struct Api {
     std::optional<std::uint32_t> removed_on_arrival{};
     unsigned id_queries{};
 
+    Result<std::uint32_t> locate(const std::string &id) {
+        for (const auto &[instance, node] : nodes)
+            if (node.id == id)
+                return instance;
+        return std::unexpected(std::make_error_code(std::errc::no_such_device));
+    }
+
     Result<std::string> device_id(std::uint32_t node) {
         ++id_queries;
         const auto found = nodes.find(node);
@@ -83,6 +90,24 @@ void replug_with_reused_handles() {
         CHECK(selected->carrier_id == refreshed->carrier_id);
         CHECK(selected->connection_id != refreshed->connection_id);
     }
+}
+
+void targeted_checks_relocate_the_disk_and_reject_a_new_arrival() {
+    auto original = connection();
+    const auto bound = win32_node_identity(original, 1);
+    CHECK(bound.has_value());
+    if (!bound)
+        return;
+    auto current = connection(500);
+    CHECK(win32_revalidate_identity(current, *bound).has_value());
+    ++current.nodes.at(501).arrival;
+    CHECK(err(win32_revalidate_identity(current, *bound)) == Errc::device_connection_changed);
+    current = connection(500);
+    current.nodes.erase(501);
+    CHECK(err(win32_revalidate_identity(current, *bound)) == std::errc::no_such_device);
+    current = connection(500);
+    current.failed_arrival = 503;
+    CHECK(err(win32_revalidate_identity(current, *bound)) == std::errc::permission_denied);
 }
 
 void disk_restart_without_parent_replug() {
@@ -187,6 +212,7 @@ void identity_mismatch_reasons() {
 int main() {
     same_connection_in_different_processes();
     replug_with_reused_handles();
+    targeted_checks_relocate_the_disk_and_reject_a_new_arrival();
     disk_restart_without_parent_replug();
     removal_during_identity_query_and_retry();
     sibling_disks_have_distinct_connections();

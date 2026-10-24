@@ -45,6 +45,13 @@ Result<void> verify_bound(const Connection &connection) {
     return connection.device.transport->verify_bound();
 }
 
+Result<void> verify_read_bound(const Connection &connection) {
+    ReadDiagnosticScope::add(ReadMetric::binding_checks, 1U);
+    const ReadDiagnosticTimer trace{ReadMetric::binding_time};
+    const IoTiming timing{connection.reads.binding_checks, connection.reads.binding_nanoseconds};
+    return connection.device.transport->verify_read_bound();
+}
+
 Result<Json> load_json(const std::filesystem::path &path) {
     auto reader = FileReader::open(path);
     if (!reader || (*reader)->size() > 16U * 1024U * 1024U)
@@ -181,7 +188,8 @@ axk::Result<void> Source::read_exact_at(std::uint64_t offset, std::span<std::byt
                 guards_.emplace(start + at, *digest(data.subspan(at, sector_size)));
             }
             return {};
-        });
+        },
+        sealed_ ? 64U * 1024U : 0U);
     ReadDiagnosticScope::add(ReadMetric::cache_hits, cache_.hits - hits);
     ReadDiagnosticScope::add(ReadMetric::cache_misses, cache_.misses - misses);
     return result;

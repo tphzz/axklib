@@ -41,13 +41,17 @@ axk::app::Result<void> validate_source(const axk::native::PcmSource &source) {
 axk::app::Result<axk::app::ImageWaveformPreview> axk::app::ImageSessionManager::preview(
     const ImageDocumentRef &target, std::string_view owner_id, std::string_view object_id, std::size_t bin_count,
     std::uint64_t expected_revision, const CancellationToken &cancellation, diagnostic_sink *diagnostics) {
-    ReadDiagnosticScope trace{diagnostics, "image_preview_read"};
+    ReadDiagnosticScope trace{diagnostics, "image_preview_read", &cancellation};
+    if (cancellation.is_cancelled())
+        return std::unexpected(Error{"operation_cancelled", "Waveform read cancelled"});
     ReadDiagnosticScope::add(ReadMetric::requested_bins, bin_count);
     const auto session = implementation_->owned(target.image_id, owner_id);
     if (!session)
         return std::unexpected(session.error());
     trace.phase("lock-wait");
     const std::scoped_lock access{(*session)->access_mutex};
+    if (cancellation.is_cancelled())
+        return std::unexpected(Error{"operation_cancelled", "Waveform read cancelled"});
     trace.phase("metadata");
     auto selected = Implementation::document(**session, target.document_id);
     if (!selected)
@@ -61,10 +65,14 @@ axk::app::Result<axk::app::ImageWaveformPreview> axk::app::ImageSessionManager::
         return std::unexpected(session_error("audition_unsupported", "This document has no audio provider"));
     trace.phase("source-verify");
     if (auto verified = (*session)->sources.native_sources->verify(cancellation); !verified)
-        return std::unexpected(session_error("image_source_changed", verified.error().message));
+        return std::unexpected(session_error(
+            verified.error().code == ErrorCode::operation_cancelled ? "operation_cancelled" : "image_source_changed",
+            verified.error().message));
     if (bin_count == 0U || bin_count > 4096U)
         return std::unexpected(session_error("invalid_preview", "preview bin count is outside the configured range"));
     trace.phase("source-prepare");
+    if (cancellation.is_cancelled())
+        return std::unexpected(Error{"operation_cancelled", "Waveform read cancelled"});
     auto source = audio->prepare_source(object_id, native::PcmReadWindow::stored_pcm);
     if (!source)
         return std::unexpected(source.error());
@@ -98,6 +106,8 @@ axk::app::Result<axk::app::ImageWaveformPreview> axk::app::ImageSessionManager::
         lane.bins.assign(used_bins,
                          {std::numeric_limits<std::int32_t>::max(), std::numeric_limits<std::int32_t>::min()});
         for (std::uint64_t first = 0U; first < member.frame_count; first += chunk_frames) {
+            if (cancellation.is_cancelled())
+                return std::unexpected(Error{"operation_cancelled", "Waveform read cancelled"});
             const auto count =
                 static_cast<std::size_t>(std::min<std::uint64_t>(chunk_frames, member.frame_count - first));
             auto pcm = [&] {
@@ -107,6 +117,8 @@ axk::app::Result<axk::app::ImageWaveformPreview> axk::app::ImageSessionManager::
             }();
             if (!pcm)
                 return std::unexpected(pcm.error());
+            if (cancellation.is_cancelled())
+                return std::unexpected(Error{"operation_cancelled", "Waveform read cancelled"});
             if (pcm->size() != count * member.output_width)
                 return std::unexpected(
                     session_error("invalid_audio_range", "Native PCM read returned an incomplete range"));
@@ -139,7 +151,9 @@ axk::app::ImageSessionManager::prepare_audition(const ImageDocumentRef &target, 
                                                 const std::vector<std::string> &object_ids,
                                                 std::uint64_t expected_revision, const CancellationToken &cancellation,
                                                 bool stored_pcm, diagnostic_sink *diagnostics) {
-    ReadDiagnosticScope trace{diagnostics, "image_audition_prepare_read"};
+    ReadDiagnosticScope trace{diagnostics, "image_audition_prepare_read", &cancellation};
+    if (cancellation.is_cancelled())
+        return std::unexpected(session_error("operation_cancelled", "operation cancelled"));
     if (object_ids.empty() || object_ids.size() > implementation_->maximum_audition_clips) {
         return std::unexpected(
             session_error("invalid_request", std::format("audition must contain between 1 and {} unique objects",
@@ -157,6 +171,8 @@ axk::app::ImageSessionManager::prepare_audition(const ImageDocumentRef &target, 
         return std::unexpected(session.error());
     trace.phase("lock-wait");
     const std::scoped_lock access{(*session)->access_mutex};
+    if (cancellation.is_cancelled())
+        return std::unexpected(session_error("operation_cancelled", "operation cancelled"));
     trace.phase("metadata");
     auto selected = Implementation::document(**session, target.document_id);
     if (!selected)
@@ -170,7 +186,9 @@ axk::app::ImageSessionManager::prepare_audition(const ImageDocumentRef &target, 
         return std::unexpected(session_error("audition_unsupported", "This document has no audio provider"));
     trace.phase("source-verify");
     if (auto verified = (*session)->sources.native_sources->verify(cancellation); !verified)
-        return std::unexpected(session_error("image_source_changed", verified.error().message));
+        return std::unexpected(session_error(
+            verified.error().code == ErrorCode::operation_cancelled ? "operation_cancelled" : "image_source_changed",
+            verified.error().message));
     trace.phase("source-prepare");
     ImageAudition descriptor;
     descriptor.image_id = target.image_id;
@@ -237,6 +255,8 @@ axk::app::ImageSessionManager::prepare_audition(const ImageDocumentRef &target, 
         descriptor.clips.push_back(std::move(clip));
         sources.push_back(std::move(*source));
     }
+    if (cancellation.is_cancelled())
+        return std::unexpected(session_error("operation_cancelled", "operation cancelled"));
     auto audition_id = random_identifier("audition-");
     if (!audition_id)
         return std::unexpected(audition_id.error());
@@ -267,41 +287,21 @@ axk::app::Result<axk::app::ImageAuditionRange>
 axk::app::ImageSessionManager::audition_range(std::string_view audition_id, std::string_view owner_id,
                                               std::uint64_t offset, std::size_t size,
                                               const CancellationToken &cancellation, diagnostic_sink *diagnostics) {
-    ReadDiagnosticScope trace{diagnostics, "image_audition_range_read"};
-    std::shared_ptr<Implementation::Session> session;
-    std::string document_id;
-    {
-        const std::scoped_lock lock{implementation_->mutex};
-        implementation_->cleanup_locked();
-        const auto found = implementation_->audition_sessions.find(std::string{audition_id});
-        if (found != implementation_->audition_sessions.end()) {
-            {
-                session = found->second.session.lock();
-                document_id = found->second.document_id;
-            }
-            if (!session)
-                implementation_->audition_sessions.erase(found);
-        }
-    }
-    if (!session || session->owner_id != owner_id)
-        return std::unexpected(session_error("audition_not_found", "audition does not exist"));
-    trace.phase("lock-wait");
-    const std::scoped_lock access_lock{session->access_mutex};
+    ReadDiagnosticScope trace{diagnostics, "image_audition_range_read", &cancellation};
+    if (cancellation.is_cancelled())
+        return std::unexpected(session_error("operation_cancelled", "operation cancelled"));
+    auto access = implementation_->access_audition(audition_id, owner_id);
+    if (!access)
+        return std::unexpected(access.error());
     trace.phase("metadata");
-    auto selected = Implementation::document(*session, document_id);
-    if (!selected)
-        return std::unexpected(selected.error());
-    const auto found = (*selected)->native->auditions.find(std::string{audition_id});
-    if (found == (*selected)->native->auditions.end())
-        return std::unexpected(session_error("audition_not_found", "audition does not exist"));
-    auto &entry = found->second;
-    const auto *audio = (*selected)->native->audio();
-    if (!audio || entry.descriptor.revision != session->revision ||
-        entry.last_access + std::chrono::minutes{10} <= implementation_->clock())
-        return std::unexpected(session_error("audition_not_found", "Audition expired or its document changed"));
+    const auto &session = access->session;
+    auto &entry = *access->entry;
+    const auto *audio = access->document->native->audio();
     trace.phase("source-verify");
     if (auto verified = session->sources.native_sources->verify(cancellation); !verified)
-        return std::unexpected(session_error("image_source_changed", verified.error().message));
+        return std::unexpected(session_error(
+            verified.error().code == ErrorCode::operation_cancelled ? "operation_cancelled" : "image_source_changed",
+            verified.error().message));
     session->last_access = implementation_->clock();
     entry.last_access = session->last_access;
     const auto total_size = entry.descriptor.content_size_bytes;
@@ -315,6 +315,8 @@ axk::app::ImageSessionManager::audition_range(std::string_view audition_id, std:
         const auto &clip = entry.descriptor.clips[clip_index];
         const auto &source = entry.sources[clip_index];
         for (std::size_t lane_index = 0U; lane_index < clip.lanes.size(); ++lane_index) {
+            if (cancellation.is_cancelled())
+                return std::unexpected(session_error("operation_cancelled", "operation cancelled"));
             const auto &lane = clip.lanes[lane_index];
             const auto lane_end = lane.content_offset_bytes + lane.wav_size_bytes;
             if (lane_end <= offset || lane.content_offset_bytes >= requested_end)

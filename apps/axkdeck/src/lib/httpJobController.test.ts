@@ -17,6 +17,29 @@ function snapshot(state: ApiJobSnapshot['state'], latestSequence: number): ApiJo
 }
 
 describe('HttpJobController', () => {
+    it('sends cancellation while event connection setup is unresolved and reconciles its terminal result', async () => {
+        let cancelled = false;
+        const request = vi.fn(async (method: string) => {
+            if (method === 'DELETE') cancelled = true;
+            return snapshot(cancelled ? 'CANCELLED' : 'RUNNING', cancelled ? 3 : 2);
+        });
+        const close = vi.fn();
+        const connectEvents = vi.fn().mockResolvedValue({ opened: new Promise<void>(() => {}), close });
+        const controller = new HttpJobController({
+            request,
+            connectEvents,
+            replayJobEvents: async () => ({ events: [] }),
+            deviceWrites: { terminal: vi.fn() },
+        } as unknown as AxklibHttpApiClient);
+        const submitted = controller.map(snapshot('QUEUED', 1));
+        const abort = new AbortController();
+        const pending = controller.wait(submitted.jobId, () => {}, abort.signal);
+        await vi.waitFor(() => expect(connectEvents).toHaveBeenCalledOnce());
+        abort.abort();
+        await expect(pending).resolves.toMatchObject({ status: 'cancelled' });
+        expect(request).toHaveBeenCalledWith('DELETE', '/jobs/job-import');
+        expect(close).toHaveBeenCalledOnce();
+    });
     it('recovers an expired replay cursor from the current snapshot and keeps monitoring', async () => {
         const completedEvent: ApiJobEvent = {
             schemaVersion: '1',

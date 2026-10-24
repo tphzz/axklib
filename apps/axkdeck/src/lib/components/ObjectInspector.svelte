@@ -13,6 +13,8 @@
     import InspectorRelationships from './InspectorRelationships.svelte';
     import SampleWaveformStack from './SampleWaveformStack.svelte';
     import Waveform from './Waveform.svelte';
+    import type { WaveformReadDraw } from '../readDiagnostics';
+    import type { AudioIdentity } from '../transport';
 
     interface Props {
         selection: InspectorSelection;
@@ -20,6 +22,7 @@
         playheadFrame?: number;
         onrelationshipnavigate?: (objectId: string, focusTarget: boolean) => void;
         onmetadatacopy?: (objectId: string) => Promise<void>;
+        onwaveformdraw?: (objectId: string, draw: WaveformReadDraw, identity?: AudioIdentity) => void;
     }
 
     let {
@@ -28,6 +31,7 @@
         playheadFrame = 0,
         onrelationshipnavigate,
         onmetadatacopy,
+        onwaveformdraw,
     }: Props = $props();
     provideInspectorPanels();
     const scope = $derived(selection?.kind ?? 'object');
@@ -233,6 +237,8 @@
                 <SampleWaveformStack
                     preview={displayedMember}
                     sampleObjectId={displayedMember.item.objectId}
+                    ondraw={(draw) =>
+                        onwaveformdraw?.(displayedMember.item.objectId, draw, displayedMember.preview ?? undefined)}
                     {playingObjectId}
                     {playheadFrame}
                 />
@@ -273,6 +279,9 @@
             <SampleWaveformStack
                 preview={selection.preview}
                 sampleObjectId={selection.item.objectId}
+                ondraw={(draw) =>
+                    selection?.kind === 'sample' &&
+                    onwaveformdraw?.(selection.item.objectId, draw, selection.preview.preview ?? undefined)}
                 {playingObjectId}
                 {playheadFrame}
             />
@@ -324,6 +333,7 @@
             <div class="inspector-wave">
                 <Waveform
                     values={item.waveform}
+                    ondraw={(draw) => onwaveformdraw?.(item.objectKey, draw)}
                     large
                     {timeline}
                     playheadRatio={playingObjectId === item.objectKey && item.object.storedFrameCount > 0

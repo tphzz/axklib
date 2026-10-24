@@ -5,6 +5,26 @@
 #include <nlohmann/json.hpp>
 
 #include "axklib/server/telemetry.hpp"
+#include "transport.hpp"
+
+TEST(ServerTelemetry, EarlyResponsesNeverReuseThePreviousKeepAliveRequestTimer) {
+    axk::server::RequestTelemetry telemetry;
+    axk::server::detail::RequestTelemetryMiddleware middleware{&telemetry, nullptr};
+    axk::server::detail::RequestTelemetryMiddleware::context context;
+    crow::request request;
+    crow::response response{204};
+    middleware.before_handle(request, response, context);
+    context.started -= std::chrono::seconds{5};
+    middleware.after_handle(request, response, context);
+    EXPECT_FALSE(context.begun);
+    const auto previous = telemetry.snapshot().total_duration_ms;
+    middleware.after_handle(request, response, context);
+    const auto snapshot = telemetry.snapshot();
+    EXPECT_EQ(snapshot.total_duration_ms, previous);
+    EXPECT_EQ(snapshot.total_requests, 2U);
+    EXPECT_EQ(snapshot.active_requests, 0U);
+    EXPECT_FALSE(context.begun);
+}
 
 TEST(ServerTelemetry, CountsActiveAndCompletedRequestsByStatusClass) {
     axk::server::RequestTelemetry telemetry;
@@ -36,7 +56,8 @@ TEST(ServerTelemetry, StructuredLogContainsOnlyBoundedTransportMetadata) {
     EXPECT_EQ(parsed.at("durationMs"), 9);
     EXPECT_EQ(parsed.at("level"), "warning");
     EXPECT_EQ(parsed.at("source"), "http");
-    EXPECT_EQ(parsed.size(), 8U);
+    EXPECT_TRUE(parsed.at("durationMeasured"));
+    EXPECT_EQ(parsed.size(), 9U);
     EXPECT_EQ(line.find("Authorization"), std::string::npos);
     EXPECT_EQ(line.find("relativePath"), std::string::npos);
     EXPECT_EQ(line.find('?'), std::string::npos);

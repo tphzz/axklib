@@ -1314,6 +1314,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    '/image-waveform-previews': {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations['images.preview'];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     '/images': {
         parameters: {
             query?: never;
@@ -1467,29 +1483,6 @@ export interface paths {
             cookie?: never;
         };
         get: operations['images.object'];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    '/images/{imageId}/documents/{documentId}/preview': {
-        parameters: {
-            query: {
-                bins: number;
-                expectedRevision: number;
-                objectId: string;
-            };
-            header?: never;
-            path: {
-                documentId: string;
-                imageId: string;
-            };
-            cookie?: never;
-        };
-        get: operations['images.preview'];
         put?: never;
         post?: never;
         delete?: never;
@@ -2617,6 +2610,8 @@ export interface components {
             expectedRevision: number;
             imageId: string;
             objectIds: string[];
+            /** @enum {string} */
+            readIntent: 'PLAYBACK' | 'PREFETCH';
             /**
              * @default PLAYBACK
              * @enum {string}
@@ -4055,16 +4050,14 @@ export interface components {
             sourceObjectId: string;
             storedFrameCount: number;
         };
-        ImagePreviewResponse: {
-            data: {
-                documentId: string;
-                imageId: string;
-                lanes: components['schemas']['ImagePreviewLane'][];
-                objectId: string;
-                revision: number;
-                warnings: string[];
-            };
-            meta: components['schemas']['ResponseMeta'];
+        ImagePreviewRequest: {
+            bins: number;
+            documentId: string;
+            expectedRevision: number;
+            imageId: string;
+            objectId: string;
+            /** @enum {string} */
+            readIntent: 'SELECTED' | 'REFINEMENT';
         };
         ImageProgramAssignmentCleanupCandidate: {
             assignmentName: string;
@@ -4861,6 +4854,14 @@ export interface components {
             documentId: string;
             expectedRevision: number;
             imageId: string;
+        };
+        ImageWaveformPreview: {
+            documentId: string;
+            imageId: string;
+            lanes: components['schemas']['ImagePreviewLane'][];
+            objectId: string;
+            revision: number;
+            warnings: string[];
         };
         InfoRequest: {
             /** @default false */
@@ -14523,6 +14524,121 @@ export interface operations {
             };
         };
     };
+    'images.preview': {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                'application/json': components['schemas']['ImagePreviewRequest'];
+            };
+        };
+        responses: {
+            /** @description Job accepted */
+            202: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['JobResponse'];
+                };
+            };
+            /** @description Malformed or schema-invalid request */
+            400: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Authentication is required */
+            401: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Authenticated caller is not authorized */
+            403: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Referenced resource does not exist */
+            404: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Request conflicts with current state */
+            409: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Configured request limit exceeded */
+            413: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Unsupported or invalid domain request */
+            422: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Transient server capacity exhausted */
+            429: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Contained internal failure */
+            500: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+        };
+    };
     'images.open': {
         parameters: {
             query?: never;
@@ -14981,44 +15097,6 @@ export interface operations {
                 };
                 content: {
                     'application/json': components['schemas']['ErrorResponse'];
-                };
-            };
-            /** @description Request could not be completed */
-            default: {
-                headers: {
-                    'X-Request-Id': components['headers']['XRequestId'];
-                    [name: string]: unknown;
-                };
-                content: {
-                    'application/json': components['schemas']['ErrorResponse'];
-                };
-            };
-        };
-    };
-    'images.preview': {
-        parameters: {
-            query: {
-                bins: number;
-                expectedRevision: number;
-                objectId: string;
-            };
-            header?: never;
-            path: {
-                documentId: string;
-                imageId: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Bounded document-scoped PCM min/max lanes */
-            200: {
-                headers: {
-                    'X-Request-Id': components['headers']['XRequestId'];
-                    [name: string]: unknown;
-                };
-                content: {
-                    'application/json': components['schemas']['ImagePreviewResponse'];
                 };
             };
             /** @description Request could not be completed */

@@ -187,7 +187,7 @@ export class HttpImageSessions {
         mutations?: HttpCapacityGate,
     ) {
         this.mutations = mutations ?? new HttpCapacityGate(client, jobs);
-        this.native = new HttpNativeDocumentReads(client, (id) => this.get(id));
+        this.native = new HttpNativeDocumentReads(client, (id) => this.get(id), jobs);
     }
 
     async open(locations: ImageLocation[], options: ImageOpenOptions = {}): Promise<OpenedImage> {

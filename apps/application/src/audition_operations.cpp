@@ -7,6 +7,7 @@
 #include <nlohmann/json.hpp>
 
 #include "axklib/application/image_sessions.hpp"
+#include "image_read_jobs.hpp"
 #include "operation_diagnostics.hpp"
 
 namespace {
@@ -16,10 +17,14 @@ using Json = nlohmann::json;
 } // namespace
 
 axk::app::Result<void> axk::app::bind_audition_operations(OperationRegistry &registry, ImageSessionManager &images) {
+    if (auto preview = bind_preview_operation(registry, images); !preview)
+        return preview;
     if (registry.is_implemented("auditions.prepare"))
         return {};
-    return registry.bind(
+    auto bound = registry.bind(
         "auditions.prepare", [&images](const Json &request, const OperationContext &context) -> Result<Json> {
+            if (auto policy = image_read_scheduling(images, request, context, ImageReadJob::audition); !policy)
+                return std::unexpected(policy.error());
             const auto image = request.find("imageId");
             const auto objects = request.find("objectIds");
             if (image == request.end() || objects == request.end() || !image->is_string() || !objects->is_array()) {
@@ -74,4 +79,9 @@ axk::app::Result<void> axk::app::bind_audition_operations(OperationRegistry &reg
                         {"contentSizeBytes", audition->content_size_bytes},
                         {"clips", std::move(clips)}};
         });
+    if (!bound)
+        return bound;
+    return registry.bind_read_scheduling("auditions.prepare", [&images](const auto &request, const auto &context) {
+        return image_read_scheduling(images, request, context, ImageReadJob::audition);
+    });
 }

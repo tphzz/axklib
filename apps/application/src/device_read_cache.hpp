@@ -22,7 +22,8 @@ class MetadataReadCache {
 
     template <typename Read, typename Observe>
     axk::Result<void> read(std::uint64_t size, std::uint32_t sector_size, std::uint64_t offset,
-                           std::span<std::byte> destination, Read &&physical_read, Observe &&observe) {
+                           std::span<std::byte> destination, Read &&physical_read, Observe &&observe,
+                           std::size_t maximum_fill_bytes = 0U) {
         if (sector_size == 0U || sector_size > 64U * 1024U || size % sector_size != 0U || offset > size ||
             destination.size() > size - offset)
             return std::unexpected(
@@ -33,8 +34,7 @@ class MetadataReadCache {
             const auto alignment = streaming ? sector_size : page_size;
             const auto start = offset - offset % alignment;
             const auto within = static_cast<std::size_t>(offset - start);
-            const auto count =
-                std::min<std::size_t>(destination.size(), (streaming ? 64U * 1024U : page_size) - within);
+            auto count = std::min<std::size_t>(destination.size(), (streaming ? 64U * 1024U : page_size) - within);
             std::vector<std::byte> streamed;
             std::span<const std::byte> data;
             if (streaming) {
@@ -46,22 +46,34 @@ class MetadataReadCache {
             } else {
                 auto found = pages_.find(start);
                 if (found == pages_.end()) {
-                    ++misses;
-                    std::vector<std::byte> page(
-                        static_cast<std::size_t>(std::min<std::uint64_t>(page_size, size - start)));
-                    if (auto loaded = physical_read(start, std::span{page}); !loaded)
+                    const auto limit = std::clamp<std::size_t>(maximum_fill_bytes, page_size, 64U * 1024U);
+                    auto end = start + std::min<std::uint64_t>(page_size, size - start);
+                    while (end < offset + destination.size() && end < size && !pages_.contains(end) &&
+                           end - start + std::min<std::uint64_t>(page_size, size - end) <= limit)
+                        end += std::min<std::uint64_t>(page_size, size - end);
+                    streamed.resize(static_cast<std::size_t>(end - start));
+                    misses += (streamed.size() + page_size - 1U) / page_size;
+                    if (auto loaded = physical_read(start, std::span{streamed}); !loaded)
                         return loaded;
-                    if (pages_.size() >= (4U * 1024U * 1024U) / page_size) {
-                        pages_.erase(recent_.back());
-                        recent_.pop_back();
+                    for (std::size_t at = 0U; at < streamed.size(); at += page_size) {
+                        const auto length = std::min<std::size_t>(page_size, streamed.size() - at);
+                        if (pages_.size() >= (4U * 1024U * 1024U) / page_size) {
+                            pages_.erase(recent_.back());
+                            recent_.pop_back();
+                        }
+                        const auto page_start = start + at;
+                        recent_.push_front(page_start);
+                        pages_.emplace(page_start, Page{{streamed.begin() + static_cast<std::ptrdiff_t>(at),
+                                                         streamed.begin() + static_cast<std::ptrdiff_t>(at + length)},
+                                                        recent_.begin()});
                     }
-                    recent_.push_front(start);
-                    found = pages_.emplace(start, Page{std::move(page), recent_.begin()}).first;
+                    data = streamed;
+                    count = std::min(destination.size(), streamed.size() - within);
                 } else {
                     ++hits;
                     recent_.splice(recent_.begin(), recent_, found->second.recent);
+                    data = found->second.bytes;
                 }
-                data = found->second.bytes;
             }
             const auto guard_start = within - within % sector_size;
             const auto guard_end = ((within + count + sector_size - 1U) / sector_size) * sector_size;

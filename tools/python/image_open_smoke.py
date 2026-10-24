@@ -344,7 +344,19 @@ def check_image(
                 raise RuntimeError("expected nonempty Device view")
         if "objectCount" in expected and (document or {}).get("objectCount", 0) != expected["objectCount"]:
             raise RuntimeError("object count differs")
-        native = inspect_native(get, native_path(), document, summary["revision"], expected, maximum_entries, summary["imageId"]) if document else {}
+        def run_job(path: str, body: dict[str, Any]) -> dict[str, Any]:
+            nonlocal requests
+            requests += 1
+            if requests > maximum_requests or time.monotonic() > deadline:
+                raise RuntimeError("image traversal request/time limit exceeded")
+            submitted = require_status(client.request("POST", path, body), 202, "wave preview submission")
+            result: dict[str, Any] = wait_for_job(client, str(submitted["data"]["jobId"]))["result"]
+            if time.monotonic() > deadline:
+                raise RuntimeError("image traversal time limit exceeded")
+            return result
+
+        native = inspect_native(get, native_path(), document, summary["revision"], expected, maximum_entries,
+                                summary["imageId"], run_job) if document else {}
         return {
             **native,
             "format": image_format,

@@ -440,19 +440,19 @@ export class HttpImageTransport extends HttpPackageTransport implements ImageTra
     async prepareAuditionBundle(
         sessionId: number,
         objectKeys: readonly string[],
-        signal?: AbortSignal,
-        storedPcm = false,
+        options: import('./audioReadOptions').AuditionReadOptions,
     ): Promise<AuditionBundleDescriptor> {
         const session = this.imageSessions.get(sessionId);
         const submitted = await this.client.invoke<never>('auditions.prepare', {
             ...documentTarget(session),
             expectedRevision: session.revision,
             objectIds: objectKeys,
-            ...(storedPcm ? { sourceWindow: 'STORED' } : {}),
+            sourceWindow: options.sourceWindow ?? 'PLAYBACK',
+            readIntent: options.readIntent,
         });
         if (!this.jobs.isJob(submitted)) throw new Error('auditions.prepare did not return a job');
         const localJob = this.jobs.map(submitted);
-        const completed = await this.waitForJob(localJob.jobId, () => undefined, signal);
+        const completed = await this.waitForJob(localJob.jobId, () => undefined, options.signal);
         if (completed.status !== 'completed' || !completed.result) {
             throw new AxklibApiError(
                 completed.errorCode ?? 'audition_prepare_failed',
@@ -476,22 +476,25 @@ export class HttpImageTransport extends HttpPackageTransport implements ImageTra
     async readAuditionContent(
         auditionId: string,
         contentSizeBytes: number,
-        signal?: AbortSignal,
+        options: import('./audioReadOptions').AuditionContentOptions,
     ): Promise<ArrayBuffer> {
         if (!Number.isSafeInteger(contentSizeBytes) || contentSizeBytes <= 0) {
             throw new Error('Audition content size must be a positive safe integer');
         }
         const limits = await this.client.serverLimits();
-        const rangeLimit = limits.maximumDownloadRangeBytes;
+        const rangeLimit = Math.min(
+            limits.maximumDownloadRangeBytes,
+            options.readIntent === 'PREFETCH' ? 64 * 1024 : limits.maximumDownloadRangeBytes,
+        );
         if (!Number.isSafeInteger(rangeLimit) || rangeLimit <= 0) {
             throw new Error('axklib-server advertised an invalid audition range limit');
         }
 
         const audio = new Uint8Array(contentSizeBytes);
         for (let start = 0; start < contentSizeBytes; start += rangeLimit) {
-            signal?.throwIfAborted();
+            options.signal?.throwIfAborted();
             const end = Math.min(contentSizeBytes, start + rangeLimit) - 1;
-            const response = await this.client.openAuditionContent(auditionId, start, end, signal);
+            const response = await this.client.openAuditionContent(auditionId, start, end, options.signal);
             const bytes = new Uint8Array(await response.arrayBuffer());
             const expectedBytes = end - start + 1;
             if (bytes.byteLength !== expectedBytes) {

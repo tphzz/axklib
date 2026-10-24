@@ -1132,8 +1132,13 @@ Pagination uses this complete ordering; clients retain the returned order rather
 than sorting individual pages. Cursors are navigation markers, not directory
 snapshots, and directory changes between requests may change the available entries.
 
-`images.preview` accepts either a Wave Data (`SMPL`) or Sample (`SBNK`) object
-identifier. A Wave Data preview returns one `MONO` lane over its physical PCM
+`images.preview` is a cancellable job submitted to `POST /image-waveform-previews`.
+Its request requires `imageId`, `documentId`, `expectedRevision`, `objectId`,
+`bins` (1-4096), and `readIntent` (`SELECTED` or `REFINEMENT`). Retrieve the
+completed job's `result` for the waveform; progress alone is not a result.
+The former synchronous document-preview GET route is not supported.
+The object may be Wave Data (`SMPL`) or a Sample (`SBNK`).
+A Wave Data preview returns one `MONO` lane over its physical PCM
 extent. A Sample preview applies its member start and length fields and returns
 one `LEFT` lane plus an optional `RIGHT` lane. Each lane identifies its source
 Wave Data, stored frame count and playback window. Its `sampleWidthBytes` is
@@ -1149,6 +1154,22 @@ audition bundle. Every clip exposes one or two mono-WAV lane ranges in
 differ and clients normalize them independently. The default aggregate content
 limit is 128 MiB. A failure rejects the complete request and includes the
 responsible object ID when one object caused it.
+
+Audition requests require `readIntent: PLAYBACK` for explicit playback or
+`PREFETCH` for speculative preparation. The server schedules these read jobs
+within the authenticated owner, image and requested revision: playback precedes
+selected previews, ordinary reads, refinements and prefetch. A higher-priority
+read cancels lower-priority queued work and requests cancellation of an active
+scan. The next job in that group starts only after the old handler returns.
+A preempted job is `CANCELLED` with retryable error `read_preempted`; clients may
+retry a still-current preview after playback preparation settles. Source and
+revision checks still run for each read. This policy does not preempt writes.
+
+Axkdeck starts selected speculative audio only after a matching nonempty
+waveform canvas has drawn. Speculative content ranges are capped at 64 KiB;
+changing selection aborts subsequent ranges but lets an in-flight OS transfer
+finish. Explicit playback replaces pending speculative preparation with a
+foreground request. Finished, revision-matched audio remains reusable.
 
 The optional `sourceWindow` is `PLAYBACK` by default. `STORED` prepares the
 complete linked Wave Data spans for client-side Sample draft preview; the same

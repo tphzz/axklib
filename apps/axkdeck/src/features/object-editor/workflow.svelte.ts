@@ -98,6 +98,7 @@ type Dependencies = {
     stopPlayback: () => void;
     status: (message: string) => void;
     audition?: (document: ObjectEditorDocument, note: number) => Promise<void>;
+    readStarted?: (sessionId: number, objectId: string) => () => void;
 };
 
 export class ObjectEditorWorkflow {
@@ -161,7 +162,12 @@ export class ObjectEditorWorkflow {
     find(sessionId: number, objectId: string): ObjectEditorDocument | undefined {
         return this.documents.find((item) => item.sessionId === sessionId && item.detail?.object.id === objectId);
     }
-    async load(sessionId: number, objectId: string): Promise<ObjectEditorDocument | null> {
+    load(sessionId: number, objectId: string): Promise<ObjectEditorDocument | null> {
+        const completed = this.dependencies.readStarted?.(sessionId, objectId);
+        const pending = this.loadDocument(sessionId, objectId);
+        return completed ? pending.finally(completed) : pending;
+    }
+    private async loadDocument(sessionId: number, objectId: string): Promise<ObjectEditorDocument | null> {
         const trace = readTrace('editor-load', { sessionId, objectId }, readContext(sessionId, objectId));
         const existing = this.find(sessionId, objectId);
         if (existing) {

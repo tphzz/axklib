@@ -757,17 +757,44 @@ describe('HttpImageTransport', () => {
         { revision: 2 },
         { objectId: 'other-wave' },
     ])('binds preview requests and replies to the selected identity: %j', async (replyIdentity) => {
-        let query: URLSearchParams | undefined;
+        let body: Record<string, unknown> | undefined;
         vi.stubGlobal(
             'fetch',
             vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
                 const url = new URL(String(input));
                 if (url.pathname.endsWith('/images') && init?.method === 'POST')
                     return completedImageOpen(audioImageSummary());
-                if (url.pathname.endsWith('/preview')) {
-                    query = url.searchParams;
-                    return json({ ...audioPreview(), ...replyIdentity });
+                if (url.pathname.endsWith('/system/capabilities'))
+                    return json({
+                        apiVersion: 'v1',
+                        operations: [
+                            {
+                                id: 'images.preview',
+                                method: 'POST',
+                                route: '/api/v1/image-waveform-previews',
+                                implemented: true,
+                                mode: 'job',
+                                operationClass: 'read',
+                                requiresIdempotency: false,
+                                variant: null,
+                            },
+                        ],
+                    });
+                if (url.pathname.endsWith('/image-waveform-previews')) {
+                    body = JSON.parse(String(init?.body));
+                    return json({ jobId: 'preview-job', operationId: 'images.preview', state: 'QUEUED' }, 202);
                 }
+                if (url.pathname.endsWith('/jobs/preview-job/events')) return json({ events: [] });
+                if (url.pathname.endsWith('/jobs/preview-job'))
+                    return json({
+                        jobId: 'preview-job',
+                        operationId: 'images.preview',
+                        state: 'COMPLETED',
+                        latestSequence: 2,
+                        result: { ...audioPreview(), ...replyIdentity },
+                        error: null,
+                        progress: null,
+                    });
                 throw new Error(`unexpected request ${init?.method} ${url}`);
             }),
         );
@@ -777,7 +804,7 @@ describe('HttpImageTransport', () => {
             mode: 'remote',
         });
         const opened = await transport.openImage([serverFile('TONE.W01')]);
-        const pending = transport.preview(opened.sessionId, 'tx:wave+1', 32);
+        const pending = transport.preview(opened.sessionId, 'tx:wave+1', 32, { readIntent: 'SELECTED' });
         if (Object.keys(replyIdentity).length) {
             await expect(pending).rejects.toThrow();
         } else {
@@ -785,8 +812,7 @@ describe('HttpImageTransport', () => {
             expect(preview).toMatchObject({ imageId: 'audio-image', revision: 3, objectId: 'tx:wave+1' });
             expect(preview.lanes[0]!.bins).toEqual([{ minimum: -1, maximum: 32752 / 32768 }]);
         }
-        expect(query?.get('expectedRevision')).toBe('3');
-        expect(query?.get('objectId')).toBe('tx:wave+1');
+        expect(body).toMatchObject({ expectedRevision: 3, objectId: 'tx:wave+1', bins: 32, readIntent: 'SELECTED' });
     });
 
     it.each([{}, { imageId: 'other-image' }, { documentId: 'other-document' }, { revision: 2 }])(
@@ -866,13 +892,17 @@ describe('HttpImageTransport', () => {
                 result,
             });
             try {
-                const pending = transport.prepareAuditionBundle(opened.sessionId, ['tx:wave+1']);
+                const pending = transport.prepareAuditionBundle(opened.sessionId, ['tx:wave+1'], {
+                    readIntent: 'PLAYBACK',
+                });
                 if (Object.keys(replyIdentity).length) await expect(pending).rejects.toThrow();
                 else await expect(pending).resolves.toEqual(result);
                 expect(body).toEqual({
                     imageId: 'audio-image',
                     documentId: opened.documentId,
                     expectedRevision: 3,
+                    readIntent: 'PLAYBACK',
+                    sourceWindow: 'PLAYBACK',
                     objectIds: ['tx:wave+1'],
                 });
             } finally {
@@ -919,10 +949,44 @@ describe('HttpImageTransport', () => {
             mode: 'remote',
         });
 
-        const audio = await transport.readAuditionContent('audition-1', 10);
+        const audio = await transport.readAuditionContent('audition-1', 10, { readIntent: 'PLAYBACK' });
 
         expect(Array.from(new Uint8Array(audio))).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
         expect(requestedRanges).toEqual(['bytes=0-3', 'bytes=4-7', 'bytes=8-9']);
+    });
+
+    it('bounds speculative audio transfers to 64 KiB and stops before another range after cancellation', async () => {
+        const abort = new AbortController();
+        const ranges: string[] = [];
+        vi.stubGlobal(
+            'fetch',
+            vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+                const path = new URL(String(input)).pathname;
+                if (path.endsWith('/system/capabilities'))
+                    return json({
+                        apiVersion: 'v1',
+                        operations: [],
+                        limits: { maximumDownloadRangeBytes: 1024 * 1024 },
+                    });
+                const range = (init?.headers as Record<string, string>).Range;
+                ranges.push(range);
+                expect(range).toBe('bytes=0-65535');
+                abort.abort();
+                return new Response(new Uint8Array(65536), {
+                    status: 206,
+                    headers: { 'Content-Range': 'bytes 0-65535/131072' },
+                });
+            }),
+        );
+        const transport = new HttpImageTransport({
+            baseUrl: 'http://localhost/api/v1',
+            bearerToken: 'secret',
+            mode: 'remote',
+        });
+        await expect(
+            transport.readAuditionContent('audition', 131072, { signal: abort.signal, readIntent: 'PREFETCH' }),
+        ).rejects.toMatchObject({ name: 'AbortError' });
+        expect(ranges).toEqual(['bytes=0-65535']);
     });
 
     it('assembles file downloads from ranges bound to one server revision', async () => {
@@ -1007,7 +1071,9 @@ describe('HttpImageTransport', () => {
             mode: 'remote',
         });
 
-        await expect(transport.readAuditionContent('audition-1', 4)).rejects.toThrow('returned 3 bytes; expected 4');
+        await expect(transport.readAuditionContent('audition-1', 4, { readIntent: 'PLAYBACK' })).rejects.toThrow(
+            'returned 3 bytes; expected 4',
+        );
     });
 
     it('forwards cancellation while an audition request is active', async () => {
@@ -1045,7 +1111,10 @@ describe('HttpImageTransport', () => {
             bearerToken: 'secret',
             mode: 'remote',
         });
-        const request = transport.readAuditionContent('audition-1', 4, controller.signal);
+        const request = transport.readAuditionContent('audition-1', 4, {
+            signal: controller.signal,
+            readIntent: 'PLAYBACK',
+        });
         await requestStarted;
         controller.abort(new DOMException('cancelled', 'AbortError'));
 

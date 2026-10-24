@@ -54,6 +54,7 @@ class DeviceTransport : public RandomAccessReader {
   public:
     virtual Result<void> authorize_writes() = 0;
     virtual Result<void> verify_bound() const = 0;
+    virtual Result<void> verify_read_bound() const { return verify_bound(); }
     virtual Result<void> write_exact_at(std::uint64_t, std::span<const std::byte>) = 0;
     virtual Result<void> flush() = 0;
     virtual std::string carrier_identity() const = 0;
@@ -118,6 +119,9 @@ class DeviceSessionManager {
     [[nodiscard]] Result<DeviceSessionSummary> connect(std::string_view candidate_id, std::string_view owner,
                                                        std::string_view layout = "raw", std::string_view xml = {});
     [[nodiscard]] Result<DeviceSessionSummary> status(std::string_view session_id, std::string_view owner) const;
+    // In-memory capability state only; callers must have verified their source in this read operation.
+    [[nodiscard]] Result<DeviceSessionSummary> status_snapshot(std::string_view session_id,
+                                                               std::string_view owner) const;
     [[nodiscard]] Result<void> close(std::string_view session_id, std::string_view owner);
     [[nodiscard]] Result<void> authorize_writes(std::string_view session_id, std::string_view target_id,
                                                 std::string_view owner, bool exclusive_use_acknowledged,

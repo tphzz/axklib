@@ -105,13 +105,14 @@ def test_wave_preview_checks_identity_dimensions_uncertainty_and_pcm(problem: st
     if problem == "inverted":
         lane["bins"] = [{"minimum": 1, "maximum": -1}] * 2
 
-    def get(path: str, query: dict[str, Any]) -> dict[str, Any]:
-        assert path == "/documents/document/preview"
-        assert query == {"objectId": "wave:/1", "expectedRevision": 3, "bins": 64}
+    def run_job(path: str, body: dict[str, Any]) -> dict[str, Any]:
+        assert path == "/image-waveform-previews"
+        assert body == {"imageId": "image", "documentId": "document", "objectId": "wave:/1",
+                        "expectedRevision": 3, "bins": 64, "readIntent": "SELECTED"}
         return preview
 
     if problem:
         with pytest.raises(RuntimeError):
-            check_wave_preview(get, "/documents/document", "wave:/1", "image", "document", 3)
+            check_wave_preview(run_job, "wave:/1", "image", "document", 3)
     else:
-        check_wave_preview(get, "/documents/document", "wave:/1", "image", "document", 3)
+        check_wave_preview(run_job, "wave:/1", "image", "document", 3)

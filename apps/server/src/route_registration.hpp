@@ -62,7 +62,6 @@ struct FileRoutes {
     SubItemRoute image_system_program_contexts;
     SubItemRoute image_allocation_map;
     SubItemRoute image_validation;
-    SubItemRoute image_preview;
     ItemRoute audition_content;
     ItemRoute delete_audition;
     RequestRoute uploads;

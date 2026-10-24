@@ -96,6 +96,10 @@ export class AuditionController {
         }
     }
 
+    cancelPrefetch(): void {
+        this.assets.cancelSpeculative();
+    }
+
     async play(
         sessionId: number,
         objectId: string,

@@ -3,7 +3,8 @@
 namespace axk::app {
 
 Result<ImageDocumentSummary> ImageSessionManager::Implementation::summarize(const Session &session,
-                                                                            const Document &document_state) const {
+                                                                            const Document &document_state,
+                                                                            const VerifiedRead *verified) const {
     const auto &native_summary = document_state.native->native_document->summary();
     ImageDocumentSummary summary;
     summary.id = document_state.id;
@@ -34,7 +35,12 @@ Result<ImageDocumentSummary> ImageSessionManager::Implementation::summarize(cons
     if (document_state.primary && document_state.member_ids.size() == 1U) {
         const auto &source = document_state.primary->reference;
         if (source.kind == ImageSourceKind::device && devices) {
-            auto status = devices->status(source.device_session_id, session.owner_id);
+            const auto checked = verified && verified->session == &session;
+            auto status = checked ? devices->status_snapshot(source.device_session_id, session.owner_id)
+                                  : devices->status(source.device_session_id, session.owner_id);
+            if (checked && (!status || status->invalidated))
+                return std::unexpected(status ? Error{"device_disconnected", "device session is invalidated"}
+                                              : status.error());
             device_writable = status && status->writes_authorized && !status->invalidated;
         } else {
             auto metadata = sandbox.metadata(source.root_id, source.relative_path);

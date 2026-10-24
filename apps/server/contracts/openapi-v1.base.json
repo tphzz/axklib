@@ -1896,69 +1896,6 @@
         }
       }
     },
-    "/images/{imageId}/documents/{documentId}/preview": {
-      "parameters": [
-        {
-          "name": "imageId",
-          "in": "path",
-          "required": true,
-          "schema": {
-            "type": "string"
-          }
-        },
-        {
-          "name": "objectId",
-          "in": "query",
-          "required": true,
-          "schema": {
-            "type": "string"
-          }
-        },
-        {
-          "name": "bins",
-          "in": "query",
-          "required": true,
-          "schema": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 4096
-          }
-        },
-        {
-          "name": "documentId",
-          "in": "path",
-          "required": true,
-          "schema": {
-            "type": "string",
-            "minLength": 1
-          }
-        },
-        {
-          "name": "expectedRevision",
-          "in": "query",
-          "required": true,
-          "schema": {
-            "type": "integer",
-            "minimum": 1
-          }
-        }
-      ],
-      "get": {
-        "operationId": "images.preview",
-        "responses": {
-          "200": {
-            "description": "Bounded document-scoped PCM min/max lanes",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ImagePreviewResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/images/{imageId}/documents": {
       "parameters": [
         {
@@ -4786,60 +4723,90 @@
           }
         }
       },
-      "ImagePreviewResponse": {
+      "ImageWaveformPreview": {
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "data",
-          "meta"
+          "objectId",
+          "lanes",
+          "imageId",
+          "documentId",
+          "revision",
+          "warnings"
         ],
         "properties": {
-          "data": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": [
-              "objectId",
-              "lanes",
-              "imageId",
-              "documentId",
-              "revision",
-              "warnings"
-            ],
-            "properties": {
-              "objectId": {
-                "type": "string",
-                "minLength": 1
-              },
-              "lanes": {
-                "type": "array",
-                "minItems": 1,
-                "maxItems": 2,
-                "items": {
-                  "$ref": "#/components/schemas/ImagePreviewLane"
-                }
-              },
-              "imageId": {
-                "type": "string",
-                "minLength": 1
-              },
-              "documentId": {
-                "type": "string",
-                "minLength": 1
-              },
-              "revision": {
-                "type": "integer",
-                "minimum": 1
-              },
-              "warnings": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                }
-              }
+          "objectId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "lanes": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 2,
+            "items": {
+              "$ref": "#/components/schemas/ImagePreviewLane"
             }
           },
-          "meta": {
-            "$ref": "#/components/schemas/ResponseMeta"
+          "imageId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "documentId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "ImagePreviewRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "imageId",
+          "documentId",
+          "expectedRevision",
+          "objectId",
+          "bins",
+          "readIntent"
+        ],
+        "properties": {
+          "imageId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "documentId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "expectedRevision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "objectId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "bins": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 4096
+          },
+          "readIntent": {
+            "type": "string",
+            "enum": [
+              "SELECTED",
+              "REFINEMENT"
+            ]
           }
         }
       },
@@ -7997,7 +7964,8 @@
           "imageId",
           "objectIds",
           "documentId",
-          "expectedRevision"
+          "expectedRevision",
+          "readIntent"
         ],
         "properties": {
           "sourceWindow": {
@@ -8029,6 +7997,13 @@
           "expectedRevision": {
             "type": "integer",
             "minimum": 1
+          },
+          "readIntent": {
+            "type": "string",
+            "enum": [
+              "PLAYBACK",
+              "PREFETCH"
+            ]
           }
         }
       },

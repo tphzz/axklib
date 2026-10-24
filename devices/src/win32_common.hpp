@@ -45,6 +45,7 @@ class Handle {
 
 bool is_elevated() noexcept;
 Result<Win32UsbIdentity> win32_usb_identity(HANDLE disk);
+Result<void> win32_verify_usb_identity(const Win32UsbIdentity &bound);
 
 // Elevated helper session shared by all devices opened through it (win32_elevation.cpp).
 Result<std::shared_ptr<RemoteSession>> win32_elevated_session(const ElevationOptions &options);

@@ -19,6 +19,7 @@
     import type { PreviewEnvelope, ObjectDetail } from '../../../../lib/transport';
     import { userFacingMessage } from '../../../../lib/userFacingMessage';
     import { reportWaveformReadDraw, readTrace, readContext } from '../../../../lib/readDiagnostics';
+    import { WaveformPreviewQueue } from '../../../../lib/audio/waveformPreviewQueue';
     let {
         document,
         preview,
@@ -36,11 +37,12 @@
     let width = $state(800);
     let previewBins = $state(1024);
     let detailedPreview = $state.raw<{ detail: ObjectDetail; envelope: PreviewEnvelope }>();
-    let previewLoading = $state(false);
     let failedPreview = $state.raw<{ detail: ObjectDetail; bins: number }>();
+    const refinements = audio ? new WaveformPreviewQueue(audio.transport, 'REFINEMENT', 1) : undefined;
     let mounted = true;
     onDestroy(() => {
         mounted = false;
+        refinements?.reset();
     });
     const frames = $derived(Math.max(1, sampleSnapshot(document.detail)!.maximumFrames));
     const values = $derived(document.draft.values);
@@ -53,13 +55,13 @@
             ? detailed
             : base;
     });
+    $effect(() => refinements?.playbackPending(audio?.audition.state.status === 'preparing'));
     $effect(() => {
         const detail = document.detail;
         const count = previewBins;
         if (
             !audio ||
             !detail ||
-            previewLoading ||
             (failedPreview?.detail === detail && failedPreview.bins === count) ||
             !lanes.length ||
             lanes.every((lane) => lane.bins.length >= Math.min(count, lane.storedFrameCount))
@@ -72,24 +74,24 @@
         );
         const timer = setTimeout(() => {
             trace?.finish('started');
-            previewLoading = true;
-            void audio.transport
-                .preview(document.sessionId, detail.object.id, count)
-                .then((envelope) => {
+            refinements!.request(
+                document.sessionId,
+                detail.object.id,
+                count,
+                (envelope) => {
                     if (mounted && detail === document.detail) detailedPreview = { detail, envelope };
-                })
-                .catch((error) => {
+                },
+                (error) => {
                     if (mounted && detail === document.detail) {
                         failedPreview = { detail, bins: count };
                         view.error = userFacingMessage(error);
                     }
-                })
-                .finally(() => {
-                    if (mounted) previewLoading = false;
-                });
+                },
+            );
         }, 100);
         return () => {
             clearTimeout(timer);
+            refinements?.reset();
             trace?.finish('cancelled');
         };
     });
@@ -217,7 +219,18 @@
                         {end}
                         {markers}
                         onresolution={(bins) => (previewBins = bins)}
-                        ondraw={(draw) =>
+                        ondraw={(draw) => {
+                            const envelope =
+                                detailedPreview && detailedPreview.detail === document.detail
+                                    ? detailedPreview.envelope
+                                    : preview?.preview;
+                            if (envelope)
+                                audio?.selectionReads?.drawn(
+                                    document.sessionId,
+                                    document.detail!.object.id,
+                                    envelope,
+                                    draw,
+                                );
                             reportWaveformReadDraw(
                                 document.sessionId,
                                 document.detail!.object.id,
@@ -225,7 +238,8 @@
                                     ? detailedPreview.envelope
                                     : preview?.preview,
                                 draw,
-                            )}
+                            );
+                        }}
                     />
                 </div>
             {/each}

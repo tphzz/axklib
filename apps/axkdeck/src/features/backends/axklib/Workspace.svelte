@@ -59,6 +59,7 @@
         showScope?(id: string): void;
     }>();
     let revealEntry = $state<FilesystemEntry | null>(null);
+    const fileMappings = new Map<string, FilesystemEntry | null>();
     let about = $state<DesktopBuildInfoState | null>(null);
     let buildInfo: ReturnType<typeof desktopBuildInfo> | undefined;
     let mappingGeneration = 0;
@@ -99,8 +100,10 @@
             return;
         }
         const context = untrack(() => {
-            if (previousSession !== sessionId) fileContexts.clear();
-            else if (previousMember && files?.initialized) fileContexts.set(previousMember, files.capture());
+            if (previousSession !== sessionId) {
+                fileContexts.clear();
+                fileMappings.clear();
+            } else if (previousMember && files?.initialized) fileContexts.set(previousMember, files.capture());
             return fileContexts.get(member.id);
         });
         previousSession = sessionId;
@@ -140,15 +143,31 @@
         const session = workspace.sessionId;
         const documentId = workspace.documentId;
         const objectId = workspace.catalog.inspectorObjectId;
+        const revision = workspace.revision;
         const token = ++mappingGeneration;
         revealEntry = null;
         if (!controller?.initialized || !documentId || !objectId || document?.formatId !== 'yamaha.a-series') return;
-        void locateFile(objectId, documentId)
-            .then((entry) => {
-                if (token === mappingGeneration && workspace.sessionId === session && controller === files)
-                    revealEntry = entry;
-            })
-            .catch(() => undefined);
+        const key = JSON.stringify([session, documentId, revision, objectId]);
+        if (fileMappings.has(key)) {
+            revealEntry = fileMappings.get(key) ?? null;
+            return;
+        }
+        return workspace.audition.selectionReads.afterForeground(() => {
+            void locateFile(objectId, documentId)
+                .then((entry) => {
+                    if (
+                        token === mappingGeneration &&
+                        workspace.sessionId === session &&
+                        controller === files &&
+                        workspace.revision === revision
+                    ) {
+                        revealEntry = entry;
+                        if (fileMappings.size >= 256) fileMappings.delete(fileMappings.keys().next().value!);
+                        fileMappings.set(key, entry);
+                    }
+                })
+                .catch(() => undefined);
+        });
     });
     async function locateFile(objectId: string, documentId: string): Promise<FilesystemEntry | null> {
         if (workspace.sessionId === null) return null;
@@ -190,7 +209,8 @@
         const documentId = workspace.documentId;
         let token = ++modeGeneration;
         if (!files || !documentId) return;
-        const entry = objectId ? await locateFile(objectId, documentId).catch(() => null) : revealEntry;
+        const currentObject = objectId ?? workspace.catalog.inspectorObjectId;
+        const entry = currentObject ? await locateFile(currentObject, documentId).catch(() => null) : null;
         if (token !== modeGeneration || workspace.documentId !== documentId) return;
         if (!entry) {
             workspace.setStatus('No unique file location is available for this object');

@@ -672,7 +672,10 @@ describe('AuditionController', () => {
             expect(completed).toHaveBeenCalledWith({ status: 'completed', playedCount: 2, skippedCount: 0 }),
         );
         expect(transport.prepareAuditionBundle).toHaveBeenCalledTimes(1);
-        expect(transport.prepareAuditionBundle).toHaveBeenCalledWith(1, ['SBNK-1', 'SBNK-2'], expect.any(AbortSignal));
+        expect(transport.prepareAuditionBundle).toHaveBeenCalledWith(1, ['SBNK-1', 'SBNK-2'], {
+            signal: expect.any(AbortSignal),
+            readIntent: 'PLAYBACK',
+        });
         expect(MockAudioContext.instances[0]?.state).toBe('running');
         await controller.dispose();
     });
@@ -1032,7 +1035,7 @@ describe('AuditionController', () => {
         installAudio();
         const transport = transportFor(descriptor());
         vi.mocked(transport.readAuditionContent).mockImplementation(
-            async (_auditionId, _contentSizeBytes, signal): Promise<ArrayBuffer> =>
+            async (_auditionId, _contentSizeBytes, { signal }): Promise<ArrayBuffer> =>
                 new Promise<ArrayBuffer>((_resolve, reject) => {
                     signal?.addEventListener(
                         'abort',

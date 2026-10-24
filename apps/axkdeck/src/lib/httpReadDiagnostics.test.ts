@@ -10,7 +10,8 @@ vi.mock('./diagnostics', () => ({
 }));
 const identity = { imageId: 'image-a', documentId: 'document-a', revision: 1 };
 const transport = { audioIdentity: () => identity } as unknown as ImageTransport;
-const path = '/images/image-a/documents/document-a/preview?objectId=sample-a&bins=1024&expectedRevision=1';
+const path = '/image-waveform-previews';
+const body = { ...identity, expectedRevision: 1, objectId: 'sample-a', bins: 1024, readIntent: 'SELECTED' };
 const client = () => new AxklibHttpApiClient({ baseUrl: 'http://localhost/api/v1', bearerToken: 'private-token' });
 const reply = (data: unknown, status = 200) =>
     new Response(JSON.stringify({ data, meta: { requestId: 'request-7' } }), {
@@ -38,14 +39,14 @@ describe('HTTP read diagnostics', () => {
                     }),
             ),
         );
-        const pending = client().request('GET', path);
+        const pending = client().request('POST', path, body);
         beginSampleRead(transport, 1, 'sample-b');
         resolve(reply({ objectId: 'sample-a', lanes: [] }));
         await expect(pending).resolves.toMatchObject({ objectId: 'sample-a' });
         const events = diagnostics.report.mock.calls.map(([, fields]) => fields);
         expect(events).toContainEqual(
             expect.objectContaining({
-                phase: 'preview-http',
+                phase: 'preview-submit-http',
                 requestId: 'request-7',
                 selectionId: context.selectionId,
                 objectId: 'sample-a',
@@ -55,7 +56,11 @@ describe('HTTP read diagnostics', () => {
             }),
         );
         expect(events.map((event) => event.phase)).toEqual(
-            expect.arrayContaining(['preview-http/headers', 'preview-http/body-read', 'preview-http/json-parse']),
+            expect.arrayContaining([
+                'preview-submit-http/headers',
+                'preview-submit-http/body-read',
+                'preview-submit-http/json-parse',
+            ]),
         );
         expect(JSON.stringify(events)).not.toContain('private-token');
         expect(JSON.stringify(events)).not.toContain('lanes');
@@ -74,9 +79,12 @@ describe('HTTP read diagnostics', () => {
                     ),
             ),
         );
-        await expect(client().request('GET', path)).rejects.toMatchObject({ code: 'sample_unreadable', status: 422 });
+        await expect(client().request('POST', path, body)).rejects.toMatchObject({
+            code: 'sample_unreadable',
+            status: 422,
+        });
         expect(diagnostics.report.mock.calls.at(-1)![1]).toMatchObject({
-            phase: 'preview-http',
+            phase: 'preview-submit-http',
             requestId: 'request-failed',
             outcome: 'failed',
         });
@@ -87,7 +95,7 @@ describe('HTTP read diagnostics', () => {
                 throw error;
             }),
         );
-        await expect(client().request('GET', path)).rejects.toBe(error);
+        await expect(client().request('POST', path, body)).rejects.toBe(error);
         expect(diagnostics.report.mock.calls.at(-1)![1]).toMatchObject({ outcome: 'cancelled' });
     });
 
@@ -127,7 +135,7 @@ describe('HTTP read diagnostics', () => {
         await client().request('POST', '/unrelated', { credentials: 'not-for-logs' });
         expect(diagnostics.report).not.toHaveBeenCalled();
         diagnostics.enabled = false;
-        await client().request('GET', path);
+        await client().request('POST', path, body);
         expect(diagnostics.report).not.toHaveBeenCalled();
         expect(fetch).toHaveBeenCalledTimes(2);
     });

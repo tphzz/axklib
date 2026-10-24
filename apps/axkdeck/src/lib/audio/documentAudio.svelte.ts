@@ -32,6 +32,7 @@ export class DocumentAudio {
         this.queue = new WaveformPreviewQueue(transport);
         this.controller = new AuditionController(transport, (state) => {
             this.state = state;
+            this.queue.playbackPending(state.status === 'preparing');
         });
     }
 

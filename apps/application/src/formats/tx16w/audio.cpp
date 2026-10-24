@@ -46,7 +46,9 @@ Result<std::vector<std::byte>> SessionState::read_member_pcm(const native::PcmMe
                                                              const CancellationToken &cancellation) const {
     const auto frames = document_->read_wave_frames(member.object_id, first_frame, frame_count, cancellation);
     if (!frames)
-        return std::unexpected(Error{"audio_read_failed", frames.error().message});
+        return std::unexpected(
+            Error{frames.error().code == ErrorCode::operation_cancelled ? "operation_cancelled" : "audio_read_failed",
+                  frames.error().message});
     std::vector<std::byte> bytes;
     bytes.reserve(frames->size() * 2U);
     for (const auto frame : *frames) {

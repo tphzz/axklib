@@ -100,7 +100,10 @@ function setup() {
     });
     const autoplay = fromStore(writable(false));
     const audio: EditorAudioServices = {
-        transport: { preview } as unknown as EditorAudioServices['transport'],
+        transport: {
+            preview,
+            audioIdentity: () => ({ imageId: 'image-1', documentId: 'document-1', revision: 1 }),
+        } as unknown as EditorAudioServices['transport'],
         audition: {
             state: { objectId: null, status: 'idle', playheadFrame: 0 },
             get autoplay() {
@@ -133,7 +136,12 @@ async function resize(next: number) {
 describe('TrimLoop adaptive preview requests', () => {
     it('bounds unresolved requests and coalesces repeated tier changes to the latest desired resolution', async () => {
         const fixture = setup();
-        await waitFor(() => expect(fixture.preview).toHaveBeenCalledExactlyOnceWith(1, 'A', 2048));
+        await waitFor(() =>
+            expect(fixture.preview).toHaveBeenCalledExactlyOnceWith(1, 'A', 2048, {
+                readIntent: 'REFINEMENT',
+                signal: expect.any(AbortSignal),
+            }),
+        );
 
         for (const size of [2200, 1100, 2300]) await resize(size);
 
@@ -141,7 +149,10 @@ describe('TrimLoop adaptive preview requests', () => {
         expect(fixture.view.getByText('LEFT')).toBeTruthy();
         fixture.requests[0]!.resolve(envelope(2048));
         await waitFor(() => expect(fixture.preview).toHaveBeenCalledTimes(2));
-        expect(fixture.preview).toHaveBeenLastCalledWith(1, 'A', 4096);
+        expect(fixture.preview).toHaveBeenLastCalledWith(1, 'A', 4096, {
+            readIntent: 'REFINEMENT',
+            signal: expect.any(AbortSignal),
+        });
         fixture.requests[1]!.resolve(envelope(4096));
         await resize(1000);
         await resize(2300);
@@ -163,7 +174,12 @@ describe('TrimLoop adaptive preview requests', () => {
 
     it('keeps a sharper audition preview when a coarser direct request completes late', async () => {
         const fixture = setup();
-        await waitFor(() => expect(fixture.preview).toHaveBeenCalledExactlyOnceWith(1, 'A', 2048));
+        await waitFor(() =>
+            expect(fixture.preview).toHaveBeenCalledExactlyOnceWith(1, 'A', 2048, {
+                readIntent: 'REFINEMENT',
+                signal: expect.any(AbortSignal),
+            }),
+        );
         await fixture.view.rerender({
             preview: { preview: envelope(4096), previewState: 'ready' } as SampleWaveformPreview,
         });
@@ -186,7 +202,10 @@ describe('TrimLoop adaptive preview requests', () => {
         });
         fixture.requests[0]!.resolve(envelope(2048));
         await waitFor(() => expect(fixture.preview).toHaveBeenCalledTimes(2));
-        expect(fixture.preview).toHaveBeenLastCalledWith(1, 'A', 2048);
+        expect(fixture.preview).toHaveBeenLastCalledWith(1, 'A', 2048, {
+            readIntent: 'REFINEMENT',
+            signal: expect.any(AbortSignal),
+        });
         fixture.requests[1]!.resolve(envelope(2048));
         await resize(1200);
         expect(fixture.preview).toHaveBeenCalledTimes(2);

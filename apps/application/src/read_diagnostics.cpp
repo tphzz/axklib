@@ -36,14 +36,17 @@ constexpr std::array<MetricDescription, static_cast<std::size_t>(ReadMetric::cou
      {"storedFrames"},
      {"lanes"},
      {"helperReads"},
-     {"directReads"}}};
+     {"directReads"},
+     {"identityTimeUs", true},
+     {"sessionLockWaitUs", true}}};
 std::uint64_t elapsed_us(std::chrono::steady_clock::time_point start, std::chrono::steady_clock::time_point end) {
     return static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(end - start).count());
 }
 } // namespace
 
-ReadDiagnosticScope::ReadDiagnosticScope(diagnostic_sink *sink, std::string_view event) noexcept
-    : event_(event), previous_(current_) {
+ReadDiagnosticScope::ReadDiagnosticScope(diagnostic_sink *sink, std::string_view event,
+                                         const CancellationToken *cancellation) noexcept
+    : event_(event), previous_(current_), cancellation_(cancellation) {
     if (sink && sink->enabled(diagnostic_level::debug)) {
         sink_ = sink;
         started_ = Clock::now();
@@ -108,7 +111,9 @@ void ReadDiagnosticScope::emit(std::string_view phase_name, std::uint64_t durati
                                .source = diagnostic_source::devices,
                                .event = std::string{event_},
                                .phase = std::string{phase_name},
-                               .outcome = completed_ ? "success" : "failed",
+                               .outcome = completed_                                       ? "success"
+                                          : cancellation_ && cancellation_->is_cancelled() ? "cancelled"
+                                                                                           : "failed",
                                .duration_us = duration_us,
                                .metrics = {}};
         event.metrics.reserve(counters.size() + 1U);

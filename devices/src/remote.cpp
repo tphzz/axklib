@@ -145,6 +145,7 @@ class RemoteDisk final : public BlockDevice {
         return session_->write(handle_, off / ss_, in);
     }
     Result<void> flush_raw() override { return session_->flush(handle_); }
+    Result<void> verify_binding_raw() override { return session_->verify_binding(handle_); }
 
   private:
     std::shared_ptr<RemoteSession> session_;
@@ -334,6 +335,15 @@ void RemoteSession::close(std::uint32_t handle) noexcept {
     }
 }
 
+Result<void> RemoteSession::verify_binding(std::uint32_t handle) {
+    auto reply = call(Op::verify, handle, {});
+    if (!reply)
+        return fail(reply.error());
+    if (!reply->body.empty())
+        return mark_broken(make_error_code(Errc::helper_protocol));
+    return {};
+}
+
 // ---- server ----------------------------------------------------------------------------------
 
 Result<void> serve(Stream &stream, const Opener &opener) noexcept {
@@ -460,6 +470,16 @@ Result<void> serve(Stream &stream, const Opener &opener) noexcept {
                     ec = r.error();
                 break;
             }
+            case Op::verify:
+                if (!in.done())
+                    return violation();
+                if (found == handles.end()) {
+                    ec = Errc::invalid_argument;
+                    break;
+                }
+                if (auto r = found->second->verify_binding(); !r)
+                    ec = r.error();
+                break;
             case Op::flush:
                 if (!in.done())
                     return violation();

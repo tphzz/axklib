@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <functional>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -11,6 +12,7 @@
 
 #include "axklib/application/contracts.hpp"
 #include "axklib/application/path_reservations.hpp"
+#include "axklib/application/read_job_scheduling.hpp"
 #include "axklib/io.hpp"
 #include "axklib/sdk/diagnostics.hpp"
 
@@ -56,10 +58,15 @@ class OperationRegistry {
     using Json = nlohmann::json;
     using Handler = std::function<Result<Json>(const Json &, const OperationContext &)>;
     using PathAccessResolver = std::function<Result<std::vector<PathAccess>>(const Json &, const OperationContext &)>;
+    using ReadSchedulingResolver =
+        std::function<Result<std::optional<ReadJobScheduling>>(const Json &, const OperationContext &)>;
 
     Result<void> declare(OperationDescriptor descriptor);
     Result<void> bind(std::string_view operation_id, Handler handler);
     Result<void> bind_path_accesses(std::string_view operation_id, PathAccessResolver resolver);
+    Result<void> bind_read_scheduling(std::string_view operation_id, ReadSchedulingResolver resolver);
+    [[nodiscard]] Result<std::optional<ReadJobScheduling>>
+    read_scheduling(std::string_view operation_id, const Json &input, const OperationContext &context) const;
 
     template <typename Request, typename Response, typename Callable>
     Result<void> bind_typed(std::string_view operation_id, Callable callable) {
@@ -93,6 +100,7 @@ class OperationRegistry {
         Handler handler;
         PathAccessResolver path_access_resolver;
         std::size_t handler_type_hash{};
+        ReadSchedulingResolver read_scheduling_resolver{};
     };
 
     std::vector<RegisteredOperation> operations_;

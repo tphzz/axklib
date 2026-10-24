@@ -1,6 +1,7 @@
 import { diagnosticsEnabled, reportDiagnostic } from './diagnostics';
 import { sameAudioIdentity } from './audio/audioIdentity';
 import type { AudioIdentity, ImageTransport, PreviewEnvelope } from './transport';
+import { AxklibApiError } from './httpErrors';
 
 export interface ReadContext extends AudioIdentity {
     readonly selectionId: number;
@@ -133,7 +134,13 @@ export async function finishReadTrace<T>(trace: ReadTrace | undefined, action: (
         const cancelled =
             (error instanceof Error || (typeof DOMException !== 'undefined' && error instanceof DOMException)) &&
             error.name === 'AbortError';
-        trace?.finish(cancelled ? 'cancelled' : 'failed');
+        trace?.finish(
+            error instanceof AxklibApiError && error.code === 'read_preempted'
+                ? 'preempted'
+                : cancelled || (error instanceof AxklibApiError && error.code === 'operation_cancelled')
+                  ? 'cancelled'
+                  : 'failed',
+        );
         throw error;
     }
 }

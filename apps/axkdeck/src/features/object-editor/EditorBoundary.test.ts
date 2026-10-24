@@ -7,6 +7,7 @@ import type { ImageTransport, JobState, ObjectDetail } from '../../lib/transport
 import { sampleSnapshot, type ObjectParameterEdit } from '../../lib/objectEditing';
 import SampleSaveHarness from '../../test/SampleSaveHarness.svelte';
 import { ObjectEditorWorkflow } from './workflow.svelte';
+import { SelectionReadScheduler } from '../../lib/audio/selectionReadScheduler';
 
 const native = vi.hoisted(() => ({
     invoke: vi.fn().mockResolvedValue(undefined),
@@ -111,6 +112,11 @@ function setup() {
         confirmEditorLeave: async () => true,
     };
     const audition = {
+        state: { objectId: null, status: 'idle', playheadFrame: 0 },
+        selectionReads: new SelectionReadScheduler(
+            () => {},
+            () => {},
+        ),
         refreshEditorWorkspace: async (refresh: () => Promise<void>) => refresh(),
         stop: vi.fn().mockResolvedValue(undefined),
     };

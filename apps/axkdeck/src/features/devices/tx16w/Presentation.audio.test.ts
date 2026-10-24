@@ -59,7 +59,10 @@ async function setup() {
 describe('TX16W shared wave controls', () => {
     it('loads neutral waveform previews and retains native precision and approximate-rate metadata', async () => {
         const { row, preview } = await setup();
-        expect(preview).toHaveBeenCalledWith(1, 'wave-20', expect.any(Number), expect.any(AbortSignal));
+        expect(preview).toHaveBeenCalledWith(1, 'wave-20', expect.any(Number), {
+            signal: expect.any(AbortSignal),
+            readIntent: 'SELECTED',
+        });
         expect(row.querySelector('canvas')).not.toBeNull();
         expect(row.textContent).toContain('12-bit');
         expect(row.textContent).toContain('Approx.');

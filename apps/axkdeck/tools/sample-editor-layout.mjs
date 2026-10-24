@@ -27,8 +27,8 @@ try {
                 for(let i=0;i<64;i++) wav.setInt16(44+i*2, i*100,true);
                 let deleted = 0;
                 const transport = {
-                    prepareAuditionBundle: async (_s,_o,_signal,stored) => {
-                        if (!stored) throw new Error('Preview must request stored PCM');
+                    prepareAuditionBundle: async (_s,_o,options) => {
+                        if (options.sourceWindow !== 'STORED' || options.readIntent !== 'PLAYBACK') throw new Error('Preview must request stored PCM');
                         return {auditionId:'test',contentSizeBytes:172,clips:[{loopModeLabel:'One-shot',lanes:[{
                             sampleRate:44100,frameCount:64,contentOffsetBytes:0,wavSizeBytes:172
                         }]}]};

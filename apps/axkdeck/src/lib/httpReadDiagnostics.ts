@@ -5,7 +5,7 @@ function requestTrace(method: string, path: string, body: unknown): ReadTrace | 
     if (!diagnosticsEnabled()) return undefined;
     try {
         const url = new URL(path, 'http://diagnostics.invalid');
-        const match = url.pathname.match(/\/images\/([^/]+)\/documents\/([^/]+)\/(objects\/([^/]+)|preview)$/);
+        const match = url.pathname.match(/\/images\/([^/]+)\/documents\/([^/]+)\/objects\/([^/]+)$/);
         if (method === 'GET' && match) {
             const identity = {
                 imageId: decodeURIComponent(match[1]!),
@@ -14,18 +14,18 @@ function requestTrace(method: string, path: string, body: unknown): ReadTrace | 
                     ? { revision: Number(url.searchParams.get('expectedRevision')) }
                     : {}),
             };
-            const objectId = match[4] ? decodeURIComponent(match[4]) : (url.searchParams.get('objectId') ?? '');
-            const bins = Number(url.searchParams.get('bins') ?? 0);
-            return readTrace(
-                match[4] ? 'object-http' : 'preview-http',
-                { ...identity, objectId, bins },
-                readContext(null, objectId, identity),
-            );
+            const objectId = decodeURIComponent(match[3]!);
+            return readTrace('object-http', { ...identity, objectId }, readContext(null, objectId, identity));
         }
-        if (method === 'POST' && url.pathname.endsWith('/auditions') && body && typeof body === 'object') {
+        const preview = url.pathname.endsWith('/image-waveform-previews');
+        if (method === 'POST' && (preview || url.pathname.endsWith('/auditions')) && body && typeof body === 'object') {
             const input = body as Record<string, unknown>;
             const objectId =
-                Array.isArray(input.objectIds) && typeof input.objectIds[0] === 'string' ? input.objectIds[0] : '';
+                preview && typeof input.objectId === 'string'
+                    ? input.objectId
+                    : Array.isArray(input.objectIds) && typeof input.objectIds[0] === 'string'
+                      ? input.objectIds[0]
+                      : '';
             const identity =
                 typeof input.imageId === 'string' && typeof input.documentId === 'string'
                     ? {
@@ -35,8 +35,15 @@ function requestTrace(method: string, path: string, body: unknown): ReadTrace | 
                       }
                     : undefined;
             return readTrace(
-                'audition-submit-http',
-                { ...identity, objectId },
+                preview ? 'preview-submit-http' : 'audition-submit-http',
+                {
+                    ...identity,
+                    objectId,
+                    ...(preview && typeof input.bins === 'number' ? { bins: input.bins } : {}),
+                    ...(['SELECTED', 'REFINEMENT', 'PLAYBACK', 'PREFETCH'].includes(String(input.readIntent))
+                        ? { readIntent: input.readIntent }
+                        : {}),
+                },
                 identity ? readContext(null, objectId, identity) : undefined,
             );
         }

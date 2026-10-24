@@ -21,6 +21,7 @@
     import CollectionToolbar from './CollectionToolbar.svelte';
     import CollectionRow from './CollectionRow.svelte';
     import WaveCollectionRow from './WaveCollectionRow.svelte';
+    import type { WaveformReadDraw } from '../readDiagnostics';
     import ObjectContextMenu from './ObjectContextMenu.svelte';
     import ObjectSizeIdentity from './ObjectSizeIdentity.svelte';
 
@@ -34,6 +35,7 @@
         onprogramselect: (program: Program) => void;
         onwavedataselect: (item: WaveDataItem) => void;
         onpreviewrequest?: (item: WaveDataItem, bins: number) => void;
+        onwaveformdraw?: (item: WaveDataItem, draw: WaveformReadDraw) => void;
         onplay?: (item: WaveDataItem) => void;
         onprefetch?: (item: WaveDataItem) => void;
         onstop?: () => void;
@@ -69,6 +71,7 @@
         onprogramselect,
         onwavedataselect,
         onpreviewrequest = () => undefined,
+        onwaveformdraw,
         onplay = () => undefined,
         onprefetch = () => undefined,
         onstop = () => undefined,
@@ -372,6 +375,7 @@
                     onselect={(event) => selectWaveData(event, item)}
                     onseek={(event) => selectWaveData(event, item, true)}
                     onpreview={(bins) => onpreviewrequest(item, bins)}
+                    ondraw={(draw) => onwaveformdraw?.(item, draw)}
                     onplay={() => onplay(item)}
                     {onstop}
                     onprefetch={() => onprefetch(item)}

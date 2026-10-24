@@ -38,15 +38,18 @@
     import type { WaveformBin } from '../types';
     import type { WaveformTimeline } from '../waveformTimeline';
     import Waveform from './Waveform.svelte';
+    import type { WaveformReadDraw } from '../readDiagnostics';
 
     interface Props {
         values: readonly WaveformBin[];
         timeline: WaveformTimeline;
         playheadRatio?: number;
         onvisible?: (bins: number) => void;
+        ondraw?: (draw: WaveformReadDraw) => void;
+        redrawKey?: unknown;
     }
 
-    let { values, timeline, playheadRatio = 0, onvisible = () => undefined }: Props = $props();
+    let { values, timeline, playheadRatio = 0, onvisible = () => undefined, ondraw, redrawKey }: Props = $props();
     let host: HTMLDivElement;
     let visible = $state(typeof IntersectionObserver === 'undefined');
 
@@ -64,6 +67,6 @@
 
 <div class="viewport-waveform" bind:this={host}>
     {#if visible}
-        <Waveform {values} {timeline} {playheadRatio} onresolution={onvisible} />
+        <Waveform {values} {timeline} {playheadRatio} onresolution={onvisible} {ondraw} {redrawKey} />
     {/if}
 </div>

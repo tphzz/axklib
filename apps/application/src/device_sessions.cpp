@@ -114,10 +114,18 @@ Result<DeviceSessionSummary> DeviceSessionManager::status(std::string_view id, s
     if (!connection)
         return std::unexpected(connection.error());
     const std::scoped_lock lock{(*connection)->io};
-    if (!device_detail::verify_bound(**connection)) {
+    if (!device_detail::verify_read_bound(**connection)) {
         (*connection)->invalidated = true;
         (*connection)->authorized_target.clear();
     }
+    return summary(**connection);
+}
+
+Result<DeviceSessionSummary> DeviceSessionManager::status_snapshot(std::string_view id, std::string_view owner) const {
+    auto connection = implementation_->owned(id, owner);
+    if (!connection)
+        return std::unexpected(connection.error());
+    const std::scoped_lock lock{(*connection)->io};
     return summary(**connection);
 }
 
@@ -191,7 +199,7 @@ Result<OpenedDeviceSource> DeviceSessionManager::open_source(std::string_view id
             if (value->invalidated || value->revision != revision)
                 return std::unexpected(
                     Error{"device_disconnected", "device session is invalidated or its revision changed"});
-            auto checked = device_detail::verify_bound(*value);
+            auto checked = device_detail::verify_read_bound(*value);
             if (!checked) {
                 value->invalidated = true;
                 value->authorized_target.clear();

@@ -7,6 +7,7 @@
 #include <iostream>
 #include <mutex>
 #include <ranges>
+#include <utility>
 
 namespace axk::server::detail {
 namespace {
@@ -66,15 +67,15 @@ void RequestTelemetryMiddleware::before_handle(crow::request &, crow::response &
 
 void RequestTelemetryMiddleware::after_handle(crow::request &request, crow::response &response,
                                               context &request_context) const {
+    const auto measured = std::exchange(request_context.begun, false);
     if (telemetry == nullptr)
         return;
-    if (!request_context.begun) {
-        request_context.started = std::chrono::steady_clock::now();
-        request_context.begun = true;
+    if (!measured) {
         telemetry->begin_request();
     }
-    const auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() -
-                                                                                request_context.started);
+    const auto duration = measured ? std::chrono::duration_cast<std::chrono::milliseconds>(
+                                         std::chrono::steady_clock::now() - request_context.started)
+                                   : std::chrono::milliseconds{0};
     telemetry->complete_request(response.code, duration);
     auto id = response.get_header_value("X-Request-Id");
     if (id.empty()) {
@@ -85,8 +86,8 @@ void RequestTelemetryMiddleware::after_handle(crow::request &request, crow::resp
                        : response.code >= 400 ? diagnostic_level::warning
                                               : diagnostic_level::debug;
     if (diagnostics != nullptr && diagnostics->enabled(level) && request.url != "/api/v1/diagnostics/capture")
-        diagnostics->submit_line(
-            structured_request_log(id, crow::method_name(request.method), request.url, response.code, duration));
+        diagnostics->submit_line(structured_request_log(id, crow::method_name(request.method), request.url,
+                                                        response.code, duration, measured));
 }
 
 } // namespace axk::server::detail

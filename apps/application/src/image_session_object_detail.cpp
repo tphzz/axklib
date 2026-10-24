@@ -11,16 +11,17 @@ axk::app::Result<nlohmann::ordered_json> axk::app::ImageSessionManager::object_d
         return std::unexpected(session.error());
     trace.phase("lock-wait");
     const std::scoped_lock access{(*session)->access_mutex};
+    trace.phase("source-verify");
+    const auto verified = implementation_->verify_read(**session);
+    if (!verified)
+        return std::unexpected(verified.error());
     trace.phase("metadata");
     auto selected = Implementation::document(**session, target.document_id);
     if (!selected)
         return std::unexpected(selected.error());
-    const auto summary = implementation_->summarize(**session, **selected);
+    const auto summary = implementation_->summarize(**session, **selected, &*verified);
     if (!summary)
         return std::unexpected(summary.error());
-    trace.phase("source-verify");
-    if (const auto unchanged = (*session)->sources.native_sources->verify(); !unchanged)
-        return std::unexpected(session_error("image_source_changed", unchanged.error().message));
     trace.phase("object-detail");
     auto result = (*selected)->native->object_detail(
         {target.image_id, target.document_id, (*session)->revision, summary->format, summary->available_operations},

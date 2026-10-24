@@ -17,377 +17,7 @@
 #include "jobs_support.hpp"
 #include "jobs_test_access.hpp"
 
-struct axk::app::JobManager::Impl {
-    struct Record {
-        mutable std::mutex mutex;
-        bool admitted{};
-        std::string job_id;
-        std::string operation_id;
-        OperationClass operation_class{OperationClass::read};
-        nlohmann::json request;
-        std::optional<std::string> idempotency_index;
-        std::vector<std::string> destination_keys;
-        OperationContext context;
-        JobState state{JobState::queued};
-        std::uint64_t latest_sequence{};
-        std::optional<JobProgress> progress;
-        job_runtime_detail::ProgressPublication progress_publication;
-        std::optional<nlohmann::json> result;
-        std::optional<Error> error;
-        std::deque<JobEvent> events;
-        CancellationSource cancellation;
-        bool cancellation_requested{};
-        Clock::time_point submitted_at;
-        std::optional<Clock::time_point> running_at;
-        std::optional<Clock::time_point> phase_started_at;
-        std::optional<Clock::time_point> cancellation_requested_at;
-        std::vector<UploadLease> upload_leases;
-        PathReservationCoordinator::Lease path_lease;
-    };
-
-    struct IdempotentSubmission {
-        std::string operation_id;
-        std::string request_fingerprint;
-        std::string job_id;
-    };
-
-    struct TerminalRecord {
-        Clock::time_point completed_at;
-        std::string job_id;
-    };
-
-    class ProgressAdapter final : public ProgressSink {
-      public:
-        ProgressAdapter(Impl &owner, std::shared_ptr<Record> record) : owner_(owner), record_(std::move(record)) {}
-
-        void report(const Progress &progress) noexcept override {
-            try {
-                owner_.report_progress(record_, progress);
-            } catch (...) {
-            }
-        }
-
-      private:
-        Impl &owner_;
-        std::shared_ptr<Record> record_;
-    };
-
-    Impl(const OperationRegistry &operation_registry, std::size_t read_worker_count, std::size_t write_worker_count,
-         std::size_t maximum_queued_jobs, std::size_t replay_events_per_job, std::size_t maximum_retained_jobs,
-         std::chrono::seconds retention, Now now_function, UploadStore *upload_store,
-         PathReservationCoordinator *reservations)
-        : registry(operation_registry), maximum_queue(std::max<std::size_t>(maximum_queued_jobs, 1U)),
-          maximum_replay(std::max<std::size_t>(replay_events_per_job, 1U)),
-          maximum_jobs(std::max<std::size_t>(maximum_retained_jobs, 1U)), retention(retention),
-          now(std::move(now_function)), uploads(upload_store), path_reservations(reservations) {
-        const auto readers = std::max<std::size_t>(read_worker_count, 1U);
-        const auto writers = std::max<std::size_t>(write_worker_count, 1U);
-        workers.reserve(readers + writers);
-        for (std::size_t index = 0; index < readers; ++index)
-            workers.emplace_back([this] { worker_loop(OperationClass::read); });
-        for (std::size_t index = 0; index < writers; ++index)
-            workers.emplace_back([this] { worker_loop(OperationClass::write); });
-    }
-
-    ~Impl() { shutdown(); }
-
-    Result<std::string> next_id() {
-        auto suffix = secure_random_hex(16U);
-        if (!suffix)
-            return std::unexpected(suffix.error());
-        return "job-" + std::move(*suffix);
-    }
-
-    JobSnapshot snapshot(const std::shared_ptr<Record> &record) const {
-        const std::scoped_lock lock{record->mutex};
-        return {.job_id = record->job_id,
-                .operation_id = record->operation_id,
-                .state = record->state,
-                .latest_sequence = record->latest_sequence,
-                .progress = record->progress,
-                .result = record->result,
-                .error = record->error};
-    }
-
-    JobEvent append_event_locked(Record &record, std::string type, std::optional<JobProgress> progress = std::nullopt) {
-        ++record.latest_sequence;
-        JobEvent event{.event_id = record.job_id + '-' + std::to_string(record.latest_sequence),
-                       .sequence = record.latest_sequence,
-                       .job_id = record.job_id,
-                       .operation_id = record.operation_id,
-                       .owner_id = record.context.owner_id,
-                       .type = std::move(type),
-                       .state = record.state,
-                       .timestamp_unix_ms = job_runtime_detail::timestamp_unix_ms(),
-                       .progress = std::move(progress)};
-        record.events.push_back(event);
-        while (record.events.size() > maximum_replay)
-            record.events.pop_front();
-        published_events.fetch_add(1U, std::memory_order_relaxed);
-        return event;
-    }
-
-    void record_transition_locked(Record &record, JobState previous, JobState next) noexcept {
-        const auto current = now();
-        if (next == JobState::running) {
-            record.running_at = current;
-            queued_jobs.fetch_sub(1U, std::memory_order_relaxed);
-            running_jobs.fetch_add(1U, std::memory_order_relaxed);
-            total_queue_wait_ms.fetch_add(job_runtime_detail::elapsed_ms(record.submitted_at, current),
-                                          std::memory_order_relaxed);
-            return;
-        }
-        if (!is_terminal(next))
-            return;
-        if (previous == JobState::queued)
-            queued_jobs.fetch_sub(1U, std::memory_order_relaxed);
-        else if (previous == JobState::running)
-            running_jobs.fetch_sub(1U, std::memory_order_relaxed);
-        if (record.phase_started_at) {
-            total_phase_duration_ms.fetch_add(job_runtime_detail::elapsed_ms(*record.phase_started_at, current),
-                                              std::memory_order_relaxed);
-            record.phase_started_at.reset();
-        }
-        if (record.running_at)
-            total_execution_ms.fetch_add(job_runtime_detail::elapsed_ms(*record.running_at, current),
-                                         std::memory_order_relaxed);
-        if (record.cancellation_requested_at) {
-            total_cancellation_latency_ms.fetch_add(
-                job_runtime_detail::elapsed_ms(*record.cancellation_requested_at, current), std::memory_order_relaxed);
-        }
-        if (next == JobState::completed)
-            completed_jobs.fetch_add(1U, std::memory_order_relaxed);
-        else if (next == JobState::failed)
-            failed_jobs.fetch_add(1U, std::memory_order_relaxed);
-        else
-            cancelled_jobs.fetch_add(1U, std::memory_order_relaxed);
-    }
-
-    void emit(const JobEvent &event) noexcept {
-        std::vector<EventSink> sinks;
-        {
-            const std::scoped_lock lock{mutex};
-            sinks.reserve(subscribers.size());
-            for (const auto &[id, sink] : subscribers) {
-                static_cast<void>(id);
-                sinks.push_back(sink);
-            }
-        }
-        for (const auto &sink : sinks) {
-            try {
-                sink(event);
-            } catch (...) {
-            }
-        }
-    }
-
-    void transition(const std::shared_ptr<Record> &record, JobState state, std::string type,
-                    std::optional<nlohmann::json> result = std::nullopt, std::optional<Error> error = std::nullopt) {
-        std::optional<JobEvent> event;
-        std::vector<UploadLease> released_upload_leases;
-        if (is_terminal(state)) {
-            const std::scoped_lock lock{mutex, record->mutex};
-            if (is_terminal(record->state))
-                return;
-            record->path_lease = {};
-            released_upload_leases = std::move(record->upload_leases);
-            for (const auto &key : record->destination_keys) {
-                const auto found = destination_reservations.find(key);
-                if (found != destination_reservations.end() && found->second == record->job_id)
-                    destination_reservations.erase(found);
-            }
-            const auto previous = record->state;
-            record->state = state;
-            record->result = std::move(result);
-            record->error = std::move(error);
-            record_transition_locked(*record, previous, state);
-            event = append_event_locked(*record, std::move(type), record->progress);
-            terminal_jobs.push_back({now(), record->job_id});
-        } else {
-            const std::scoped_lock lock{record->mutex};
-            if (is_terminal(record->state))
-                return;
-            const auto previous = record->state;
-            record->state = state;
-            record->result = std::move(result);
-            record->error = std::move(error);
-            record_transition_locked(*record, previous, state);
-            event = append_event_locked(*record, std::move(type), record->progress);
-        }
-        released_upload_leases.clear();
-        emit(*event);
-    }
-
-    void report_progress(const std::shared_ptr<Record> &record, const Progress &progress) {
-        std::optional<JobEvent> event;
-        {
-            const std::scoped_lock lock{record->mutex};
-            if (record->state != JobState::running)
-                return;
-            JobProgress update{job_runtime_detail::progress_phase_name(progress.phase), progress.completed,
-                               progress.total, progress.label};
-            if (record->progress && record->progress->phase == update.phase &&
-                record->progress->message == update.message && record->progress->total == update.total &&
-                record->progress->completed > update.completed) {
-                return;
-            }
-            const auto current = now();
-            if (!record->progress || record->progress->phase != update.phase) {
-                if (record->phase_started_at) {
-                    total_phase_duration_ms.fetch_add(
-                        job_runtime_detail::elapsed_ms(*record->phase_started_at, current), std::memory_order_relaxed);
-                }
-                record->phase_started_at = current;
-            }
-            record->progress = update;
-            if (!record->progress_publication.admit(update, current))
-                return;
-            progress_events.fetch_add(1U, std::memory_order_relaxed);
-            event = append_event_locked(*record, "progress", update);
-        }
-        emit(*event);
-    }
-
-    std::deque<std::shared_ptr<Record>> &queue_for(OperationClass operation_class) {
-        return operation_class == OperationClass::write ? write_queue : read_queue;
-    }
-
-    bool claim_running(const std::shared_ptr<Record> &record) {
-        std::optional<JobEvent> event;
-        {
-            const std::scoped_lock lock{mutex, record->mutex};
-            if (stopping || record->state != JobState::queued)
-                return false;
-            const auto previous = record->state;
-            record->state = JobState::running;
-            record_transition_locked(*record, previous, record->state);
-            event = append_event_locked(*record, "running");
-        }
-        emit(*event);
-        return true;
-    }
-
-    void worker_loop(OperationClass operation_class) {
-        for (;;) {
-            std::shared_ptr<Record> record;
-            std::function<void()> before_claim;
-            {
-                std::unique_lock lock{mutex};
-                auto &queue = queue_for(operation_class);
-                condition.wait(lock, [&] { return stopping || (!queue.empty() && queue.front()->admitted); });
-                if (queue.empty()) {
-                    if (stopping)
-                        return;
-                    continue;
-                }
-                record = std::move(queue.front());
-                queue.pop_front();
-                before_claim = before_running_claim;
-            }
-
-            if (before_claim)
-                before_claim();
-            if (!claim_running(record)) {
-                if (!stopping)
-                    continue;
-                record->cancellation.cancel();
-                transition(record, JobState::cancelled, "cancelled");
-                continue;
-            }
-
-            ProgressAdapter progress{*this, record};
-            auto context = record->context;
-            context.cancellation = record->cancellation.token();
-            context.progress = &progress;
-
-            auto result = invoke_diagnostic_job(registry, record->operation_id, record->request, std::move(context),
-                                                record->job_id);
-            if (result) {
-                transition(record, JobState::completed, "completed", std::optional<nlohmann::json>{std::move(*result)});
-            } else if (result.error().code == "operation_cancelled" || result.error().code == "cancelled") {
-                transition(record, JobState::cancelled, "cancelled");
-            } else {
-                transition(record, JobState::failed, "failed", std::nullopt, result.error());
-            }
-        }
-    }
-
-    void cleanup_expired_locked() {
-        const auto current = now();
-        while (!terminal_jobs.empty() && terminal_jobs.front().completed_at + retention <= current) {
-            const auto job_id = std::move(terminal_jobs.front().job_id);
-            terminal_jobs.pop_front();
-            const auto found = jobs.find(job_id);
-            if (found == jobs.end())
-                continue;
-            if (found->second->idempotency_index) {
-                const auto idempotency = idempotent_submissions.find(*found->second->idempotency_index);
-                if (idempotency != idempotent_submissions.end() && idempotency->second.job_id == job_id)
-                    idempotent_submissions.erase(idempotency);
-            }
-            jobs.erase(found);
-        }
-    }
-
-    void shutdown() noexcept {
-        std::vector<std::shared_ptr<Record>> active;
-        {
-            const std::scoped_lock lock{mutex};
-            if (stopping && workers.empty())
-                return;
-            stopping = true;
-            active.reserve(jobs.size());
-            for (const auto &[id, record] : jobs) {
-                static_cast<void>(id);
-                active.push_back(record);
-            }
-        }
-        for (const auto &record : active)
-            record->cancellation.cancel();
-        condition.notify_all();
-        for (auto &worker : workers) {
-            if (worker.joinable())
-                worker.join();
-        }
-        workers.clear();
-    }
-
-    const OperationRegistry &registry;
-    const std::size_t maximum_queue;
-    const std::size_t maximum_replay;
-    const std::size_t maximum_jobs;
-    const std::chrono::seconds retention;
-    Now now;
-    UploadStore *uploads{};
-    PathReservationCoordinator *path_reservations{};
-    std::mutex submission_mutex;
-    mutable std::mutex mutex;
-    std::condition_variable condition;
-    std::unordered_map<std::string, std::shared_ptr<Record>> jobs;
-    std::unordered_map<std::string, IdempotentSubmission> idempotent_submissions;
-    std::unordered_map<std::string, std::string> destination_reservations;
-    std::deque<TerminalRecord> terminal_jobs;
-    std::deque<std::shared_ptr<Record>> read_queue;
-    std::deque<std::shared_ptr<Record>> write_queue;
-    std::unordered_map<SubscriptionId, EventSink> subscribers;
-    std::function<void()> before_running_claim;
-    std::vector<std::thread> workers;
-    SubscriptionId next_subscription{1U};
-    std::atomic_bool stopping{};
-    std::atomic<std::uint64_t> submitted_jobs{};
-    std::atomic<std::uint64_t> queued_jobs{};
-    std::atomic<std::uint64_t> running_jobs{};
-    std::atomic<std::uint64_t> completed_jobs{};
-    std::atomic<std::uint64_t> failed_jobs{};
-    std::atomic<std::uint64_t> cancelled_jobs{};
-    std::atomic<std::uint64_t> published_events{};
-    std::atomic<std::uint64_t> progress_events{};
-    std::atomic<std::uint64_t> total_queue_wait_ms{};
-    std::atomic<std::uint64_t> total_execution_ms{};
-    std::atomic<std::uint64_t> total_phase_duration_ms{};
-    std::atomic<std::uint64_t> total_cancellation_latency_ms{};
-};
-
+#include "jobs_internal.hpp"
 axk::app::JobManager::JobManager(const OperationRegistry &registry, std::size_t read_worker_count,
                                  std::size_t write_worker_count, std::size_t maximum_queued_jobs,
                                  std::size_t replay_events_per_job, std::size_t maximum_retained_jobs,
@@ -424,6 +54,10 @@ axk::app::Result<axk::app::JobSnapshot> axk::app::JobManager::submit(std::string
     if (idempotency_key && (idempotency_key->empty() || idempotency_key->size() > 128U))
         return std::unexpected(
             job_runtime_detail::job_error("invalid_idempotency_key", "idempotency key must contain 1 to 128 bytes"));
+
+    auto scheduling = impl_->registry.read_scheduling(operation_id, request, context);
+    if (!scheduling)
+        return std::unexpected(scheduling.error());
 
     std::unique_lock submission_lock{impl_->submission_mutex};
     const auto request_fingerprint = request.dump();
@@ -472,6 +106,10 @@ axk::app::Result<axk::app::JobSnapshot> axk::app::JobManager::submit(std::string
     record->operation_class = descriptor->operation_class;
     record->request = std::move(request);
     record->context = std::move(context);
+    record->scheduling = std::move(*scheduling);
+    if (record->scheduling)
+        record->read_group = std::to_string(record->context.owner_id.size()) + ':' + record->context.owner_id + ':' +
+                             record->scheduling->scope;
     record->path_lease = std::move(path_lease);
     if (impl_->uploads != nullptr) {
         std::vector<std::string> upload_ids;
@@ -491,6 +129,7 @@ axk::app::Result<axk::app::JobSnapshot> axk::app::JobManager::submit(std::string
     JobSnapshot initial_snapshot;
     std::shared_ptr<Impl::Record> replayed_record;
     std::vector<EventSink> sinks;
+    Impl::PreemptedReads preempted;
     {
         const std::scoped_lock lock{impl_->mutex};
         impl_->cleanup_expired_locked();
@@ -519,7 +158,13 @@ axk::app::Result<axk::app::JobSnapshot> axk::app::JobManager::submit(std::string
                         "destination_reserved", "destination is reserved by another active job", true));
                 }
             }
-            if (impl_->read_queue.size() + impl_->write_queue.size() >= impl_->maximum_queue)
+            impl_->prune_cancelled_locked();
+            const auto candidates = impl_->preemption_candidates_locked(*record);
+            const auto replaced_queued =
+                static_cast<std::size_t>(std::ranges::count_if(impl_->read_queue, [&](const auto &candidate) {
+                    return std::ranges::find(candidates, candidate) != candidates.end();
+                }));
+            if (impl_->read_queue.size() + impl_->write_queue.size() - replaced_queued >= impl_->maximum_queue)
                 return std::unexpected(job_runtime_detail::job_error(
                     "job_queue_full", "job queue has reached its configured capacity", true));
             if (impl_->jobs.size() >= impl_->maximum_jobs)
@@ -545,6 +190,7 @@ axk::app::Result<axk::app::JobSnapshot> axk::app::JobManager::submit(std::string
                                     .error = record->error};
             }
             impl_->jobs.emplace(record->job_id, record);
+            impl_->preempt_locked(candidates, preempted);
             impl_->submitted_jobs.fetch_add(1U, std::memory_order_relaxed);
             impl_->queued_jobs.fetch_add(1U, std::memory_order_relaxed);
             for (const auto &key : record->destination_keys)
@@ -563,6 +209,10 @@ axk::app::Result<axk::app::JobSnapshot> axk::app::JobManager::submit(std::string
         }
     }
     submission_lock.unlock();
+    preempted.paths.clear();
+    preempted.uploads.clear();
+    for (const auto &event : preempted.events)
+        impl_->emit(event);
     if (replayed_record)
         return impl_->snapshot(replayed_record);
     for (const auto &sink : sinks) {

@@ -34,6 +34,7 @@ struct Connection {
 [[nodiscard]] Result<void> save_json(const std::filesystem::path &path, const Json &value, bool create,
                                      ReadCounters *counters = nullptr);
 [[nodiscard]] Result<void> verify_bound(const Connection &connection);
+[[nodiscard]] Result<void> verify_read_bound(const Connection &connection);
 [[nodiscard]] Result<Json> load_json(const std::filesystem::path &path);
 [[nodiscard]] std::string target_identity(const Connection &connection, const DeviceTargetDescription &target);
 [[nodiscard]] const DeviceTargetDescription *find_target(const Connection &connection, std::string_view id);

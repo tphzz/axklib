@@ -20,6 +20,7 @@
     } from '../lib/objectEditing';
     import type { InspectorSelection } from '../lib/types';
     import { bankEditorUnits } from './bankEditorFixture';
+    import { SelectionReadScheduler } from '../lib/audio/selectionReadScheduler';
     let { bank = false }: { bank?: boolean } = $props();
     const resolvedMembers = [
         { objectId: 'Member A', name: 'PB BRASS A' },
@@ -292,6 +293,10 @@
     const controller = new AuditionController(transport, (state) => (audioState = state));
     onDestroy(() => controller.dispose());
     const audition = {
+        selectionReads: new SelectionReadScheduler(
+            () => {},
+            () => {},
+        ),
         get state() {
             return audioState;
         },

@@ -118,7 +118,7 @@ async function exerciseReadContract(transport: ImageTransport, source: FileLocat
         message: '',
     });
 
-    const preview = await transport.preview(image.sessionId, objects.objects[0]!.key, 16);
+    const preview = await transport.preview(image.sessionId, objects.objects[0]!.key, 16, { readIntent: 'SELECTED' });
     expect(preview).toEqual({
         imageId: 'image-1',
         documentId: 'document-a-series-source-1',
@@ -242,10 +242,29 @@ describe('ImageTransport shared read contract', () => {
     });
 
     it('passes through the Crow HTTP transport', async () => {
+        let previewJob: unknown;
         vi.stubGlobal(
             'fetch',
             vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
                 const url = new URL(String(input));
+                if (url.pathname.endsWith('/system/capabilities'))
+                    return json({
+                        apiVersion: 'v1',
+                        operations: [
+                            {
+                                id: 'images.preview',
+                                method: 'POST',
+                                route: '/api/v1/image-waveform-previews',
+                                mode: 'job',
+                                implemented: true,
+                                operationClass: 'read',
+                                requiresIdempotency: false,
+                                variant: null,
+                            },
+                        ],
+                    });
+                if (url.pathname.endsWith('/jobs/job-preview/events')) return json({ events: [] });
+                if (url.pathname.endsWith('/jobs/job-preview')) return json(previewJob);
                 if (url.pathname.endsWith('/images') && init?.method === 'POST') {
                     return json(
                         {
@@ -385,30 +404,43 @@ describe('ImageTransport shared read contract', () => {
                         message: '',
                     });
                 }
-                if (url.pathname.endsWith('/preview')) {
-                    return json({
-                        imageId: 'image-1',
-                        documentId: 'document-a-series-source-1',
-                        revision: 1,
-                        warnings: [],
+                if (url.pathname.endsWith('/image-waveform-previews') && init?.method === 'POST') {
+                    expect(JSON.parse(String(init.body))).toMatchObject({
                         objectId: 'sample-1',
-                        lanes: [
-                            {
-                                role: 'MONO',
-                                sourceObjectId: 'wave-1',
-                                sampleRate: 44_100,
-                                sampleWidthBytes: 2,
-                                nativeBitDepth: 16,
-                                sampleRateApproximate: false,
-                                storedFrameCount: 4,
-                                playbackStartFrame: 0,
-                                playbackLengthFrames: 4,
-                                loopStartFrame: 0,
-                                loopLengthFrames: 0,
-                                bins: [{ minimum: -32768, maximum: 16384 }],
-                            },
-                        ],
+                        readIntent: 'SELECTED',
                     });
+                    previewJob = {
+                        jobId: 'job-preview',
+                        operationId: 'images.preview',
+                        state: 'COMPLETED',
+                        latestSequence: 3,
+                        progress: null,
+                        error: null,
+                        result: {
+                            imageId: 'image-1',
+                            documentId: 'document-a-series-source-1',
+                            revision: 1,
+                            warnings: [],
+                            objectId: 'sample-1',
+                            lanes: [
+                                {
+                                    role: 'MONO',
+                                    sourceObjectId: 'wave-1',
+                                    sampleRate: 44_100,
+                                    sampleWidthBytes: 2,
+                                    nativeBitDepth: 16,
+                                    sampleRateApproximate: false,
+                                    storedFrameCount: 4,
+                                    playbackStartFrame: 0,
+                                    playbackLengthFrames: 4,
+                                    loopStartFrame: 0,
+                                    loopLengthFrames: 0,
+                                    bins: [{ minimum: -32768, maximum: 16384 }],
+                                },
+                            ],
+                        },
+                    };
+                    return json(previewJob, 202);
                 }
                 if (url.pathname.endsWith('/images/image-1') && init?.method === 'DELETE') {
                     return new Response(null, { status: 204 });

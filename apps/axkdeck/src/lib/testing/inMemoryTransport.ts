@@ -505,11 +505,11 @@ export class InMemoryImageTransport implements ImageTransport {
         sessionId: number,
         objectKey: string,
         binCount: number,
-        signal?: AbortSignal,
+        options: import('../audioReadOptions').PreviewReadOptions,
     ): Promise<PreviewEnvelope> {
         this.calls.push('preview');
         const configured = this.options.operations?.preview;
-        if (configured) return configured(sessionId, objectKey, binCount, signal);
+        if (configured) return configured(sessionId, objectKey, binCount, options);
         if (this.options.preview) return this.options.preview;
         throw this.unsupported('preview');
     }
@@ -517,14 +517,17 @@ export class InMemoryImageTransport implements ImageTransport {
     prepareAuditionBundle(
         sessionId: number,
         objectKeys: readonly string[],
-        signal?: AbortSignal,
-        storedPcm?: boolean,
+        options: import('../audioReadOptions').AuditionReadOptions,
     ): Promise<AuditionBundleDescriptor> {
-        return this.invoke('prepareAuditionBundle', [sessionId, objectKeys, signal, storedPcm]);
+        return this.invoke('prepareAuditionBundle', [sessionId, objectKeys, options]);
     }
 
-    readAuditionContent(auditionId: string, contentSizeBytes: number, signal?: AbortSignal): Promise<ArrayBuffer> {
-        return this.invoke('readAuditionContent', [auditionId, contentSizeBytes, signal]);
+    readAuditionContent(
+        auditionId: string,
+        contentSizeBytes: number,
+        options: import('../audioReadOptions').AuditionContentOptions,
+    ): Promise<ArrayBuffer> {
+        return this.invoke('readAuditionContent', [auditionId, contentSizeBytes, options]);
     }
 
     deleteAudition(auditionId: string): Promise<void> {

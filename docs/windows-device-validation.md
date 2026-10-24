@@ -11,8 +11,7 @@ SCSI hosts before attaching the USB reader to the computer.
 
 ## Capture Slow Sample Selection
 
-This trace measures the existing behavior; it does not yet change read sizes,
-prefetch, waveform quality or safety checks. Use **10 Build - Windows x64** for
+Use **10 Build - Windows x64** for
 the first capture and record the workflow run URL and application's source
 identity. Keep the same card, reader and connection for all three runs.
 
@@ -34,7 +33,40 @@ identity. Keep the same card, reader and connection for all three runs.
 Return the three log files, Windows version, reader model, Sample names, and
 workflow/source identity. An existing matching backup image on NVMe can be a
 separate control; do not create a card dump or change device permissions for this
-check. Autoplay off deliberately leaves today's speculative audio prefetch intact.
+check. In the optimized build, Autoplay off defers selected audio prefetch until
+an actual waveform draw. Unrendered or failed previews must not trigger it.
+
+### Qualify The Optimized Read Path
+
+The October 24 baseline showed about 848-870 ms cold click-to-draw, with only
+0.7-5.5 ms of PCM scanning. Repeated full device enumeration took 143-194 ms
+per check. Warm revisits drew in 19-23 ms. These are observations from the
+reported Windows capture, not a guarantee for other readers.
+
+1. On the same reader/card, collect at least 20 first selections of different
+   6-40 KiB Samples across three fresh app launches, with Autoplay off. Record
+   median and p95 `sinceSelectionMs` at the first valid waveform draw. Targets
+   are at most 100 ms median and 200 ms p95. Report a miss instead of replacing
+   a cold sample with a warm-cache result.
+2. Repeat A/B/A and rapid A/B/C selection. Only the current waveform may appear;
+   unrelated visible Wave Data rows must still finish loading. Re-selecting a
+   loading Sample must not leave it blank.
+3. Select a multi-megabyte Sample and press Play during its scan, then repeat
+   with Autoplay enabled. A preempted preview must retry silently after audio
+   preparation; no permanent waveform error or old-selection playback is allowed.
+4. Resize the waveform to request refinement while pressing Play. Check both
+   Sample and Wave Data views, with the lower editor shown and hidden. Prefetch
+   must follow a real visible draw, including a cached waveform, with Debug
+   capture disabled as well as enabled.
+5. Select objects repeatedly, then use Show in Files. Cached advisory mapping
+   must not reveal an object in another revision/document; explicit Reveal must
+   query its current location again.
+6. Unplug the reader or change its card while a session is open. Old reads must
+   fail closed. Refresh and explicitly reconnect; never write during this test.
+
+Compare exact waveform extrema and decoded audio with the same backup image.
+For cold PCM, adjacent requested pages should now share transfers no larger
+than 64 KiB; warm pages remain cache hits. These checks do not qualify writes.
 
 ### Reading The Capture
 
@@ -50,28 +82,36 @@ Join HTTP `requestId` to `image_object_read`, `image_preview_read`,
 `image_read_response`. Audition submission also records `jobId`; prepared audio
 and range records share `auditionId`. Backend phase durations and `startOffsetUs`
 separate lock waiting, source verification, preparation and PCM processing.
-`serialize` measures response construction separately.
+`serialize` measures response construction separately. `preview-job` links the
+waveform submission and completed result; its job ID joins the server scan.
 
 For each slow click, summarize selection-to-draw time, queue/lock waits,
 verification time, PCM time, read count/bytes and cache results. Use these rules:
 
 - Phase durations partition a backend call; `total` is not another phase to add.
-- Enumeration and layout-guard times are inside source verification. PCM read
+- Targeted `identityTimeUs`, enumeration and layout-guard times are inside source verification. PCM read
   time includes transport time. Frontend HTTP/job waits contain backend work.
   These nested timings must not be added together.
 - `transportReads`/`transportReadBytes` count attempted post-cache transport
   calls, not necessarily individual Windows disk operations or completed bytes.
   `failedReads` identifies failures. Layout-guard reads are counted separately.
-  Device-only counters are absent for ordinary image files; their PCM timings
+  `sessionLockWaitUs` measures image-session contention, separately from
+  connection/transport lock waits. Device-only counters are absent for ordinary image files; their PCM timings
   still apply.
 - The read-size buckets are disjoint: up to 4 KiB, over 4 through 64 KiB, over
-  64 KiB through 1 MiB, and over 1 MiB. Cache hits and misses count metadata pages.
+  64 KiB through 1 MiB, and over 1 MiB. Cache hits and misses count 4 KiB pages,
+  including requested PCM pages after metadata admission is sealed.
 - `helperReads`/`directReads` identify the actual native access path, including
   layout guards. Transport time includes helper IPC where used; it is not an
   isolated measurement of physical disk time.
 
-Linux tests and synthetic read counts verify the trace, not Windows performance.
-Choose the optimization only after the Windows capture identifies the delay.
+HTTP logs set `durationMeasured: false` and `durationMs: 0` when an early response
+(such as a CORS preflight) skipped the timing middleware. Such a record must not
+be interpreted as measured network latency or reuse the last keep-alive timer.
+
+Linux tests and synthetic read counts verify correctness and bounds, not Windows
+performance. Windows SDK builds, UAC/helper behavior and these physical timing
+checks remain pipeline/manual acceptance gates.
 
 ## Reconnect Without Restarting
 

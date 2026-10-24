@@ -42,6 +42,21 @@ server and UAC helper compare the same identity. Unavailable or malformed
 identity properties refuse access; reconnecting requires Refresh and an explicit
 new selection. See the [Windows reconnection check](../docs/windows-device-validation.md).
 
+Ordinary Windows reads revalidate the already-open handle's descriptor,
+geometry and disk number, then locate its original disk PnP instance and compare
+fresh disk/USB arrival properties. They do not enumerate every disk or reopen
+the device. Missing, short or changed identity data fails closed. SCSI2SD layout
+guards are still read fresh, without a verification TTL. Helper opcode 7 performs
+the same handle check with an empty request and a status-only reply; desktop,
+server and helper must come from the same build. Opening, write authorization,
+mutation and recovery retain their full checks.
+
+After metadata admission is sealed, adjacent missing 4 KiB cache pages required
+by a PCM request are filled in one transfer of at most 64 KiB. This keeps the
+existing 4 MiB LRU and streaming policy; it does not prefetch unrelated pages,
+batch unsealed metadata admission, or change mutation planning. Waveform scans
+retain exact envelopes and check cancellation between 16K-frame PCM chunks.
+
 Selecting a carrier in SCSI2SDv6 automatically reads only its final two 512-byte
 sectors, read-only. Native admission requires `BCFG`, at least one enabled target,
 recognized types, unique enabled IDs, supported sector packing, and disjoint

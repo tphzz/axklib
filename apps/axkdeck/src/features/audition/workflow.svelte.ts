@@ -2,13 +2,8 @@ import { WaveformPreviewQueue } from '../../lib/audio/waveformPreviewQueue';
 import { AuditionController, type AuditionState } from '../../lib/audio/auditionController';
 import { inspectorSelectionStopsPlayback } from '../../lib/audio/playbackSelection';
 import { matchesSearch, playbackRowVisible } from '../../lib/auditionVisibility';
-import {
-    auditionableSampleBankIds,
-    auditionableSampleIds,
-    isStandaloneSample,
-    stereoSampleIds,
-} from '../../lib/sampleRelationships';
-import type { ImageTransport, SamplerRelationship } from '../../lib/transport';
+import { isStandaloneSample } from '../../lib/sampleRelationships';
+import type { AudioIdentity, ImageTransport } from '../../lib/transport';
 import type {
     Program,
     ProgramSampleSelectRow,
@@ -20,7 +15,15 @@ import { userFacingMessage } from '../../lib/userFacingMessage';
 import type { CatalogWorkflow } from '../catalog/workflow.svelte';
 import type { CachedAudition } from '../../lib/audio/auditionTypes';
 import type { PackageExportSelectionState } from '../../lib/objectSelection';
-import { beginSampleRead, clearSampleRead } from '../../lib/readDiagnostics';
+import {
+    beginSampleRead,
+    clearSampleRead,
+    readContext,
+    readTrace,
+    type WaveformReadDraw,
+} from '../../lib/readDiagnostics';
+import { SelectionReadScheduler } from '../../lib/audio/selectionReadScheduler';
+import { auditionabilityIndex, type AuditionabilityIndex } from './auditionability';
 
 export interface LaneQueries {
     primary: string;
@@ -45,18 +48,8 @@ interface AuditionWorkflowDependencies {
     setSelection: (selection: PackageExportSelectionState) => void;
 }
 
-interface AuditionabilityIndex {
-    relationships: readonly SamplerRelationship[];
-    waveData: readonly WaveDataItem[];
-    sampleBanks: readonly SampleStructureItem[];
-    samples: readonly SampleStructureItem[];
-    objectIds: Set<string>;
-    sampleIds: Set<string>;
-    sampleBankIds: Set<string>;
-    stereoIds: Set<string>;
-}
-
 export class AuditionWorkflow {
+    readonly selectionReads: SelectionReadScheduler;
     state = $state<AuditionState>({ objectId: null, status: 'idle', playheadFrame: 0 });
     autoplay = $state(false);
     showOnlyStandaloneSamples = $state(true);
@@ -82,6 +75,8 @@ export class AuditionWorkflow {
         this.previews = new WaveformPreviewQueue(dependencies.transport);
         this.controller = new AuditionController(dependencies.transport, (state) => {
             this.state = state;
+            this.previews.playbackPending(state.status === 'preparing');
+            this.selectionReads?.playbackPending(state.status === 'preparing');
             if (
                 state.status === 'playing' &&
                 state.objectId &&
@@ -106,6 +101,12 @@ export class AuditionWorkflow {
                 this.pendingObjectId = '';
             }
         });
+        this.selectionReads = new SelectionReadScheduler(
+            (sessionId, objectId) => {
+                void this.controller.prefetch(sessionId, objectId);
+            },
+            () => this.controller.cancelPrefetch(),
+        );
     }
 
     get auditionableSampleObjectIds(): Set<string> {
@@ -125,32 +126,7 @@ export class AuditionWorkflow {
     }
 
     private auditionabilityIndex(): AuditionabilityIndex {
-        const catalog = this.dependencies.catalog;
-        const cached = this.auditionabilityCache;
-        if (
-            cached?.relationships === catalog.relationships &&
-            cached.waveData === catalog.waveData &&
-            cached.sampleBanks === catalog.sampleBanks &&
-            cached.samples === catalog.samples
-        ) {
-            return cached;
-        }
-        const sampleIds = auditionableSampleIds(catalog.relationships, catalog.waveData);
-        const result = {
-            relationships: catalog.relationships,
-            waveData: catalog.waveData,
-            sampleBanks: catalog.sampleBanks,
-            samples: catalog.samples,
-            sampleIds,
-            sampleBankIds: auditionableSampleBankIds(
-                catalog.relationships,
-                catalog.sampleBanks,
-                catalog.samples,
-                sampleIds,
-            ),
-            stereoIds: stereoSampleIds(catalog.relationships, catalog.waveData),
-            objectIds: new Set([...sampleIds, ...catalog.waveData.map((item) => item.objectKey)]),
-        };
+        const result = auditionabilityIndex(this.dependencies.catalog, this.auditionabilityCache);
         this.auditionabilityCache = result;
         return result;
     }
@@ -237,7 +213,7 @@ export class AuditionWorkflow {
         else if (view === 'samples') catalog.selectedSampleWaveDataId = item.objectKey;
         else if (view === 'wave-data') catalog.selectedWaveDataId = item.objectKey;
         this.setEditorObject(item.objectKey);
-        this.requestWaveformPreview(item);
+        this.requestWaveformPreview(item, 1024, 'SELECTED');
         await this.inspectObject(item.objectKey);
         const selectionStillActive =
             (view === 'sample-banks' && catalog.selectedBankWaveDataId === item.objectKey) ||
@@ -248,13 +224,14 @@ export class AuditionWorkflow {
 
     resetPreviewQueue(): void {
         clearSampleRead();
+        this.selectionReads.clear();
         this.previews.reset();
         this.previewPending.clear();
         this.previewFailed.clear();
         this.dependencies.catalog.samplePreviewStates = {};
     }
 
-    requestWaveformPreview(item: WaveDataItem, bins = 1024): void {
+    requestWaveformPreview(item: WaveDataItem, bins = 1024, intent: 'SELECTED' | 'REFINEMENT' = 'REFINEMENT'): void {
         const sessionId = this.dependencies.sessionId();
         const requestKey = `${item.objectKey}/${bins}`;
         if (
@@ -272,7 +249,7 @@ export class AuditionWorkflow {
                 ? { ...candidate, previewState: 'loading' }
                 : candidate,
         );
-        this.loadPreview({ kind: 'wave-data', objectId: item.objectKey, itemId: item.id }, bins);
+        this.loadPreview({ kind: 'wave-data', objectId: item.objectKey, itemId: item.id }, bins, intent);
     }
 
     requestSampleWaveformPreview(item: SampleStructureItem): void {
@@ -375,8 +352,20 @@ export class AuditionWorkflow {
     prefetchObject(objectId: string): void {
         const sessionId = this.dependencies.sessionId();
         if (sessionId !== null && this.auditionableObjectIds.has(objectId)) {
-            void this.controller.prefetch(sessionId, objectId);
+            this.selectionReads.prefetch(sessionId, objectId);
         }
+    }
+
+    waveformDrawn(objectId: string, draw: WaveformReadDraw, identity?: AudioIdentity): void {
+        const sessionId = this.dependencies.sessionId();
+        if (sessionId === null) return;
+        this.selectionReads.drawn(
+            sessionId,
+            objectId,
+            identity ?? this.dependencies.transport.audioIdentity(sessionId),
+            draw,
+        );
+        readTrace('waveform-draw', { ...draw }, readContext(sessionId, objectId))?.finish('drawn');
     }
 
     seekWaveData(item: WaveDataItem, ratio: number): void {
@@ -534,11 +523,28 @@ export class AuditionWorkflow {
     }
 
     dispose(): Promise<void> {
+        this.selectionReads.clear();
         this.previews.reset();
         return this.controller.dispose();
     }
 
     private setEditorObject(objectId: string): void {
+        const sessionId = this.dependencies.sessionId();
+        if (sessionId !== null) {
+            this.previews.focus(sessionId, objectId);
+            const identity = this.dependencies.transport.audioIdentity(sessionId);
+            const cached =
+                this.dependencies.catalog.samplePreviewStates[objectId]?.previewState === 'ready' ||
+                this.dependencies.catalog.waveData.some(
+                    (item) => item.objectKey === objectId && item.previewState === 'ready',
+                );
+            this.selectionReads.select(
+                sessionId,
+                objectId,
+                identity,
+                this.auditionableObjectIds.has(objectId) && !cached,
+            );
+        } else this.selectionReads.clear();
         beginSampleRead(this.dependencies.transport, this.dependencies.sessionId(), objectId, {
             autoplay: this.autoplay,
             previewCache: this.dependencies.catalog.samplePreviewStates[objectId]?.previewState ?? 'absent',
@@ -612,9 +618,10 @@ export class AuditionWorkflow {
         });
     }
 
-    private loadPreview(target: PreviewTarget, bins: number): void {
+    private loadPreview(target: PreviewTarget, bins: number, intent: 'SELECTED' | 'REFINEMENT' = 'SELECTED'): void {
         const sessionId = this.dependencies.sessionId();
         if (sessionId === null) return;
+        const identity = this.dependencies.transport.audioIdentity(sessionId);
         const key = target.kind === 'wave-data' ? `${target.objectId}/${bins}` : target.objectId;
         this.previews.request(
             sessionId,
@@ -622,6 +629,7 @@ export class AuditionWorkflow {
             bins,
             (preview) => {
                 this.previewPending.delete(key);
+                this.selectionReads.previewReady(sessionId, target.objectId, preview);
                 const catalog = this.dependencies.catalog;
                 if (target.kind === 'wave-data') {
                     const lane = preview.lanes[0];
@@ -641,6 +649,7 @@ export class AuditionWorkflow {
             },
             (error) => {
                 this.previewPending.delete(key);
+                this.selectionReads.previewReady(sessionId, target.objectId, identity);
                 this.previewFailed.add(target.objectId);
                 const catalog = this.dependencies.catalog;
                 if (target.kind === 'wave-data') {
@@ -657,6 +666,7 @@ export class AuditionWorkflow {
                 }
                 this.dependencies.setStatus(userFacingMessage(error));
             },
+            { intent, cancelled: () => this.previewPending.delete(key) },
         );
     }
 }

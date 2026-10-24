@@ -14,6 +14,7 @@ namespace rawdisk::detail {
 struct Win32UsbIdentity {
     std::string carrier_id;
     std::string connection_id;
+    std::string disk_instance_id;
 };
 
 template <class Api> Result<Win32UsbIdentity> win32_node_identity(Api &api, std::uint32_t instance) {
@@ -40,8 +41,10 @@ template <class Api> Result<Win32UsbIdentity> win32_node_identity(Api &api, std:
             if (*usb_arrival == 0)
                 return std::unexpected(make_error_code(Errc::device_identity_unavailable));
             // DEVINST values are opaque handles, not identities shared with the UAC helper.
-            return Win32UsbIdentity{*name, std::format("{}:{}:{}:{}:{}:{}", name->size(), *name, disk_id->size(),
-                                                       *disk_id, *usb_arrival, *disk_arrival)};
+            return Win32UsbIdentity{*name,
+                                    std::format("{}:{}:{}:{}:{}:{}", name->size(), *name, disk_id->size(), *disk_id,
+                                                *usb_arrival, *disk_arrival),
+                                    *disk_id};
         }
         auto parent = api.parent(instance);
         if (!parent)
@@ -49,6 +52,21 @@ template <class Api> Result<Win32UsbIdentity> win32_node_identity(Api &api, std:
         instance = *parent;
     }
     return std::unexpected(make_error_code(Errc::device_identity_unavailable));
+}
+
+template <class Api> Result<void> win32_revalidate_identity(Api &api, const Win32UsbIdentity &bound) {
+    if (bound.disk_instance_id.empty() || bound.carrier_id.empty() || bound.connection_id.empty())
+        return std::unexpected(make_error_code(Errc::device_identity_unavailable));
+    const auto instance = api.locate(bound.disk_instance_id);
+    if (!instance)
+        return std::unexpected(instance.error());
+    const auto current = win32_node_identity(api, *instance);
+    if (!current)
+        return std::unexpected(current.error());
+    if (current->carrier_id != bound.carrier_id || current->connection_id != bound.connection_id ||
+        current->disk_instance_id != bound.disk_instance_id)
+        return std::unexpected(make_error_code(Errc::device_connection_changed));
+    return {};
 }
 
 inline std::error_code win32_identity_mismatch(const DeviceInfo &actual, const DeviceInfo &expected) noexcept {

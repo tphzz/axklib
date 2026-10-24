@@ -126,6 +126,15 @@ Result<void> BlockDevice::flush() noexcept {
     });
 }
 
+Result<void> BlockDevice::verify_binding() noexcept {
+    return detail::guard([&]() -> Result<void> {
+        const std::lock_guard lock{mutex_};
+        return verify_binding_raw();
+    });
+}
+
+Result<void> BlockDevice::verify_binding_raw() { return detail::fail(Errc::not_a_usb_disk); }
+
 Result<std::vector<DeviceInfo>> list_usb_devices() noexcept {
     return detail::guard([] { return detail::list_platform(); });
 }

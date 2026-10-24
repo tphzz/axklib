@@ -33,7 +33,8 @@ class RequestTelemetry {
 };
 
 [[nodiscard]] std::string structured_request_log(std::string_view request_id, std::string_view method,
-                                                 std::string_view path, int status, std::chrono::milliseconds duration);
+                                                 std::string_view path, int status, std::chrono::milliseconds duration,
+                                                 bool duration_measured = true);
 [[nodiscard]] std::string structured_audit_log(std::string_view request_id, std::string_view action,
                                                std::string_view outcome, std::string_view principal_id = {},
                                                std::string_view resource_type = {}, std::string_view resource_id = {});

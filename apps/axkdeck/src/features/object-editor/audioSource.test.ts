@@ -57,7 +57,11 @@ describe('editor source PCM', () => {
             Math.round(Math.sin(0.2) * Math.exp(-1 / 1900) * 0.8 * 32767) / 32768,
             6,
         );
-        expect(transport.prepareAuditionBundle).toHaveBeenCalledWith(1, ['sample'], expect.any(AbortSignal), true);
+        expect(transport.prepareAuditionBundle).toHaveBeenCalledWith(1, ['sample'], {
+            signal: expect.any(AbortSignal),
+            sourceWindow: 'STORED',
+            readIntent: 'PLAYBACK',
+        });
         expect(transport.deleteAudition).toHaveBeenCalledWith('fixture');
     });
     it('rejects oversized audio before downloading and still cleans up', async () => {

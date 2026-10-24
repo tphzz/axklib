@@ -290,7 +290,7 @@ export interface SamplerObject {
         }[];
     };
 }
-type ApiPreviewEnvelope = components['schemas']['ImagePreviewResponse']['data'];
+type ApiPreviewEnvelope = components['schemas']['ImageWaveformPreview'];
 type ApiPreviewLane = components['schemas']['ImagePreviewLane'];
 export interface PreviewEnvelope extends Omit<ApiPreviewEnvelope, 'lanes'> {
     lanes: readonly PreviewLane[];
@@ -536,14 +536,22 @@ export interface ImageTransport
         programs: ProgramGenerationSelection[],
     ): Promise<JobState>;
     audioIdentity(sessionId: number): AudioIdentity;
-    preview(sessionId: number, objectKey: string, binCount: number, signal?: AbortSignal): Promise<PreviewEnvelope>;
+    preview(
+        sessionId: number,
+        objectKey: string,
+        binCount: number,
+        options: import('./audioReadOptions').PreviewReadOptions,
+    ): Promise<PreviewEnvelope>;
     prepareAuditionBundle(
         sessionId: number,
         objectKeys: readonly string[],
-        signal?: AbortSignal,
-        storedPcm?: boolean,
+        options: import('./audioReadOptions').AuditionReadOptions,
     ): Promise<AuditionBundleDescriptor>;
-    readAuditionContent(auditionId: string, contentSizeBytes: number, signal?: AbortSignal): Promise<ArrayBuffer>;
+    readAuditionContent(
+        auditionId: string,
+        contentSizeBytes: number,
+        options: import('./audioReadOptions').AuditionContentOptions,
+    ): Promise<ArrayBuffer>;
     deleteAudition(auditionId: string): Promise<void>;
     uploadClientFile(
         file: ClientUploadSource,

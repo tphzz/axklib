@@ -1,5 +1,7 @@
 #pragma once
 
+#include "read_diagnostics.hpp"
+
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -24,6 +26,7 @@
 #include "axklib/media.hpp"
 #include "image_filesystem_internal.hpp"
 #include "image_sources.hpp"
+#include "native_audio.hpp"
 #include "native_document_admission.hpp"
 #include "native_document_state.hpp"
 
@@ -81,6 +84,33 @@ struct axk::app::ImageSessionManager::Implementation {
         CursorSet document_cursors;
         std::string mutation_member_id;
     };
+
+    struct AuditionAccess {
+        std::shared_ptr<Session> session;
+        std::unique_lock<std::mutex> lock;
+        std::shared_ptr<Document> document;
+        AuditionEntry *entry{};
+    };
+    Result<AuditionAccess> access_audition(std::string_view audition_id, std::string_view owner_id);
+
+    class VerifiedRead {
+      public:
+        VerifiedRead(const VerifiedRead &) = default;
+
+      private:
+        explicit VerifiedRead(const Session &value) : session(&value) {}
+        const Session *session;
+        friend struct Implementation;
+    };
+
+    Result<VerifiedRead> verify_read(const Session &session, const CancellationToken &cancellation = {}) {
+        if (auto verified = session.sources.native_sources->verify(cancellation); !verified)
+            return std::unexpected(session_error(verified.error().code == ErrorCode::operation_cancelled
+                                                     ? "operation_cancelled"
+                                                     : "image_source_changed",
+                                                 verified.error().message));
+        return VerifiedRead{session};
+    }
 
     const Sandbox &sandbox;
     std::size_t maximum_sessions;
@@ -164,7 +194,11 @@ struct axk::app::ImageSessionManager::Implementation {
             result = found->second;
         }
         {
-            const std::scoped_lock lock{result->access_mutex};
+            std::unique_lock lock{result->access_mutex, std::defer_lock};
+            {
+                const ReadDiagnosticTimer wait{ReadMetric::session_wait};
+                lock.lock();
+            }
             if (result->invalidated)
                 return std::unexpected(
                     session_error("image_session_invalidated", "image session requires recovery and reopening"));
@@ -191,7 +225,8 @@ struct axk::app::ImageSessionManager::Implementation {
     Result<void> discover(Session &session, const CancellationToken &cancellation, ProgressSink *progress = nullptr,
                           diagnostic_sink *diagnostics = nullptr);
     Result<std::shared_ptr<const detail::ImageFilesystemIndex>> filesystem(Session &session) const;
-    Result<ImageDocumentSummary> summarize(const Session &session, const Document &document) const;
+    Result<ImageDocumentSummary> summarize(const Session &session, const Document &document,
+                                           const VerifiedRead *verified = nullptr) const;
     static Result<void> preserve_documents(Session &fresh, const Session &current,
                                            std::string_view mutated_member = {});
     static void adopt_refreshed_state(Session &current, Session &fresh) {

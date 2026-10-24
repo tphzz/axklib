@@ -103,7 +103,11 @@ TEST(ServerContract, EmbedsValidOpenApi31WithSandboxReferences) {
     EXPECT_TRUE(document.at("paths").contains("/images/{imageId}/documents/{documentId}/objects/{objectId}"));
     EXPECT_TRUE(document.at("paths").contains("/images/{imageId}/documents/{documentId}/relationships"));
     EXPECT_TRUE(document.at("paths").contains("/images/{imageId}/documents/{documentId}/validation/issues"));
-    EXPECT_TRUE(document.at("paths").contains("/images/{imageId}/documents/{documentId}/preview"));
+    EXPECT_TRUE(
+        axk::server::build_openapi_document(axk::server::embedded_openapi(), axk::app::make_operation_registry())
+            .at("paths")
+            .contains("/image-waveform-previews"));
+    EXPECT_FALSE(document.at("paths").contains("/images/{imageId}/documents/{documentId}/preview"));
     EXPECT_TRUE(document.at("paths").contains("/auditions/{auditionId}"));
     EXPECT_TRUE(document.at("paths").contains("/auditions/{auditionId}/content"));
     EXPECT_TRUE(document.at("paths").contains("/jobs/{jobId}"));
@@ -358,7 +362,7 @@ TEST(ServerContract, SystemProgramContextsArePartitionScopedAndIndependentlyAvai
 TEST(ServerContract, RegistryIsTheOnlyDomainOperationRouteInventory) {
     const auto registry = axk::app::make_operation_registry();
     const auto entries = registry.entries();
-    EXPECT_EQ(entries.size(), 87U);
+    EXPECT_EQ(entries.size(), 88U);
     EXPECT_EQ(entries.front().descriptor.id, "system.version");
     EXPECT_EQ(entries.front().descriptor.route, "/api/v1/system/version");
 }
@@ -447,7 +451,7 @@ TEST(ServerContract, InfrastructureJsonOperationsDeclareConcreteRequestAndRespon
                     "ImageRelationshipPageResponse"},
         Expectation{"/images/{imageId}/documents/{documentId}/validation/issues", "get", "", "200",
                     "ImageValidationPageResponse"},
-        Expectation{"/images/{imageId}/documents/{documentId}/preview", "get", "", "200", "ImagePreviewResponse"},
+        Expectation{"/image-waveform-previews", "post", "ImagePreviewRequest", "202", "JobResponse"},
         Expectation{"/uploads", "post", "UploadCreateRequest", "201", "UploadResponse"},
         Expectation{"/uploads/{uploadId}", "get", "", "200", "UploadResponse"},
         Expectation{"/uploads/{uploadId}", "put", "", "200", "UploadResponse"},
@@ -529,11 +533,19 @@ TEST(ServerContract, AuditionRequestsRequireAnExplicitRevision) {
     auto request = nlohmann::json{{"imageId", "image-1"},
                                   {"documentId", "document-1"},
                                   {"objectIds", nlohmann::json::array({"wave-1"})},
-                                  {"expectedRevision", 2U}};
+                                  {"expectedRevision", 2U},
+                                  {"readIntent", "PLAYBACK"}};
     EXPECT_TRUE(axk::server::validate_openapi_value(document, "AuditionPrepareRequest", request));
     request.erase("expectedRevision");
     EXPECT_FALSE(axk::server::validate_openapi_value(document, "AuditionPrepareRequest", request));
     request["expectedRevision"] = 0U;
+    EXPECT_FALSE(axk::server::validate_openapi_value(document, "AuditionPrepareRequest", request));
+    request["expectedRevision"] = 2U;
+    request["readIntent"] = "PREFETCH";
+    EXPECT_TRUE(axk::server::validate_openapi_value(document, "AuditionPrepareRequest", request));
+    request["readIntent"] = "SELECTED";
+    EXPECT_FALSE(axk::server::validate_openapi_value(document, "AuditionPrepareRequest", request));
+    request.erase("readIntent");
     EXPECT_FALSE(axk::server::validate_openapi_value(document, "AuditionPrepareRequest", request));
 }
 
@@ -556,13 +568,9 @@ TEST(ServerContract, EveryHttpResponseCarriesRequestIdAndPaginationIsBounded) {
     EXPECT_EQ(parameters.at("PageCursor").at("schema").at("minLength"), 1);
     EXPECT_EQ(parameters.at("PageCursor").at("schema").at("maxLength"), 512);
 
-    const auto &preview_parameters =
-        document.at("paths").at("/images/{imageId}/documents/{documentId}/preview").at("parameters");
-    const auto bins = std::ranges::find_if(preview_parameters, [](const auto &parameter) {
-        return parameter.is_object() && parameter.value("name", "") == "bins";
-    });
-    ASSERT_NE(bins, preview_parameters.end());
-    EXPECT_EQ(bins->at("schema").at("maximum"), 4096);
+    const auto &preview_request = document.at("components").at("schemas").at("ImagePreviewRequest");
+    EXPECT_EQ(preview_request.at("properties").at("bins").at("maximum"), 4096);
+    EXPECT_TRUE(std::ranges::contains(preview_request.at("required"), "readIntent"));
 
     const auto &limits = document.at("components").at("schemas").at("ApiLimits");
     EXPECT_EQ(limits.at("properties").at("maximumAlterationJournalBytes").at("maximum"),
