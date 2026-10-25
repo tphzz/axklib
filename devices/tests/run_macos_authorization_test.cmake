@@ -1,0 +1,45 @@
+cmake_minimum_required(VERSION 3.21)
+
+if(NOT IS_ABSOLUTE "${RAWDISK_AUTHORIZATION_TEST}" OR
+   NOT EXISTS "${RAWDISK_AUTHORIZATION_TEST}" OR IS_DIRECTORY "${RAWDISK_AUTHORIZATION_TEST}")
+    message(FATAL_ERROR "An absolute native authorization test executable is required")
+endif()
+if("$ENV{HOME}" STREQUAL "")
+    message(FATAL_ERROR "HOME is required for native authorization qualification")
+endif()
+if(NOT DEFINED RAWDISK_AUTHORIZATION_TIMEOUT_SECONDS)
+    set(RAWDISK_AUTHORIZATION_TIMEOUT_SECONDS 20)
+endif()
+if(NOT RAWDISK_AUTHORIZATION_TIMEOUT_SECONDS MATCHES "^[1-9][0-9]*$" OR
+   RAWDISK_AUTHORIZATION_TIMEOUT_SECONDS GREATER 20)
+    message(FATAL_ERROR "Native authorization test timeout must be between 1 and 20 seconds")
+endif()
+
+# authd must read its caller's code. External-volume checkouts can be MAC-protected:
+# https://forums.swift.org/t/swift-build-differs-from-xcode-build/80775
+# Keep the real native test and self-spawned child on local, private storage.
+set(cache "$ENV{HOME}/Library/Caches/axklib-authorization-tests")
+file(MAKE_DIRECTORY "${cache}")
+file(REAL_PATH "${cache}" cache)
+string(RANDOM LENGTH 24 ALPHABET 0123456789abcdef identifier)
+set(stage "${cache}/${identifier}")
+if(EXISTS "${stage}" OR IS_SYMLINK "${stage}")
+    message(FATAL_ERROR "Refusing to reuse an existing native authorization stage")
+endif()
+file(MAKE_DIRECTORY "${stage}")
+file(CHMOD "${stage}" PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
+get_filename_component(name "${RAWDISK_AUTHORIZATION_TEST}" NAME)
+set(executable "${stage}/${name}")
+file(COPY_FILE "${RAWDISK_AUTHORIZATION_TEST}" "${executable}" RESULT copied)
+if(NOT copied STREQUAL "0")
+    file(REMOVE_RECURSE "${stage}")
+    message(FATAL_ERROR "Cannot stage native authorization test: ${copied}")
+endif()
+file(CHMOD "${executable}" PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
+message(STATUS "Running real native authorization qualification from private HOME cache")
+execute_process(COMMAND ${RAWDISK_AUTHORIZATION_EMULATOR} "${executable}"
+    RESULT_VARIABLE result TIMEOUT "${RAWDISK_AUTHORIZATION_TIMEOUT_SECONDS}")
+file(REMOVE_RECURSE "${stage}")
+if(NOT result STREQUAL "0")
+    message(FATAL_ERROR "Native authorization qualification failed (${result})")
+endif()

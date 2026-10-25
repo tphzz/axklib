@@ -310,11 +310,11 @@ static void test_card_swapped_before_open() {
 class FailFinalOnce final : public Block {
   public:
     FailFinalOnce(std::error_code failure, std::shared_ptr<bool> armed) : failure_(failure), armed_(std::move(armed)) {}
-    std::string_view id() const noexcept override { return "probe"; }
+    std::string_view id() const noexcept override { return "auth-check"; }
     Outcome<Step> prepare(const BlockEnv &, const Stage &) override { return Step{}; }
     Outcome<Stage> apply(const BlockEnv &env, const Stage &input, const Answers &) override {
         if (env.final_pass && std::exchange(*armed_, false))
-            return std::unexpected(SubmitError{failure_, "probe", "", failure_.message()});
+            return std::unexpected(SubmitError{failure_, "auth-check", "", failure_.message()});
         return input;
     }
 

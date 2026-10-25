@@ -5,12 +5,14 @@
 #include <cerrno>
 #include <chrono>
 #include <cstddef>
+#include <cstdio>
 #include <cstring>
 #include <span>
 #include <utility>
 #include <vector>
 
 #include <fcntl.h>
+#include <poll.h>
 #include <signal.h>
 #include <sys/socket.h>
 #include <sys/uio.h>
@@ -22,6 +24,17 @@ using namespace rawdisk::detail;
 using namespace std::chrono_literals;
 
 namespace {
+
+void test_endpoint_modes() {
+    auto sockets = authorization_sockets();
+    CHECK(sockets.has_value());
+    if (!sockets)
+        return;
+    const int parent_flags = ::fcntl(sockets->first.get(), F_GETFL);
+    const int child_flags = ::fcntl(sockets->second.get(), F_GETFL);
+    CHECK(parent_flags >= 0 && (parent_flags & O_NONBLOCK) != 0);
+    CHECK(child_flags >= 0 && (child_flags & O_NONBLOCK) == 0);
+}
 
 void test_closed_peer_does_not_raise_sigpipe() {
     auto sockets = authorization_sockets();
@@ -49,9 +62,8 @@ void test_expired_transfer_sends_no_bytes() {
     const std::array<std::byte, 32> form{};
     CHECK(err(send_authorization_bytes(sockets->first.get(), form, std::chrono::steady_clock::now() - 1ms)) ==
           Errc::authorization_timeout);
-    char byte{};
-    CHECK(::recv(sockets->second.get(), &byte, 1, MSG_DONTWAIT) == -1);
-    CHECK(errno == EAGAIN || errno == EWOULDBLOCK);
+    pollfd event{sockets->second.get(), POLLIN, 0};
+    CHECK(::poll(&event, 1, 0) == 0);
 }
 
 void send_descriptor(int socket) {
@@ -130,9 +142,15 @@ void test_partial_transfer_and_failed_transfer_reap_child(bool hung) {
 } // namespace
 
 int main() {
+    std::fprintf(stderr, "authorization transfer: endpoint modes\n");
+    test_endpoint_modes();
+    std::fprintf(stderr, "authorization transfer: closed peer\n");
     test_closed_peer_does_not_raise_sigpipe();
+    std::fprintf(stderr, "authorization transfer: expired request\n");
     test_expired_transfer_sends_no_bytes();
+    std::fprintf(stderr, "authorization transfer: partial transfer\n");
     test_partial_transfer_and_failed_transfer_reap_child(false);
+    std::fprintf(stderr, "authorization transfer: hung peer\n");
     test_partial_transfer_and_failed_transfer_reap_child(true);
     return finish_tests();
 }

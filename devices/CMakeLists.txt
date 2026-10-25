@@ -164,7 +164,10 @@ if(RAWDISK_BUILD_TESTS)
         target_include_directories(macos_authorization_tests PRIVATE src tests)
         target_link_libraries(macos_authorization_tests PRIVATE rawdisk "-framework Security")
         rawdisk_target_options(macos_authorization_tests)
-        add_test(NAME macos_authorization_tests COMMAND macos_authorization_tests)
+        add_test(NAME macos_authorization_tests COMMAND "${CMAKE_COMMAND}"
+            "-DRAWDISK_AUTHORIZATION_TEST=$<TARGET_FILE:macos_authorization_tests>"
+            "-DRAWDISK_AUTHORIZATION_EMULATOR=$<TARGET_PROPERTY:macos_authorization_tests,CROSSCOMPILING_EMULATOR>"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/run_macos_authorization_test.cmake")
         set_tests_properties(macos_authorization_tests PROPERTIES TIMEOUT 30)
         add_executable(macos_claim_tests tests/macos_claim_tests.cpp)
         target_include_directories(macos_claim_tests PRIVATE src tests)

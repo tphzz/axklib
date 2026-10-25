@@ -28,6 +28,7 @@ class AuthorizedChild {
     pid_t pid_;
 };
 
+// Private close-on-exec sockets: parent is nonblocking, child stays blocking for authopen.
 Result<std::pair<PosixFd, PosixFd>> authorization_sockets();
 Result<void> send_authorization_bytes(int socket, std::span<const std::byte> bytes, AuthorizationDeadline deadline);
 Result<PosixFd> validate_authorized_fd(PosixFd fd, Access access);

@@ -12,6 +12,14 @@ slices and the packaged server's device capabilities, but does not test a
 physical USB device. Intel execution under Rosetta is not physical Intel
 hardware acceptance.
 
+The native authorization test runs the unchanged test executable from a unique,
+private directory under `~/Library/Caches`. Apple's `authd` reads its caller's
+code identity, so a checkout on privacy-protected storage can prevent even an
+empty-rights `AuthorizationCreate` call. The test keeps real native reference,
+external-form and child-transfer checks; it does not request protected rights
+or skip failed authorization. Setup failures include the native `OSStatus`.
+See the [Apple DTS explanation](https://forums.swift.org/t/swift-build-differs-from-xcode-build/80775).
+
 ## Read-Only Checks
 
 1. Disconnect the sampler and any other SCSI host from the reader. Start

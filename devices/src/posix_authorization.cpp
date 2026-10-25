@@ -69,6 +69,10 @@ Result<std::pair<PosixFd, PosixFd>> authorization_sockets() {
     PosixFd theirs(::fcntl(original_theirs.get(), F_DUPFD_CLOEXEC, 3));
     if (!theirs.valid())
         return fail(errno_code(errno));
+    // Darwin's full-buffer send path does not honor MSG_DONTWAIT. Keep only our endpoint nonblocking.
+    const int status = ::fcntl(ours.get(), F_GETFL);
+    if (status < 0 || ::fcntl(ours.get(), F_SETFL, status | O_NONBLOCK) != 0)
+        return fail(errno_code(errno));
 #if defined(__APPLE__)
     const int enabled = 1;
     if (::setsockopt(ours.get(), SOL_SOCKET, SO_NOSIGPIPE, &enabled, sizeof enabled) != 0 ||

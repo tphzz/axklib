@@ -6,6 +6,7 @@
 #include <cerrno>
 #include <chrono>
 #include <cstddef>
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <memory>
@@ -25,6 +26,33 @@ using namespace rawdisk::detail;
 using namespace std::chrono_literals;
 
 namespace {
+
+struct TestAuthorization {
+    AuthorizationRef reference{};
+    ~TestAuthorization() {
+        if (reference)
+            (void)::AuthorizationFree(reference, kAuthorizationFlagDefaults);
+    }
+};
+
+bool test_native_authorization_preflight() {
+    auto checked = [](const char *operation, OSStatus status) {
+        if (status != errAuthorizationSuccess)
+            std::fprintf(stderr, "%s failed: OSStatus=%ld\n", operation, static_cast<long>(status));
+        CHECK(status == errAuthorizationSuccess);
+        return status == errAuthorizationSuccess;
+    };
+    TestAuthorization original;
+    if (!checked("AuthorizationCreate", ::AuthorizationCreate(nullptr, kAuthorizationEmptyEnvironment,
+                                                              kAuthorizationFlagDefaults, &original.reference)))
+        return false;
+    AuthorizationExternalForm form{};
+    if (!checked("AuthorizationMakeExternalForm", ::AuthorizationMakeExternalForm(original.reference, &form)))
+        return false;
+    TestAuthorization imported;
+    return checked("AuthorizationCreateFromExternalForm",
+                   ::AuthorizationCreateFromExternalForm(&form, &imported.reference));
+}
 
 int child_main(int argc, char **argv) {
     if (argc != 6 || std::string_view(argv[1]) != "-stdoutpipe" || std::string_view(argv[2]) != "-extauth" ||
@@ -98,6 +126,9 @@ void test_reference_reuse_and_private_spawn(const std::string &executable) {
     std::weak_ptr<AuthorizationState> original;
     for (const auto access : {Access::ReadOnly, Access::ReadOnly, Access::ReadWrite}) {
         auto opened = macos_authorized_open(path, access, *session, std::chrono::steady_clock::now() + 5s, process);
+        if (!opened)
+            std::fprintf(stderr, "macos_authorized_open failed: %s:%d (%s)\n", opened.error().category().name(),
+                         opened.error().value(), opened.error().message().c_str());
         CHECK(opened.has_value());
         if (opened) {
             CHECK((::fcntl(opened->get(), F_GETFL) & O_ACCMODE) == (access == Access::ReadWrite ? O_RDWR : O_RDONLY));
@@ -130,6 +161,8 @@ void test_reference_reuse_and_private_spawn(const std::string &executable) {
 int main(int argc, char **argv) {
     if (argc > 1)
         return child_main(argc, argv);
+    if (!test_native_authorization_preflight())
+        return finish_tests();
     test_reference_reuse_and_private_spawn(std::filesystem::absolute(argv[0]).string());
     return finish_tests();
 }
