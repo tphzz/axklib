@@ -105,14 +105,17 @@ Result<PosixFd> fake_authorization(Reply reply) {
         }
         ::_exit(reply == Reply::failed_after_send ? 2 : 0);
     }
-    {
-        PosixFd close_now(std::move(theirs));
-    }
-    const auto timeout = reply == Reply::hung || reply == Reply::hung_after_send ? std::chrono::milliseconds(30)
-                                                                                 : std::chrono::milliseconds(3000);
-    auto receive = reply == Reply::truncated ? &receive_truncated_rights : &::recvmsg;
-    auto result =
-        receive_authorized_fd(ours.get(), child, Access::ReadOnly, std::chrono::steady_clock::now() + timeout, receive);
+    auto result = [&] {
+        AuthorizedChild process(child);
+        {
+            PosixFd close_now(std::move(theirs));
+        }
+        const auto timeout = reply == Reply::hung || reply == Reply::hung_after_send ? std::chrono::milliseconds(30)
+                                                                                     : std::chrono::milliseconds(3000);
+        auto receive = reply == Reply::truncated ? &receive_truncated_rights : &::recvmsg;
+        return receive_authorized_fd(ours.get(), process, Access::ReadOnly, std::chrono::steady_clock::now() + timeout,
+                                     receive);
+    }();
     int status{};
     CHECK(::waitpid(child, &status, WNOHANG) == -1 && errno == ECHILD);
     return result;
@@ -151,9 +154,11 @@ int main() {
 #if defined(__APPLE__)
     ElevationOptions options;
     options.allow = false;
-    set_elevation_options(options);
-    CHECK(err(macos_authorized_open("/dev/test", Access::ReadOnly)) == std::errc::permission_denied);
-    set_elevation_options({});
+    auto authorization = create_authorization_session(options);
+    CHECK(authorization.has_value());
+    if (authorization)
+        CHECK(err(macos_authorized_open("/dev/test", Access::ReadOnly, **authorization)) ==
+              std::errc::permission_denied);
 #endif
     return finish_tests();
 }

@@ -9,6 +9,26 @@ These checks open devices read-only. Do not use Save, Import, Delete, restore or
 any other command that writes to the card. Disconnect the sampler and other
 SCSI hosts before attaching the USB reader to the computer.
 
+## Authorization Reuse
+
+1. Start axkdeck as a normal user. Opening ordinary image files and refreshing
+   the device list must not show UAC.
+2. Open a USB device read-only and approve UAC if requested. Close its image and
+   device session, keep axkdeck running, and open the device again. A healthy
+   helper must be reused without another UAC prompt. Repeat with a second USB
+   device when available.
+3. Quit axkdeck completely. Confirm its backend/helper exit and the device is no
+   longer claimed. A new app launch must not borrow the previous app's helper.
+4. In a fresh launch, cancel the first UAC request and then retry explicitly.
+   Cancellation must not prevent approval of the next request. If the helper
+   dies while idle, old sessions must fail; a fresh explicit open may prompt
+   again. Do not terminate a helper during a write.
+
+Read/write promotion uses the same authorization owner, but still requires the
+normal target selection, exclusive-use acknowledgement and fresh write checks.
+Test that separately on a backed-up spare card; do not write to an original card
+to qualify prompt reuse. Record prompt counts and build identity.
+
 ## Capture Slow Sample Selection
 
 Use **10 Build - Windows x64** for

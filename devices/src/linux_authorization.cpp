@@ -1,4 +1,5 @@
 #include "linux_authorization.hpp"
+#include "authorization_session.hpp"
 #include "detail.hpp"
 
 #include <cerrno>
@@ -31,6 +32,47 @@ struct ConnectionDeleter {
         dbus_connection_unref(connection);
     }
 };
+
+class SystemConnection final : public AuthorizationConnection {
+  public:
+    explicit SystemConnection(std::unique_ptr<DBusConnection, ConnectionDeleter> connection)
+        : connection_(std::move(connection)) {}
+    Result<DbusMessage> call(DBusMessage *request, AuthorizationDeadline deadline) override {
+        const auto remaining =
+            std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now());
+        if (remaining.count() <= 0)
+            return fail(Errc::authorization_timeout);
+        BusError error;
+        DbusMessage reply(dbus_connection_send_with_reply_and_block(connection_.get(), request,
+                                                                    static_cast<int>(remaining.count()), &error.value));
+        if (!reply)
+            return fail(linux_authorization_error(error.value.name ? error.value.name : DBUS_ERROR_FAILED));
+        return reply;
+    }
+
+  private:
+    std::unique_ptr<DBusConnection, ConnectionDeleter> connection_;
+};
+
+struct LinuxAuthorizationState final : AuthorizationState {
+    std::unique_ptr<AuthorizationConnection> connection;
+};
+
+Result<std::unique_ptr<AuthorizationConnection>> system_connection() {
+    static const bool initialized = dbus_threads_init_default();
+    if (!initialized)
+        return fail(std::make_error_code(std::errc::not_enough_memory));
+    BusError error;
+    auto *bus = dbus_bus_get_private(DBUS_BUS_SYSTEM, &error.value);
+    if (!bus)
+        return fail(linux_authorization_error(error.value.name ? error.value.name : DBUS_ERROR_DISCONNECTED));
+    std::unique_ptr<DBusConnection, ConnectionDeleter> owned(bus);
+    dbus_connection_set_exit_on_disconnect(bus, false);
+    if (!dbus_connection_can_send_type(bus, DBUS_TYPE_UNIX_FD))
+        return fail(Errc::authorization_unavailable);
+    auto connection = std::make_unique<SystemConnection>(std::move(owned));
+    return connection;
+}
 
 bool dictionary(DBusMessageIter &parent, const char *key = nullptr, int type = DBUS_TYPE_INVALID,
                 const void *value = nullptr) {
@@ -147,34 +189,41 @@ Result<PosixFd> linux_authorization_exchange(const std::string &path, Access acc
     return authorized_descriptor(opened->get(), access);
 }
 
-Result<PosixFd> linux_authorized_open(const std::string &path, Access access) {
-    if (!elevation_options().allow)
+Result<PosixFd> linux_authorized_open(const std::string &path, Access access, AuthorizationSession &authorization,
+                                      AuthorizationDeadline deadline, const AuthorizationConnectionFactory &factory) {
+    if (!AuthorizationSessionAccess::options(authorization).allow)
         return fail(std::make_error_code(std::errc::permission_denied));
-    static const bool initialized = dbus_threads_init_default();
-    if (!initialized)
-        return fail(std::make_error_code(std::errc::not_enough_memory));
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(120);
-    BusError error;
-    std::unique_ptr<DBusConnection, ConnectionDeleter> connection(dbus_bus_get_private(DBUS_BUS_SYSTEM, &error.value));
-    if (!connection)
-        return fail(linux_authorization_error(error.value.name ? error.value.name : DBUS_ERROR_DISCONNECTED));
-    dbus_connection_set_exit_on_disconnect(connection.get(), false);
-    if (!dbus_connection_can_send_type(connection.get(), DBUS_TYPE_UNIX_FD))
-        return fail(Errc::authorization_unavailable);
-    return linux_authorization_exchange(
+    auto lock = lock_authorization(authorization, deadline);
+    if (!lock)
+        return fail(lock.error());
+    auto &slot = AuthorizationSessionAccess::state(authorization);
+    if (!slot)
+        slot = std::make_shared<LinuxAuthorizationState>();
+    auto state = std::dynamic_pointer_cast<LinuxAuthorizationState>(slot);
+    if (!state)
+        return fail(Errc::internal_error);
+    struct Attempt {
+        LinuxAuthorizationState &state;
+        bool succeeded{};
+        ~Attempt() {
+            if (!succeeded)
+                state.connection.reset();
+        }
+    } attempt{*state};
+    if (!state->connection) {
+        auto connected = factory ? factory() : system_connection();
+        if (!connected)
+            return fail(connected.error());
+        if (!*connected)
+            return fail(Errc::authorization_unavailable);
+        state->connection = std::move(*connected);
+    }
+    auto result = linux_authorization_exchange(
         path, access, deadline, [&](DBusMessage *request, AuthorizationDeadline until) -> Result<DbusMessage> {
-            const auto remaining =
-                std::chrono::duration_cast<std::chrono::milliseconds>(until - std::chrono::steady_clock::now());
-            if (remaining.count() <= 0)
-                return fail(Errc::authorization_timeout);
-            BusError call_error;
-            DbusMessage reply(dbus_connection_send_with_reply_and_block(
-                connection.get(), request, static_cast<int>(remaining.count()), &call_error.value));
-            if (!reply)
-                return fail(
-                    linux_authorization_error(call_error.value.name ? call_error.value.name : DBUS_ERROR_FAILED));
-            return reply;
+            return state->connection->call(request, until);
         });
+    attempt.succeeded = result.has_value();
+    return result;
 }
 
 } // namespace rawdisk::detail

@@ -72,7 +72,8 @@ Result<std::filesystem::path> carrier_lease_directory() noexcept {
     });
 }
 
-Result<std::shared_ptr<BlockDevice>> open_owned_device(const DeviceInfo &info, Access access) noexcept {
+Result<std::shared_ptr<BlockDevice>> open_owned_device(const DeviceInfo &info, Access access,
+                                                       std::shared_ptr<AuthorizationSession> authorization) noexcept {
     return detail::guard([&]() -> Result<std::shared_ptr<BlockDevice>> {
         auto directory = carrier_lease_directory();
         if (!directory)
@@ -80,7 +81,7 @@ Result<std::shared_ptr<BlockDevice>> open_owned_device(const DeviceInfo &info, A
         auto lease = claim_carrier(*directory, info.carrier_id);
         if (!lease)
             return detail::fail(lease.error());
-        auto device = open_device(info, access);
+        auto device = open_device(info, access, std::move(authorization));
         if (!device)
             return detail::fail(device.error());
         struct Owned {

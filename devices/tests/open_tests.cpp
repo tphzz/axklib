@@ -8,7 +8,9 @@
 
 #include <algorithm>
 #include <functional>
+#include <memory>
 #include <span>
+#include <system_error>
 #include <utility>
 
 using namespace rawdisk;
@@ -24,21 +26,19 @@ class FakeDevices final : public DeviceSource {
     std::vector<FakeDevice> devices;
     int opens = 0;
     std::vector<Access> accesses; // every open, in order
-    std::weak_ptr<int> held;      // token handed out by hold()
+    std::weak_ptr<AuthorizationSession> held;
     int rw_opens_while_held = 0, rw_opens = 0;
     std::function<void()> before_rw_open; // one-shot media change during exclusive reopen
-    std::shared_ptr<void> hold() override {
-        auto token = std::make_shared<int>(0);
-        held = token;
-        return token;
-    }
     Result<std::vector<DeviceInfo>> list() override {
         std::vector<DeviceInfo> out;
         for (const auto &d : devices)
             out.push_back(d.info);
         return out;
     }
-    Result<std::shared_ptr<BlockDevice>> open(const DeviceInfo &info, Access access) override {
+    Result<std::shared_ptr<BlockDevice>> open(const DeviceInfo &info, Access access,
+                                              std::shared_ptr<AuthorizationSession> authorization) override {
+        CHECK(authorization);
+        held = authorization;
         for (const auto &d : devices)
             if (d.info == info) { // like open_device: identity must still match
                 ++opens;
@@ -169,12 +169,14 @@ static void test_raw_mode() {
     // Discovery never opens for writing, even in a ReadWrite flow.
     CHECK(!src->accesses.empty() && std::ranges::all_of(src->accesses, [](Access a) { return a == Access::ReadOnly; }));
     const int before = src->opens;
+    const auto discovery_authorization = src->held;
     auto o = f.open();
     CHECK(o.has_value() && o->device->writable());
     CHECK(src->opens == before + 1); // reopened for writing in the final pass
     CHECK(src->accesses.back() == Access::ReadWrite);
-    // Privileges were held while reopening (one UAC prompt on Windows), and released afterwards.
-    CHECK(src->rw_opens == 1 && src->rw_opens_while_held == 1 && src->held.expired());
+    // Discovery and the exclusive reopen use the same explicitly owned flow session.
+    CHECK(src->rw_opens == 1 && src->rw_opens_while_held == 1 && !src->held.expired());
+    CHECK(discovery_authorization.lock() == src->held.lock());
     if (o) {
         std::vector<std::byte> w(512, std::byte{9});
         CHECK(o->device->write(0, w).has_value());
@@ -303,6 +305,52 @@ static void test_card_swapped_before_open() {
     CHECK(layout_changes == 1);
     CHECK(!src2->before_rw_open);
     CHECK(!o2 && (o2.error().code == Errc::device_changed) && o2.error().step == "scsi2sd");
+}
+
+class FailFinalOnce final : public Block {
+  public:
+    FailFinalOnce(std::error_code failure, std::shared_ptr<bool> armed) : failure_(failure), armed_(std::move(armed)) {}
+    std::string_view id() const noexcept override { return "probe"; }
+    Outcome<Step> prepare(const BlockEnv &, const Stage &) override { return Step{}; }
+    Outcome<Stage> apply(const BlockEnv &env, const Stage &input, const Answers &) override {
+        if (env.final_pass && std::exchange(*armed_, false))
+            return std::unexpected(SubmitError{failure_, "probe", "", failure_.message()});
+        return input;
+    }
+
+  private:
+    std::error_code failure_;
+    std::shared_ptr<bool> armed_;
+};
+
+static void test_authorization_recovery_waits_for_explicit_retry() {
+    const auto p = make_card("authorization-retry.img", 4096);
+    for (const auto failure :
+         {make_error_code(Errc::elevation_cancelled), make_error_code(Errc::elevation_failed),
+          make_error_code(Errc::authorization_unavailable), make_error_code(Errc::authorization_denied),
+          make_error_code(Errc::authorization_timeout), make_error_code(Errc::helper_protocol),
+          make_error_code(Errc::helper_timeout), std::make_error_code(std::errc::operation_canceled)}) {
+        auto src = std::make_shared<FakeDevices>();
+        src->devices.push_back(fake(p, "AUTH"));
+        auto armed = std::make_shared<bool>(true);
+        auto pipeline = make_mode({"auth-retry", "Authorization retry", ""}, [=] {
+            std::vector<std::unique_ptr<Block>> blocks;
+            blocks.push_back(select_device());
+            blocks.push_back(std::make_unique<FailFinalOnce>(failure, armed));
+            return blocks;
+        });
+        auto flow = Flow::start(std::move(pipeline), Access::ReadWrite, {src});
+        CHECK(flow && (*flow)->submit({{"device", device_key(src->devices[0].info)}}).has_value());
+        if (!flow || !(*flow)->ready())
+            continue;
+        CHECK(src->opens == 1);
+        auto opened = (*flow)->open();
+        CHECK(!opened && opened.error().code == failure);
+        CHECK(src->opens == 2);             // No implicit read-only reopen (and potential prompt) after failure.
+        CHECK(!(*flow)->read_only());       // The old discovery handles have been released.
+        CHECK((*flow)->open().has_value()); // A later explicit request can rediscover and retry.
+        CHECK(src->opens == 4);
+    }
 }
 
 static void test_v6_no_config() {
@@ -499,6 +547,7 @@ int main() {
     test_v6_mode_read();
     test_v6_mode_write();
     test_card_swapped_before_open();
+    test_authorization_recovery_waits_for_explicit_retry();
     test_v6_no_config();
     test_v5_mode();
     test_run_errors();

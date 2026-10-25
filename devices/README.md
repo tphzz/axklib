@@ -76,6 +76,39 @@ Authorization waits are bounded to 120 seconds on Linux and macOS. The app is
 not elevated and never changes device permissions or automatically unmounts
 Linux filesystems. `ElevationOptions::allow = false` disables these fallbacks.
 
+### Session Authorization
+
+The desktop backend retains one explicit native authorization session until
+backend shutdown. Creation and device-list refresh never prompt. Windows keeps
+its healthy UAC helper available across device closes and switches. macOS shares
+an Authorization Services reference with each `authopen` request; Linux reuses
+its private UDisks2 connection. Native policy still decides whether macOS/Linux
+require another approval after expiry or for new rights.
+
+Library callers opt into reuse with a typed owner:
+
+```cpp
+auto authorization = rawdisk::create_authorization_session();
+if (!authorization)
+    return std::unexpected(authorization.error());
+auto device = rawdisk::open_device(info, rawdisk::Access::ReadOnly, *authorization);
+```
+
+Retain the owner, not a closed device's handle, for subsequent opens. Omitting
+the owner scopes authorization to one operation; native CLI flows retain their
+own owner across discovery and the final reopen. Independent owners never share
+credentials implicitly. Configure `ElevationOptions` when creating the owner,
+not through process-global settings.
+
+Closing a device still releases its descriptors, carrier lease and exclusive
+write claim. Reuse does not authorize another target for writing or bypass
+fresh identity, geometry, layout, mount and recovery checks. Broken Windows
+transports disconnect immediately; every failed Linux exchange discards its
+connection so late replies cannot retain exclusive descriptors. A new explicit
+operation can authorize a replacement session. No passwords or authorization
+tokens are stored on disk, no privileged service is installed, and the UI and
+server remain unprivileged.
+
 `axk::inspect_scsi2sd_xml` and the `devices.xml.inspect` API validate XML without
 enumerating or opening devices. Both V5 `BoardConfig` and V6 `S2S_BoardCfg`
 exports are accepted, with bounded 256 KiB input and nesting, strict enabled

@@ -40,9 +40,6 @@ Result<void> check_capacity(BlockDevice &dev) {
     return {};
 }
 
-std::mutex g_options_mutex;
-ElevationOptions g_options;
-
 } // namespace
 
 Result<void> BlockDevice::read(std::uint64_t lba, std::span<std::byte> out) noexcept {
@@ -139,7 +136,8 @@ Result<std::vector<DeviceInfo>> list_usb_devices() noexcept {
     return detail::guard([] { return detail::list_platform(); });
 }
 
-Result<std::unique_ptr<BlockDevice>> open_device(const DeviceInfo &expected, Access access) noexcept {
+Result<std::unique_ptr<BlockDevice>> open_device(const DeviceInfo &expected, Access access,
+                                                 std::shared_ptr<AuthorizationSession> authorization) noexcept {
     return detail::guard([&]() -> Result<std::unique_ptr<BlockDevice>> {
         auto devices = detail::list_platform();
         if (!devices)
@@ -156,7 +154,13 @@ Result<std::unique_ptr<BlockDevice>> open_device(const DeviceInfo &expected, Acc
             return detail::fail(Errc::device_changed);
         }
 
-        auto dev = detail::open_platform(*it, access);
+        if (!authorization) {
+            auto created = create_authorization_session();
+            if (!created)
+                return detail::fail(created.error());
+            authorization = std::move(*created);
+        }
+        auto dev = detail::open_platform(*it, access, *authorization);
         if (!dev)
             return dev;
         if (!*dev)
@@ -174,16 +178,6 @@ Result<std::unique_ptr<BlockDevice>> open_image(const std::filesystem::path &pat
             return detail::fail(Errc::invalid_argument);
         return detail::open_image_platform(path, access, sector_size);
     });
-}
-
-void set_elevation_options(ElevationOptions options) {
-    std::lock_guard lock(g_options_mutex);
-    g_options = std::move(options);
-}
-
-ElevationOptions detail::elevation_options() {
-    std::lock_guard lock(g_options_mutex);
-    return g_options;
 }
 
 } // namespace rawdisk

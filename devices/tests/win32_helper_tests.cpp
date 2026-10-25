@@ -1,5 +1,6 @@
 // Runs the production helper without requesting elevation. No physical sector I/O is requested.
 #include "test_util.hpp"
+#include "win32_common.hpp"
 #include "win32_pipe.hpp"
 
 #include <array>
@@ -7,8 +8,11 @@
 #include <cstdint>
 #include <filesystem>
 #include <format>
+#include <memory>
 #include <string>
+#include <thread>
 #include <utility>
+#include <vector>
 
 #include <windows.h>
 
@@ -70,6 +74,11 @@ class ChildProcess {
     }
 
     HANDLE handle() const noexcept { return process_.h; }
+
+    void stop_idle() {
+        CHECK(::TerminateJobObject(job_.h, 99) != FALSE);
+        expect_exit(99);
+    }
 
     void expect_exit(DWORD expected) {
         const DWORD waited = ::WaitForSingleObject(process_.h, kWaitMs);
@@ -222,6 +231,91 @@ void test_io_timeout_and_disconnect(const std::filesystem::path &helper) {
     child.expect_exit(0);
 }
 
+void test_authorization_session_lifetime(const std::filesystem::path &helper) {
+    std::vector<std::unique_ptr<ChildProcess>> children;
+    unsigned launches{};
+    const detail::HelperSessionLauncher launcher =
+        [&](const ElevationOptions &) -> Result<std::shared_ptr<detail::RemoteSession>> {
+        ++launches;
+        auto child = std::make_unique<ChildProcess>();
+        Handle pipe;
+        if (!launch_connected(helper, *child, pipe))
+            return std::unexpected(make_error_code(Errc::elevation_failed));
+        auto stream = detail::make_pipe_stream(std::move(pipe), kWaitMs);
+        if (!stream)
+            return std::unexpected(stream.error());
+        auto connected = detail::RemoteSession::start(std::move(*stream));
+        if (!connected)
+            return connected;
+        children.push_back(std::move(child));
+        return connected;
+    };
+    auto authorization = create_authorization_session();
+    CHECK(authorization.has_value());
+    if (!authorization)
+        return;
+    const detail::HelperSessionLauncher cancelled =
+        [](const ElevationOptions &) -> Result<std::shared_ptr<detail::RemoteSession>> {
+        return std::unexpected(make_error_code(Errc::elevation_cancelled));
+    };
+    CHECK(err(detail::win32_elevated_session(**authorization, cancelled)) == Errc::elevation_cancelled);
+    auto disabled = create_authorization_session({.allow = false});
+    CHECK(disabled.has_value());
+    if (disabled)
+        CHECK(err(detail::win32_elevated_session(**disabled, launcher)) == std::errc::permission_denied);
+    CHECK(launches == 0U);
+    auto first = detail::win32_elevated_session(**authorization, launcher);
+    CHECK(first.has_value());
+    if (!first)
+        return;
+    const std::weak_ptr<detail::RemoteSession> original = *first;
+    first->reset();
+    CHECK(!original.expired());
+    CHECK(launches == 1U);
+    std::thread worker([&] {
+        auto reused = detail::win32_elevated_session(**authorization, launcher);
+        CHECK(reused.has_value());
+        CHECK(reused && *reused == original.lock());
+    });
+    worker.join();
+    CHECK(launches == 1U);
+    CHECK(::WaitForSingleObject(children[0]->handle(), 0) == WAIT_TIMEOUT);
+
+    auto independent = create_authorization_session();
+    CHECK(independent.has_value());
+    if (!independent)
+        return;
+    auto other = detail::win32_elevated_session(**independent, launcher);
+    CHECK(other.has_value());
+    CHECK(other && *other != original.lock());
+    CHECK(launches == 2U);
+    if (!other)
+        return;
+    other->reset();
+    independent->reset();
+    children[1]->expect_exit(0);
+
+    children[0]->stop_idle();
+    {
+        auto broken = original.lock();
+        CHECK(broken);
+        if (!broken)
+            return;
+        CHECK(!broken->verify_binding(1U));
+        CHECK(broken->broken());
+    }
+    auto renewed = detail::win32_elevated_session(**authorization, launcher);
+    CHECK(renewed.has_value());
+    CHECK(renewed && *renewed != original.lock());
+    CHECK(original.expired());
+    CHECK(launches == 3U);
+    if (!renewed)
+        return;
+    renewed->reset();
+    authorization->reset();
+    children[2]->expect_exit(0);
+}
+
 } // namespace
 
 int wmain(int argc, wchar_t **argv) {
@@ -235,5 +329,6 @@ int wmain(int argc, wchar_t **argv) {
     test_wrong_client(helper);
     test_malformed_request(helper);
     test_io_timeout_and_disconnect(helper);
+    test_authorization_session_lifetime(helper);
     return finish_tests();
 }

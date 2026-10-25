@@ -22,6 +22,12 @@ std::unexpected<SubmitError> fail(std::error_code ec, std::string step, std::str
     return std::unexpected(error(ec, std::move(step), std::move(field), std::move(message)));
 }
 
+bool requires_explicit_retry(std::error_code ec) {
+    return ec == std::errc::operation_canceled || ec == Errc::elevation_failed ||
+           ec == Errc::authorization_unavailable || ec == Errc::authorization_denied ||
+           ec == Errc::authorization_timeout || ec == Errc::helper_protocol || ec == Errc::helper_timeout;
+}
+
 // What must not change between discovery and the final open.
 struct Shape {
     std::uint32_t sector_size = 0;
@@ -98,13 +104,13 @@ Outcome<Answers> validate(const Step &step, const Answers &answers) {
 class SystemDevices final : public DeviceSource {
   public:
     Result<std::vector<DeviceInfo>> list() override { return list_usb_devices(); }
-    Result<std::shared_ptr<BlockDevice>> open(const DeviceInfo &info, Access access) override {
-        auto d = open_owned_device(info, access);
+    Result<std::shared_ptr<BlockDevice>> open(const DeviceInfo &info, Access access,
+                                              std::shared_ptr<AuthorizationSession> authorization) override {
+        auto d = open_owned_device(info, access, std::move(authorization));
         if (!d)
             return std::unexpected(d.error());
         return std::move(*d);
     }
-    std::shared_ptr<void> hold() override { return hold_privileges(); }
 };
 
 class LambdaMode final : public Mode {
@@ -277,6 +283,12 @@ Outcome<std::unique_ptr<Flow>> Flow::start(std::shared_ptr<const Mode> mode, Acc
         impl->mode = std::move(mode);
         impl->access = access;
         impl->ctx = std::move(context);
+        if (!impl->ctx.authorization) {
+            auto authorization = create_authorization_session();
+            if (!authorization)
+                return fail(authorization.error(), "", "", "cannot create device authorization session");
+            impl->ctx.authorization = std::move(*authorization);
+        }
         if (!impl->ctx.devices)
             impl->ctx.devices = system_device_source();
         impl->blocks = impl->mode->pipeline();
@@ -412,14 +424,15 @@ Outcome<Opened> Flow::open(CancellationToken stop) {
         const auto recorded = m.answers;
         const auto shapes = m.shapes;
         const std::string locator = m.preview.locator;
-        const auto privileges = m.ctx.devices->hold(); // keeps e.g. the UAC helper alive across the gap
         m.stages.resize(1);
         m.released = true;
 
         auto fail_at = [&](std::size_t i, SubmitError e) -> Outcome<Opened> {
             if (e.step.empty())
                 e.step = m.block_id(i);
-            (void)m.rediscover(i, recorded, stop); // leave the flow where the user must act
+            // Recovery can reopen protected devices. Never prompt again within the failed request.
+            if (!requires_explicit_retry(e.code))
+                (void)m.rediscover(i, recorded, stop); // leave the flow where the user must act
             return std::unexpected(std::move(e));
         };
 

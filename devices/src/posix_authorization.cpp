@@ -19,46 +19,96 @@
 #include <sys/wait.h>
 
 namespace rawdisk::detail {
-namespace {
-
 constexpr std::size_t authorization_descriptor_capacity = 512U;
 
-class Child {
-  public:
-    explicit Child(pid_t pid) : pid_(pid) {}
-    ~Child() {
-        if (pid_ <= 0)
-            return;
-        ::kill(pid_, SIGKILL);
-        while (::waitpid(pid_, nullptr, 0) < 0 && errno == EINTR) {
-        }
+AuthorizedChild::~AuthorizedChild() {
+    if (pid_ <= 0)
+        return;
+    ::kill(pid_, SIGKILL);
+    while (::waitpid(pid_, nullptr, 0) < 0 && errno == EINTR) {
     }
-    Child(const Child &) = delete;
-    Child &operator=(const Child &) = delete;
-    Result<int> wait(AuthorizationDeadline deadline) {
-        for (;;) {
-            int status{};
-            const auto result = ::waitpid(pid_, &status, WNOHANG);
-            if (result == pid_) {
+}
+Result<int> AuthorizedChild::wait(AuthorizationDeadline deadline) {
+    if (!valid())
+        return fail(Errc::invalid_argument);
+    for (;;) {
+        int status{};
+        const auto result = ::waitpid(pid_, &status, WNOHANG);
+        if (result == pid_) {
+            pid_ = -1;
+            return status;
+        }
+        if (result < 0 && errno != EINTR) {
+            if (errno == ECHILD)
                 pid_ = -1;
-                return status;
-            }
-            if (result < 0 && errno != EINTR) {
-                if (errno == ECHILD)
-                    pid_ = -1;
-                return fail(Errc::elevation_failed);
-            }
-            if (std::chrono::steady_clock::now() >= deadline)
-                return fail(Errc::authorization_timeout);
-            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            return fail(Errc::elevation_failed);
         }
+        if (std::chrono::steady_clock::now() >= deadline)
+            return fail(Errc::authorization_timeout);
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
+}
 
-  private:
-    pid_t pid_;
-};
+Result<std::pair<PosixFd, PosixFd>> authorization_sockets() {
+    int sockets[2];
+#if defined(__linux__)
+    constexpr int flags = SOCK_STREAM | SOCK_CLOEXEC;
+#else
+    constexpr int flags = SOCK_STREAM;
+#endif
+    if (::socketpair(AF_UNIX, flags, 0, sockets) != 0)
+        return fail(errno_code(errno));
+    PosixFd original_ours(sockets[0]);
+    PosixFd original_theirs(sockets[1]);
+    if (::fcntl(original_ours.get(), F_SETFD, FD_CLOEXEC) != 0 ||
+        ::fcntl(original_theirs.get(), F_SETFD, FD_CLOEXEC) != 0)
+        return fail(errno_code(errno));
+    PosixFd ours(::fcntl(original_ours.get(), F_DUPFD_CLOEXEC, 3));
+    if (!ours.valid())
+        return fail(errno_code(errno));
+    PosixFd theirs(::fcntl(original_theirs.get(), F_DUPFD_CLOEXEC, 3));
+    if (!theirs.valid())
+        return fail(errno_code(errno));
+#if defined(__APPLE__)
+    const int enabled = 1;
+    if (::setsockopt(ours.get(), SOL_SOCKET, SO_NOSIGPIPE, &enabled, sizeof enabled) != 0 ||
+        ::setsockopt(theirs.get(), SOL_SOCKET, SO_NOSIGPIPE, &enabled, sizeof enabled) != 0)
+        return fail(errno_code(errno));
+#endif
+    return std::pair(std::move(ours), std::move(theirs));
+}
 
-} // namespace
+Result<void> send_authorization_bytes(int socket, std::span<const std::byte> bytes, AuthorizationDeadline deadline) {
+    std::size_t done{};
+    while (done < bytes.size()) {
+        const auto remaining =
+            std::chrono::duration_cast<std::chrono::milliseconds>(deadline - std::chrono::steady_clock::now());
+        if (remaining.count() <= 0)
+            return fail(Errc::authorization_timeout);
+        pollfd event{socket, POLLOUT, 0};
+        const auto ready = ::poll(&event, 1, static_cast<int>(remaining.count()));
+        if (ready < 0 && errno == EINTR)
+            continue;
+        if (ready < 0)
+            return fail(errno_code(errno));
+        if (ready == 0)
+            return fail(Errc::authorization_timeout);
+#if defined(__linux__)
+        constexpr int flags = MSG_DONTWAIT | MSG_NOSIGNAL;
+#else
+        constexpr int flags = MSG_DONTWAIT;
+#endif
+        const auto count = ::send(socket, bytes.data() + done, bytes.size() - done, flags);
+        if (count < 0 && (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK))
+            continue;
+        if (count < 0)
+            return fail(errno_code(errno));
+        if (count == 0)
+            return fail(Errc::elevation_failed);
+        done += static_cast<std::size_t>(count);
+    }
+    return {};
+}
 
 Result<PosixFd> validate_authorized_fd(PosixFd fd, Access access) {
     if (!fd.valid())
@@ -73,11 +123,10 @@ Result<PosixFd> validate_authorized_fd(PosixFd fd, Access access) {
     return fd;
 }
 
-Result<PosixFd> receive_authorized_fd(int socket, pid_t child, Access access, AuthorizationDeadline deadline,
-                                      decltype(&::recvmsg) receive_message) {
-    if (child <= 0)
+Result<PosixFd> receive_authorized_fd(int socket, AuthorizedChild &process, Access access,
+                                      AuthorizationDeadline deadline, decltype(&::recvmsg) receive_message) {
+    if (!process.valid())
         return fail(Errc::invalid_argument);
-    Child process(child);
     std::vector<PosixFd> descriptors;
     descriptors.reserve(authorization_descriptor_capacity);
     char byte{};

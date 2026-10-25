@@ -26,6 +26,21 @@ hardware acceptance.
    select the new connection and open it again. An old selection must not
    silently open a replacement device.
 
+## Authorization Reuse
+
+Record the prompt count for several read-only open/close/reopen cycles in one
+app launch, including a zero-device gap and a second USB device when available.
+The backend reuses one native authorization reference rather than creating a
+new reference for every `authopen`. Startup, ordinary image files, refresh and
+reading from an already open device must not request administrative access.
+
+Repeat after an idle interval and after a fresh app launch. macOS controls
+credential expiry and additional rights; another prompt is allowed when policy
+requires it. This is native authorization reuse, not a promise of unlimited
+approval. Cancel a prompt and confirm that a new explicit attempt still works.
+Closing a device must release its claim even while axkdeck retains authorization
+state. Confirm child/backend cleanup on full app exit.
+
 ## Write Qualification Is Separate
 
 Do not write to an original card during these checks. Physical write testing

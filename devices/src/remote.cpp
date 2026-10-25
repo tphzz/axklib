@@ -205,12 +205,13 @@ Result<std::shared_ptr<RemoteSession>> RemoteSession::start(std::unique_ptr<Stre
 
 std::unexpected<std::error_code> RemoteSession::mark_broken(std::error_code ec) noexcept {
     broken_ = true;
+    stream_.reset();
     return std::unexpected(ec);
 }
 
 Result<RemoteSession::Reply> RemoteSession::call(Op op, std::uint32_t handle, std::span<const std::byte> payload,
                                                  std::span<const std::byte> data) {
-    std::lock_guard lock(mutex_);
+    std::unique_lock lock(mutex_);
     if (broken_)
         return fail(Errc::elevation_failed);
     const std::size_t len = payload.size() + data.size();
@@ -242,7 +243,14 @@ Result<RemoteSession::Reply> RemoteSession::call(Op op, std::uint32_t handle, st
     if (!h || h->op != (opcode | kReplyBit) || h->len < kStatusSize || (op != Op::open && h->handle != handle))
         return mark_broken(make_error_code(Errc::helper_protocol));
 
-    Reply reply{h->handle, std::vector<std::byte>(h->len)};
+    std::vector<std::byte> body;
+    try {
+        body.resize(h->len);
+    } catch (...) {
+        (void)mark_broken(std::make_error_code(std::errc::not_enough_memory));
+        throw;
+    }
+    Reply reply{std::move(lock), h->handle, std::move(body)};
     if (auto r = stream_->read_exact(reply.body); !r)
         return transport(r.error());
 
@@ -287,7 +295,12 @@ Result<std::unique_ptr<BlockDevice>> RemoteSession::open(const DeviceInfo &info,
         count > std::numeric_limits<std::uint64_t>::max() / ss || writable != (access == Access::ReadWrite))
         return mark_broken(make_error_code(Errc::helper_protocol));
 
-    return std::make_unique<RemoteDisk>(shared_from_this(), reply->handle, ss, count, writable);
+    try {
+        return std::make_unique<RemoteDisk>(shared_from_this(), reply->handle, ss, count, writable);
+    } catch (...) {
+        (void)mark_broken(std::make_error_code(std::errc::not_enough_memory));
+        throw;
+    }
 }
 
 Result<void> RemoteSession::read(std::uint32_t handle, std::uint64_t lba, std::span<std::byte> out) {
@@ -330,9 +343,17 @@ Result<void> RemoteSession::flush(std::uint32_t handle) {
 
 void RemoteSession::close(std::uint32_t handle) noexcept {
     try {
-        (void)call(Op::close, handle, {});
+        auto reply = call(Op::close, handle, {});
+        if (reply) {
+            if (!reply->body.empty())
+                (void)mark_broken(make_error_code(Errc::helper_protocol));
+            return;
+        }
     } catch (...) {
     }
+    // A failed Close leaves native handle ownership uncertain. Do not pin it in the session cache.
+    std::lock_guard lock(mutex_);
+    (void)mark_broken(make_error_code(Errc::elevation_failed));
 }
 
 Result<void> RemoteSession::verify_binding(std::uint32_t handle) {

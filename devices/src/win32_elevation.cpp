@@ -11,6 +11,7 @@
 //  - server accepts only the client whose PID is the process it launched
 //  - helper accepts only a server whose PID was passed on its command line, and connects
 //    with SECURITY_IDENTIFICATION so the unelevated server cannot impersonate its admin token
+#include "authorization_session.hpp"
 #include "detail.hpp"
 #include "rawdisk/block_device.hpp"
 #include "remote.hpp"
@@ -93,33 +94,13 @@ Result<Handle> launch_helper(const std::filesystem::path &exe, const std::wstrin
     return Handle{sei.hProcess};
 }
 
-// The running helper session, shared by every device opened through it.
-std::mutex g_session_mutex;
-std::weak_ptr<detail::RemoteSession> g_session;
+struct Win32AuthorizationState final : detail::AuthorizationState {
+    std::shared_ptr<detail::RemoteSession> session;
+};
 
 } // namespace
 
-std::shared_ptr<detail::RemoteSession> detail::win32_existing_session() noexcept {
-    std::lock_guard lock(g_session_mutex);
-    auto s = g_session.lock();
-    return s && !s->broken() ? s : nullptr;
-}
-
-std::shared_ptr<void> hold_privileges() noexcept {
-    try {
-        return detail::win32_existing_session();
-    } catch (...) {
-        return nullptr;
-    }
-}
-
-Result<std::shared_ptr<detail::RemoteSession>> detail::win32_elevated_session(const ElevationOptions &options) {
-    std::lock_guard lock(g_session_mutex); // also makes concurrent opens share one prompt
-    auto &cached = g_session;
-
-    if (auto s = cached.lock(); s && !s->broken())
-        return s;
-
+static Result<std::shared_ptr<detail::RemoteSession>> start_helper(const ElevationOptions &options) {
     std::filesystem::path exe = options.helper_path;
     if (exe.empty()) {
         auto d = default_helper_path();
@@ -144,11 +125,34 @@ Result<std::shared_ptr<detail::RemoteSession>> detail::win32_elevated_session(co
     auto stream = detail::make_pipe_stream(std::move(*pipe), options.io_timeout_ms);
     if (!stream)
         return fail(stream.error());
-    auto session = RemoteSession::start(std::move(*stream));
+    auto session = detail::RemoteSession::start(std::move(*stream));
     if (!session)
         return fail(session.error());
-    cached = *session;
     return session;
+}
+
+Result<std::shared_ptr<detail::RemoteSession>> detail::win32_elevated_session(AuthorizationSession &authorization,
+                                                                              const HelperSessionLauncher &launcher) {
+    const auto &options = AuthorizationSessionAccess::options(authorization);
+    if (!options.allow)
+        return fail(std::make_error_code(std::errc::permission_denied));
+    const std::lock_guard lock{AuthorizationSessionAccess::mutex(authorization)};
+    auto &slot = AuthorizationSessionAccess::state(authorization);
+    if (!slot)
+        slot = std::make_shared<Win32AuthorizationState>();
+    auto state = std::dynamic_pointer_cast<Win32AuthorizationState>(slot);
+    if (!state)
+        return fail(Errc::internal_error);
+    if (state->session && !state->session->broken())
+        return state->session;
+    state->session.reset();
+    auto started = launcher ? launcher(options) : start_helper(options);
+    if (!started)
+        return fail(started.error());
+    if (!*started || (*started)->broken())
+        return fail(Errc::elevation_failed);
+    state->session = std::move(*started);
+    return state->session;
 }
 
 int helper_main(int argc, wchar_t **argv) noexcept {
@@ -189,12 +193,14 @@ int helper_main(int argc, wchar_t **argv) noexcept {
 
         ElevationOptions no_elevation;
         no_elevation.allow = false; // the helper must never try to elevate again
-        set_elevation_options(std::move(no_elevation));
+        auto authorization = create_authorization_session(std::move(no_elevation));
+        if (!authorization)
+            return 5;
         auto stream = detail::make_pipe_stream(std::move(pipe), INFINITE);
         if (!stream)
             return 5;
-        const auto result = detail::serve(**stream, [](const DeviceInfo &info, Access access) {
-            return open_device(info, access); // full enumeration + identity + capacity checks
+        const auto result = detail::serve(**stream, [&](const DeviceInfo &info, Access access) {
+            return open_device(info, access, *authorization); // full enumeration + identity + capacity checks
         });
         return result ? 0 : 6;
     } catch (...) {

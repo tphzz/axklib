@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <filesystem>
 #include <format>
 #include <map>
 #include <mutex>
@@ -29,11 +30,13 @@ using device_detail::native_error;
 
 class NativeTransport final : public DeviceTransport {
   public:
-    NativeTransport(rawdisk::DeviceInfo info, std::shared_ptr<void> lease, std::unique_ptr<rawdisk::BlockDevice> device,
-                    std::vector<rawdisk::Range> protected_ranges,
+    NativeTransport(rawdisk::DeviceInfo info, std::shared_ptr<void> lease,
+                    std::shared_ptr<rawdisk::AuthorizationSession> authorization,
+                    std::unique_ptr<rawdisk::BlockDevice> device, std::vector<rawdisk::Range> protected_ranges,
                     std::map<std::uint64_t, std::vector<std::byte>> layout_guards)
-        : info_(std::move(info)), lease_(std::move(lease)), device_(std::move(device)),
-          protected_ranges_(std::move(protected_ranges)), layout_guards_(std::move(layout_guards)) {}
+        : info_(std::move(info)), lease_(std::move(lease)), authorization_(std::move(authorization)),
+          device_(std::move(device)), protected_ranges_(std::move(protected_ranges)),
+          layout_guards_(std::move(layout_guards)) {}
 
     std::uint64_t size() const noexcept override { return info_.size_bytes; }
     std::uint32_t sector_size() const noexcept override { return info_.sector_size; }
@@ -58,9 +61,8 @@ class NativeTransport final : public DeviceTransport {
             return checked;
         if (device_->writable())
             return {};
-        auto privilege = rawdisk::hold_privileges();
         device_.reset();
-        auto opened = rawdisk::open_device(info_, rawdisk::Access::ReadWrite);
+        auto opened = rawdisk::open_device(info_, rawdisk::Access::ReadWrite, authorization_);
         if (!opened) {
             invalidated_ = true;
             return std::unexpected(native_error(opened.error()));
@@ -183,6 +185,7 @@ class NativeTransport final : public DeviceTransport {
     }
     rawdisk::DeviceInfo info_;
     std::shared_ptr<void> lease_;
+    std::shared_ptr<rawdisk::AuthorizationSession> authorization_;
     mutable std::unique_ptr<rawdisk::BlockDevice> device_;
     std::vector<rawdisk::Range> protected_ranges_;
     std::map<std::uint64_t, std::vector<std::byte>> layout_guards_;
@@ -192,10 +195,7 @@ class NativeTransport final : public DeviceTransport {
 
 class NativeProvider final : public DeviceProvider {
   public:
-    explicit NativeProvider(const std::filesystem::path &helper) {
-        if (!helper.empty())
-            rawdisk::set_elevation_options({.helper_path = helper});
-    }
+    explicit NativeProvider(const std::filesystem::path &helper) : helper_(helper) {}
     Result<std::vector<DeviceCandidate>> list() override {
         auto devices = rawdisk::list_usb_devices();
         if (!devices)
@@ -225,7 +225,13 @@ class NativeProvider final : public DeviceProvider {
         auto lease = rawdisk::claim_carrier(*directory, info.carrier_id);
         if (!lease)
             return std::unexpected(native_error(lease.error()));
-        auto opened = rawdisk::open_device(info, rawdisk::Access::ReadOnly);
+        if (!authorization_) {
+            auto created = rawdisk::create_authorization_session({.helper_path = helper_});
+            if (!created)
+                return std::unexpected(native_error(created.error()));
+            authorization_ = std::move(*created);
+        }
+        auto opened = rawdisk::open_device(info, rawdisk::Access::ReadOnly, authorization_);
         if (!opened)
             return std::unexpected(native_error(opened.error()));
         std::vector<DeviceTargetDescription> targets;
@@ -332,13 +338,16 @@ class NativeProvider final : public DeviceProvider {
         }
         if (targets.empty())
             return std::unexpected(Error{"device_targets_unavailable", "no eligible targets at or below 9 GB"});
-        return ConnectedDevice{std::make_shared<NativeTransport>(info, std::move(*lease), std::move(*opened),
-                                                                 std::move(protected_ranges), std::move(layout_guards)),
+        return ConnectedDevice{std::make_shared<NativeTransport>(info, std::move(*lease), authorization_,
+                                                                 std::move(*opened), std::move(protected_ranges),
+                                                                 std::move(layout_guards)),
                                {std::string{candidate_id}, info.model, info.serial, info.size_bytes, info.sector_size},
                                std::move(targets)};
     }
 
   private:
+    std::filesystem::path helper_;
+    std::shared_ptr<rawdisk::AuthorizationSession> authorization_;
     std::map<std::string, rawdisk::DeviceInfo, std::less<>> candidates_;
     std::mutex mutex_;
 };

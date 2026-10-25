@@ -70,6 +70,8 @@ class RemoteSession : public std::enable_shared_from_this<RemoteSession> {
 
   private:
     struct Reply {
+        // Keep reply validation inside the same transaction as the wire exchange.
+        std::unique_lock<std::mutex> transaction;
         std::uint32_t handle = 0;
         std::vector<std::byte> body; // after the status
     };

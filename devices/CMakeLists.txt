@@ -41,6 +41,7 @@ add_library(rawdisk
     # core
     src/errors.cpp
     src/block_device.cpp
+    src/authorization_session.cpp
     src/ownership.cpp
     src/remote.cpp
     src/probe.cpp
@@ -87,7 +88,7 @@ if(WIN32)
 elseif(APPLE)
     target_sources(rawdisk PRIVATE src/posix_disk.cpp src/posix_authorization.cpp src/macos_authorization.cpp src/enumerate_macos.cpp src/macos_claim.cpp)
     target_link_libraries(rawdisk PRIVATE
-        "-framework CoreFoundation" "-framework DiskArbitration" "-framework IOKit")
+        "-framework CoreFoundation" "-framework DiskArbitration" "-framework IOKit" "-framework Security")
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(RAWDISK_DBUS REQUIRED IMPORTED_TARGET dbus-1>=1.10)
@@ -111,7 +112,7 @@ endif()
 
 if(RAWDISK_BUILD_TESTS)
     enable_testing()
-    foreach(t rawdisk_tests layout_tests v6_primary_tests open_tests cancellation_tests probe_tests ownership_tests
+    foreach(t rawdisk_tests authorization_session_tests layout_tests v6_primary_tests open_tests cancellation_tests probe_tests ownership_tests
             win32_identity_tests)
         if(t STREQUAL "rawdisk_tests")
             add_executable(${t} tests/tests.cpp)
@@ -132,6 +133,12 @@ if(RAWDISK_BUILD_TESTS)
         rawdisk_target_options(linux_authorization_tests)
         add_test(NAME linux_authorization_tests COMMAND linux_authorization_tests)
         set_tests_properties(linux_authorization_tests PROPERTIES TIMEOUT 30)
+        add_executable(linux_authorization_session_tests tests/linux_authorization_session_tests.cpp)
+        target_include_directories(linux_authorization_session_tests PRIVATE src tests)
+        target_link_libraries(linux_authorization_session_tests PRIVATE rawdisk PkgConfig::RAWDISK_DBUS)
+        rawdisk_target_options(linux_authorization_session_tests)
+        add_test(NAME linux_authorization_session_tests COMMAND linux_authorization_session_tests)
+        set_tests_properties(linux_authorization_session_tests PROPERTIES TIMEOUT 30)
         # Test-only syscall fault injection; never enabled in the library or CLI.
         target_compile_definitions(probe_tests PRIVATE RAWDISK_TEST_WRAP_FSYNC=1)
         target_link_options(probe_tests PRIVATE -Wl,--wrap=fsync)
@@ -144,9 +151,21 @@ if(RAWDISK_BUILD_TESTS)
         rawdisk_target_options(posix_authorization_tests)
         add_test(NAME posix_authorization_tests COMMAND posix_authorization_tests)
         set_tests_properties(posix_authorization_tests PROPERTIES TIMEOUT 30)
+        add_executable(authorization_transfer_tests tests/authorization_transfer_tests.cpp)
+        target_include_directories(authorization_transfer_tests PRIVATE src tests)
+        target_link_libraries(authorization_transfer_tests PRIVATE rawdisk)
+        rawdisk_target_options(authorization_transfer_tests)
+        add_test(NAME authorization_transfer_tests COMMAND authorization_transfer_tests)
+        set_tests_properties(authorization_transfer_tests PROPERTIES TIMEOUT 30)
     endif()
 
     if(APPLE)
+        add_executable(macos_authorization_tests tests/macos_authorization_tests.cpp)
+        target_include_directories(macos_authorization_tests PRIVATE src tests)
+        target_link_libraries(macos_authorization_tests PRIVATE rawdisk "-framework Security")
+        rawdisk_target_options(macos_authorization_tests)
+        add_test(NAME macos_authorization_tests COMMAND macos_authorization_tests)
+        set_tests_properties(macos_authorization_tests PROPERTIES TIMEOUT 30)
         add_executable(macos_claim_tests tests/macos_claim_tests.cpp)
         target_include_directories(macos_claim_tests PRIVATE src tests)
         target_link_libraries(macos_claim_tests PRIVATE rawdisk "-framework CoreFoundation" "-framework DiskArbitration")

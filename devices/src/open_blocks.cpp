@@ -105,7 +105,7 @@ class SelectDevice final : public Block {
         if (it == devices_.end())
             return fail(make_error_code(Errc::flow_stale_selection), "device", "device");
         const DeviceInfo &d = it->second;
-        auto dev = env.context.devices->open(d, pass_access(env));
+        auto dev = env.context.devices->open(d, pass_access(env), env.context.authorization);
         if (!dev)
             return fail(dev.error(), "device", "device");
         if (max_bytes_ && ((*dev)->sector_size() == 0 || (*dev)->sector_count() > *max_bytes_ / (*dev)->sector_size()))

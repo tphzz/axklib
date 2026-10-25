@@ -120,9 +120,11 @@ void test_failures() {
     CHECK(err(cancelled) == Errc::elevation_cancelled);
     ElevationOptions options;
     options.allow = false;
-    set_elevation_options(options);
-    CHECK(err(linux_authorized_open("/dev/test", Access::ReadOnly)) == std::errc::permission_denied);
-    set_elevation_options({});
+    auto authorization = create_authorization_session(options);
+    CHECK(authorization.has_value());
+    if (authorization)
+        CHECK(err(linux_authorized_open("/dev/test", Access::ReadOnly, **authorization)) ==
+              std::errc::permission_denied);
     CHECK(linux_authorization_error("org.freedesktop.UDisks2.Error.NotAuthorizedDismissed") ==
           Errc::elevation_cancelled);
     CHECK(linux_authorization_error("org.freedesktop.UDisks2.Error.NotAuthorizedCanObtain") ==

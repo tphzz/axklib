@@ -16,13 +16,12 @@ namespace rawdisk::detail {
 // ---- implemented once per platform -------------------------------------------------------
 Result<std::vector<DeviceInfo>> list_platform();
 // `info` comes from a fresh enumeration. Must verify identity on the opened handle.
-Result<std::unique_ptr<BlockDevice>> open_platform(const DeviceInfo &info, Access access);
+Result<std::unique_ptr<BlockDevice>> open_platform(const DeviceInfo &info, Access access,
+                                                   AuthorizationSession &authorization);
 Result<std::unique_ptr<BlockDevice>> open_image_platform(const std::filesystem::path &path, Access access,
                                                          std::uint32_t sector_size);
 
 // ---- shared helpers ----------------------------------------------------------------------
-ElevationOptions elevation_options();
-
 inline std::unexpected<std::error_code> fail(std::error_code ec) noexcept { return std::unexpected(ec); }
 inline std::unexpected<std::error_code> fail(Errc e) noexcept { return std::unexpected(make_error_code(e)); }
 inline std::error_code errno_code(int e) noexcept { return {e, std::generic_category()}; }

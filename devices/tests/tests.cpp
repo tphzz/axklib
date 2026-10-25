@@ -15,10 +15,13 @@
 #include <format>
 #include <fstream>
 #include <map>
+#include <memory>
 #include <mutex>
+#include <new>
 #include <random>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #if defined(__linux__)
@@ -76,7 +79,8 @@ struct Channel {
 
 class MemStream final : public detail::Stream {
   public:
-    MemStream(std::shared_ptr<Channel> in, std::shared_ptr<Channel> out) : in_(std::move(in)), out_(std::move(out)) {}
+    MemStream(std::shared_ptr<Channel> in, std::shared_ptr<Channel> out, std::shared_ptr<void> lifetime = {})
+        : in_(std::move(in)), out_(std::move(out)), lifetime_(std::move(lifetime)) {}
     ~MemStream() override { shutdown(); }
     void shutdown() {
         for (auto *c : {in_.get(), out_.get()}) {
@@ -90,6 +94,7 @@ class MemStream final : public detail::Stream {
         out_->closed = true;
         out_->cv.notify_all();
     }
+    bool throw_next_write = false;
     Result<void> read_exact(std::span<std::byte> buf) override {
         std::unique_lock l(in_->m);
         in_->cv.wait(l, [&] { return in_->q.size() >= buf.size() || in_->closed; });
@@ -102,6 +107,8 @@ class MemStream final : public detail::Stream {
         return {};
     }
     Result<void> write_all(std::span<const std::byte> buf) override {
+        if (std::exchange(throw_next_write, false))
+            throw std::bad_alloc();
         std::lock_guard l(out_->m);
         if (out_->closed)
             return detail::fail(std::make_error_code(std::errc::broken_pipe));
@@ -112,11 +119,13 @@ class MemStream final : public detail::Stream {
 
   private:
     std::shared_ptr<Channel> in_, out_;
+    std::shared_ptr<void> lifetime_;
 };
 
-static std::pair<std::unique_ptr<MemStream>, std::unique_ptr<MemStream>> make_pipe() {
+static std::pair<std::unique_ptr<MemStream>, std::unique_ptr<MemStream>>
+make_pipe(std::shared_ptr<void> client_lifetime = {}) {
     auto a = std::make_shared<Channel>(), b = std::make_shared<Channel>();
-    return {std::make_unique<MemStream>(a, b), std::make_unique<MemStream>(b, a)};
+    return {std::make_unique<MemStream>(a, b, std::move(client_lifetime)), std::make_unique<MemStream>(b, a)};
 }
 
 // Server whose "devices" are image files; DeviceInfo.path is the image path.
@@ -479,8 +488,9 @@ static void test_server_robustness() {
 
 // Fake server that answers with whatever we script, to test the client's defenses.
 static Result<std::shared_ptr<detail::RemoteSession>> client_against(std::vector<std::byte> script,
-                                                                     std::unique_ptr<MemStream> &server_keep) {
-    auto [client, server] = make_pipe();
+                                                                     std::unique_ptr<MemStream> &server_keep,
+                                                                     std::shared_ptr<void> client_lifetime = {}) {
+    auto [client, server] = make_pipe(std::move(client_lifetime));
     (void)server->write_all(script);
     server_keep = std::move(server);
     return detail::RemoteSession::start(std::move(client));
@@ -531,6 +541,96 @@ static void test_client_robustness() {
         CHECK(err((*s)->open(info, Access::ReadOnly)) == Errc::helper_protocol);
         CHECK((*s)->broken());
         CHECK(err((*s)->open(info, Access::ReadOnly)) == Errc::elevation_failed); // fails fast now
+    }
+}
+
+static void test_broken_session_releases_transport() {
+    enum class Failure { transport_eof, reply_opcode, open_geometry, verify_body };
+    const std::vector<std::byte> ok_hello_body = {std::byte{0}, std::byte{0}, std::byte{0}, std::byte{0}, std::byte{0},
+                                                  std::byte{1}, std::byte{0}, std::byte{0}, std::byte{0}};
+    const DeviceInfo info{.path = "x", .model = {}, .serial = {}, .size_bytes = 512, .sector_size = 512};
+    for (const auto failure :
+         {Failure::transport_eof, Failure::reply_opcode, Failure::open_geometry, Failure::verify_body}) {
+        auto script = reply(1, 0, ok_hello_body);
+        std::vector<std::byte> open_body(5 + 4 + 8 + 1, std::byte{0});
+        open_body[6] = std::byte{2}; // 512-byte sectors
+        open_body[9] = std::byte{1}; // one sector
+        if (failure == Failure::open_geometry) {
+            open_body[5] = std::byte{7};
+            open_body[6] = std::byte{0};
+        }
+        const auto opened = reply(2, 5, open_body);
+        script.insert(script.end(), opened.begin(), opened.end());
+        if (failure == Failure::reply_opcode || failure == Failure::verify_body) {
+            std::vector<std::byte> body(5, std::byte{0});
+            if (failure == Failure::verify_body)
+                body.push_back(std::byte{1});
+            const auto verified = reply(failure == Failure::reply_opcode ? 6 : 7, 5, std::move(body));
+            script.insert(script.end(), verified.begin(), verified.end());
+        }
+
+        auto lifetime = std::make_shared<int>(0);
+        const std::weak_ptr<int> transport_lifetime = lifetime;
+        std::unique_ptr<MemStream> keep;
+        auto session = client_against(std::move(script), keep, std::move(lifetime));
+        CHECK(session.has_value());
+        if (!session)
+            continue;
+        CHECK(!transport_lifetime.expired());
+        if (failure == Failure::transport_eof)
+            keep->close_write();
+        auto device = (*session)->open(info, Access::ReadOnly);
+        if (failure == Failure::open_geometry) {
+            CHECK(err(device) == Errc::helper_protocol);
+        } else {
+            CHECK(device.has_value());
+            if (!device)
+                continue;
+            const auto expected = failure == Failure::transport_eof ? Errc::elevation_failed : Errc::helper_protocol;
+            CHECK(err((*device)->verify_binding()) == expected);
+        }
+
+        CHECK((*session)->broken());
+        CHECK(transport_lifetime.expired()); // Neither the session nor a remaining disk may retain the transport.
+        CHECK(err((*session)->open(info, Access::ReadOnly)) == Errc::elevation_failed);
+    }
+}
+
+static void test_failed_close_releases_transport() {
+    enum class Failure { reported_error, malformed_body, exception };
+    for (const auto failure : {Failure::reported_error, Failure::malformed_body, Failure::exception}) {
+        auto lifetime = std::make_shared<int>(0);
+        const std::weak_ptr<int> transport_lifetime = lifetime;
+        auto [client, server] = make_pipe(std::move(lifetime));
+        auto *client_stream = client.get();
+        std::vector<std::byte> hello_body(9, std::byte{0});
+        hello_body[5] = std::byte{1};
+        CHECK(server->write_all(reply(1, 0, std::move(hello_body))).has_value());
+        std::vector<std::byte> open_body(18, std::byte{0});
+        open_body[6] = std::byte{2}; // 512-byte sectors
+        open_body[9] = std::byte{1}; // one sector
+        CHECK(server->write_all(reply(2, 5, std::move(open_body))).has_value());
+        std::vector<std::byte> close_body(5, std::byte{0});
+        if (failure == Failure::reported_error) {
+            close_body[0] = std::byte{3}; // rawdisk error category
+            close_body[1] = static_cast<std::byte>(Errc::device_busy);
+        }
+        if (failure == Failure::malformed_body)
+            close_body.push_back(std::byte{1});
+        CHECK(server->write_all(reply(6, 5, std::move(close_body))).has_value());
+        auto session = detail::RemoteSession::start(std::move(client));
+        CHECK(session.has_value());
+        if (!session)
+            continue;
+        const DeviceInfo info{.path = "x", .model = {}, .serial = {}, .size_bytes = 512, .sector_size = 512};
+        auto device = (*session)->open(info, Access::ReadOnly);
+        CHECK(device.has_value());
+        if (!device)
+            continue;
+        client_stream->throw_next_write = failure == Failure::exception;
+        device->reset();
+        CHECK((*session)->broken());
+        CHECK(transport_lifetime.expired()); // Cached sessions must not pin a handle whose Close failed.
     }
 }
 
@@ -695,6 +795,8 @@ int main() {
     test_remote_roundtrip();
     test_remote_connection_identity();
     test_remote_handle_limit();
+    test_broken_session_releases_transport();
+    test_failed_close_releases_transport();
     test_server_robustness();
     test_client_robustness();
 #if defined(__linux__)

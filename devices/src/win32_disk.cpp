@@ -1,6 +1,7 @@
 // Windows backend: \\.\PhysicalDriveN devices and image files.
 // Enumeration needs no privileges. Opening a device needs Administrator; when the process is
 // not elevated, open_platform() transparently routes through the elevated helper (UAC).
+#include "authorization_session.hpp"
 #include "detail.hpp"
 #include "rawdisk/block_device.hpp"
 #include "remote.hpp"
@@ -364,17 +365,18 @@ Result<std::vector<DeviceInfo>> detail::list_platform() {
     return out;
 }
 
-Result<std::unique_ptr<BlockDevice>> detail::open_platform(const DeviceInfo &info, Access access) {
+Result<std::unique_ptr<BlockDevice>> detail::open_platform(const DeviceInfo &info, Access access,
+                                                           AuthorizationSession &authorization) {
     auto direct = open_direct(info, access);
     if (direct || !is_access_denied(direct.error()))
         return direct;
 
     // Access denied: elevate only now, only if allowed, and only if that can help.
-    const ElevationOptions options = elevation_options();
+    const auto &options = AuthorizationSessionAccess::options(authorization);
     if (!options.allow || is_elevated())
         return direct;
 
-    auto session = win32_elevated_session(options);
+    auto session = win32_elevated_session(authorization);
     if (!session)
         return fail(session.error());
     return (*session)->open(info, access); // the helper repeats every check on its side

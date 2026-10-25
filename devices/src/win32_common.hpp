@@ -4,6 +4,7 @@
 #include "rawdisk/block_device.hpp"
 #include "win32_identity.hpp"
 
+#include <functional>
 #include <memory>
 #include <string>
 #include <utility>
@@ -47,9 +48,8 @@ bool is_elevated() noexcept;
 Result<Win32UsbIdentity> win32_usb_identity(HANDLE disk);
 Result<void> win32_verify_usb_identity(const Win32UsbIdentity &bound);
 
-// Elevated helper session shared by all devices opened through it (win32_elevation.cpp).
-Result<std::shared_ptr<RemoteSession>> win32_elevated_session(const ElevationOptions &options);
-// The running helper session, or null. Never starts one (no prompt).
-std::shared_ptr<RemoteSession> win32_existing_session() noexcept;
+using HelperSessionLauncher = std::function<Result<std::shared_ptr<RemoteSession>>(const ElevationOptions &)>;
+Result<std::shared_ptr<RemoteSession>> win32_elevated_session(AuthorizationSession &authorization,
+                                                              const HelperSessionLauncher &launcher = {});
 
 } // namespace rawdisk::detail

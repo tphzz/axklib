@@ -93,16 +93,14 @@ class DeviceSource {
   public:
     virtual ~DeviceSource() = default;
     virtual Result<std::vector<DeviceInfo>> list() = 0;
-    virtual Result<std::shared_ptr<BlockDevice>> open(const DeviceInfo &info, Access access) = 0;
-    // Held by the flow while it closes its read-only discovery handles and reopens for writing,
-    // so privileged access survives the gap (the system source: hold_privileges(), i.e. no second
-    // UAC prompt on Windows). Default: nothing to hold.
-    virtual std::shared_ptr<void> hold() { return nullptr; }
+    virtual Result<std::shared_ptr<BlockDevice>> open(const DeviceInfo &info, Access access,
+                                                      std::shared_ptr<AuthorizationSession> authorization) = 0;
 };
 std::shared_ptr<DeviceSource> system_device_source();
 
 struct Context {
-    std::shared_ptr<DeviceSource> devices; // null: system_device_source()
+    std::shared_ptr<DeviceSource> devices;                 // null: system_device_source()
+    std::shared_ptr<AuthorizationSession> authorization{}; // null: one owner for this flow
 };
 
 // What the pipeline has produced so far; the output of one block is the input of the next.
@@ -196,6 +194,7 @@ class Flow {
     const Preview &preview() const noexcept; // only when ready()
     // Borrows the discovery handle for read-only preflight. Release it before open(ReadWrite).
     Outcome<Opened> read_only() const;
+    // Authorization/transport failures defer rediscovery until the next explicit open() or back().
     Outcome<Opened> open(CancellationToken stop = {});
 
     Answers answers() const; // flat "step.field" -> value, answered so far
