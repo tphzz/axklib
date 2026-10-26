@@ -6,6 +6,7 @@
     } from '../../features/import/packageDestinations';
     import { dismissAutocompleteFromOutsidePointer } from '../autocomplete';
     import Icon from './Icon.svelte';
+    import SelectControl from './SelectControl.svelte';
 
     interface Props {
         mode: ImportDestinationMode;
@@ -122,13 +123,13 @@
         activeIndex = -1;
     }
 
-    function changePartition(value: string): void {
-        if (disabled || value === '') return;
+    function changePartition(value: number): void {
+        if (disabled) return;
         query = '';
         filtering = false;
         activeIndex = -1;
         listOpen = false;
-        onpartition(Number(value));
+        onpartition(value);
     }
 
     function handleKey(event: KeyboardEvent): void {
@@ -180,20 +181,15 @@
     {#if unavailableModes.existing}<span hidden id={`${descriptionId}-existing`}>{unavailableModes.existing}</span>{/if}
     {#if unavailableModes.create}<span hidden id={`${descriptionId}-create`}>{unavailableModes.create}</span>{/if}
 
-    <select
-        class="destination-partition dialog-field-control"
-        aria-label="Destination partition"
-        value={partitionIndex ?? ''}
+    <SelectControl
+        class="destination-partition"
+        label="Destination partition"
+        value={partitionIndex ?? undefined}
+        placeholder="Select partition"
+        options={partitions.map((option) => ({ value: option.partitionIndex, label: option.name }))}
         disabled={disabled || partitions.length === 0}
-        onchange={(event) => changePartition(event.currentTarget.value)}
-    >
-        {#if partitionIndex === null}
-            <option value="" disabled>Select partition</option>
-        {/if}
-        {#each partitions as option (option.partitionIndex)}
-            <option value={option.partitionIndex}>{option.name}</option>
-        {/each}
-    </select>
+        onchange={changePartition}
+    />
 
     {#if mode === 'existing'}
         <div
@@ -295,7 +291,6 @@
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
-    .destination-partition,
     .new-volume-name {
         min-width: 0;
         width: 100%;
@@ -319,7 +314,7 @@
             grid-template-columns: minmax(0, 1fr) max-content;
         }
 
-        .destination-partition,
+        .import-destination > :global(.destination-partition),
         .volume-combobox,
         .new-volume-name {
             grid-column: 1 / -1;

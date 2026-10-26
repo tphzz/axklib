@@ -1,3 +1,4 @@
+import { selectValue } from '../../test/selectControl';
 import { cleanup, fireEvent, render, waitFor } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
@@ -151,9 +152,7 @@ describe('Files import dialog', () => {
         await fireEvent.input(input, { target: { value: 'new.bin' } });
         expect(workflow.phase).toBe('dirty');
         expect((view.getByRole('button', { name: 'Import' }) as HTMLButtonElement).disabled).toBe(true);
-        await fireEvent.change(view.getByRole('combobox', { name: 'If file exists 1' }), {
-            target: { value: 'REPLACE' },
-        });
+        await selectValue(view.getByRole('combobox', { name: 'If file exists 1' }), 'REPLACE');
         await fireEvent.click(view.getByRole('button', { name: 'Review' }));
         await waitFor(() => expect(workflow.phase).toBe('ready'));
         expect(workflow.rows[0].conflict).toBe('REPLACE');

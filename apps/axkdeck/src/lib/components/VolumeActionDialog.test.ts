@@ -218,7 +218,7 @@ describe('VolumeActionDialog', () => {
         const input = screen.getByLabelText('Partition name');
         await Promise.resolve();
         expect(document.activeElement).toBe(input);
-        expect((input as HTMLInputElement).selectionStart).toBe(0);
+        expect((input as HTMLInputElement).selectionStart).toBe('PARTITION 3'.length);
         expect((input as HTMLInputElement).selectionEnd).toBe('PARTITION 3'.length);
         const submit = screen.getByRole('button', { name: 'Rename' });
         expect((input as HTMLInputElement).value).toBe('PARTITION 3');

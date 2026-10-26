@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mountEditorPopup } from './editorPopup';
+import { mountSelectPopup } from './selectPopup';
 
 afterEach(() => {
     document.body.replaceChildren();
@@ -32,7 +32,7 @@ function setup(top: number, scale = 1) {
         return { top, bottom: top + measured, width: 200 * scale, height: measured } as DOMRect;
     };
     const close = vi.fn();
-    const mounted = mountEditorPopup(popup, anchor, close);
+    const mounted = mountSelectPopup(popup, anchor, close);
     return {
         anchor,
         popup,
@@ -46,7 +46,7 @@ function setup(top: number, scale = 1) {
     };
 }
 
-describe('editor popup anchoring', () => {
+describe('shared popup anchoring', () => {
     it.each([1, 1.5, 2])('keeps the upward edge anchored while filtering and clearing at scale %s', (scale) => {
         const { popup, mounted, resize, disconnect } = setup(600, scale);
         expect(popup.getBoundingClientRect().bottom).toBeCloseTo(596);

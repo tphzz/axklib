@@ -1,3 +1,4 @@
+import { selectValue, openSelect, controlValue } from './select-control.mjs';
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -89,11 +90,11 @@ try {
                     });
                 } else {
                     const device = dialog.getByRole('combobox', { name: 'Device', exact: true });
-                    assert.equal(await device.inputValue(), '');
+                    assert.equal(await controlValue(device), '');
                     footer = dialog.locator('.open-source-panel:not([hidden]) > footer');
                     primary = footer.getByRole('button', { name: 'Open', exact: true });
                     assert(await primary.isDisabled());
-                    await device.selectOption('fixture');
+                    await selectValue(device, 'fixture');
                     if (mode === 'v6-invalid') {
                         await dialog
                             .getByRole('status')
@@ -102,7 +103,7 @@ try {
                         assert(await primary.isDisabled());
                         const target = dialog.getByRole('combobox', { name: 'SCSI target', exact: true });
                         assert(await target.isDisabled());
-                        assert.equal(await target.locator('option').count(), 1);
+                        assert.equal((await target.textContent()).trim(), 'Select a configured target');
                         await page.screenshot({ path: resolve(output, `${mode}-${width}.png`) });
                         await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
                         await dialog.waitFor({ state: 'detached' });
@@ -115,9 +116,9 @@ try {
                     if (mode === 'xml' || v6) {
                         assert(await primary.isDisabled());
                         const target = dialog.getByRole('combobox', { name: 'SCSI target', exact: true });
-                        await target.getByRole('option', { name: /SCSI ID 0/ }).waitFor({ state: 'attached' });
-                        assert.equal(await target.inputValue(), '');
-                        await target.selectOption('0');
+                        await (await openSelect(target)).getByRole('option', { name: /SCSI ID 0/ }).waitFor({ state: 'attached' });
+                        assert.equal(await controlValue(target), '');
+                        await selectValue(target, '0');
                         if (v6) {
                             const details = dialog.getByRole('definition').filter({ hasText: /^5242880$/ });
                             assert.equal(await details.count(), 1, 'Target end is exclusive and expressed in bytes');
@@ -145,14 +146,14 @@ try {
                         () => document.querySelector('[aria-label="Fixture calls"]')?.textContent === 'list list ',
                     );
                     await dialog.getByRole('button', { name: 'Refresh devices', exact: true }).click({ trial: true });
-                    assert.equal(await device.inputValue(), 'fixture', 'Refresh must retain the selected device');
+                    assert.equal(await controlValue(device), 'fixture', 'Refresh must retain the selected device');
                     assert(
                         await dialog.getByRole('checkbox').isChecked(),
                         'A matching refresh retains acknowledgement',
                     );
                     if (mode === 'xml' || v6)
                         assert.equal(
-                            await dialog.getByRole('combobox', { name: 'SCSI target', exact: true }).inputValue(),
+                            await controlValue(dialog.getByRole('combobox', { name: 'SCSI target', exact: true })),
                             '0',
                         );
                     const beforeAccessChange = await dialog.boundingBox();
@@ -180,12 +181,12 @@ try {
                 primary = footer.locator('.dialog-footer-actions button').last();
             } else if (mode === 'recovery') {
                 assert(await primary.isDisabled());
-                assert.equal(await dialog.getByRole('combobox', { name: /^Device/ }).inputValue(), '');
+                assert.equal(await controlValue(dialog.getByRole('combobox', { name: /^Device/ })), '');
                 assert(await dialog.getByRole('button', { name: 'Connect read-only' }).isDisabled());
-                await dialog.getByRole('combobox', { name: /^Device/ }).selectOption('fixture');
+                await selectValue(dialog.getByRole('combobox', { name: /^Device/ }), 'fixture');
                 await dialog.getByRole('button', { name: 'Connect read-only' }).click();
-                assert.equal(await dialog.getByRole('combobox', { name: /^Target/ }).inputValue(), '');
-                await dialog.getByRole('combobox', { name: /^Target/ }).selectOption('disk');
+                assert.equal(await controlValue(dialog.getByRole('combobox', { name: /^Target/ })), '');
+                await selectValue(dialog.getByRole('combobox', { name: /^Target/ }), 'disk');
             }
             if (!source) {
                 const acknowledgement = dialog.getByRole('checkbox');
@@ -194,7 +195,7 @@ try {
                 await page.keyboard.press('Space');
                 assert.equal(await acknowledgement.isChecked(), true);
                 if (mode === 'recovery')
-                    await dialog.getByLabel('Interrupted operation').selectOption('synthetic-operation-0');
+                    await selectValue(dialog.getByRole('combobox', { name: 'Interrupted operation', exact: true }), 'synthetic-operation-0');
             }
             for (const select of await dialog.locator('select:visible').all()) {
                 const theme = await select.evaluate((node) => {

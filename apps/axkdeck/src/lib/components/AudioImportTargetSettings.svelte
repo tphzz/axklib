@@ -1,6 +1,7 @@
 <script lang="ts">
     import type { AudioImportGrouping, AudioImportOptions } from '../audioImportOptions';
     import SampleFormatControl from './SampleFormatControl.svelte';
+    import SelectControl from './SelectControl.svelte';
 
     let {
         mode = $bindable(),
@@ -19,10 +20,17 @@
 
 <div class="import-target-settings">
     <label for="audio-import-mode">Import mode</label>
-    <select id="audio-import-mode" class="dialog-field-control" bind:value={mode} {disabled}>
-        <option value="SAMPLES">Import as Samples</option>
-        <option value="SAMPLE_BANK">Import as Samples in a Sample Bank</option>
-    </select>
+    <SelectControl
+        id="audio-import-mode"
+        label="Import mode"
+        value={mode}
+        onchange={(value) => (mode = value)}
+        {disabled}
+        options={[
+            { value: 'SAMPLES', label: 'Import as Samples' },
+            { value: 'SAMPLE_BANK', label: 'Import as Samples in a Sample Bank' },
+        ] as const}
+    />
     <span id="audio-import-format-label">Sample format</span>
     <SampleFormatControl bind:value={sampleFormat} label="Sample format" {disabled} />
     {#if mode === 'SAMPLE_BANK'}
@@ -53,7 +61,6 @@
         font-size: var(--dialog-label-font-size);
         white-space: nowrap;
     }
-    select,
     input {
         width: 100%;
         min-width: 0;

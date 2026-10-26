@@ -120,7 +120,7 @@ try {
             assert.ok(layout.zones.every(zone => zone.background !== 'rgba(0, 0, 0, 0)'), 'Effective zones must be painted');
             await mapping.screenshot({ path: resolve(output, `${name}-window.png`) });
 
-            await mapping.getByRole('button', { name: 'Sample/Bank', exact: true }).click();
+            await mapping.getByRole('combobox', { name: 'Sample/Bank', exact: true }).click();
             const popup = mapping.getByRole('listbox', { name: 'Sample/Bank', exact: true });
             result.dropdown = await popup.evaluate(node => {
                 const box = node.getBoundingClientRect(), style = getComputedStyle(node);
@@ -142,7 +142,7 @@ try {
             await waitValue(main, 'assignments.1.velocity_high', 127);
             assert.equal((await state(main)).canUndo, false, 'One keyboard gesture must be one undo entry');
 
-            await main.getByRole('button', { name: 'Sample/Bank', exact: true }).click();
+            await main.getByRole('combobox', { name: 'Sample/Bank', exact: true }).click();
             await main.getByRole('option', { name: 'Duplicate (Sample) · 1', exact: true }).click();
             await waitLimit(mapping, 'low', 24);
             const handle = mapping.getByRole('button', { name: 'Low key limit', exact: true });

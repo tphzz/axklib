@@ -204,6 +204,32 @@ describe('modal', () => {
         dialog.remove();
     });
 
+    it('places an explicitly marked caret at the end only once', async () => {
+        const dialog = document.createElement('div');
+        const input = document.createElement('input');
+        input.value = 'New Volume';
+        input.setSelectionRange(0, 0);
+        input.setAttribute('data-dialog-initial-focus', 'end');
+        dialog.append(input);
+        document.body.append(dialog);
+        const action = modal(dialog);
+        try {
+            await Promise.resolve();
+            expect(document.activeElement).toBe(input);
+            expect(input.selectionStart).toBe(input.value.length);
+            expect(input.selectionEnd).toBe(input.value.length);
+            input.setSelectionRange(2, 2);
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+            input.disabled = true;
+            input.disabled = false;
+            await Promise.resolve();
+            expect(input.selectionStart).toBe(2);
+        } finally {
+            action.destroy();
+            dialog.remove();
+        }
+    });
+
     it('preserves scrollbar geometry in inert modal backgrounds', () => {
         expect(appStyles).toMatch(/\*\s*\{[^}]*scrollbar-width:\s*thin;[^}]*\}/);
         expect(appStyles).toMatch(/\.modal-scrollbar-measurement\s*\{[^}]*scrollbar-gutter:\s*stable;/);

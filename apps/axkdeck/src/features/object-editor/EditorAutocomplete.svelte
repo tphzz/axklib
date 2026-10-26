@@ -2,7 +2,7 @@
     import { tick } from 'svelte';
     import Icon from '../../lib/components/Icon.svelte';
     import EditorOptionLabel from './EditorOptionLabel.svelte';
-    import { mountEditorPopup } from './editorPopup';
+    import { mountSelectPopup } from '../../lib/selectPopup';
     import { optionHelp, type EditorOption } from './editorOptions';
     import ExtendedParameterMarker from './ExtendedParameterMarker.svelte';
     let {
@@ -70,7 +70,7 @@
         close();
         input.focus();
     }
-    const mount = (node: HTMLDivElement) => mountEditorPopup(node, wrapper, close);
+    const mount = (node: HTMLDivElement) => mountSelectPopup(node, wrapper, close);
     function key(event: KeyboardEvent) {
         if (event.key === 'Escape' && open) {
             event.preventDefault();

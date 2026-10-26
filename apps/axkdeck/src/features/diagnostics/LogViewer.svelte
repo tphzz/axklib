@@ -2,6 +2,7 @@
     import { onMount, tick, untrack } from 'svelte';
     import { on } from 'svelte/events';
     import Icon from '../../lib/components/Icon.svelte';
+    import SelectControl from '../../lib/components/SelectControl.svelte';
     import { LogController } from './controller.svelte';
     import { desktopLogs } from './desktop';
     import {
@@ -38,10 +39,7 @@
     let saveContainer: HTMLDivElement;
     let saveButton: HTMLButtonElement;
     let windowVisible = true;
-    function changeLevel(event: Event): void {
-        const select = event.currentTarget as HTMLSelectElement;
-        const level = select.value as LogLevel;
-        select.value = logs.filter.level;
+    function changeLevel(level: LogLevel): void {
         void logs.setLevel(level);
     }
     const time = (timestamp: number | null) => {
@@ -176,15 +174,17 @@
         />
         <label
             >Level<span class="log-select"
-                ><select
+                ><SelectControl
+                    label="Level"
+                    size="toolbar"
                     value={logs.filter.level}
+                    options={logLevels.map((level) => ({
+                        value: level,
+                        label: level[0].toUpperCase() + level.slice(1),
+                    }))}
                     disabled={logs.captureBusy || logs.actionBusy}
                     onchange={changeLevel}
-                >
-                    {#each logLevels as level}
-                        <option value={level}>{level[0].toUpperCase() + level.slice(1)}</option>
-                    {/each}
-                </select><span aria-hidden="true"><Icon name="chevron" size={12} /></span></span
+                /></span
             ></label
         >
         <label class="log-search"

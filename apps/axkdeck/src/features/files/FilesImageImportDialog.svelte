@@ -1,4 +1,5 @@
 <script lang="ts">
+    import SelectControl from '../../lib/components/SelectControl.svelte';
     import { modal } from '../../lib/modal';
     import Icon from '../../lib/components/Icon.svelte';
     import { formatStoredSize } from '../../lib/formatBytes';
@@ -155,20 +156,16 @@
                                     >{item.row.snapshot ? formatStoredSize(item.row.snapshot.sizeBytes) : '-'}</span
                                 >
                                 <span role="cell"
-                                    >{#if item.row.directory}Merge{:else}<select
-                                            class="dialog-field-control"
-                                            aria-label={`If file exists ${item.groupIndex + 1}.${item.index + 1}`}
+                                    >{#if item.row.directory}Merge{:else}<SelectControl
+                                            label={`If file exists ${item.groupIndex + 1}.${item.index + 1}`}
                                             disabled={!workflow.editable}
                                             value={item.row.conflict}
-                                            onchange={(event) =>
-                                                workflow.conflict(
-                                                    item.groupIndex,
-                                                    item.index,
-                                                    event.currentTarget.value === 'REPLACE' ? 'REPLACE' : 'SKIP',
-                                                )}
-                                            ><option value="SKIP">Skip</option><option value="REPLACE">Replace</option
-                                            ></select
-                                        >{/if}</span
+                                            options={[
+                                                { value: 'SKIP', label: 'Skip' },
+                                                { value: 'REPLACE', label: 'Replace' },
+                                            ] as const}
+                                            onchange={(value) => workflow.conflict(item.groupIndex, item.index, value)}
+                                        />{/if}</span
                                 >
                                 <span
                                     role="cell"
@@ -283,9 +280,6 @@
     }
     .image-name [aria-expanded='true'] :global(svg) {
         transform: rotate(90deg);
-    }
-    .image-row select {
-        width: 100%;
     }
     .image-rows,
     .heading {

@@ -1,3 +1,4 @@
+import { selectValue } from './select-control.mjs';
 import assert from 'node:assert/strict';
 import { writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -164,7 +165,7 @@ async function checkSelection(page, rows, prefix) {
 export async function checkNativeCollectionParity(page, output, width, scale) {
     const selector = page.getByRole('combobox', { name: 'Image', exact: true });
     const results = [];
-    await selector.selectOption('source-1');
+    await selectValue(selector, 'source-1');
     const programs = page.getByRole('region', { name: 'Programs', exact: true });
     const programRows = programs.locator('[data-collection-object-id]');
     await programRows.nth(39).waitFor({ state: 'attached' });
@@ -208,7 +209,7 @@ export async function checkNativeCollectionParity(page, output, width, scale) {
     await programs.getByText('No matching Programs', { exact: true }).waitFor();
     assert.equal(await programRows.count(), 0);
     await programSearch.fill('');
-    await selector.selectOption('source-2');
+    await selectValue(selector, 'source-2');
     const tabs = page.getByRole('navigation', { name: 'Workspace views' });
     const collection = page.getByRole('region', { name: 'TX16W native objects' });
     for (const [label, kind] of [
@@ -254,12 +255,12 @@ export async function checkNativeCollectionParity(page, output, width, scale) {
         await collection.locator('[data-collection-object-id="performance-0"]').getAttribute('aria-pressed'),
         'true',
     );
-    await selector.selectOption('source-1');
+    await selectValue(selector, 'source-1');
     assert.equal(
         await programRows.first().getAttribute('aria-pressed'),
         'true',
         'A-series selection survives source switching',
     );
-    await selector.selectOption('source-2');
+    await selectValue(selector, 'source-2');
     return { reference, referenceLong, selection, tabs: results };
 }

@@ -1,3 +1,4 @@
+import { selectValue } from './select-control.mjs';
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -76,7 +77,7 @@ try {
             await page.evaluate(() => window.logFixture.append(3));
             await page.getByText('Entry 254:', { exact: false }).waitFor();
             assert.equal(await page.locator('.log-record').count(), 3);
-            await page.getByRole('combobox', { name: 'Level', exact: true }).selectOption('warning');
+            await selectValue(page.getByRole('combobox', { name: 'Level', exact: true }), 'warning');
             const sourceBounds = await page.getByRole('button', { name: 'Sources', exact: true }).boundingBox();
             const levelBounds = await page.getByRole('combobox', { name: 'Level', exact: true }).boundingBox();
             assert(sourceBounds.x < levelBounds.x && sourceBounds.y <= levelBounds.y, 'Sources must be leftmost');

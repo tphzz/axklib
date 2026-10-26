@@ -51,17 +51,17 @@ try {
         page.on('pageerror', error => errors.push(error.message));
         try {
             await page.goto(`${base}/tools/layout-fixtures/bank-editor.html${native ? '?short-stereo' : ''}`);
-            await page.getByRole('button', { name: 'Preview sample', exact: true }).waitFor();
+            await page.getByRole('combobox', { name: 'Preview sample', exact: true }).waitFor();
             await page.evaluate(zoom => {
                 document.documentElement.style.zoom = String(zoom);
                 document.querySelector('main').style.height = `${innerHeight / zoom - 40}px`;
             }, zoom);
-            const preview = page.getByRole('button', { name: 'Preview sample', exact: true });
+            const preview = page.getByRole('combobox', { name: 'Preview sample', exact: true });
             await preview.click();
             await page.getByRole('option', { name: 'DNBS drum loop 1', exact: true }).click();
             await preview.press('ArrowDown');
-            await page.getByRole('listbox', { name: 'Preview sample' }).press('Home');
-            await page.getByRole('listbox', { name: 'Preview sample' }).press('Enter');
+            await preview.press('Home');
+            await preview.press('Enter');
             await page.addScriptTag({content: checks});
             const result = await page.evaluate(() => window.runBankEditorChecks());
             assert.deepEqual(result.failures, []);

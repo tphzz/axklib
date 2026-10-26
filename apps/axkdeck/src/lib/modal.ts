@@ -86,6 +86,12 @@ function initialFocusElement(node: HTMLElement): HTMLElement | null {
 function focusInitialElement(element: HTMLElement): void {
     element.focus({ preventScroll: true });
     if (element.dataset.dialogInitialFocus === 'select' && element instanceof HTMLInputElement) element.select();
+    else if (
+        element.dataset.dialogInitialFocus === 'end' &&
+        element instanceof HTMLInputElement &&
+        element.selectionStart !== null
+    )
+        element.setSelectionRange(element.value.length, element.value.length);
 }
 
 export function modal(node: HTMLElement, initialOptions: ModalOptions = {}) {

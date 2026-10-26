@@ -2,6 +2,7 @@
     import type { DeviceWorkflow } from './workflow.svelte';
     import { modal } from '../../lib/modal';
     import Icon from '../../lib/components/Icon.svelte';
+    import SelectControl from '../../lib/components/SelectControl.svelte';
     let { workflow }: { workflow: DeviceWorkflow } = $props();
     const pending = $derived(
         workflow.operations.filter((item) => ['PREPARED', 'RECOVERY_REQUIRED'].includes(item.state)),
@@ -42,32 +43,34 @@
         <div class="device-content">
             <label class="field"
                 >Device
-                <select
-                    bind:value={workflow.candidateId}
-                    class="dialog-field-control"
+                <SelectControl
+                    label="Device"
+                    value={workflow.candidateId}
+                    onchange={(value) => (workflow.candidateId = value)}
+                    options={[
+                        { value: '', label: 'Select a device' },
+                        ...workflow.visibleCandidates.map((candidate) => ({
+                            value: candidate.id,
+                            label: `${candidate.model} / ${candidate.serial} / ${(candidate.sizeBytes / 1e9).toFixed(2)} GB / ${candidate.sectorSize} B`,
+                        })),
+                    ]}
                     disabled={workflow.busy || !!workflow.connection}
-                    data-dialog-initial-focus
-                >
-                    <option value="">Select a device</option>
-                    {#each workflow.visibleCandidates as candidate}
-                        <option value={candidate.id}
-                            >{candidate.model} / {candidate.serial} / {(candidate.sizeBytes / 1e9).toFixed(2)} GB / {candidate.sectorSize}
-                            B</option
-                        >
-                    {/each}
-                </select>
+                    initialFocus
+                />
             </label>
             <label class="field"
                 >Layout
-                <select
-                    class="dialog-field-control"
-                    bind:value={workflow.layout}
+                <SelectControl
+                    label="Layout"
+                    value={workflow.layout}
+                    onchange={(value) => (workflow.layout = value)}
+                    options={[
+                        { value: 'RAW', label: 'Single sampler disk' },
+                        { value: 'SCSI2SD_V6', label: 'SCSI2SD V6 card configuration' },
+                        { value: 'SCSI2SD_XML', label: 'SCSI2SD XML configuration' },
+                    ] as const}
                     disabled={workflow.busy || !!workflow.connection}
-                >
-                    <option value="RAW">Single sampler disk</option>
-                    <option value="SCSI2SD_V6">SCSI2SD V6 card configuration</option>
-                    <option value="SCSI2SD_XML">SCSI2SD XML configuration</option>
-                </select>
+                />
             </label>
             {#if workflow.layout === 'SCSI2SD_XML'}
                 <label class="field"
@@ -110,16 +113,19 @@
                 </dl>
                 <label class="field"
                     >Target
-                    <select class="dialog-field-control" bind:value={workflow.targetId} disabled={workflow.busy}>
-                        <option value="">Select a target</option>
-                        {#each workflow.connection.targets as target}
-                            <option value={target.id}
-                                >{target.label} / {target.sizeBytes} bytes / {target.sectorSize} B{target.readOnly
-                                    ? ' / read-only'
-                                    : ''}</option
-                            >
-                        {/each}
-                    </select>
+                    <SelectControl
+                        label="Target"
+                        value={workflow.targetId}
+                        onchange={(value) => (workflow.targetId = value)}
+                        disabled={workflow.busy}
+                        options={[
+                            { value: '', label: 'Select a target' },
+                            ...workflow.connection.targets.map((target) => ({
+                                value: target.id,
+                                label: `${target.label} / ${target.sizeBytes} bytes / ${target.sectorSize} B${target.readOnly ? ' / read-only' : ''}`,
+                            })),
+                        ]}
+                    />
                 </label>
                 {#each workflow.target?.notices ?? [] as notice}<p class="dialog-warning">{notice}</p>{/each}
                 {#if workflow.connection.invalidated}<p class="dialog-error">
@@ -145,12 +151,19 @@
                 </p>
                 <label class="field"
                     >Interrupted operation
-                    <select class="dialog-field-control" bind:value={workflow.recoveryId} disabled={workflow.busy}>
-                        <option value="">Select an interrupted operation</option>
-                        {#each pending as operation}<option value={operation.operationId}
-                                >{operation.targetLabel} / {operation.serial} / {operation.state} / {operation.operationId}</option
-                            >{/each}
-                    </select>
+                    <SelectControl
+                        label="Interrupted operation"
+                        value={workflow.recoveryId}
+                        onchange={(value) => (workflow.recoveryId = value)}
+                        disabled={workflow.busy}
+                        options={[
+                            { value: '', label: 'Select an interrupted operation' },
+                            ...pending.map((operation) => ({
+                                value: operation.operationId,
+                                label: `${operation.targetLabel} / ${operation.serial} / ${operation.state} / ${operation.operationId}`,
+                            })),
+                        ]}
+                    />
                 </label>
                 <div class="operation-list" aria-label="Device operation status">
                     {#each workflow.operations as operation}<p>
@@ -225,7 +238,6 @@
         align-items: center;
         font-size: var(--dialog-label-font-size);
     }
-    select,
     input {
         min-width: 0;
         max-width: 100%;

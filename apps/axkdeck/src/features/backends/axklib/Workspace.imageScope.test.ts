@@ -1,12 +1,13 @@
+import { selectValue } from '../../../test/selectControl';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { describe, expect, it } from 'vitest';
 import ImageScopeHarness from '../../../test/ImageScopeHarness.svelte';
 import { imageScopeFixture } from '../../../test/imageScopeFixture.svelte';
 
-const image = () => screen.getByRole('combobox', { name: 'Image' }) as HTMLSelectElement;
+const image = () => screen.getByRole('combobox', { name: 'Image' }) as HTMLButtonElement;
 const search = () => screen.getByRole('searchbox', { name: 'Search filesystem' }) as HTMLInputElement;
 async function selectImage(value: string) {
-    await fireEvent.change(image(), { target: { value } });
+    await selectValue(image(), value);
     await waitFor(() => {
         expect(image().value).toBe(value);
         expect(image().disabled).toBe(false);
@@ -54,9 +55,7 @@ describe('Workspace image scope', () => {
         render(ImageScopeHarness, { fixture });
         await screen.findByRole('combobox', { name: 'Image' });
         await selectImage('source-4');
-        await fireEvent.change(screen.getByRole('combobox', { name: 'Native document' }), {
-            target: { value: 'alternative' },
-        });
+        await selectValue(screen.getByRole('combobox', { name: 'Native document' }), 'alternative');
         await waitFor(() => expect(fixture.workflow.documentId).toBe('alternative'));
         await selectImage('source-3');
         await fireEvent.click(screen.getByRole('button', { name: 'Waves' }));
@@ -101,7 +100,7 @@ describe('Workspace image scope', () => {
         await screen.findByRole('combobox', { name: 'Image' });
         for (const label of ['Decline switch', 'Fail switch']) {
             await fireEvent.click(screen.getByRole('checkbox', { name: label }));
-            await fireEvent.change(image(), { target: { value: 'source-2' } });
+            await selectValue(image(), 'source-2');
             await waitFor(() => expect(image().value).toBe('source-1'));
             await fireEvent.click(screen.getByRole('checkbox', { name: label }));
         }

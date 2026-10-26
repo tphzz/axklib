@@ -45,7 +45,7 @@ window.runBankEditorChecks = async function () {
     }
     measurePreview();
     preview.click(); await settle();
-    const popup = () => document.querySelector('.editor-select-popup[aria-label="Preview sample"]');
+    const popup = () => document.querySelector('.select-popup[aria-label="Preview sample"]');
     const option = name => [...popup().querySelectorAll('[role=option]')].find(node => node.textContent.trim() === name);
     const missing = option('Missing member (unresolved)');
     check(missing?.getAttribute('aria-disabled') === 'true', 'Unresolved preview samples stay disabled');
@@ -56,13 +56,13 @@ window.runBankEditorChecks = async function () {
     check(preview.title === longName, 'Long names remain available in the trigger tooltip');
     measurePreview(true);
     preview.click(); await settle();
-    popup().dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
-    popup().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    preview.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
+    preview.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     await settle();
     check(!popup() && preview.textContent.trim() === longName, 'Escape cancels pending preview selection');
     preview.click(); await settle();
-    popup().dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
-    popup().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    preview.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }));
+    preview.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
     await settle();
     check(preview.textContent.trim() === 'PB BRASS A', 'Keyboard selection restores the first preview');
     preview.click(); await settle();

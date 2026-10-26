@@ -74,7 +74,7 @@ describe('Program editor controls', () => {
         expect(view.container.querySelectorAll('tbody tr').length).toBeLessThan(60);
         await fireEvent.keyDown(view.getAllByRole('button', { name: /^Duplicate Sample/ })[0]!, { key: 'End' });
         expect(view.getByRole('button', { name: 'Target 2047 Sample' })).toBe(document.activeElement);
-        await fireEvent.click(view.getByRole('button', { name: 'Receive channel assign: Target 2047' }));
+        await fireEvent.click(view.getByRole('combobox', { name: 'Receive channel assign: Target 2047' }));
         await fireEvent.click(view.getByRole('option', { name: '=Sample' }));
         expect((fixture.document.draft as ProgramDraft).assignments.at(-1)?.name).toBe('Target 2047');
     });
@@ -119,15 +119,15 @@ describe('Program editor controls', () => {
         expect(view.queryByRole('combobox', { name: 'Assignment' })).toBeNull();
         expect(view.queryByText('Available')).toBeNull();
         await fireEvent.click(view.getByRole('checkbox', { name: 'Show only assigned' }));
-        await fireEvent.click(view.getByRole('button', { name: 'Receive channel assign: Available' }));
+        await fireEvent.click(view.getByRole('combobox', { name: 'Receive channel assign: Available' }));
         await fireEvent.click(view.getByRole('option', { name: '=Sample' }));
         expect(document.programAssignmentId).toBe(2);
         expect(document.canSave).toBe(true);
-        await fireEvent.click(view.getByRole('button', { name: 'Receive channel assign: Duplicate (1)' }));
+        await fireEvent.click(view.getByRole('combobox', { name: 'Receive channel assign: Duplicate (1)' }));
         await fireEvent.click(view.getByRole('option', { name: 'Off' }));
         expect(view.getByRole('dialog', { name: 'Remove assignment?' })).toBeTruthy();
         await fireEvent.click(view.getByRole('button', { name: 'Remove' }));
-        expect(view.queryByRole('button', { name: 'Receive channel assign: Duplicate (1)' })).toBeNull();
+        expect(view.queryByRole('combobox', { name: 'Receive channel assign: Duplicate (1)' })).toBeNull();
         await act(() => document.draft.undo());
         expect(document.draft.values['assignments.0.level_offset']).toBe(11);
     });
@@ -217,7 +217,7 @@ describe('Program editor controls', () => {
 
     it('selects duplicate stored targets by row ordinal and never merges their changes', async () => {
         const { document, view } = setup('easy-edit');
-        const assignment = view.getByRole('button', { name: 'Sample/Bank' });
+        const assignment = view.getByRole('combobox', { name: 'Sample/Bank' });
         await fireEvent.click(assignment);
         expect(view.getByRole('option', { name: 'Duplicate (Sample) · 1' })).toBeTruthy();
         await fireEvent.click(view.getByRole('option', { name: 'Duplicate (Sample) · 2' }));

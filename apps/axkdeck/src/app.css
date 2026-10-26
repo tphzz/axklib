@@ -19,6 +19,11 @@
   --color-brand: #cc7832;
   --color-success: #34d399;
   --color-danger: #f1a4a4;
+  --color-popup: #101516;
+  --color-selection: #294958;
+  --control-background: var(--color-bg-deep);
+  --control-text: var(--color-text);
+  --control-font-size: 11px;
   --density-app-header: 40px;
   --density-status-bar: 18px;
   --density-panel-heading: 34px;
@@ -35,7 +40,7 @@
   --dialog-title-font-size: 13px;
   --dialog-body-font-size: 11px;
   --dialog-section-font-size: 11px;
-  --dialog-control-font-size: 11px;
+  --dialog-control-font-size: var(--control-font-size);
   --dialog-label-font-size: 10px;
   --dialog-table-header-font-size: 10px;
   --dialog-metadata-font-size: 10px;
@@ -47,6 +52,7 @@
   background: var(--color-bg);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
+  color-scheme: dark;
 }
 
 * {
@@ -2273,19 +2279,92 @@ input:focus-visible {
   min-width: 0;
   height: var(--density-control);
   padding: 0 8px;
-  color: var(--color-text-strong);
+  color: var(--control-text);
   border: 1px solid var(--color-border);
   border-radius: 5px;
   outline: none;
-  background: var(--color-bg-deep);
+  background: var(--control-background);
   color-scheme: dark;
-  font-family: inherit;
+  font-family: var(--font-sans);
   font-size: var(--dialog-control-font-size);
+  font-weight: 400;
   line-height: 1.2;
 }
 
 .dialog-field-control:focus {
   border-color: var(--color-accent);
+}
+
+.select-control {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  height: var(--density-control);
+  padding: 3px 8px;
+  color: var(--control-text);
+  background: var(--control-background);
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  font-family: var(--font-sans);
+  font-size: var(--control-font-size);
+  font-weight: 400;
+  line-height: 1.2;
+  text-align: left;
+  cursor: pointer;
+}
+.select-control[data-size='header'] { height: 25px; }
+.select-control[data-size='toolbar'] { height: 28px; }
+.select-control:focus { border-color: var(--color-accent); }
+.select-control:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: 2px;
+}
+.select-control:disabled { opacity: 0.45; cursor: default; }
+.select-control[aria-invalid='true'] { border-color: var(--color-danger); }
+.select-value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.select-control > svg { flex: none; transform: rotate(90deg); }
+.select-popup {
+  position: fixed;
+  z-index: 2000;
+  overflow: auto;
+  padding: 3px;
+  color: var(--control-text);
+  background: var(--color-popup);
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  box-shadow: 0 6px 16px #0008;
+  font-family: var(--font-sans);
+  font-size: var(--control-font-size);
+  font-weight: 400;
+  line-height: 1.35;
+}
+.select-popup [role='option'] {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 26px;
+  padding: 5px 7px;
+  border-radius: 2px;
+  cursor: pointer;
+}
+.select-popup .active { background: var(--color-selection); }
+.select-option-label { min-width: 0; overflow-wrap: anywhere; }
+.select-option-check { flex: 0 0 12px; height: 12px; }
+.select-popup [aria-disabled='true'] { color: var(--color-text-muted); opacity: 0.5; cursor: not-allowed; }
+.select-empty { padding: 5px 7px; color: var(--color-text-muted); }
+@media (forced-colors: active) {
+  .select-control, .select-popup { border-color: ButtonText; }
+  .select-popup .active { background: Highlight; color: HighlightText; forced-color-adjust: none; }
+  .select-control:focus-visible { outline-color: Highlight; }
 }
 
 .dialog-autocomplete-control {
@@ -2334,16 +2413,19 @@ input:focus-visible {
   display: grid;
   max-height: 220px;
   overflow-y: auto;
-  color: var(--color-text-strong);
+  color: var(--control-text);
   border: 1px solid var(--color-border);
-  background: var(--color-bg-deep);
+  background: var(--color-popup);
+  font-family: var(--font-sans);
+  font-size: var(--control-font-size);
+  font-weight: 400;
   box-shadow: 0 10px 24px rgb(0 0 0 / 36%);
 }
 
 .dialog-autocomplete-option {
   min-height: 28px;
   padding: 0 8px;
-  color: var(--color-text-strong);
+  color: var(--control-text);
   border: 0;
   border-bottom: 1px solid var(--color-border);
   border-radius: 0;
@@ -2360,7 +2442,7 @@ input:focus-visible {
 
 .dialog-autocomplete-option:hover:not(:disabled),
 .dialog-autocomplete-option.active:not(:disabled) {
-  background: rgb(104 151 187 / 14%);
+  background: var(--color-selection);
 }
 
 .dialog-autocomplete-option:disabled {

@@ -31,7 +31,7 @@ function values(kind: SampleEnvelope) {
 function setup(kind: SampleEnvelope, draft = new EditorDraft(values(kind)), blocked: string[] = []) {
     const onselect = vi.fn();
     const view = render(EnvelopeGraph, { draft, kind, disabled: false, blocked, onselect });
-    const selector = () => view.getByRole('button', { name: 'Envelope stage' }) as HTMLButtonElement;
+    const selector = () => view.getByRole('combobox', { name: 'Envelope stage' }) as HTMLButtonElement;
     const handle = (id: string) => view.container.querySelector<HTMLButtonElement>(`[data-handle="${id}"]`)!;
     async function select(id: string) {
         await fireEvent.click(selector());

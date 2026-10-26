@@ -1,3 +1,4 @@
+import { openSelect, selectValue } from '../../test/selectControl';
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -72,20 +73,13 @@ describe('CreateHardDiskImageDialog', () => {
                 },
             });
 
-            await screen.findByRole('option', { name: label });
-            const capacity = screen.getByRole('combobox', { name: 'Capacity' }) as HTMLSelectElement;
-            expect(Array.from(capacity.options, (option) => option.textContent)).toEqual([
-                '1.44 MB',
-                '128 MiB',
-                '256 MiB',
-                'CD-R 650',
-                'CD-R 700',
-                '1 GiB',
-                '2 GiB',
-                '4 GiB',
-                '8 GiB',
-            ]);
-            await fireEvent.change(capacity, { target: { value: id } });
+            const capacity = screen.getByRole('combobox', { name: 'Capacity' }) as HTMLButtonElement;
+            const popup = await openSelect(capacity);
+            expect(screen.getByRole('option', { name: label })).toBeTruthy();
+            expect(
+                Array.from(popup.querySelectorAll('[role="option"]'), (option) => option.textContent?.trim()),
+            ).toEqual(['1.44 MB', '128 MiB', '256 MiB', 'CD-R 650', 'CD-R 700', '1 GiB', '2 GiB', '4 GiB', '8 GiB']);
+            await selectValue(capacity, id);
 
             expect(capacity.value).toBe(id);
             for (let count = 1; count <= 8; count += 1) {
@@ -119,24 +113,26 @@ describe('CreateHardDiskImageDialog', () => {
                 oncancel: vi.fn(),
             },
         });
-        await screen.findByRole('option', { name: '128 MiB' });
+        await waitFor(() =>
+            expect(screen.getByRole('combobox', { name: 'Capacity' })).toHaveProperty('disabled', false),
+        );
         const capacity = screen.getByRole('combobox', { name: 'Capacity' });
-        await fireEvent.change(capacity, { target: { value: 'HDS_128_MIB' } });
+        await selectValue(capacity, 'HDS_128_MIB');
         await fireEvent.click(screen.getByRole('button', { name: '6 partitions' }));
 
         for (const id of ['HDS_256_MIB', 'HDS_4_GIB']) {
-            await fireEvent.change(capacity, { target: { value: id } });
+            await selectValue(capacity, id);
             expect(screen.getByRole('button', { name: '6 partitions' }).getAttribute('aria-pressed')).toBe('true');
         }
-        await fireEvent.change(capacity, { target: { value: 'HDS_8_GIB' } });
+        await selectValue(capacity, 'HDS_8_GIB');
         expect(screen.getByRole('button', { name: '8 partitions' }).getAttribute('aria-pressed')).toBe('true');
-        await fireEvent.change(capacity, { target: { value: 'HDS_128_MIB' } });
+        await selectValue(capacity, 'HDS_128_MIB');
         expect(screen.getByRole('button', { name: '8 partitions' }).getAttribute('aria-pressed')).toBe('true');
-        await fireEvent.change(capacity, { target: { value: 'FLOPPY_SCALE' } });
+        await selectValue(capacity, 'FLOPPY_SCALE');
         expect(screen.getByRole('button', { name: '1 partition' }).getAttribute('aria-pressed')).toBe('true');
-        await fireEvent.change(capacity, { target: { value: 'HDS_256_MIB' } });
+        await selectValue(capacity, 'HDS_256_MIB');
         await fireEvent.click(screen.getByRole('button', { name: '3 partitions' }));
-        await fireEvent.change(capacity, { target: { value: 'HDS_4_GIB' } });
+        await selectValue(capacity, 'HDS_4_GIB');
         expect(screen.getByRole('button', { name: '4 partitions' }).getAttribute('aria-pressed')).toBe('true');
     });
 
@@ -153,11 +149,13 @@ describe('CreateHardDiskImageDialog', () => {
         });
 
         expect(screen.getByRole('dialog', { name: 'Create HD/Floppy image' })).toBeTruthy();
-        expect((screen.getByLabelText('Type') as HTMLSelectElement).value).toBe('HD');
-        await screen.findByRole('option', { name: '1.44 MB' });
-        expect((screen.getByRole('combobox', { name: 'Capacity' }) as HTMLSelectElement).value).toBe('FLOPPY_SCALE');
+        expect((screen.getByLabelText('Type') as HTMLButtonElement).value).toBe('HD');
+        await waitFor(() =>
+            expect(screen.getByRole('combobox', { name: 'Capacity' })).toHaveProperty('disabled', false),
+        );
+        expect((screen.getByRole('combobox', { name: 'Capacity' }) as HTMLButtonElement).value).toBe('FLOPPY_SCALE');
         expect(screen.getByText('1 partition · 1.40 MiB each')).toBeTruthy();
-        await fireEvent.change(screen.getByRole('combobox', { name: 'Capacity' }), { target: { value: 'HDS_2_GIB' } });
+        await selectValue(screen.getByRole('combobox', { name: 'Capacity' }), 'HDS_2_GIB');
         expect(screen.getByRole('button', { name: '2 partitions' }).getAttribute('aria-pressed')).toBe('true');
         const onePartition = screen.getByRole('button', { name: '1 partition' });
         const twoPartitions = screen.getByRole('button', { name: '2 partitions' });
@@ -201,8 +199,10 @@ describe('CreateHardDiskImageDialog', () => {
             },
         });
 
-        await screen.findByRole('option', { name: '1.44 MB' });
-        await fireEvent.change(screen.getByLabelText('Type'), { target: { value: 'Floppy' } });
+        await waitFor(() =>
+            expect(screen.getByRole('combobox', { name: 'Capacity' })).toHaveProperty('disabled', false),
+        );
+        await selectValue(screen.getByLabelText('Type'), 'Floppy');
         expect(screen.queryByText('Capacity')).toBeNull();
         expect(screen.queryByText('Partitions')).toBeNull();
         expect(screen.getByText('1.44 MB · Yamaha A-series FAT12 · Full format')).toBeTruthy();
@@ -237,7 +237,9 @@ describe('CreateHardDiskImageDialog', () => {
             },
         });
 
-        await screen.findByRole('option', { name: '1.44 MB' });
+        await waitFor(() =>
+            expect(screen.getByRole('combobox', { name: 'Capacity' })).toHaveProperty('disabled', false),
+        );
         await fireEvent.input(screen.getByLabelText('File name'), { target: { value: '../bad' } });
         await fireEvent.click(screen.getByRole('button', { name: 'Create' }));
         expect(screen.getByRole('alert').textContent).toContain('without directory separators');
@@ -266,7 +268,9 @@ describe('CreateHardDiskImageDialog', () => {
             },
         });
 
-        await screen.findByRole('option', { name: '1.44 MB' });
+        await waitFor(() =>
+            expect(screen.getByRole('combobox', { name: 'Capacity' })).toHaveProperty('disabled', false),
+        );
         await fireEvent.click(screen.getByRole('button', { name: 'Create' }));
         await waitFor(() => expect(imageTransport.waitForJob).toHaveBeenCalledOnce());
         await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));

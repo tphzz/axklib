@@ -50,7 +50,7 @@
         }),
         list: async () => {
             calls += 'list ';
-            return { devices: [candidate], writesSupported: true };
+            return { devices: mode === 'empty' ? [] : [candidate], writesSupported: true };
         },
         connect: async (_id, layout) => {
             if (mode === 'v6-invalid') throw new Error('No SCSI2SDv6 configuration found in the final two sectors.');
@@ -85,7 +85,7 @@
     let opening = $state(true);
     const mode = new URLSearchParams(location.search).get('mode');
     workflow.mode = mode === 'recovery' ? mode : null;
-    workflow.candidates = [candidate];
+    workflow.candidates = mode === 'empty' ? [] : [candidate];
     if (workflow.mode === 'recovery')
         workflow.operations = Array.from({ length: 40 }, (_, index) => ({
             operationId: `synthetic-operation-${index}`,

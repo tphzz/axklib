@@ -155,7 +155,7 @@ describe('Files mutation controls', () => {
         const input = (await view.findByRole('textbox', { name: 'Name' })) as HTMLInputElement;
         expect(input.value).toBe('Documents');
         await waitFor(() => expect(document.activeElement).toBe(input));
-        expect(input.selectionStart).toBe(0);
+        expect(input.selectionStart).toBe(input.value.length);
         expect(input.selectionEnd).toBe(input.value.length);
         const rename = view.getByRole('button', { name: 'Rename' }) as HTMLButtonElement;
         expect(rename.disabled).toBe(true);

@@ -71,7 +71,7 @@ describe('Mapping Editor window', () => {
         expect(commands.filter((command) => command.action.kind === 'range')).toHaveLength(1);
         await fireEvent.click(view.getByRole('button', { name: 'Undo' }));
         await waitFor(() => expect(document.draft.values['assignments.0.velocity_high']).toBe(127));
-        await fireEvent.click(view.getByRole('button', { name: 'Sample/Bank' }));
+        await fireEvent.click(view.getByRole('combobox', { name: 'Sample/Bank' }));
         await fireEvent.click(view.getByRole('option', { name: 'Duplicate (Sample) · 2' }));
         expect(document.programAssignmentId).toBe(1);
     });

@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { tick } from 'svelte';
+    import SelectControl from '../../lib/components/SelectControl.svelte';
     import type { OpenedImage } from '../../lib/transport';
     import { userFacingMessage } from '../../lib/userFacingMessage';
     let {
@@ -48,16 +48,14 @@
             },
         };
     }
-    async function select(control: HTMLSelectElement) {
+    async function select(id: string) {
         try {
             pending = true;
             error = '';
-            await onselect(control.value || null);
+            await onselect(id || null);
         } catch (reason) {
             error = userFacingMessage(reason);
         } finally {
-            await tick();
-            control.value = selected ?? '';
             pending = false;
         }
     }
@@ -75,22 +73,20 @@
 </script>
 
 {#if documents.length > 1}
-    <select
-        class="document-select dialog-field-control"
-        aria-label="Native document"
-        value={selected ?? ''}
-        disabled={disabled || pending}
-        onchange={(event) => void select(event.currentTarget)}
-    >
-        <option value="" disabled>Choose native format</option>
-        {#each documents as document (document.id)}
-            <option value={document.id}
-                >{document.name} / {document.profile}{document.completeness === 'INCOMPLETE'
-                    ? ' (incomplete)'
-                    : ''}</option
-            >
-        {/each}
-    </select>
+    <div class="document-select">
+        <SelectControl
+            label="Native document"
+            value={selected ?? ''}
+            placeholder="Choose native format"
+            size="header"
+            options={documents.map((document) => ({
+                value: document.id,
+                label: `${document.name} / ${document.profile}${document.completeness === 'INCOMPLETE' ? ' (incomplete)' : ''}`,
+            }))}
+            disabled={disabled || pending}
+            onchange={(id) => void select(id)}
+        />
+    </div>
 {/if}
 {#if discovery.selectionRequired}
     <details class="format-selection" use:dismissible>

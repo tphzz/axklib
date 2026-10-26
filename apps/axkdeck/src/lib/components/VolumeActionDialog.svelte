@@ -160,7 +160,7 @@
                         <input
                             class="dialog-field-control"
                             bind:value
-                            data-dialog-initial-focus={action.startsWith('rename-') ? 'select' : 'caret'}
+                            data-dialog-initial-focus={action.startsWith('rename-') ? 'end' : 'caret'}
                             disabled={locked}
                             maxlength="16"
                             autocomplete="off"

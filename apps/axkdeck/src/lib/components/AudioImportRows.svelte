@@ -6,6 +6,7 @@
     import type { AudioImportRow } from './audioImportDialogTypes';
     import AudioSamplerSettings from './AudioSamplerSettings.svelte';
     import Icon from './Icon.svelte';
+    import SelectControl from './SelectControl.svelte';
 
     interface Props {
         rows: AudioImportRow[];
@@ -16,7 +17,7 @@
         completionStatus?: string;
         grouped: boolean;
         audition: AudioImportAuditionState;
-        onchangeTargetSampleRate: (row: AudioImportRow, event: Event) => void;
+        onchangeTargetSampleRate: (row: AudioImportRow, rate: number) => void;
         onupdate: (id: number, update: Partial<AudioImportRow>) => void;
         onremove: (row: AudioImportRow) => void;
         onaudition: (row: AudioImportRow) => void;
@@ -182,17 +183,16 @@
                 <div class="identity-fields">
                     <label>
                         <span>Target rate</span>
-                        <select
-                            class="dialog-field-control"
-                            aria-label={`Target sample rate for ${row.fileName}`}
+                        <SelectControl
+                            label={`Target sample rate for ${row.fileName}`}
                             value={row.targetSampleRate}
+                            options={capabilities.supportedSampleRates.map((rate) => ({
+                                value: rate,
+                                label: `${rate.toLocaleString()} Hz`,
+                            }))}
                             disabled={busy || row.status === 'checking'}
-                            onchange={(event) => onchangeTargetSampleRate(row, event)}
-                        >
-                            {#each capabilities.supportedSampleRates as rate (rate)}
-                                <option value={rate}>{rate.toLocaleString()} Hz</option>
-                            {/each}
-                        </select>
+                            onchange={(rate) => onchangeTargetSampleRate(row, rate)}
+                        />
                     </label>
                     <label>
                         <span>Sample name</span>
@@ -346,13 +346,9 @@
         color: var(--color-text-muted);
         font-size: var(--dialog-label-font-size);
     }
-    input,
-    select {
+    input {
         width: 100%;
         min-width: 0;
-    }
-    select {
-        appearance: auto;
     }
     .status-message {
         display: flex;

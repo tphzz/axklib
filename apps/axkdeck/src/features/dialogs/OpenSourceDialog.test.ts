@@ -1,3 +1,4 @@
+import { openSelect, selectValue } from '../../test/selectControl';
 import { fireEvent, render, waitFor, within } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import OpenSourceHarness from '../../test/OpenSourceHarness.svelte';
@@ -73,9 +74,9 @@ describe('Open dialog', () => {
     it('uses the shared dark field styling for every device and target selector', () => {
         const { transport, service } = fixture();
         const view = render(OpenSourceHarness, { transport, service });
-        const selects = [...view.container.querySelectorAll('select')];
+        const selects = [...view.container.querySelectorAll('[role="combobox"]')];
         expect(selects).toHaveLength(5);
-        for (const select of selects) expect(select.classList.contains('dialog-field-control')).toBe(true);
+        for (const select of selects) expect(select.classList.contains('select-control')).toBe(true);
     });
 
     it('offers write access immediately and authorizes it as part of Open', async () => {
@@ -85,8 +86,7 @@ describe('Open dialog', () => {
         const tab = view.getByRole('tab', { name: 'Device' });
         await waitFor(() => expect((tab as HTMLButtonElement).disabled).toBe(false));
         await fireEvent.click(tab);
-        await view.findByRole('option', { name: /USB test/ });
-        await fireEvent.change(view.getByRole('combobox', { name: 'Device' }), { target: { value: 'test' } });
+        await selectValue(view.getByRole('combobox', { name: 'Device' }), 'test');
         const writeAccess = view.getByRole('button', { name: 'Read & write' });
         const open = view.getByRole('button', { name: 'Open' });
         expect(writeAccess.getAttribute('aria-pressed')).toBe('true');
@@ -108,8 +108,7 @@ describe('Open dialog', () => {
         const tab = view.getByRole('tab', { name: 'Device' });
         await waitFor(() => expect((tab as HTMLButtonElement).disabled).toBe(false));
         await fireEvent.click(tab);
-        await view.findByRole('option', { name: /USB test/ });
-        await fireEvent.change(view.getByRole('combobox', { name: 'Device' }), { target: { value: 'test' } });
+        await selectValue(view.getByRole('combobox', { name: 'Device' }), 'test');
         await fireEvent.click(view.getByRole('button', { name: 'Read only' }));
         expect(view.queryByRole('checkbox')).toBeNull();
         await fireEvent.click(view.getByRole('button', { name: 'Open' }));
@@ -124,8 +123,7 @@ describe('Open dialog', () => {
         const tab = view.getByRole('tab', { name: 'Device' });
         await waitFor(() => expect((tab as HTMLButtonElement).disabled).toBe(false));
         await fireEvent.click(tab);
-        await view.findByRole('option', { name: /USB test/ });
-        await fireEvent.change(view.getByRole('combobox', { name: 'Device' }), { target: { value: 'test' } });
+        await selectValue(view.getByRole('combobox', { name: 'Device' }), 'test');
         await fireEvent.click(view.getByRole('checkbox'));
         await fireEvent.click(view.getByRole('button', { name: 'Read only' }));
         await fireEvent.click(view.getByRole('button', { name: 'Read & write' }));
@@ -150,8 +148,7 @@ describe('Open dialog', () => {
         const tab = view.getByRole('tab', { name: 'Device' });
         await waitFor(() => expect((tab as HTMLButtonElement).disabled).toBe(false));
         await fireEvent.click(tab);
-        await view.findByRole('option', { name: /USB test/ });
-        await fireEvent.change(view.getByRole('combobox', { name: 'Device' }), { target: { value: 'test' } });
+        await selectValue(view.getByRole('combobox', { name: 'Device' }), 'test');
         await fireEvent.click(view.getByRole('checkbox'));
         service.authorize.mockRejectedValue(new Error('Permission declined'));
         await fireEvent.click(view.getByRole('button', { name: 'Open' }));
@@ -194,7 +191,7 @@ describe('Open dialog', () => {
         await waitFor(() => expect((device as HTMLButtonElement).disabled).toBe(false));
         await fireEvent.click(device);
         await waitFor(() => expect(service.list).toHaveBeenCalledOnce());
-        expect((view.getByRole('combobox', { name: 'Device' }) as HTMLSelectElement).value).toBe('');
+        expect((view.getByRole('combobox', { name: 'Device' }) as HTMLButtonElement).value).toBe('');
         expect(view.queryByRole('option', { name: /Large card/ })).toBeNull();
         await fireEvent.keyDown(device, { key: 'ArrowLeft' });
         expect(view.getByRole('tab', { name: 'Image' }).getAttribute('aria-selected')).toBe('true');
@@ -213,14 +210,15 @@ describe('Open dialog', () => {
         const tab = view.getByRole('tab', { name: 'SCSI2SD XML' });
         await waitFor(() => expect((tab as HTMLButtonElement).disabled).toBe(false));
         await fireEvent.click(tab);
-        expect((view.getByRole('combobox', { name: 'Device' }) as HTMLSelectElement).disabled).toBe(true);
+        expect((view.getByRole('combobox', { name: 'Device' }) as HTMLButtonElement).disabled).toBe(true);
         expect(service.list).not.toHaveBeenCalled();
         const file = { name: 'test.xml', size: 4, text: async () => 'xml' };
         await fireEvent.change(view.getByLabelText('Configuration XML'), { target: { files: [file] } });
         await waitFor(() => expect(service.inspectXml).toHaveBeenCalledWith('xml'));
         await waitFor(() => expect(service.list).toHaveBeenCalledOnce());
+        await openSelect(view.getByRole('combobox', { name: 'Device' }));
         expect(view.getByRole('option', { name: /Large card/ })).toBeTruthy();
-        expect((view.getByRole('combobox', { name: 'SCSI target' }) as HTMLSelectElement).value).toBe('');
+        expect((view.getByRole('combobox', { name: 'SCSI target' }) as HTMLButtonElement).value).toBe('');
         expect((view.getByRole('button', { name: 'Open' }) as HTMLButtonElement).disabled).toBe(true);
     });
     it('dismisses with Escape and outside click through the same cancellation path', async () => {
@@ -273,13 +271,16 @@ describe('Open dialog', () => {
         const tab = view.getByRole('tab', { name: 'SCSI2SDv6' });
         await waitFor(() => expect((tab as HTMLButtonElement).disabled).toBe(false));
         await fireEvent.click(tab);
-        await view.findByRole('option', { name: /Large card/ });
         expect(service.connect).not.toHaveBeenCalled();
-        await fireEvent.change(view.getByRole('combobox', { name: 'Device' }), { target: { value: 'large' } });
-        await view.findByRole('option', { name: /SCSI ID 2 \/ CD-ROM.*\[1536000, 3584000\)/ });
+        await selectValue(view.getByRole('combobox', { name: 'Device' }), 'large');
+        await waitFor(() =>
+            expect((view.getByRole('combobox', { name: 'SCSI target' }) as HTMLButtonElement).disabled).toBe(false),
+        );
+        await openSelect(view.getByRole('combobox', { name: 'SCSI target' }));
+        expect(view.getByRole('option', { name: /SCSI ID 2 \/ CD-ROM.*\[1536000, 3584000\)/ })).toBeTruthy();
         expect(service.connect).toHaveBeenCalledWith('large', 'SCSI2SD_V6');
         expect((view.getByRole('button', { name: 'Open' }) as HTMLButtonElement).disabled).toBe(true);
-        await fireEvent.change(view.getByRole('combobox', { name: 'SCSI target' }), { target: { value: '2' } });
+        await selectValue(view.getByRole('combobox', { name: 'SCSI target' }), '2');
         const details = within(view.getByLabelText('Configured target details'));
         expect(details.getByText('3584000')).toBeTruthy();
         expect(details.getByText('2048 B')).toBeTruthy();
@@ -289,7 +290,7 @@ describe('Open dialog', () => {
         expect((view.getByRole('button', { name: 'Open' }) as HTMLButtonElement).disabled).toBe(false);
         await fireEvent.click(view.getByRole('button', { name: 'Refresh devices' }));
         await waitFor(() => expect(service.status).toHaveBeenCalledOnce());
-        expect((view.getByRole('combobox', { name: 'SCSI target' }) as HTMLSelectElement).value).toBe('2');
+        expect((view.getByRole('combobox', { name: 'SCSI target' }) as HTMLButtonElement).value).toBe('2');
         await fireEvent.click(view.getByRole('button', { name: 'Cancel' }));
         await waitFor(() => expect(service.close).toHaveBeenCalledWith('v6-preview'));
         expect(service.authorize).not.toHaveBeenCalled();
@@ -301,12 +302,11 @@ describe('Open dialog', () => {
         const tab = view.getByRole('tab', { name: 'SCSI2SDv6' });
         await waitFor(() => expect((tab as HTMLButtonElement).disabled).toBe(false));
         await fireEvent.click(tab);
-        await view.findByRole('option', { name: /USB test/ });
-        await fireEvent.change(view.getByRole('combobox', { name: 'Device' }), { target: { value: 'test' } });
+        await selectValue(view.getByRole('combobox', { name: 'Device' }), 'test');
         await within(view.getByRole('tabpanel')).findByText(/invalid target geometry/);
-        const targets = view.getByRole('combobox', { name: 'SCSI target' }) as HTMLSelectElement;
+        const targets = view.getByRole('combobox', { name: 'SCSI target' }) as HTMLButtonElement;
         expect(targets.disabled).toBe(true);
-        expect(targets.options.length).toBe(1);
+        expect(targets.textContent?.trim()).toBe('Select a configured target');
         expect((view.getByRole('button', { name: 'Open' }) as HTMLButtonElement).disabled).toBe(true);
         expect(service.authorize).not.toHaveBeenCalled();
     });

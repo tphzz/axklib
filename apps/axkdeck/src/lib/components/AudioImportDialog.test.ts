@@ -1,3 +1,4 @@
+import { selectValue } from '../../test/selectControl';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -203,7 +204,7 @@ describe('AudioImportDialog', () => {
         };
         const rendered = render(AudioImportDialog, { props });
         await screen.findAllByDisplayValue('Fresh');
-        await fireEvent.change(screen.getByLabelText('Import mode'), { target: { value: 'SAMPLE_BANK' } });
+        await selectValue(screen.getByLabelText('Import mode'), 'SAMPLE_BANK');
         await fireEvent.input(screen.getByLabelText('Sample Bank name'), { target: { value: 'New Bank' } });
         await fireEvent.click(screen.getByRole('button', { name: 'Import' }));
         await screen.findByRole('button', { name: 'Done' });
@@ -330,8 +331,8 @@ describe('AudioImportDialog', () => {
         });
 
         const mode = screen.getByRole('combobox', { name: 'Import mode' });
-        expect(mode.classList).toContain('dialog-field-control');
-        await fireEvent.change(mode, { target: { value: 'SAMPLE_BANK' } });
+        expect(mode.classList).toContain('select-control');
+        await selectValue(mode, 'SAMPLE_BANK');
         expect(screen.getByRole('textbox', { name: 'Sample Bank name' }).classList).toContain('dialog-field-control');
         expect(targetSettingsSource).toMatch(
             /\.import-target-settings\s*\{[^}]*grid-template-columns:\s*max-content minmax\(0, 360px\) max-content max-content;[^}]*align-items:\s*center;/s,
@@ -379,9 +380,7 @@ describe('AudioImportDialog', () => {
         });
 
         await screen.findByDisplayValue('Bass');
-        await fireEvent.change(screen.getByRole('combobox', { name: 'Import mode' }), {
-            target: { value: 'SAMPLE_BANK' },
-        });
+        await selectValue(screen.getByRole('combobox', { name: 'Import mode' }), 'SAMPLE_BANK');
         const name = screen.getByRole('textbox', { name: 'Sample Bank name' });
         await fireEvent.input(name, { target: { value: 'existing' } });
         expect(screen.getByText('Sample Bank name already exists: existing')).toBeTruthy();
@@ -820,12 +819,14 @@ describe('AudioImportDialog', () => {
         expect(screen.getByDisplayValue('70000')).toBeTruthy();
         const playbackMode = screen.getByRole('combobox', {
             name: 'Playback mode for Mapped.wav',
-        }) as HTMLSelectElement;
+        }) as HTMLButtonElement;
         expect(playbackMode.value).toBe('1');
-        const forwardLoopOption = within(playbackMode).getByRole('option', {
+        await fireEvent.click(playbackMode);
+        const forwardLoopOption = screen.getByRole('option', {
             name: 'Forward loop',
-        }) as HTMLOptionElement;
-        expect(forwardLoopOption.selected).toBe(true);
+        });
+        expect(forwardLoopOption.getAttribute('aria-selected')).toBe('true');
+        await fireEvent.keyDown(playbackMode, { key: 'Escape' });
         expect(within(card).queryByText('Initial value sources')).toBeNull();
         expect(within(card).queryByText('An additional WAV sampler loop was ignored.')).toBeNull();
 
@@ -903,12 +904,17 @@ describe('AudioImportDialog', () => {
         const selector = await screen.findByRole('combobox', {
             name: `Target sample rate for ${file.name}`,
         });
-        expect(selector.classList).toContain('dialog-field-control');
-        expect((selector as HTMLSelectElement).value).toBe('44100');
+        expect(selector.classList).toContain('select-control');
+        expect((selector as HTMLButtonElement).value).toBe('44100');
 
-        await fireEvent.change(selector, { target: { value: '22050' } });
+        await selectValue(selector, '22050');
         await waitFor(() => expect(imageTransport.inspectAudio).toHaveBeenLastCalledWith(expect.anything(), 22_050));
-        await waitFor(() => expect((selector as HTMLSelectElement).value).toBe('22050'));
+        await waitFor(() =>
+            expect(
+                (screen.getByRole('combobox', { name: `Target sample rate for ${file.name}` }) as HTMLButtonElement)
+                    .value,
+            ).toBe('22050'),
+        );
         expect(screen.getByText('WAV PCM_16 · Mono · 96,000 Hz · 16-bit · resampled TPDF · 1.00 s')).toBeTruthy();
 
         await fireEvent.click(screen.getByRole('button', { name: 'Import' }));

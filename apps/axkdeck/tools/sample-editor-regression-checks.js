@@ -132,8 +132,8 @@ window.runSampleEditorRegression = async function () {
     assert(document.querySelector('input[aria-label="Velocity Offset"]'), 'MIDI Set owns Velocity Offset');
     await page('MIDI/CTRL', 'Control');
     assert(document.querySelectorAll('tbody tr').length === 6, 'MIDI controls are not six rows');
-    assert(document.querySelectorAll('[role=combobox]').length === 18, 'MIDI selectors are not all searchable');
-    const controller = document.querySelector('[role=combobox]');
+    assert(document.querySelectorAll('input[role=combobox]').length === 18, 'MIDI selectors are not all searchable');
+    const controller = document.querySelector('input[role=combobox]');
     controller.scrollIntoView({ block: 'nearest' }); await settle();
     controller.click(); await settle();
     const upwards = document.querySelector('[role=listbox]').getBoundingClientRect().bottom <= controller.getBoundingClientRect().top;

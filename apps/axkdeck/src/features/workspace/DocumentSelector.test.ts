@@ -1,3 +1,4 @@
+import { selectValue } from '../../test/selectControl';
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import DocumentSelector from './DocumentSelector.svelte';
@@ -15,8 +16,8 @@ describe('Document selector', () => {
             onselect,
             onresolve: vi.fn(),
         });
-        const control = screen.getByRole('combobox') as HTMLSelectElement;
-        await fireEvent.change(control, { target: { value: 'other' } });
+        const control = screen.getByRole('combobox') as HTMLButtonElement;
+        await selectValue(control, 'other');
         await waitFor(() => expect(control.value).toBe(fixture.documentId));
         expect(onselect).toHaveBeenCalledWith('other');
     });
@@ -51,7 +52,7 @@ describe('Document selector', () => {
             onselect,
             onresolve,
         });
-        await fireEvent.change(screen.getByRole('combobox'), { target: { value: 'document-a-series-source-1' } });
+        await selectValue(screen.getByRole('combobox'), 'document-a-series-source-1');
         expect(onselect).toHaveBeenCalledWith('document-a-series-source-1');
         await fireEvent.click(screen.getByText('Choose native formats'));
         expect(screen.getAllByRole('checkbox')).toHaveLength(1);

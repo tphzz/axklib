@@ -1,4 +1,5 @@
 <script lang="ts">
+    import SelectControl from '../../lib/components/SelectControl.svelte';
     import FilesystemNameField from './FilesystemNameField.svelte';
     import FilesImportFooter from './FilesImportFooter.svelte';
     import ImportCapacityControl from '../../lib/components/ImportCapacityControl.svelte';
@@ -155,19 +156,16 @@
                                     >{row.snapshot ? formatStoredSize(row.snapshot.sizeBytes) : '-'}</span
                                 >
                                 <span role="cell"
-                                    >{#if row.directory}<span class="import-result">Merge</span>{:else}<select
-                                            class="dialog-field-control"
-                                            aria-label={`If file exists ${index + 1}`}
+                                    >{#if row.directory}<span class="import-result">Merge</span>{:else}<SelectControl
+                                            label={`If file exists ${index + 1}`}
                                             value={row.conflict}
+                                            options={[
+                                                { value: 'SKIP', label: 'Skip' },
+                                                { value: 'REPLACE', label: 'Replace' },
+                                            ] as const}
                                             disabled={!workflow.editable}
-                                            onchange={(event) =>
-                                                workflow.setConflict(
-                                                    index,
-                                                    event.currentTarget.value === 'REPLACE' ? 'REPLACE' : 'SKIP',
-                                                )}
-                                        >
-                                            <option value="SKIP">Skip</option><option value="REPLACE">Replace</option>
-                                        </select>{/if}</span
+                                            onchange={(value) => workflow.setConflict(index, value)}
+                                        />{/if}</span
                                 >
                                 <span
                                     class="import-result"
@@ -297,9 +295,6 @@
     }
     .import-row > * {
         min-width: 0;
-    }
-    .import-row select {
-        width: 100%;
     }
     .import-heading {
         color: var(--color-text-muted);

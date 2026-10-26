@@ -41,6 +41,40 @@ restored against an unchanged base payload. See
 - C++23 axklib application service and Crow-based `axklib-server`
 - HTTP/WebSocket transport for local sidecar and remote Raspberry Pi profiles
 
+## Shared Controls
+
+Single-choice dropdowns use `src/lib/components/SelectControl.svelte`, including
+workspace sources, physical devices, dialogs, log level and editor choices.
+Native `<select>` popups are not used in production: their
+[option painting](https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/option#styling_with_css)
+is platform-dependent, even with `color-scheme: dark`. The source-level
+`selectConsistency.test.ts` regression enforces this boundary. Editable
+autocomplete and Sources multi-select keep their distinct interaction contracts.
+
+`src/app.css` owns the shared palette and typography. Ordinary values use
+`--control-text` (`--color-text`, `#c0c8cf`) at `--control-font-size` (11px),
+including dialog fields. Popups use `--color-popup` (`#101516`); highlighted rows
+use `--color-selection` (`#294958`) with the same normal text color. A checkmark
+identifies the committed choice independently of the highlighted row. Editable
+autocomplete and diagnostic menus consume these palette tokens too. Accent
+badges, muted labels, disabled choices and validation colors remain semantic
+exceptions, not alternative control themes. Header and toolbar sizes are explicit
+shared variants; caller wrappers own layout and spacing.
+
+Dropdowns retain focus on their labelled combobox trigger. Up/Down, Home/End and
+type-ahead highlight enabled options; click, Enter or Space confirms. Escape,
+Tab, outside interaction, disabling and removal of the active option dismiss
+without changing the controlled value. Owners retain responsibility for async
+switch rejection and busy state; the control never selects implicitly during an
+options refresh. Typed values are preserved, including zero and empty strings.
+Rows with duplicate submitted values need unique keys; enabled matching rows
+take precedence over unavailable duplicates. Popup ownership and scaling are
+shared through `src/lib/selectPopup.ts`, inside the nearest modal when present.
+
+Rename dialogs use `data-dialog-initial-focus="end"` through `src/lib/modal.ts`:
+initial focus places a collapsed caret after the existing name. Duplication and
+other forms that intentionally select their defaults retain their own policy.
+
 ## Prerequisites
 
 - Node.js 22.12 or newer

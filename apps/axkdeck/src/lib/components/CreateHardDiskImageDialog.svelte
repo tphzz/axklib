@@ -5,6 +5,7 @@
     import { userFacingMessage } from '../userFacingMessage';
     import { modal } from '../modal';
     import Icon from './Icon.svelte';
+    import SelectControl from './SelectControl.svelte';
 
     interface Props {
         transport: ImageTransport;
@@ -184,19 +185,19 @@
             </label>
             <label class="create-hds-field">
                 <span>Type</span>
-                <select
-                    class="dialog-field-control"
-                    aria-label="Type"
+                <SelectControl
+                    label="Type"
                     value={imageType}
+                    options={[
+                        { value: 'HD', label: 'HD' },
+                        { value: 'Floppy', label: 'Floppy' },
+                    ] as const}
                     disabled={busy}
-                    onchange={(event) => {
-                        imageType = event.currentTarget.value as ImageType;
+                    onchange={(value) => {
+                        imageType = value;
                         error = '';
                     }}
-                >
-                    <option value="HD">HD</option>
-                    <option value="Floppy">Floppy</option>
-                </select>
+                />
             </label>
             <label class="create-hds-field">
                 <span>File name</span>
@@ -214,16 +215,16 @@
             {#if imageType === 'HD'}
                 <fieldset disabled={busy || loading}>
                     <legend>Capacity</legend>
-                    <select
-                        class="dialog-field-control capacity-select"
-                        aria-label="Capacity"
+                    <SelectControl
+                        label="Capacity"
                         value={profileId}
-                        onchange={(event) => selectProfile(event.currentTarget.value as HardDiskCreationProfileId)}
-                    >
-                        {#each profiles as profile (profile.profileId)}
-                            <option value={profile.profileId}>{profileLabel(profile.profileId)}</option>
-                        {/each}
-                    </select>
+                        options={profiles.map((profile) => ({
+                            value: profile.profileId,
+                            label: profileLabel(profile.profileId),
+                        }))}
+                        disabled={busy || loading}
+                        onchange={selectProfile}
+                    />
                 </fieldset>
 
                 <fieldset disabled={busy || loading}>
@@ -328,11 +329,6 @@
 
     .create-hds-field output {
         padding: 0 9px;
-    }
-
-    .create-hds-field select,
-    .capacity-select {
-        width: 100%;
     }
 
     .create-hds-name {

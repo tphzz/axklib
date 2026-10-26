@@ -86,7 +86,7 @@
                     <input
                         class="dialog-field-control"
                         bind:value
-                        data-dialog-initial-focus="select"
+                        data-dialog-initial-focus="end"
                         disabled={phase !== 'idle'}
                         maxlength={maximumLength}
                         autocomplete="off"

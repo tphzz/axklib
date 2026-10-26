@@ -1,3 +1,4 @@
+import { selectValue } from '../../test/selectControl';
 /// <reference types="node" />
 
 import { readFileSync } from 'node:fs';
@@ -141,7 +142,7 @@ describe('ImportDestinationChooser', () => {
         });
 
         const partition = screen.getByRole('combobox', { name: 'Destination partition' });
-        await fireEvent.change(partition, { target: { value: '0' } });
+        await selectValue(partition, '0');
         expect(onpartition).toHaveBeenCalledWith(0);
 
         const volume = screen.getByRole('combobox', { name: 'Destination volume' }) as HTMLInputElement;
@@ -155,9 +156,7 @@ describe('ImportDestinationChooser', () => {
         });
 
         expect(screen.getByRole('textbox', { name: 'New volume name' }).classList).toContain('dialog-field-control');
-        expect(screen.getByRole('combobox', { name: 'Destination partition' }).classList).toContain(
-            'dialog-field-control',
-        );
+        expect(screen.getByRole('combobox', { name: 'Destination partition' }).classList).toContain('select-control');
     });
 
     it('uses the shared compact dialog typography and dark autocomplete palette', async () => {
@@ -178,16 +177,18 @@ describe('ImportDestinationChooser', () => {
         const listRule = appStyles.match(/\.dialog-autocomplete-list\s*\{[^}]+\}/)?.[0];
         const optionRule = appStyles.match(/\.dialog-autocomplete-option\s*\{[^}]+\}/)?.[0];
         expect(controlRule).toContain('font-size: var(--dialog-control-font-size)');
-        expect(listRule).toContain('background: var(--color-bg-deep)');
+        expect(listRule).toContain('background: var(--color-popup)');
         expect(optionRule).toContain('font-size: var(--dialog-control-font-size)');
         expect(appStyles).toContain('--density-control: 26px');
-        expect(appStyles).toContain('--dialog-control-font-size: 11px');
+        expect(appStyles).toContain('--dialog-control-font-size: var(--control-font-size)');
+        expect(appStyles).toContain('--control-font-size: 11px');
         expect(appStyles).toContain('--color-bg-deep: #0b0d0f');
 
         const style = document.createElement('style');
         style.textContent = `${controlRule}\n${listRule}\n${optionRule}`
             .replaceAll('var(--density-control)', '26px')
             .replaceAll('var(--dialog-control-font-size)', '11px')
+            .replaceAll('var(--color-popup)', '#101516')
             .replaceAll('var(--color-bg-deep)', '#0b0d0f');
         document.head.append(style);
 
@@ -196,7 +197,7 @@ describe('ImportDestinationChooser', () => {
         const optionStyle = getComputedStyle(option);
         expect(controlStyle.height).toBe('26px');
         expect(controlStyle.fontSize).toBe('11px');
-        expect(listStyle.backgroundColor).toBe('rgb(11, 13, 15)');
+        expect(listStyle.backgroundColor).toBe('rgb(16, 21, 22)');
         expect(optionStyle.minHeight).toBe('28px');
         expect(optionStyle.fontSize).toBe('11px');
 

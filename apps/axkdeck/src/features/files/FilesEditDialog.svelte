@@ -85,7 +85,7 @@
                             label={nameLabel}
                             capabilities={review.capabilities}
                             error={workflow.nameError}
-                            initialFocus={review.kind === 'rename' ? 'select' : 'caret'}
+                            initialFocus={review.kind === 'rename' ? 'end' : 'caret'}
                             value={workflow.name}
                             onchange={(name) => (workflow.name = name)}
                             disabled={workflow.phase !== 'ready'}

@@ -344,8 +344,7 @@
         return errors;
     }
 
-    async function changeTargetSampleRate(row: AudioImportRow, event: Event): Promise<void> {
-        const targetSampleRate = Number((event.currentTarget as HTMLSelectElement).value);
+    async function changeTargetSampleRate(row: AudioImportRow, targetSampleRate: number): Promise<void> {
         if (!row.source || !Number.isInteger(targetSampleRate) || row.targetSampleRate === targetSampleRate) return;
         auditionController.stop(row.id);
         const revision = row.inspectionRevision + 1;
@@ -554,7 +553,7 @@
                         {completionStatus}
                         grouped={importMode === 'SAMPLE_BANK'}
                         audition={auditionState}
-                        onchangeTargetSampleRate={(row, event) => void changeTargetSampleRate(row, event)}
+                        onchangeTargetSampleRate={(row, rate) => void changeTargetSampleRate(row, rate)}
                         onupdate={updateRow}
                         onremove={(row) => void removeRow(row)}
                         onaudition={audition}

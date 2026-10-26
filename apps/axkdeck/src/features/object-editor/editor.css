@@ -8,12 +8,12 @@
 .device-editor .editor-control,
 .editor-select-popup {
     box-sizing: border-box;
-    color: var(--color-text);
-    background: var(--color-panel-deep, #101516);
+    color: var(--control-text);
+    background: var(--control-background);
     border: 1px solid var(--color-border);
     border-radius: 3px;
     font-family: var(--font-sans);
-    font-size: 11px;
+    font-size: var(--control-font-size);
     color-scheme: dark;
 }
 .device-editor .editor-control {
@@ -184,6 +184,7 @@
     overflow: auto;
     padding: 3px;
     box-shadow: 0 6px 16px #0008;
+    background: var(--color-popup);
 }
 .editor-select-popup [role='option'] {
     display: flex;
@@ -194,10 +195,7 @@
     border-radius: 2px;
 }
 .editor-select-popup .active {
-    background: var(--color-selection, #294958);
-}
-.editor-select-popup [aria-selected='true'] {
-    color: var(--color-accent);
+    background: var(--color-selection);
 }
 .editor-switch {
     width: 30px;

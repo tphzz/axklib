@@ -23,14 +23,14 @@ describe('editor choices', () => {
         ];
         const onchange = vi.fn();
         const view = render(EditorChoice, { label: 'Mode', value: 0, options: marked, segmented: false, onchange });
-        await fireEvent.click(view.getByRole('button', { name: 'Mode' }));
+        await fireEvent.click(view.getByRole('combobox', { name: 'Mode' }));
         const option = view.getByRole('option', { name: 'Later value' });
         expect(option.querySelector('.editor-option-label .extended-parameter')).not.toBeNull();
         expect(option.title).toContain('Convert first.');
         expect(view.getByRole('option', { name: 'Ordinary' }).querySelector('[data-icon="plus"]')).toBeNull();
         await fireEvent.click(option);
         expect(onchange).not.toHaveBeenCalled();
-        await fireEvent.keyDown(view.getByRole('listbox'), { key: 'Escape' });
+        await fireEvent.keyDown(view.getByRole('combobox'), { key: 'Escape' });
         await view.rerender({ segmented: true });
         expect(
             view.getByRole('button', { name: 'Mode: Later value' }).querySelector('.extended-parameter'),
@@ -42,21 +42,21 @@ describe('editor choices', () => {
     it('opens only deliberately and supports selection, Escape and outside dismissal', async () => {
         const onchange = vi.fn();
         const view = render(EditorChoice, { label: 'Output', value: 3, options, onchange });
-        const trigger = view.getByRole('button');
+        const trigger = view.getByRole('combobox');
         await fireEvent.focus(trigger);
         expect(view.queryByRole('listbox')).toBeNull();
         await fireEvent.keyDown(trigger, { key: 'ArrowDown' });
         let popup = view.getByRole('listbox');
         expect(popup.parentElement).toBe(document.body);
-        await fireEvent.keyDown(popup, { key: 'End' });
-        await fireEvent.keyDown(popup, { key: 'Enter' });
+        await fireEvent.keyDown(trigger, { key: 'End' });
+        await fireEvent.keyDown(trigger, { key: 'Enter' });
         expect(onchange).toHaveBeenCalledWith(11);
         expect(view.queryByRole('listbox')).toBeNull();
         await fireEvent.click(trigger);
         popup = view.getByRole('listbox');
         await fireEvent.pointerDown(popup);
         expect(view.queryByRole('listbox')).not.toBeNull();
-        await fireEvent.keyDown(popup, { key: 'Escape' });
+        await fireEvent.keyDown(trigger, { key: 'Escape' });
         expect(view.queryByRole('listbox')).toBeNull();
         expect(document.activeElement).toBe(trigger);
         await fireEvent.click(trigger);
@@ -77,7 +77,7 @@ describe('editor choices', () => {
     });
     it('ignores queued scroll notifications at the same anchor but closes when the anchor moves', async () => {
         const view = render(EditorChoice, { label: 'Mode', value: 0, options, onchange: vi.fn() });
-        const trigger = view.getByRole('button');
+        const trigger = view.getByRole('combobox');
         const bounds = vi
             .spyOn(trigger, 'getBoundingClientRect')
             .mockReturnValue({ top: 0, left: 0, width: 100, bottom: 26, height: 26 } as DOMRect);

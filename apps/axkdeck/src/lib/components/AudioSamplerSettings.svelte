@@ -1,6 +1,7 @@
 <script lang="ts">
     import { noteName } from '../audioImport';
     import type { AudioImportRow } from './audioImportDialogTypes';
+    import SelectControl from './SelectControl.svelte';
 
     interface Props {
         row: AudioImportRow;
@@ -103,22 +104,21 @@
         </label>
         <label class="playback-setting">
             <span>Playback</span>
-            <select
-                class="dialog-field-control"
-                aria-label={`Playback mode for ${row.fileName}`}
+            <SelectControl
+                label={`Playback mode for ${row.fileName}`}
                 value={row.loopMode}
+                options={[
+                    { value: 4, label: 'One-shot' },
+                    { value: 1, label: 'Forward loop' },
+                ] as const}
                 {disabled}
-                onchange={(event) => {
-                    const loopMode = Number((event.currentTarget as HTMLSelectElement).value) as 1 | 4;
+                onchange={(loopMode) => {
                     onupdate(row.id, {
                         loopMode,
                         ...(loopMode === 4 ? { loopStartFrame: 0, loopLengthFrames: 0 } : {}),
                     });
                 }}
-            >
-                <option value={4}>One-shot</option>
-                <option value={1}>Forward loop</option>
-            </select>
+            />
         </label>
         {#if row.loopMode === 1}
             <label class="frame-setting">
@@ -171,8 +171,7 @@
         color: var(--color-text-muted);
         font-size: var(--dialog-label-font-size);
     }
-    input,
-    select {
+    input {
         width: 100%;
         min-width: 0;
     }

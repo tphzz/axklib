@@ -24,8 +24,7 @@
     color: var(--color-text-muted);
     font-size: 10px;
 }
-.log-toolbar input,
-.log-toolbar select {
+.log-toolbar input {
     height: 28px;
     min-width: 0;
     border: 1px solid var(--color-border);
@@ -36,23 +35,10 @@
     font: inherit;
     font-size: 11px;
 }
-.log-toolbar select {
-    width: 145px;
-    appearance: none;
-    -webkit-appearance: none;
-    padding-right: 24px;
-}
 .log-select {
-    position: relative;
-}
-.log-select > span {
-    position: absolute;
-    right: 8px;
-    top: 8px;
-    width: 12px;
-    height: 12px;
-    transform: rotate(90deg);
-    pointer-events: none;
+    display: block;
+    width: 145px;
+    min-width: 0;
 }
 .log-multiselect {
     position: relative;
@@ -73,7 +59,7 @@
     padding: 3px 8px;
     border: 1px solid var(--color-border);
     border-radius: 4px;
-    background: var(--color-bg-deep, #0b0e0f);
+    background: var(--control-background);
     color: var(--color-text);
     font-size: 11px;
 }
@@ -90,7 +76,7 @@
     padding: 4px;
     border: 1px solid var(--color-border);
     border-radius: 4px;
-    background: #101617;
+    background: var(--color-popup);
     box-shadow: 0 4px 12px #0008;
 }
 .log-filter-menu button {
@@ -106,7 +92,7 @@
 }
 .log-filter-menu button:hover,
 .log-filter-menu button:focus {
-    background: #294b5b;
+    background: var(--color-selection);
 }
 .log-filter-actions {
     display: flex;
@@ -209,7 +195,7 @@
     display: grid;
     min-width: 160px;
     padding: 4px;
-    background: #101617;
+    background: var(--color-popup);
     border: 1px solid var(--color-border);
     border-radius: 4px;
     box-shadow: 0 4px 12px #0008;
@@ -224,7 +210,7 @@
 }
 .log-save-menu button:hover,
 .log-save-menu button:focus {
-    background: #294b5b;
+    background: var(--color-selection);
 }
 .log-page-bar {
     display: flex;

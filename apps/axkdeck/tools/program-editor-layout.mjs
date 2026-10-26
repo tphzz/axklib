@@ -196,7 +196,7 @@ try {
             }
 
             const undo = page.getByRole('button', { name: 'Undo Program edit', exact: true });
-            await page.getByRole('button', { name: 'Ef1-3', exact: true }).click();
+            await page.getByRole('combobox', { name: 'Ef1-3', exact: true }).click();
             await page.getByRole('option', { name: '1 > 2 > 3', exact: true }).click();
             assert.equal((await state(page)).values['effect_connections.1'], 2);
             result.serialGraph = await graphGeometry(page, count);
@@ -205,7 +205,7 @@ try {
             await page.screenshot({ path: resolve(output, `${name}-serial-routing.png`) });
             await undo.click();
             if (!native) {
-                await page.getByRole('button', { name: 'Output', exact: true }).click();
+                await page.getByRole('combobox', { name: 'Output', exact: true }).click();
                 const destination = page.getByRole('option', { name: 'Ef4', exact: true });
                 assert.equal(await destination.locator('.extended-parameter').count(), 1, 'A5000-only destinations retain their shared marker');
                 await destination.click();
@@ -294,8 +294,8 @@ try {
             assert.equal((await state(page)).tab, 'sample-select');
             await page.keyboard.press('ArrowRight');
             assert.equal((await state(page)).tab, 'easy-edit');
-            assert.equal(await page.getByRole('combobox', { name: 'Sample/Bank', exact: true }).count(), 0, 'Sample/Bank must be a normal EditorChoice, not an autocomplete');
-            const assignment = page.getByRole('button', { name: 'Sample/Bank', exact: true });
+            assert.equal(await page.getByRole('combobox', { name: 'Sample/Bank', exact: true }).getAttribute('aria-autocomplete'), null, 'Sample/Bank must remain a non-editable choice');
+            const assignment = page.getByRole('combobox', { name: 'Sample/Bank', exact: true });
             await assignment.click();
             assert.equal(await page.getByRole('option', { name: /Duplicate \(Sample\)/ }).count(), 2);
             await page.getByRole('option', { name: 'Duplicate (Sample) · 2', exact: true }).click();
@@ -367,7 +367,7 @@ try {
             assert.equal((await state(page)).dirty, false);
             await page.getByRole('tab', { name: 'Sample Select', exact: true }).click();
             await page.getByRole('checkbox', { name: 'Show only assigned' }).uncheck();
-            await page.getByRole('button', { name: 'Receive channel assign: Available', exact: true }).click();
+            await page.getByRole('combobox', { name: 'Receive channel assign: Available', exact: true }).click();
             await page.screenshot({ path: resolve(output, `${name}-receive-menu.png`) });
             await page.getByRole('option', { name: '=Sample', exact: true }).click();
             assert.equal((await state(page)).assignment, 2);

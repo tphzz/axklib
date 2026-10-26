@@ -1,3 +1,4 @@
+import { selectValue } from '../../test/selectControl';
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import ImageSelector from './ImageSelector.svelte';
@@ -17,9 +18,13 @@ describe('Image selector', () => {
     it('lists physical filenames and restores a declined switch without a Files-only choice', async () => {
         const onselect = vi.fn(async () => undefined);
         render(ImageSelector, { sources, selected: 'source-1', disabled: false, onselect, onerror: vi.fn() });
-        const control = screen.getByRole('combobox', { name: 'Image' }) as HTMLSelectElement;
-        expect(screen.getAllByRole('option').map((item) => item.textContent)).toEqual(['test.hds', 'second.hds']);
-        await fireEvent.change(control, { target: { value: 'source-2' } });
+        const control = screen.getByRole('combobox', { name: 'Image' }) as HTMLButtonElement;
+        await fireEvent.click(control);
+        expect(screen.getAllByRole('option').map((item) => item.textContent?.trim())).toEqual([
+            'test.hds',
+            'second.hds',
+        ]);
+        await selectValue(control, 'source-2');
         await waitFor(() => expect(control.value).toBe('source-1'));
         expect(onselect).toHaveBeenCalledWith('source-2');
         expect(control.title).toBe('root/test.hds');

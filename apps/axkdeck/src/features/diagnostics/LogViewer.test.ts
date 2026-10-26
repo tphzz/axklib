@@ -1,3 +1,4 @@
+import { openSelect, selectValue } from '../../test/selectControl';
 import { cleanup, fireEvent, render, waitFor } from '@testing-library/svelte';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import LogViewer from './LogViewer.svelte';
@@ -45,7 +46,8 @@ describe('Logs window', () => {
         const { driver, view } = fixture();
         await view.findByText('Failure', { exact: false });
         const level = view.getByRole('combobox', { name: 'Level' });
-        expect([...level.querySelectorAll('option')].map((option) => option.textContent)).toEqual([
+        const popup = await openSelect(level);
+        expect([...popup.querySelectorAll('[role="option"]')].map((option) => option.textContent?.trim())).toEqual([
             'Error',
             'Warning',
             'Info',
@@ -60,7 +62,7 @@ describe('Logs window', () => {
                 ?.firstElementChild?.contains(view.getByRole('button', { name: 'Sources' })),
         ).toBe(true);
         expect(view.container.querySelector('.log-record')?.firstElementChild?.className).toBe('log-time');
-        await fireEvent.change(level, { target: { value: 'warning' } });
+        await selectValue(level, 'warning');
         await waitFor(() => expect(driver.setCapture).toHaveBeenCalledWith('warning'));
         await waitFor(() =>
             expect(vi.mocked(driver.read).mock.lastCall?.[0].filter).toMatchObject({ level: 'warning' }),
@@ -70,7 +72,7 @@ describe('Logs window', () => {
     it('combines controls in the backend query and uses a non-destructive clear boundary', async () => {
         const { driver, view } = fixture();
         await view.findByText('Failure', { exact: false });
-        await fireEvent.change(view.getByRole('combobox', { name: 'Level' }), { target: { value: 'warning' } });
+        await selectValue(view.getByRole('combobox', { name: 'Level' }), 'warning');
         await waitFor(() => expect(vi.mocked(driver.read).mock.lastCall?.[0].filter.level).toBe('warning'));
         await fireEvent.click(view.getByRole('button', { name: 'Sources' }));
         await fireEvent.click(view.getByRole('menuitem', { name: 'None' }));

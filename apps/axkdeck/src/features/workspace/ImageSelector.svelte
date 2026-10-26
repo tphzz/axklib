@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { tick } from 'svelte';
+    import SelectControl from '../../lib/components/SelectControl.svelte';
     import type { OpenedImage } from '../../lib/transport';
     import { sourceLabels } from './sourceLabels';
     import { userFacingMessage } from '../../lib/userFacingMessage';
@@ -20,32 +20,30 @@
     } = $props();
     let pending = $state(false);
     const options = $derived(sourceLabels(sources, deviceLabel));
-    async function select(control: HTMLSelectElement) {
+    async function select(id: string) {
         pending = true;
         try {
-            await onselect(control.value);
+            await onselect(id);
         } catch (error) {
             onerror(userFacingMessage(error));
         } finally {
-            await tick();
-            control.value = selected ?? '';
             pending = false;
         }
     }
 </script>
 
 {#if options.length}
-    <select
-        class="image-select dialog-field-control"
-        aria-label="Image"
-        value={selected ?? ''}
-        title={options.find((item) => item.id === selected)?.path}
-        disabled={disabled || pending}
-        onchange={(event) => void select(event.currentTarget)}
-    >
-        {#each options as option (option.id)}<option value={option.id} title={option.path}>{option.label}</option
-            >{/each}
-    </select>
+    <div class="image-select">
+        <SelectControl
+            label="Image"
+            value={selected ?? ''}
+            options={options.map((option) => ({ value: option.id, label: option.label, title: option.path }))}
+            size="header"
+            title={options.find((item) => item.id === selected)?.path}
+            disabled={disabled || pending}
+            onchange={(id) => void select(id)}
+        />
+    </div>
 {/if}
 
 <style>

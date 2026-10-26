@@ -2,6 +2,7 @@
     import { onDestroy, onMount, type ComponentProps } from 'svelte';
     import { modal } from '../../lib/modal';
     import Icon from '../../lib/components/Icon.svelte';
+    import SelectControl from '../../lib/components/SelectControl.svelte';
     import StorageBrowserPanel from '../../lib/components/StorageBrowserPanel.svelte';
     import OpenSourceImagePanel from './OpenSourceImagePanel.svelte';
     import DeviceTargetDetails from './DeviceTargetDetails.svelte';
@@ -185,10 +186,9 @@
                     <div class="open-source-field">
                         <label for={`open-device-${tab.replaceAll(' ', '-')}`}>Device</label>
                         <div class="open-source-device">
-                            <select
+                            <SelectControl
                                 id={`open-device-${tab.replaceAll(' ', '-')}`}
-                                class="dialog-field-control"
-                                aria-label="Device"
+                                label="Device"
                                 value={tab === 'Device'
                                     ? workflow.candidateId
                                     : tab === 'SCSI2SDv6'
@@ -198,22 +198,20 @@
                                     workflow.listing ||
                                     workflow.connectionBlocksControls ||
                                     (tab === 'SCSI2SD XML' && !workflow.xml)}
-                                onchange={(event) => {
-                                    if (tab === 'Device') workflow.candidateId = event.currentTarget.value;
-                                    else if (tab === 'SCSI2SDv6')
-                                        void workflow.selectV6Device(event.currentTarget.value);
-                                    else workflow.xmlCandidateId = event.currentTarget.value;
+                                options={[
+                                    { value: '', label: 'Select a device' },
+                                    ...workflow.visibleCandidates.map((candidate) => ({
+                                        value: candidate.id,
+                                        label: `${candidate.model} / ${candidate.serial} / ${(candidate.sizeBytes / 1e9).toFixed(2)} GB / ${candidate.sectorSize} B`,
+                                    })),
+                                ]}
+                                emptyLabel="No devices available"
+                                onchange={(value) => {
+                                    if (tab === 'Device') workflow.candidateId = value;
+                                    else if (tab === 'SCSI2SDv6') void workflow.selectV6Device(value);
+                                    else workflow.xmlCandidateId = value;
                                 }}
-                            >
-                                <option value="">Select a device</option>
-                                {#each workflow.visibleCandidates as candidate}
-                                    <option value={candidate.id}
-                                        >{candidate.model} / {candidate.serial} / {(candidate.sizeBytes / 1e9).toFixed(
-                                            2,
-                                        )} GB / {candidate.sectorSize} B</option
-                                    >
-                                {/each}
-                            </select>
+                            />
                             <button
                                 class="icon-button"
                                 type="button"
@@ -231,20 +229,22 @@
                     {#if tab === 'SCSI2SDv6'}
                         <label class="open-source-field"
                             >SCSI target
-                            <select
-                                aria-label="SCSI target"
-                                class="dialog-field-control"
-                                bind:value={workflow.v6TargetId}
+                            <SelectControl
+                                label="SCSI target"
+                                value={workflow.v6TargetId}
+                                onchange={(value) => (workflow.v6TargetId = value)}
+                                options={[
+                                    { value: '', label: 'Select a configured target' },
+                                    ...workflow.v6Targets.map((target) => ({
+                                        value: target.id,
+                                        label: deviceTargetLabel(target),
+                                    })),
+                                ]}
                                 disabled={workflow.busy ||
                                     workflow.listing ||
                                     workflow.readingConfiguration ||
                                     !workflow.v6Targets.length}
-                            >
-                                <option value="">Select a configured target</option>
-                                {#each workflow.v6Targets as target (target.id)}
-                                    <option value={target.id}>{deviceTargetLabel(target)}</option>
-                                {/each}
-                            </select>
+                            />
                         </label>
                         <DeviceTargetDetails
                             target={workflow.v6Targets.find((target) => target.id === workflow.v6TargetId)}
@@ -256,28 +256,24 @@
                     {#if tab === 'SCSI2SD XML'}
                         <label class="open-source-field"
                             >SCSI target
-                            <select
-                                aria-label="SCSI target"
-                                class="dialog-field-control"
-                                bind:value={workflow.xmlTargetId}
+                            <SelectControl
+                                label="SCSI target"
+                                value={workflow.xmlTargetId}
+                                onchange={(value) => (workflow.xmlTargetId = value)}
+                                options={[
+                                    { value: '', label: 'Select a configured target' },
+                                    ...workflow.xmlTargets.map((target, index) => ({
+                                        value: target.id,
+                                        key: `${target.id}:${index}`,
+                                        disabled: !target.enabled || !target.eligible,
+                                        label: `${target.label} / ${(target.sizeBytes / 1e9).toFixed(2)} GB / ${target.sectorSize} B${!target.enabled ? ' / disabled' : !target.eligible ? ' / unavailable' : target.readOnly ? ' / read-only' : ''}`,
+                                    })),
+                                ]}
                                 disabled={!workflow.xml ||
                                     workflow.busy ||
                                     workflow.validating ||
                                     workflow.connectionBlocksControls}
-                            >
-                                <option value="">Select a configured target</option>
-                                {#each workflow.xmlTargets as target, index (`${target.id}:${index}`)}
-                                    <option value={target.id} disabled={!target.enabled || !target.eligible}
-                                        >{target.label} / {(target.sizeBytes / 1e9).toFixed(2)} GB / {target.sectorSize} B{!target.enabled
-                                            ? ' / disabled'
-                                            : !target.eligible
-                                              ? ' / unavailable'
-                                              : target.readOnly
-                                                ? ' / read-only'
-                                                : ''}</option
-                                    >
-                                {/each}
-                            </select>
+                            />
                         </label>
                         {#each workflow.selectedTarget?.notices ?? [] as notice}<p class="dialog-warning">
                                 {notice}
@@ -422,7 +418,7 @@
         text-overflow: ellipsis;
         font-size: var(--dialog-body-font-size);
     }
-    select {
+    .open-source-device > :global(.select-control) {
         flex: 1;
         min-width: 0;
         width: 100%;

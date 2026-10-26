@@ -1,4 +1,5 @@
 <script lang="ts">
+    import SelectControl from '../../lib/components/SelectControl.svelte';
     import { onMount, untrack } from 'svelte';
     import type { ObjectEditorWorkflow } from '../object-editor/workflow.svelte';
     import type { ImageSessionWorkflow } from '../image-session/workflow.svelte';
@@ -123,11 +124,15 @@
             <header class="dialog-header"><h2 id="retained-drafts-title">Retained device drafts</h2></header>
             <div class="retained-content">
                 <label
-                    >Draft<select class="dialog-field-control" bind:value={selected}
-                        ><option value="">Select a retained draft</option>{#each records as item}<option value={item.id}
-                                >{item.name} / {item.device}</option
-                            >{/each}</select
-                    ></label
+                    >Draft<SelectControl
+                        label="Draft"
+                        value={selected}
+                        onchange={(value) => (selected = value)}
+                        options={[
+                            { value: '', label: 'Select a retained draft' },
+                            ...records.map((item) => ({ value: item.id, label: `${item.name} / ${item.device}` })),
+                        ]}
+                    /></label
                 >
                 {#if record}
                     <dl>
@@ -189,11 +194,6 @@
         align-items: center;
         gap: 8px;
         font-size: var(--dialog-label-font-size);
-    }
-    select {
-        width: 100%;
-        min-width: 0;
-        font-size: var(--dialog-body-font-size);
     }
     dl {
         display: grid;

@@ -1,8 +1,6 @@
 <script lang="ts">
-    import { tick } from 'svelte';
     import { measureWidth } from './measureWidth';
-    import { mountEditorPopup } from './editorPopup';
-    import Icon from '../../lib/components/Icon.svelte';
+    import SelectControl from '../../lib/components/SelectControl.svelte';
     import EditorOptionLabel from './EditorOptionLabel.svelte';
     import { optionHelp, type EditorOption } from './editorOptions';
     let {
@@ -22,12 +20,6 @@
         onchange: (value: number) => void;
         ontriggerkeydown?: (event: KeyboardEvent) => void;
     } = $props();
-    let trigger = $state<HTMLButtonElement>();
-    let popup: HTMLDivElement | undefined;
-    let open = $state(false);
-    let active = $state(0);
-    let query = '';
-    let typedAt = 0;
     let width = $state(0);
     let minimumWidth = $state(0);
     function measureLabels(node: HTMLElement) {
@@ -45,6 +37,7 @@
     const showSegments = $derived(segmented ?? (options.length <= 4 && (!width || width >= minimumWidth)));
     const measure = $derived(segmented === undefined && options.length <= 4);
     const selected = $derived(options.find((option) => option.value === value));
+    const choiceOptions = $derived(options.map((option) => ({ ...option, title: optionHelp(option) })));
     function observeChoice(node: HTMLElement, enabled: boolean) {
         let observer: ReturnType<typeof measureWidth> | undefined;
         const update = (active: boolean) => {
@@ -54,74 +47,6 @@
         update(enabled);
         return { update, destroy: () => observer?.destroy() };
     }
-    const id = $props.id();
-    function close(focus = false) {
-        open = false;
-        if (focus) trigger?.focus();
-    }
-    async function show() {
-        if (disabled) return;
-        active = Math.max(
-            0,
-            options.findIndex((option) => option.value === value),
-        );
-        open = true;
-        await tick();
-        popup?.focus();
-        scrollActive();
-    }
-    function scrollActive() {
-        popup?.querySelectorAll('[role=option]')[active]?.scrollIntoView({ block: 'nearest' });
-    }
-    function select(index: number) {
-        if (disabled || !options[index] || options[index]!.disabled) return;
-        onchange(options[index]!.value);
-        close(true);
-    }
-    function key(event: KeyboardEvent) {
-        if (event.key === 'Escape') {
-            event.preventDefault();
-            event.stopPropagation();
-            close(true);
-            return;
-        }
-        if (event.key === 'Tab') {
-            close(true);
-            return;
-        }
-        if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault();
-            select(active);
-            return;
-        }
-        if (event.key === 'ArrowDown' || event.key === 'ArrowRight') active = (active + 1) % options.length;
-        else if (event.key === 'ArrowUp' || event.key === 'ArrowLeft')
-            active = (active - 1 + options.length) % options.length;
-        else if (event.key === 'Home') active = 0;
-        else if (event.key === 'End') active = options.length - 1;
-        else if (event.key.length === 1 && !event.ctrlKey && !event.altKey && !event.metaKey) {
-            query = (Date.now() - typedAt > 700 ? '' : query) + event.key.toLowerCase();
-            typedAt = Date.now();
-            const found = options.findIndex((option) => option.label.toLowerCase().startsWith(query));
-            if (found >= 0) active = found;
-        } else return;
-        event.preventDefault();
-        void tick().then(scrollActive);
-    }
-    function mount(node: HTMLDivElement) {
-        popup = node;
-        if (!trigger) return;
-        const mounted = mountEditorPopup(node, trigger, close);
-        return {
-            destroy() {
-                mounted.destroy();
-                popup = undefined;
-            },
-        };
-    }
-    $effect(() => {
-        if (disabled) close();
-    });
 </script>
 
 <div class="choice-control" use:observeChoice={measure}>
@@ -159,61 +84,18 @@
             {/each}
         </div>
     {:else}
-        <button
-            type="button"
+        <SelectControl
             class="editor-control editor-select"
-            bind:this={trigger}
-            aria-label={label}
-            aria-haspopup="listbox"
-            aria-expanded={open}
-            aria-controls={open ? id : undefined}
+            {label}
+            {value}
+            options={choiceOptions}
+            {onchange}
+            {ontriggerkeydown}
             title={selected ? optionHelp(selected) : label}
             {disabled}
-            onclick={() => (open ? close() : void show())}
-            onkeydown={(event) => {
-                ontriggerkeydown?.(event);
-                if (event.defaultPrevented) return;
-                if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
-                    event.preventDefault();
-                    void show();
-                }
-            }}
         >
-            <EditorOptionLabel
-                label={selected?.label ?? 'Unavailable'}
-                extended={selected?.extended}
-                a5000Only={selected?.a5000Only}
-            /><Icon name="chevron" size={12} />
-        </button>
-        {#if open}
-            <div
-                {id}
-                class="editor-select-popup"
-                role="listbox"
-                aria-label={label}
-                tabindex="-1"
-                aria-activedescendant={`${id}-${active}`}
-                use:mount
-                onkeydown={key}
-            >
-                {#each options as option, index}
-                    <div
-                        id={`${id}-${index}`}
-                        role="option"
-                        tabindex="-1"
-                        aria-selected={option.value === value}
-                        aria-disabled={option.disabled || undefined}
-                        title={optionHelp(option)}
-                        class:active={active === index}
-                        onpointermove={() => (active = index)}
-                        onkeydown={key}
-                        onclick={() => select(index)}
-                    >
-                        <EditorOptionLabel {...option} />
-                    </div>
-                {/each}
-            </div>
-        {/if}
+            {#snippet renderOption(option)}<EditorOptionLabel {...option} />{/snippet}
+        </SelectControl>
     {/if}
 </div>
 

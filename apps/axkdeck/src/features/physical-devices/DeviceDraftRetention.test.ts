@@ -1,3 +1,4 @@
+import { openSelect, selectValue } from '../../test/selectControl';
 import { fireEvent, render, screen } from '@testing-library/svelte';
 import { flushSync } from 'svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -84,9 +85,10 @@ describe('device draft lifecycle', () => {
         expect(editors.documents).toHaveLength(0);
         expect(images.setStatus).toHaveBeenCalledWith(expect.stringContaining('held in memory'));
         await fireEvent.click(screen.getByRole('button', { name: 'Retained device drafts (1)' }));
-        const select = screen.getByRole('combobox', { name: 'Draft' }) as HTMLSelectElement;
-        expect(select.classList.contains('dialog-field-control')).toBe(true);
-        await fireEvent.change(select, { target: { value: select.options[1]!.value } });
+        const select = screen.getByRole('combobox', { name: 'Draft' }) as HTMLButtonElement;
+        expect(select.classList.contains('select-control')).toBe(true);
+        const popup = await openSelect(select);
+        await selectValue(select, popup.querySelectorAll<HTMLElement>('[role="option"]')[1]!.dataset.value!);
         expect((screen.getByRole('button', { name: 'Export JSON' }) as HTMLButtonElement).disabled).toBe(false);
     });
 });

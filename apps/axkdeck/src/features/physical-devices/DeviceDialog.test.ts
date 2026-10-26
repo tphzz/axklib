@@ -1,3 +1,4 @@
+import { selectValue } from '../../test/selectControl';
 import { fireEvent, render, waitFor } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import DeviceDialog from './DeviceDialog.svelte';
@@ -18,18 +19,19 @@ describe('device dialog safety controls', () => {
     it('uses the shared dark field styling for recovery selectors', () => {
         const { workflow } = fixture();
         const view = render(DeviceDialog, { workflow });
-        const selects = [...view.container.querySelectorAll('select')];
+        const selects = [...view.container.querySelectorAll('[role="combobox"]')];
         expect(selects.length).toBeGreaterThanOrEqual(2);
-        for (const select of selects) expect(select.classList.contains('dialog-field-control')).toBe(true);
+        for (const select of selects) expect(select.classList.contains('select-control')).toBe(true);
     });
 
     it('has no preselected device and exposes large carriers only for sliced layouts', async () => {
         const { workflow } = fixture();
         const view = render(DeviceDialog, { workflow });
-        expect((view.getByLabelText('Device') as HTMLSelectElement).value).toBe('');
+        expect((view.getByLabelText('Device') as HTMLButtonElement).value).toBe('');
         expect((view.getByRole('button', { name: 'Connect read-only' }) as HTMLButtonElement).disabled).toBe(true);
         expect(view.queryByRole('option', { name: /Large carrier/ })).toBeNull();
-        await fireEvent.change(view.getByLabelText('Layout'), { target: { value: 'SCSI2SD_V6' } });
+        await selectValue(view.getByLabelText('Layout'), 'SCSI2SD_V6');
+        await fireEvent.click(view.getByLabelText('Device'));
         expect(view.getByRole('option', { name: /Large carrier/ })).not.toBeNull();
     });
     it('releases an unopened connection on cancellation but blocks dismissal while busy', async () => {

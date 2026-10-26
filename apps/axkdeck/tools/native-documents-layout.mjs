@@ -1,3 +1,4 @@
+import { selectValue } from './select-control.mjs';
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -140,7 +141,7 @@ try {
                 objectRows,
             );
             await structureSearch.fill('/');
-            await selector.selectOption('source-1');
+            await selectValue(selector, 'source-1');
             const aSeries = page.getByRole('region', { name: 'Image contents', exact: true });
             await aSeries.getByRole('searchbox').waitFor();
             assert.deepEqual(
@@ -148,7 +149,7 @@ try {
                 txGeometry,
                 'Sampler headers and Search must share geometry and typography',
             );
-            await selector.selectOption('source-2');
+            await selectValue(selector, 'source-2');
             await structureSearch.waitFor();
             assert.equal(await structureSearch.inputValue(), '/', 'Structure query survives source switching');
             await structureSearch.fill('');

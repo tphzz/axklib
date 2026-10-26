@@ -52,7 +52,7 @@ window.runSampleEditorRegression = async function () {
             assert(!control.closest('.parameter-field').querySelector('.field-label .extended-parameter'), `${label}: no blanket extension marker`);
             const value = control.textContent;
             control.click(); await settle();
-            const popup = document.querySelector('.editor-select-popup');
+            const popup = document.querySelector('.select-popup');
             const options = [...popup.querySelectorAll('[role=option]')];
             assert(options.length === 13, `${label}: complete destination list`);
             for (const [index, option] of options.entries()) {
@@ -68,10 +68,10 @@ window.runSampleEditorRegression = async function () {
             }
             assert(options[first ? 6 : 2].title.includes('AIEB1'), `${label}: optional hardware explained separately`);
             for (const option of options.slice(10)) {
-                assert(option.textContent.match(/A5000/g)?.length === 1, `${label}: later effects show one A5000 label`);
+                assert(option.querySelectorAll('.extended-parameter').length === 1, `${label}: later effects show one capability marker`);
                 assert(option.title.includes('requires A5000') && !option.title.includes('select this destination under'), `${label}: A5000-only effect has no false native-group redirect`);
             }
-            popup.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+            control.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
             await settle();
         }
         measurements.push({ routingFormat: a3k ? 'a3k' : 'a4k/a5k', viewport: innerWidth });
@@ -94,8 +94,10 @@ window.runSampleEditorRegression = async function () {
         assert(icon.width >= 9 && icon.right <= node.getBoundingClientRect().right + 1, `${name}: marker fits without shrinking`);
         assert(getComputedStyle(marker).color === accentColor, `${name}: shared accent marker color`);
     };
-    const optionMarkers = () => {
-        const popup = document.querySelector('.editor-select-popup');
+    const optionMarkers = (selector = '.select-popup') => {
+        const popup = document.querySelector(selector);
+        assert(!!popup, `${selector}: option popup exists`);
+        if (!popup) return;
         assert(popup.parentElement === document.body, 'option marker styling survives the popup portal');
         const options = [...popup.querySelectorAll('[role=option]')];
         const height = options[0].getBoundingClientRect().height;
@@ -119,12 +121,12 @@ window.runSampleEditorRegression = async function () {
     choice.style.width = '120px'; await settle();
     portamento.click(); await settle();
     // Exercise truncation below the popup's preferred 200px minimum.
-    document.querySelector('.editor-select-popup').style.width = '90px'; await settle();
+    document.querySelector('.select-popup').style.width = '90px'; await settle();
     optionMarkers();
     assert([...document.querySelectorAll('.editor-option-text')].some(node => node.scrollWidth > node.clientWidth), 'narrow label truncation is exercised');
-    document.querySelector('.editor-select-popup').dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
+    portamento.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
     await settle(); optionMarkers();
-    document.querySelector('.editor-select-popup').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    portamento.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     choice.style.width = savedChoiceWidth;
     await click('[role=tab]', 'EG');
     await click('.sample-pages button', 'Amplitude');
@@ -175,7 +177,7 @@ window.runSampleEditorRegression = async function () {
     const functionInput = document.querySelector('input[aria-label="Control 1 Function"]');
     functionInput.value = 'Portamento'; functionInput.dispatchEvent(new Event('input', { bubbles: true })); await settle();
     assert(document.querySelectorAll('.editor-select-popup [role=option]').length === 1, 'autocomplete searches labels without marker text');
-    optionMarkers();
+    optionMarkers('.editor-select-popup');
     functionInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     await settle();
     assert(!document.querySelector('.editor-select-popup'), 'Escape still dismisses autocomplete');
@@ -184,10 +186,12 @@ window.runSampleEditorRegression = async function () {
     const source = native ? 'a3k' : 'a4k/a5k', target = native ? 'a4k/a5k' : 'a3k';
     const input = document.querySelector('input[aria-label="Coarse tune"]');
     input.value = '1'; input.dispatchEvent(new Event('input', { bubbles: true })); await settle();
+    const dirtyWrites = document.querySelector('[aria-label="Write count"]').textContent;
     await click(`[aria-label="Convert to ${target} sample format"]`);
     let modal = document.querySelector('[role=dialog]');
-    assert(modal.textContent.includes('Save or discard'), 'conversion requires saved draft');
-    assert(modal.querySelector('.primary-button').disabled, 'dirty conversion cannot submit');
+    assert(modal.querySelector('h2')?.textContent === 'Unsaved edits', 'conversion requires resolving the dirty draft');
+    assert(!document.querySelector('.format-dialog'), 'dirty conversion cannot reach the write confirmation');
+    assert(document.querySelector('[aria-label="Write count"]').textContent === dirtyWrites, 'dirty conversion did not write');
     await click('.dialog-footer button', 'Cancel');
     await click('.device-editor button', 'Save');
     assert(document.querySelector('[aria-label="Inspect Sample A"] .format-badge').textContent === source, 'ordinary save retains format');

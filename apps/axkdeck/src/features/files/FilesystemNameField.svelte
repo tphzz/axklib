@@ -24,7 +24,7 @@
         immediate?: boolean;
         error?: string | null;
         title?: string;
-        initialFocus?: 'select' | 'caret';
+        initialFocus?: 'select' | 'caret' | 'end';
         contextKey?: string;
     } = $props();
     const id = $props.id();

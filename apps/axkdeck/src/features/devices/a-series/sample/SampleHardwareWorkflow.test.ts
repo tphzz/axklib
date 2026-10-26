@@ -16,7 +16,7 @@ async function choose(scope: Queries, label: RegExp, option: string) {
         await fireEvent.click(within(group).getByRole('button', { name: new RegExp(`: ${option}$`, 'i') }));
         return;
     }
-    await fireEvent.click(scope.getByRole('button', { name: label }));
+    await fireEvent.click(scope.getByRole('combobox', { name: label }));
     await fireEvent.click(within(document.body).getByRole('option', { name: option }));
 }
 
@@ -27,7 +27,7 @@ describe('Hardware-aligned Sample editor workflow', () => {
         const fields = within(waveform);
         const mode =
             fields.queryByRole('group', { name: /^loop mode$/i }) ??
-            fields.getByRole('button', { name: /^loop mode$/i });
+            fields.getByRole('combobox', { name: /^loop mode$/i });
         const loopEnd = fields.getByRole('spinbutton', { name: 'Loop end' });
         expect(loopEnd.compareDocumentPosition(mode) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
         const transport = within(view.container.querySelector('.sample-transport')! as HTMLElement);

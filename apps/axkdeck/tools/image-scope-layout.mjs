@@ -1,3 +1,4 @@
+import { selectValue, openSelect, controlValue } from './select-control.mjs';
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -38,9 +39,11 @@ try {
         const selector = page.getByRole('combobox', { name: 'Image', exact: true });
         await selector.waitFor();
         await page.waitForFunction(() => !document.querySelector('[aria-label="Image"]').disabled);
-        assert.deepEqual(await selector.locator('option').allTextContents(), [
+        const options = await openSelect(selector);
+        assert.deepEqual((await options.getByRole('option').allTextContents()).map(text => text.trim()), [
             'HD50_partition-test.hds', 'single-cycle-waveforms.hds', 'tx16w-1.img', 'tx16w-2.img', 'plain.img',
         ]);
+        await page.keyboard.press('Escape');
         assert.equal(await page.locator('.source-context').count(), 0);
         assert.equal(await page.getByText('Files only', { exact: true }).count(), 0);
         assert.equal(await page.getByRole('combobox', { name: 'Native document' }).count(), 0);
@@ -51,7 +54,7 @@ try {
         const rows = page.getByRole('treegrid', { name: 'Filesystem entries' });
         const search = page.getByRole('searchbox', { name: 'Search filesystem' });
         const select = async (id) => {
-            await selector.selectOption(id);
+            await selectValue(selector, id);
             await page.waitForFunction((value) => {
                 const control = document.querySelector('[aria-label="Image"]');
                 return control?.value === value && !control.disabled;
@@ -62,6 +65,7 @@ try {
         await search.fill('File 1');
         await rows.locator('small[title="/File 1"]').waitFor();
         await selector.focus();
+        await page.keyboard.press('ArrowDown');
         await page.keyboard.press('ArrowDown');
         await page.keyboard.press('Enter');
         await page.waitForFunction(() => document.querySelector('[aria-label="Image"]')?.value === 'source-2');
@@ -92,7 +96,8 @@ try {
         await page.screenshot({ path: resolve(output, `files-${width}-${scale}.png`) });
         await select('source-3');
         await page.getByRole('button', { name: 'Waves', exact: true }).click();
-        await page.getByRole('button', { name: 'Wave 20', exact: true }).click();
+        // The row's center is an independent waveform-seek button.
+        await page.getByRole('button', { name: 'Inspect Wave 20', exact: true }).press('Enter');
         await page.getByRole('searchbox', { name: 'Search Waves' }).fill('Wave 2');
         await select('source-4');
         assert.equal(await page.getByRole('searchbox', { name: 'Search Waves' }).inputValue(), 'Wave 2');
@@ -100,14 +105,14 @@ try {
         if (width / scale > 850) {
             await page.getByRole('button', { name: 'To Files', exact: true }).click();
             await rows.locator('[data-file-entry="source-4:file"][aria-selected="true"]').waitFor();
-            assert.equal(await selector.inputValue(), 'source-4');
+            assert.equal(await controlValue(selector), 'source-4');
         }
         await select('source-5');
         await rows.getByText('File 5', { exact: true }).waitFor();
         assert.equal(await page.getByRole('button', { name: 'Device', exact: true }).isDisabled(), true);
         for (const label of ['Decline switch', 'Fail switch']) {
             await page.getByRole('checkbox', { name: label }).check();
-            await selector.selectOption('source-2');
+            await selectValue(selector, 'source-2');
             await page.waitForFunction(() => {
                 const control = document.querySelector('[aria-label="Image"]');
                 return control?.value === 'source-5' && !control.disabled;

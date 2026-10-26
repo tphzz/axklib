@@ -50,11 +50,11 @@ async function preview(empty = false, unavailable = false) {
 describe('bank preview dropdown', () => {
     it('uses the shared non-searchable dropdown and keeps member IDs out of display indices', async () => {
         const { view, bank } = await preview();
-        const trigger = view.getByRole('button', { name: 'Preview sample' });
+        const trigger = view.getByRole('combobox', { name: 'Preview sample' });
         expect(trigger.classList.contains('editor-select')).toBe(true);
         expect(trigger.textContent?.trim()).toBe('PB BRASS A');
         expect(trigger.title).toBe('PB BRASS A');
-        expect(view.queryByRole('combobox')).toBeNull();
+        expect(view.queryByRole('combobox')?.getAttribute('aria-autocomplete')).toBeNull();
         await fireEvent.click(trigger);
         expect(view.getByRole('option', { name: 'PB BRASS A' }).getAttribute('aria-selected')).toBe('true');
         await fireEvent.click(view.getByRole('option', { name: 'DNBS drum loop 1' }));
@@ -68,16 +68,16 @@ describe('bank preview dropdown', () => {
     });
     it('retains keyboard selection, Escape and outside dismissal without changing a draft', async () => {
         const { view, bank } = await preview();
-        const trigger = view.getByRole('button', { name: 'Preview sample' });
+        const trigger = view.getByRole('combobox', { name: 'Preview sample' });
         await fireEvent.keyDown(trigger, { key: 'ArrowDown' });
         let popup = view.getByRole('listbox');
-        await fireEvent.keyDown(popup, { key: 'ArrowDown' });
-        await fireEvent.keyDown(popup, { key: 'Enter' });
+        await fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+        await fireEvent.keyDown(trigger, { key: 'Enter' });
         expect(bank.previewMemberId).toBe('b');
         await fireEvent.click(trigger);
         popup = view.getByRole('listbox');
-        await fireEvent.keyDown(popup, { key: 'Home' });
-        await fireEvent.keyDown(popup, { key: 'Escape' });
+        await fireEvent.keyDown(trigger, { key: 'Home' });
+        await fireEvent.keyDown(trigger, { key: 'Escape' });
         expect(bank.previewMemberId).toBe('b');
         expect(view.queryByRole('listbox')).toBeNull();
         expect(document.activeElement).toBe(trigger);
@@ -88,7 +88,7 @@ describe('bank preview dropdown', () => {
     });
     it('shows a disabled empty-bank label and never opens a popup', async () => {
         const { view, bank } = await preview(true);
-        const trigger = view.getByRole('button', { name: 'Preview sample' });
+        const trigger = view.getByRole('combobox', { name: 'Preview sample' });
         expect(trigger.textContent?.trim()).toBe('No samples');
         expect(trigger.matches(':disabled')).toBe(true);
         expect(view.getByRole('button', { name: 'Previous preview sample' }).matches(':disabled')).toBe(true);
@@ -99,7 +99,7 @@ describe('bank preview dropdown', () => {
     });
     it('keeps unavailable selection and unresolved members visible but unselectable', async () => {
         const { view, bank, transport } = await preview(false, true);
-        const trigger = view.getByRole('button', { name: 'Preview sample' });
+        const trigger = view.getByRole('combobox', { name: 'Preview sample' });
         expect(trigger.textContent?.trim()).toBe('Unresolved member');
         await fireEvent.click(trigger);
         for (const name of ['Unresolved member', 'Missing sample (unresolved)', 'Unconfirmed sample (unresolved)']) {

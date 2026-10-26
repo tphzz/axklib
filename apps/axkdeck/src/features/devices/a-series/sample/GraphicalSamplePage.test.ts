@@ -166,7 +166,7 @@ describe('graphical Sample controls', () => {
     });
     it('uses compact menus for random filter response modes and preserves numeric validation', async () => {
         const { document, draft, view } = setup('filter-scaling');
-        expect(view.getByRole('button', { name: 'Velocity to cutoff mode' }).getAttribute('aria-haspopup')).toBe(
+        expect(view.getByRole('combobox', { name: 'Velocity to cutoff mode' }).getAttribute('aria-haspopup')).toBe(
             'listbox',
         );
         const input = view.getByRole('spinbutton', { name: 'Velocity to cutoff' });

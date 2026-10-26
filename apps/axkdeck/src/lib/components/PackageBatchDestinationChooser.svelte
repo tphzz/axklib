@@ -6,6 +6,7 @@
     } from '../../features/import/packageDestinations';
     import type { PackageBatchDestinationStrategy } from '../../features/import/packageBatchTypes';
     import ImportDestinationChooser from './ImportDestinationChooser.svelte';
+    import SelectControl from './SelectControl.svelte';
 
     interface Props {
         strategy: PackageBatchDestinationStrategy;
@@ -75,16 +76,14 @@
     {:else}
         <label class="partition-field">
             <span>Partition</span>
-            <select
-                class="dialog-field-control"
-                value={partitionIndex ?? ''}
+            <SelectControl
+                label="Partition"
+                value={partitionIndex ?? undefined}
+                placeholder="Select partition"
+                options={partitions.map((option) => ({ value: option.partitionIndex, label: option.name }))}
                 disabled={disabled || partitions.length === 0}
-                onchange={(event) => onpartition(Number(event.currentTarget.value))}
-            >
-                {#each partitions as option (option.partitionIndex)}
-                    <option value={option.partitionIndex}>{option.name}</option>
-                {/each}
-            </select>
+                onchange={onpartition}
+            />
         </label>
         <small>Each selected package creates a volume using its placement hint and editable name below.</small>
     {/if}

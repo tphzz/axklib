@@ -34,6 +34,36 @@ const object: SamplerObject = {
 };
 
 describe('ObjectRenameDialog', () => {
+    it.each(['program', 'sequence', 'sample-bank', 'sample', 'wave-data'] as const)(
+        'focuses the end caret after populating a %s name',
+        async (kind) => {
+            render(ObjectRenameDialog, {
+                props: {
+                    target:
+                        kind === 'program'
+                            ? { kind, object, name: 'Piano', programNumber: 1 }
+                            : { kind, object, name: 'Piano' },
+                    busy: false,
+                    phase: 'idle',
+                    canDismiss: true,
+                    recovery: null,
+                    onrecover: vi.fn(),
+                    error: '',
+                    oncancel: vi.fn(),
+                    onsubmit: vi.fn(),
+                },
+            });
+            const input = screen.getByRole('textbox') as HTMLInputElement;
+            await Promise.resolve();
+            expect(input.value).toBe('Piano');
+            expect(document.activeElement).toBe(input);
+            expect(input.selectionStart).toBe(5);
+            expect(input.selectionEnd).toBe(5);
+            input.setRangeText('X', input.selectionStart!, input.selectionEnd!, 'end');
+            await fireEvent.input(input);
+            expect(input.value).toBe('PianoX');
+        },
+    );
     it.each(['refresh-failed', 'unconfirmed'] as const)(
         'offers recovery instead of another rename after %s',
         async (phase) => {
