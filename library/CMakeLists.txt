@@ -181,6 +181,7 @@ add_library(
   src/sfs_files_publication.cpp
   src/sfs_files_state.cpp
   src/sfs_geometry.cpp
+  src/sfs_layout.cpp
   src/sfs_repair.cpp
   src/system_file.cpp
   src/system_file_patch.cpp
@@ -379,6 +380,7 @@ add_library(
   src/sfs_write_codec.cpp
   src/writer.cpp
   src/writer_image.cpp
+  src/writer_sfs_initialization.cpp
   src/writer_manifest_template.cpp
   src/writer_profiles.cpp
 )
@@ -754,6 +756,7 @@ if(BUILD_TESTING)
     tests/native_contract_test.cpp
     tests/version_test.cpp
     tests/writer_test.cpp
+    tests/hds_initialization_test.cpp
     tests/hds_capacity_test.cpp
     tests/partition_name_test.cpp
     tests/fresh_object_graph_test.cpp

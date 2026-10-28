@@ -56,6 +56,43 @@ describe('device status reconciliation', () => {
         await expect(service.operations()).rejects.toThrow('Offline');
         expect(deviceWrites.pending()).toHaveLength(1);
     });
+    it('resolves terminal format jobs instead of clearing their durable recovery ownership', async () => {
+        const { service, invoke, request, deviceWrites } = setup();
+        deviceWrites.reconcile('known-request');
+        deviceWrites.beginTarget('Carrier', 'devices.sfs.format', 'format-request');
+        deviceWrites.acknowledge('format-request', 'format-job');
+        const operation = {
+            operationId: 'format-request',
+            kind: 'FORMAT',
+            state: 'RECOVERY_REQUIRED',
+            model: 'Test',
+            serial: '1',
+            targetLabel: 'Disk',
+            targetSize: 1024,
+        };
+        invoke.mockImplementation(async (name) =>
+            name === 'devices.resolve' ? operation : { operations: [operation] },
+        );
+        request.mockResolvedValue({ jobId: 'format-job', state: 'FAILED' });
+        expect((await service.operations()).uncertain).toHaveLength(1);
+        expect(invoke).toHaveBeenCalledWith('devices.resolve', { operationId: 'format-request' });
+        operation.state = 'ROLLED_BACK';
+        expect((await service.operations()).uncertain).toHaveLength(0);
+    });
+    it('does not clear a format request using a mismatched terminal operation response', async () => {
+        const { service, invoke, request, deviceWrites } = setup();
+        deviceWrites.reconcile('known-request');
+        deviceWrites.beginTarget('Carrier', 'devices.sfs.format', 'format-request');
+        deviceWrites.acknowledge('format-request', 'format-job');
+        request.mockResolvedValue({ jobId: 'format-job', state: 'COMPLETED' });
+        invoke.mockImplementation(async (name) =>
+            name === 'devices.resolve'
+                ? ({ operationId: 'other-request', kind: 'FORMAT', state: 'COMMITTED' } as never)
+                : { operations: [] },
+        );
+        await expect(service.operations()).rejects.toThrow('identity');
+        expect(deviceWrites.pending()).toHaveLength(1);
+    });
 });
 
 describe('device XML inspection', () => {

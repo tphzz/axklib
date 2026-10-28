@@ -6,6 +6,6 @@
 #include "axklib/application/operation_registry.hpp"
 
 namespace axk::app {
-const std::array<OperationDescriptor, 9U> &device_descriptors();
+const std::array<OperationDescriptor, 12U> &device_descriptors();
 Result<void> bind_device_operations(OperationRegistry &registry, DeviceSessionManager &devices);
 } // namespace axk::app

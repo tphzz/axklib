@@ -132,7 +132,8 @@ axk::app::Result<void> axk::app::AlterationJournalStore::apply(
     const std::shared_ptr<MutationTarget> &target, std::uint64_t image_size_bytes,
     std::span<const AlterationJournalPatch> patches, const CancellationToken &cancellation,
     const std::function<Result<void>()> &validate, const std::function<void()> &on_rollback_verified,
-    const std::function<Result<void>(std::shared_ptr<const RandomAccessReader>)> &admit_frozen) {
+    const std::function<Result<void>(std::shared_ptr<const RandomAccessReader>)> &admit_frozen,
+    const std::function<Result<void>()> &admit_forward) {
     if (!storage_ready())
         return std::unexpected(journal_error("alteration journal storage is not ready"));
     if (!target || target->size() != image_size_bytes)
@@ -188,15 +189,18 @@ axk::app::Result<void> axk::app::AlterationJournalStore::apply(
         journal_guard.resolved = true;
         return compared;
     }
+    bool forward_attempted{};
     const auto rollback = [&]() -> Result<void> {
         return journal_io::restore_original_bytes(*target, path, *journal, maximum_patch_write_bytes_, [&] {
             return interruption_hook_ && interruption_hook_("after-rollback-flush", 0U);
         });
     };
     const auto rollback_and_remove = [&](bool remove_marker) -> Result<void> {
-        if (auto restored = rollback(); !restored) {
-            quarantine();
-            return restored;
+        if (forward_attempted) {
+            if (auto restored = rollback(); !restored) {
+                quarantine();
+                return restored;
+            }
         }
         if (remove_marker) {
             std::error_code error;
@@ -212,9 +216,9 @@ axk::app::Result<void> axk::app::AlterationJournalStore::apply(
                 return std::unexpected(journal_error("alteration commit marker cannot be inspected", true));
             }
         }
-        if (on_rollback_verified)
+        if (forward_attempted && on_rollback_verified)
             on_rollback_verified();
-        if (retain_completed_journal_) {
+        if (forward_attempted && retain_completed_journal_) {
             journal_guard.resolved = true;
             return {};
         }
@@ -281,6 +285,21 @@ axk::app::Result<void> axk::app::AlterationJournalStore::apply(
                     return recovered;
                 return std::unexpected(journal_error(read.error().message));
             }
+            if (!forward_attempted) {
+                auto admitted = admit_forward ? admit_forward() : Result<void>{};
+                if (admitted && cancellation.is_cancelled())
+                    admitted =
+                        std::unexpected(Error{"operation_cancelled", "Write cancelled before first forward admission"});
+                if (!admitted) {
+                    frozen = {};
+                    if (auto discarded = rollback_and_remove(false); !discarded)
+                        return discarded;
+                    return admitted;
+                }
+            }
+            // A failed transport write may already have changed media. From
+            // this point rollback authority must not depend on forward consent.
+            forward_attempted = true;
             if (auto written = target->write_exact_at(patch.target_offset + replacement_offset, chunk); !written) {
                 frozen = {};
                 if (auto recovered = rollback_and_remove(false); !recovered)

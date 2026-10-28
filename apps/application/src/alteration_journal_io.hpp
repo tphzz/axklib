@@ -59,6 +59,7 @@ struct Publication {
 
 [[nodiscard]] Result<void> restore_original_bytes(MutationTarget &target, const std::filesystem::path &journal_path,
                                                   const Inspection &journal, std::size_t chunk_bytes,
-                                                  const std::function<bool()> &after_flush = {});
+                                                  const std::function<bool()> &after_flush = {},
+                                                  const std::function<Result<void>()> &admit_restore = {});
 
 } // namespace axk::app::journal_io

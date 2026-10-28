@@ -40,6 +40,7 @@
     import ExperimentalWarningDialog from '../../../lib/components/ExperimentalWarningDialog.svelte';
     import SessionDialogs from '../../image-session/SessionDialogs.svelte';
     import { provideDevices } from '../../physical-devices/workflow.svelte';
+    import { CreateWorkflow } from '../../create/workflow.svelte';
     import DeviceDialog from '../../physical-devices/DeviceDialog.svelte';
     import WorkspaceGuard from '../../../lib/components/WorkspaceGuard.svelte';
     import { createCapacityConnection } from './capacityConnection';
@@ -81,6 +82,7 @@
     const packagePickerHistory = new PackagePickerHistory();
     const imageSessionWorkflow = new ImageSessionWorkflow(transport, pickerController);
     const physicalDevices = provideDevices(transport.devices, imageSessionWorkflow);
+    const createWorkflow = new CreateWorkflow(transport.devices, imageSessionWorkflow);
     const fileBindings = createFilesystemBindings({
         imageFormat: () => imageSessionWorkflow.imageFormat,
         transport,
@@ -406,7 +408,7 @@
                 .then(() => {
                     if (
                         physicalDevices.operations.some((operation) =>
-                            ['prepared', 'recovery_required'].includes(operation.state),
+                            ['PREPARED', 'RECOVERY_REQUIRED'].includes(operation.state),
                         ) ||
                         physicalDevices.uncertain.length
                     )
@@ -433,6 +435,7 @@
     const appDialogsOpen = $derived(
         hasOpenAppDialog({
             pickerRequest,
+            create: createWorkflow,
             imageSession: imageSessionWorkflow,
             connectionSettings,
             mutation: mutationWorkflow,
@@ -551,7 +554,13 @@
     sequenceCancelled={() => directComputerWorkflow.cancelMidiSelection(sequenceImportWorkflow)}
 />
 
-<EditorBoundary {transport} imageSession={imageSessionWorkflow} audition={auditionWorkflow} selection={editorSelection}>
+<EditorBoundary
+    {transport}
+    imageSession={imageSessionWorkflow}
+    audition={auditionWorkflow}
+    selection={editorSelection}
+    operationBlocked={() => createWorkflow.locked || createWorkflow.imageBusy}
+>
     <WorkspaceShell
         bind:mode={workspaceMode}
         revision={imageSessionWorkflow.revision}
@@ -600,7 +609,7 @@
         {...sessionCapabilities(imageSessionWorkflow)}
         openConnectionSettings={() => void openConnectionSettings()}
         openImage={() => void imageSessionWorkflow.chooseAndOpen()}
-        createImage={() => void imageSessionWorkflow.chooseHardDiskDirectory()}
+        createImage={() => void createWorkflow.show()}
         closeImage={() => void imageSessionWorkflow.close().catch(() => undefined)}
         showImageIntegrity={() => void imageSessionWorkflow.showIntegrity()}
         manageLocations={() => (workspaceManagerOpen = true)}
@@ -655,9 +664,11 @@
             removeCompanion={(source) => imageSessionWorkflow.removeCompanionDiskSource(source)}
             attachCompanions={(selection) => void imageSessionWorkflow.attachCompanionDisks(selection)}
             cancelCompanions={() => imageSessionWorkflow.cancelCompanionDisks()}
-            hardDiskDirectory={imageSessionWorkflow.hardDiskDirectory}
+            create={createWorkflow}
+            createDirectory={imageSessionWorkflow.hardDiskDirectory}
+            chooseCreateDirectory={() => void imageSessionWorkflow.chooseHardDiskDirectory()}
             finishHardDisk={(file) => imageSessionWorkflow.finishHardDiskCreation(file)}
-            cancelHardDisk={() => imageSessionWorkflow.cancelHardDiskCreation()}
+            openDeviceRecovery={() => void physicalDevices?.show()}
             {connectionSettings}
             saveRemoteConnection={(input) => connectionActions.saveRemote(input)}
             switchToLocalConnection={() => connectionActions.useLocal()}

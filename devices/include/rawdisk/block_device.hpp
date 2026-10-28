@@ -27,8 +27,9 @@ namespace rawdisk {
 
 template <class T> using Result = std::expected<T, std::error_code>;
 
-enum class Access { ReadOnly, ReadWrite };
+enum class Access { ReadOnly, ReadWrite, ReadWriteUnmounted };
 class AuthorizationSession;
+struct DeviceInfo;
 
 // Buffer alignment that satisfies unbuffered/direct I/O on all three platforms.
 // Unaligned buffers are accepted everywhere; they just cost an extra copy.
@@ -59,6 +60,9 @@ class BlockDevice {
     // Fresh identity check on this opened device, without reopening it or listing disks.
     // Backends without this capability fail closed; file images are not USB bindings.
     Result<void> verify_binding() noexcept;
+    // Verifies a retained native claim that prevents mounts of this whole disk.
+    // Ordinary file handles and unsupported backends fail closed.
+    Result<void> verify_non_dismounting_claim(const DeviceInfo &expected) noexcept;
 
   protected:
     BlockDevice() = default;
@@ -68,6 +72,7 @@ class BlockDevice {
     virtual Result<void> write_raw(std::uint64_t offset, std::span<const std::byte> in) = 0;
     virtual Result<void> flush_raw() = 0;
     virtual Result<void> verify_binding_raw();
+    virtual Result<void> verify_non_dismounting_claim_raw(const DeviceInfo &expected);
     // Called once per write() with the whole validated range, before anything is written,
     // so a device can refuse a range atomically instead of failing halfway through.
     virtual Result<void> check_write(std::uint64_t /*lba*/, std::uint64_t /*sectors*/) { return {}; }

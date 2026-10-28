@@ -176,8 +176,8 @@ Result<PosixFd> linux_authorization_exchange(const std::string &path, Access acc
         return fail(std::make_error_code(std::errc::not_enough_memory));
     dbus_message_set_allow_interactive_authorization(open.get(), true);
     dbus_message_iter_init_append(open.get(), &args);
-    const char *mode = access == Access::ReadWrite ? "rw" : "r";
-    const dbus_int32_t flags = O_DIRECT | O_CLOEXEC | O_NOCTTY | (access == Access::ReadWrite ? O_EXCL : 0);
+    const char *mode = access != Access::ReadOnly ? "rw" : "r";
+    const dbus_int32_t flags = O_DIRECT | O_CLOEXEC | O_NOCTTY | (access != Access::ReadOnly ? O_EXCL : 0);
     if (!dbus_message_iter_append_basic(&args, DBUS_TYPE_STRING, &mode) ||
         !dictionary(args, "flags", DBUS_TYPE_INT32, &flags))
         return fail(std::make_error_code(std::errc::not_enough_memory));

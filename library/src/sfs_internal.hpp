@@ -18,8 +18,8 @@ bool begins_with(std::span<const std::byte> bytes, std::string_view value);
 Error partition_error(ErrorCode code, std::string message, PartitionIndex index, std::uint64_t offset = 0);
 Result<Superblock> parse_superblock(std::span<const std::byte> bytes);
 Result<detail::SfsAllocationBitmapLayout> read_partition_geometry(const RandomAccessReader &image, Partition &partition,
-                                                                  std::uint32_t sector_size,
-                                                                  const OpenOptions &options);
+                                                                  std::uint32_t sector_size, const OpenOptions &options,
+                                                                  bool require_readable_backup = false);
 Result<std::vector<std::byte>> read_logical_prefix(const RandomAccessReader &image, const Partition &partition,
                                                    std::uint32_t sector_size, const IndexRecord &record,
                                                    std::size_t limit, const OpenOptions &options);

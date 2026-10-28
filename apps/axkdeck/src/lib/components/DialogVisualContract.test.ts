@@ -19,7 +19,7 @@ const checkboxDialogs = [
 ];
 const segmentedControls = [
     'src/lib/components/AssignSampleBankDialog.svelte',
-    'src/lib/components/CreateHardDiskImageDialog.svelte',
+    'src/lib/components/SfsPartitionControls.svelte',
     'src/lib/components/ImportDestinationChooser.svelte',
     'src/lib/components/PackageBatchDestinationChooser.svelte',
     'src/lib/components/SfzExportDialog.svelte',

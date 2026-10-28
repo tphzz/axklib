@@ -491,6 +491,27 @@ TEST(HdsCreationProfiles, PlanCanonicalEmptyPartitionsThroughTheRegularWriterPla
     EXPECT_FALSE(axk::plan_hds_creation({static_cast<axk::HdsCreationProfileId>(255U), 1U}));
 }
 
+TEST(HdsCreationProfiles, ArbitraryCapacitiesUseTheSameCompleteOptionsPolicy) {
+    for (const auto &profile : axk::hds_creation_profiles()) {
+        const auto options = axk::hds_creation_partition_options(profile.size_bytes);
+        ASSERT_TRUE(options);
+        ASSERT_EQ(options->size(), profile.partition_options.size());
+        for (std::size_t index = 0; index < options->size(); ++index) {
+            EXPECT_EQ((*options)[index].partition_count, profile.partition_options[index].partition_count);
+            EXPECT_EQ((*options)[index].unused_tail_sectors, profile.partition_options[index].unused_tail_sectors);
+        }
+        EXPECT_EQ(options->front().partition_count, profile.default_partition_count);
+    }
+    const auto odd_capacity = axk::hds_creation_partition_options(3'000'000'000ULL / 512U * 512U);
+    ASSERT_TRUE(odd_capacity);
+    ASSERT_FALSE(odd_capacity->empty());
+    EXPECT_EQ(odd_capacity->front().partition_count, 3U);
+    EXPECT_EQ(odd_capacity->back().partition_count, 8U);
+    EXPECT_FALSE(axk::hds_creation_partition_options(0U));
+    EXPECT_FALSE(axk::hds_creation_partition_options(1'048'577U));
+    EXPECT_FALSE(axk::hds_creation_partition_options(axk::maximum_hds_size + 512U));
+}
+
 TEST(AudioImport, PreservesNativePcm16AndChoosesOnlyHardwareRates) {
     axk::Waveform source;
     source.format = {1, 2, 48000};

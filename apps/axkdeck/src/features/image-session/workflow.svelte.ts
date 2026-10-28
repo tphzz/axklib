@@ -344,6 +344,7 @@ export class ImageSessionWorkflow {
     async chooseHardDiskDirectory(): Promise<void> {
         if (this.transport.storageMode !== 'server') return;
         const selection = await this.picker.chooseLocation('directory', 'Choose image location', [], '', {
+            parentDialog: 'create',
             initialDirectory: this.lastImageDirectory,
             ondirectorychange: (directory) => (this.lastImageDirectory = directory),
         });
@@ -353,10 +354,6 @@ export class ImageSessionWorkflow {
     finishHardDiskCreation(file: FileLocation): void {
         this.hardDiskDirectory = null;
         void this.open([file]);
-    }
-
-    cancelHardDiskCreation(): void {
-        this.hardDiskDirectory = null;
     }
 
     requestCompanionDisks(retry: CompanionRetry | null = null): void {

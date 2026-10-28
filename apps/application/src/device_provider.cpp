@@ -16,6 +16,7 @@
 #if defined(AXK_BUILD_DEVICES)
 #include "device_candidates.hpp"
 #include "device_errors.hpp"
+#include "device_native_safety.hpp"
 #include "rawdisk/block_device.hpp"
 #include "rawdisk/ownership.hpp"
 #include "rawdisk/scsi2sd/v6.hpp"
@@ -68,6 +69,42 @@ class NativeTransport final : public DeviceTransport {
             return std::unexpected(native_error(opened.error()));
         }
         device_ = std::move(*opened);
+        return verify_locked();
+    }
+    bool has_write_handle() const override {
+        const std::scoped_lock lock{mutex_};
+        return device_ && device_->writable();
+    }
+    Result<DeviceWriteSafety> inspect_write_safety() const override {
+        const std::scoped_lock lock{mutex_};
+        if (auto checked = verify_locked(); !checked)
+            return std::unexpected(checked.error());
+        return device_detail::native_write_safety(info_, initialization_claim_ ? device_.get() : nullptr);
+    }
+    Result<void> authorize_initialization(const DeviceWriteSafety &expected) override {
+        const std::scoped_lock lock{mutex_};
+        if (!device_ || device_->writable() || initialization_claim_)
+            return std::unexpected(
+                Error{"device_format_claim_required", "Formatting requires a fresh read-only connection"});
+        auto inspected = device_detail::native_write_safety(info_);
+        if (!inspected || !inspected->complete || !inspected->non_dismounting_claim_supported ||
+            !inspected->mounted.empty() || inspected->membership != expected.membership)
+            return std::unexpected(Error{"device_busy", "Device safety state changed or prevents formatting"});
+        device_.reset();
+        auto opened = rawdisk::open_device(info_, rawdisk::Access::ReadWriteUnmounted, authorization_);
+        if (!opened) {
+            invalidated_ = true;
+            return std::unexpected(native_error(opened.error()));
+        }
+        device_ = std::move(*opened);
+        initialization_claim_ = expected.membership;
+        return verify_locked();
+    }
+    Result<void> verify_initialization_claim() const override {
+        const std::scoped_lock lock{mutex_};
+        if (!initialization_claim_ || !device_ || !device_->writable())
+            return std::unexpected(
+                Error{"device_format_claim_required", "No non-dismounting initialization claim is held"});
         return verify_locked();
     }
     Result<void> verify_read_bound() const override {
@@ -166,6 +203,14 @@ class NativeTransport final : public DeviceTransport {
             invalidated_ = true;
             return std::unexpected(Error{"device_changed", "device connection identity changed; select it again"});
         }
+        if (initialization_claim_) {
+            auto safety = device_detail::native_write_safety(info_, device_.get());
+            if (!safety || !safety->complete || !safety->non_dismounting_claim_supported || !safety->mounted.empty() ||
+                safety->membership != *initialization_claim_) {
+                invalidated_ = true;
+                return std::unexpected(Error{"device_changed", "The non-dismounting format claim is no longer valid"});
+            }
+        }
         return verify_layout_locked();
     }
     Result<void> verify_layout_locked() const {
@@ -191,6 +236,7 @@ class NativeTransport final : public DeviceTransport {
     std::map<std::uint64_t, std::vector<std::byte>> layout_guards_;
     mutable std::mutex mutex_;
     mutable bool invalidated_{};
+    std::optional<std::string> initialization_claim_;
 };
 
 class NativeProvider final : public DeviceProvider {
@@ -201,7 +247,16 @@ class NativeProvider final : public DeviceProvider {
         if (!devices)
             return std::unexpected(native_error(devices.error()));
         const std::scoped_lock lock{mutex_};
-        return device_detail::refresh_candidates(candidates_, *devices, [] { return secure_random_hex(16U); });
+        auto result = device_detail::refresh_candidates(candidates_, *devices, [] { return secure_random_hex(16U); });
+        if (!result)
+            return result;
+        for (auto &candidate : *result) {
+            const auto &info = candidates_.at(candidate.id);
+            const auto presentation = rawdisk::describe_usb_device(info);
+            candidate.identity =
+                device_detail::identity_details(info, presentation ? *presentation : rawdisk::DevicePresentation{});
+        }
+        return result;
     }
     Result<ConnectedDevice> connect(std::string_view candidate_id, std::string_view layout,
                                     std::string_view xml) override {
@@ -251,9 +306,8 @@ class NativeProvider final : public DeviceProvider {
                             Error{"device_layout_required", "select the stored SCSI2SD layout for this carrier"});
                 }
             }
-            if (info.size_bytes <= maximum_sampler_device_bytes)
-                targets.push_back(
-                    {"disk", info.model, 0U, info.size_bytes, info.sector_size, info.sector_size != 512U, {}});
+            targets.push_back(
+                {"disk", info.model, 0U, info.size_bytes, info.sector_size, info.sector_size != 512U, {}});
         } else {
             rawdisk::VolumeSet volumes;
             std::vector<rawdisk::scsi2sd::Target> configured_targets;
@@ -297,7 +351,7 @@ class NativeProvider final : public DeviceProvider {
             }
             for (const auto &volume : volumes.volumes) {
                 const auto bytes = volume.sector_count * volume.sector_size;
-                if (!volume.usable || bytes == 0U || bytes > maximum_sampler_device_bytes)
+                if (!volume.usable || bytes == 0U)
                     continue;
                 DeviceTargetDescription target{volume.id,
                                                volume.label,
@@ -337,12 +391,14 @@ class NativeProvider final : public DeviceProvider {
             }
         }
         if (targets.empty())
-            return std::unexpected(Error{"device_targets_unavailable", "no eligible targets at or below 9 GB"});
-        return ConnectedDevice{std::make_shared<NativeTransport>(info, std::move(*lease), authorization_,
-                                                                 std::move(*opened), std::move(protected_ranges),
-                                                                 std::move(layout_guards)),
-                               {std::string{candidate_id}, info.model, info.serial, info.size_bytes, info.sector_size},
-                               std::move(targets)};
+            return std::unexpected(Error{"device_targets_unavailable", "no structurally eligible device targets"});
+        const auto presentation = rawdisk::describe_usb_device(info);
+        return ConnectedDevice{
+            std::make_shared<NativeTransport>(info, std::move(*lease), authorization_, std::move(*opened),
+                                              std::move(protected_ranges), std::move(layout_guards)),
+            {std::string{candidate_id}, info.model, info.serial, info.size_bytes, info.sector_size,
+             device_detail::identity_details(info, presentation ? *presentation : rawdisk::DevicePresentation{})},
+            std::move(targets)};
     }
 
   private:

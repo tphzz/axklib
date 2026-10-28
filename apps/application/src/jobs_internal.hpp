@@ -29,6 +29,7 @@ struct axk::app::JobManager::Impl {
     struct Record {
         mutable std::mutex mutex;
         bool admitted{};
+        bool finishing{};
         std::string job_id;
         std::string operation_id;
         OperationClass operation_class{OperationClass::read};
@@ -54,6 +55,7 @@ struct axk::app::JobManager::Impl {
         std::optional<Clock::time_point> cancellation_requested_at;
         std::vector<UploadLease> upload_leases;
         PathReservationCoordinator::Lease path_lease;
+        std::shared_ptr<void> admission_lease;
     };
 
     struct IdempotentSubmission {
@@ -196,12 +198,24 @@ struct axk::app::JobManager::Impl {
                     std::optional<nlohmann::json> result = std::nullopt, std::optional<Error> error = std::nullopt) {
         std::optional<JobEvent> event;
         std::vector<UploadLease> released_upload_leases;
+        PathReservationCoordinator::Lease released_path;
+        std::shared_ptr<void> released_admission;
         if (is_terminal(state)) {
+            {
+                const std::scoped_lock lock{mutex, record->mutex};
+                if (is_terminal(record->state) || record->finishing)
+                    return;
+                record->finishing = true;
+                released_path = std::move(record->path_lease);
+                released_upload_leases = std::move(record->upload_leases);
+                released_admission = std::move(record->admission_lease);
+            }
+            // Cleanup may acquire device locks or publish a durable write fence.
+            // Terminal polling and events must observe the completed cleanup.
+            released_path = {};
+            released_upload_leases.clear();
+            released_admission.reset();
             const std::scoped_lock lock{mutex, record->mutex};
-            if (is_terminal(record->state))
-                return;
-            record->path_lease = {};
-            released_upload_leases = std::move(record->upload_leases);
             for (const auto &key : record->destination_keys) {
                 const auto found = destination_reservations.find(key);
                 if (found != destination_reservations.end() && found->second == record->job_id)
@@ -216,7 +230,7 @@ struct axk::app::JobManager::Impl {
             terminal_jobs.push_back({now(), record->job_id});
         } else {
             const std::scoped_lock lock{record->mutex};
-            if (is_terminal(record->state))
+            if (is_terminal(record->state) || record->finishing)
                 return;
             const auto previous = record->state;
             record->state = state;
@@ -226,6 +240,7 @@ struct axk::app::JobManager::Impl {
             event = append_event_locked(*record, std::move(type), record->progress);
         }
         released_upload_leases.clear();
+        released_admission.reset();
         emit(*event);
     }
 
@@ -354,7 +369,7 @@ struct axk::app::JobManager::Impl {
         std::optional<JobEvent> event;
         {
             const std::scoped_lock lock{mutex, record->mutex};
-            if (stopping || record->state != JobState::queued)
+            if (stopping || record->state != JobState::queued || record->cancellation_requested || record->finishing)
                 return false;
             const auto previous = record->state;
             record->state = JobState::running;

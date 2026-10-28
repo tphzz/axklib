@@ -1,3 +1,4 @@
+import { deviceIdentity } from '../../test/deviceFixture';
 import { describe, expect, it, vi } from 'vitest';
 import { OpenSourceWorkflow } from './openSource.svelte';
 import type { ImageSessionPreparation } from '../image-session/actions';
@@ -6,8 +7,16 @@ import type { ImageLocation } from '../../lib/storageLocations';
 import type { OpenedImage } from '../../lib/transport';
 import { AxklibApiError } from '../../lib/httpErrors';
 
-const candidate = { id: 'usb', model: 'Card', serial: 'test', sizeBytes: 1024, sectorSize: 512 };
+const candidate = {
+    identity: deviceIdentity,
+    id: 'usb',
+    model: 'Card',
+    serial: 'test',
+    sizeBytes: 1024,
+    sectorSize: 512,
+};
 const target = {
+    recoveryConfirmationText: 'RESTORE /dev/synthetic',
     id: 'disk',
     label: 'Disk',
     sizeBytes: 1024,

@@ -368,11 +368,10 @@ the same disk set, or explicitly use the nearby-folder search. The association
 lasts only for the open image session; axkdeck does not copy, merge, or modify
 the source folders.
 
-### Create an empty HD or floppy image
+### Create an image or format a device
 
-Open the disk-image browser, enter the writable workspace directory that should
-own the new file, and select **Create image**. In **Create HD/Floppy image**,
-choose **HD** or **Floppy**. HD creation offers only server-published capacity
+Select **Create**. The dialog initially shows **Image**; choose its writable
+destination with **Browse**, then choose **HD** or **Floppy**. HD creation offers only server-published capacity
 and partition combinations. Floppy creation asks only for a filename and always
 writes the fixed 1.44 MB Yamaha A-series FAT12 full-format profile. The
 background job publishes the image in that exact directory and opens the
@@ -382,6 +381,34 @@ The floppy option is a blank formatted disk with the Yamaha catalog and marker
 files, not a populated authored-volume image. Empty ISO9660 creation is not
 offered; use the ISO authoring or conversion workflows when object content is
 available.
+
+The other tabs select a physical **Device**, an on-card **SCSI2SDv6** target or
+a target described by **SCSI2SD XML**. Selection and inspection are read-only.
+The review shows native storage and USB reader identities separately, capacity,
+target bounds, detected partitions/signatures and any mounted host volumes.
+Partition choices use the selected target's real capacity, with an 8 GiB SFS
+limit and an explicit unused suffix. Unknown signatures do not mean empty media.
+
+Unmount host volumes manually in the operating system and inspect again.
+Create never dismounts them or provides a mounted-volume override. **Review**
+leads to a separate destructive confirmation: verify the physical device/card,
+acknowledge exclusive use and permanent data loss, and type the exact displayed
+device text before **Erase And Format**. All old data on that target is lost;
+untouched bytes do not preserve its old filesystem. This is not secure erasure.
+
+If submission or completion is uncertain, use **Check status**, not another
+format. Retain recovery journals. **Device operation status** requires a fresh
+read-only connection and a separate typed confirmation for format recovery.
+After confirmed formatting, a failed reopen offers **Open**, never another write.
+
+Windows formatting is unavailable until non-dismounting mount inspection and
+automatic-remount inhibition are qualified. Linux refuses inaccessible mount
+metadata or storage-layer consumers and requires a direct read-only exclusive
+kernel claim. UDisks-only access may therefore leave formatting unavailable.
+Multi-LUN carriers, incomplete inspections,
+unsupported target layouts and the existing ARM64 write restrictions remain
+blocked. See the [device initialization contract](../../docs/device-formatting.md)
+for the native policies, journal boundaries and outstanding hardware acceptance.
 
 ### Import A-series floppy images and folders
 

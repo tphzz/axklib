@@ -45,10 +45,10 @@ describe('ImageNavigator', () => {
         const emptyActions = container.querySelector('.image-empty-actions');
         expect(emptyActions).toBeTruthy();
         expect(screen.getByRole('button', { name: 'Open' }).closest('.image-empty-actions')).toBe(emptyActions);
-        expect(screen.getByRole('button', { name: 'Create image' }).closest('.image-empty-actions')).toBe(emptyActions);
+        expect(screen.getByRole('button', { name: 'Create' }).closest('.image-empty-actions')).toBe(emptyActions);
 
         await fireEvent.click(screen.getByRole('button', { name: 'Open' }));
-        await fireEvent.click(screen.getByRole('button', { name: 'Create image' }));
+        await fireEvent.click(screen.getByRole('button', { name: 'Create' }));
         expect(onopen).toHaveBeenCalledOnce();
         expect(oncreate).toHaveBeenCalledOnce();
 
@@ -95,7 +95,7 @@ describe('ImageNavigator', () => {
         expect(onintegrity).toHaveBeenCalledOnce();
 
         await fireEvent.click(screen.getByRole('button', { name: 'Image options' }));
-        await fireEvent.click(screen.getByRole('menuitem', { name: 'Create new image' }));
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Create' }));
         expect(oncreate).toHaveBeenCalledOnce();
 
         await fireEvent.click(screen.getByRole('button', { name: 'Image options' }));

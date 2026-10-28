@@ -37,6 +37,8 @@ export class DeviceWorkflow {
     operations = $state<DeviceOperation[]>([]);
     uncertain = $state<PendingDeviceWrite[]>([]);
     recoveryId = $state('');
+    confirmationText = $state('');
+    dataLossAcknowledged = $state(false);
     constructor(
         readonly service: DeviceService,
         readonly images: ImageSessionWorkflow,
@@ -45,14 +47,46 @@ export class DeviceWorkflow {
         return this.connection?.targets.find((target) => target.id === this.targetId);
     }
     get visibleCandidates(): DeviceCandidate[] {
-        return this.layout === 'RAW'
-            ? this.candidates.filter((candidate) => candidate.sizeBytes <= 9_000_000_000)
-            : this.candidates;
+        return this.candidates;
+    }
+    get formatRecovery() {
+        return this.operations.find((operation) => operation.operationId === this.recoveryId)?.kind === 'FORMAT';
+    }
+    get canRecover() {
+        return (
+            !!this.connection &&
+            !this.connection.invalidated &&
+            this.connection.writesSupported &&
+            !!this.target &&
+            !this.target.readOnly &&
+            !!this.recoveryId &&
+            this.acknowledged &&
+            !this.busy &&
+            (!this.formatRecovery ||
+                (!!this.target.recoveryConfirmationText &&
+                    this.confirmationText === this.target.recoveryConfirmationText &&
+                    this.dataLossAcknowledged))
+        );
+    }
+    selectTarget(targetId: string) {
+        if (this.busy) return;
+        this.resetConsent();
+        this.targetId = targetId;
+    }
+    selectOperation(operationId: string) {
+        if (this.busy) return;
+        this.resetConsent();
+        this.recoveryId = operationId;
+    }
+    private resetConsent() {
+        this.acknowledged = false;
+        this.confirmationText = '';
+        this.dataLossAcknowledged = false;
     }
     async show(): Promise<void> {
         this.mode = 'recovery';
         this.status = '';
-        this.acknowledged = false;
+        this.resetConsent();
         this.recoveryId = '';
         this.connection = null;
         this.targetId = '';
@@ -78,18 +112,24 @@ export class DeviceWorkflow {
         )
             return;
         await this.run('Connecting read-only', async () => {
+            this.resetConsent();
             this.connection = await this.service.connect(this.candidateId, this.layout, this.xml);
             this.targetId = '';
         });
     }
     async recover(): Promise<void> {
-        if (!this.connection || !this.target || !this.recoveryId || !this.acknowledged || this.busy) return;
+        if (!this.canRecover) return;
         await this.run('Recovering device; keep it connected', async () => {
-            await this.service.recover(this.recoveryId, this.connection!.sessionId, this.targetId);
+            if (this.formatRecovery)
+                await this.service.recover(this.recoveryId, this.connection!.sessionId, this.targetId, {
+                    confirmationText: this.confirmationText,
+                    dataLossAcknowledged: true,
+                });
+            else await this.service.recover(this.recoveryId, this.connection!.sessionId, this.targetId);
             await this.service.close(this.connection!.sessionId);
             this.connection = null;
             this.targetId = '';
-            this.acknowledged = false;
+            this.resetConsent();
             await this.checkStatus();
             this.status = 'Recovery completed. Select and reopen the device explicitly.';
         });

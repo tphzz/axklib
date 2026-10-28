@@ -11,7 +11,7 @@ namespace {
 TEST(OperationRegistry, DeclaresEveryMaintainedCliParityOperationExactlyOnce) {
     const auto registry = axk::app::make_operation_registry();
     const auto entries = registry.entries();
-    EXPECT_EQ(entries.size(), 88U);
+    EXPECT_EQ(entries.size(), 91U);
 
     std::set<std::string> ids;
     std::set<std::string> cli_commands;
@@ -43,6 +43,22 @@ TEST(OperationRegistry, DeclaresImageOpeningAsAReadJob) {
     EXPECT_EQ(opened->descriptor.mode, axk::app::ExecutionMode::job);
     EXPECT_EQ(opened->descriptor.request_schema, "ImageOpenRequest");
     EXPECT_EQ(opened->descriptor.result_schema, "ImageSession");
+}
+
+TEST(OperationRegistry, DeviceFormatReviewIsReadOnlyAndOnlyFormattingRequiresIdempotentWriteAdmission) {
+    const auto registry = axk::app::make_operation_registry();
+    const auto entries = registry.entries();
+    for (const auto id : {"devices.inspect", "devices.sfs.plan", "devices.sfs.format"}) {
+        const auto operation =
+            std::ranges::find_if(entries, [&](const auto &entry) { return entry.descriptor.id == id; });
+        ASSERT_NE(operation, entries.end());
+        const auto formatting = operation->descriptor.id == "devices.sfs.format";
+        EXPECT_EQ(operation->descriptor.mode, axk::app::ExecutionMode::job);
+        EXPECT_EQ(operation->descriptor.operation_class,
+                  formatting ? axk::app::OperationClass::write : axk::app::OperationClass::read);
+        EXPECT_EQ(operation->descriptor.requires_idempotency, formatting);
+        EXPECT_FALSE(operation->descriptor.cli_parity);
+    }
 }
 
 TEST(OperationRegistry, InvokesTypedSystemVersionWithoutTransportTypes) {

@@ -1,3 +1,4 @@
+import { deviceIdentity } from '../../test/deviceFixture';
 import { describe, expect, it, vi } from 'vitest';
 import { OpenSourceWorkflow } from './openSource.svelte';
 import type { DeviceService, DeviceSession } from '../../lib/httpDevices';
@@ -5,8 +6,16 @@ import type { ImageSessionPreparation } from '../image-session/actions';
 import type { ImageLocation } from '../../lib/storageLocations';
 import type { OpenedImage } from '../../lib/transport';
 
-const card = { id: 'card', model: 'Reader', serial: 'serial', sizeBytes: 32_000_000_000, sectorSize: 512 };
+const card = {
+    identity: deviceIdentity,
+    id: 'card',
+    model: 'Reader',
+    serial: 'serial',
+    sizeBytes: 32_000_000_000,
+    sectorSize: 512,
+};
 const target = {
+    recoveryConfirmationText: 'RESTORE /dev/synthetic',
     id: '2',
     label: 'SCSI ID 2',
     offsetBytes: 1_024_000,

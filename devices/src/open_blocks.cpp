@@ -275,7 +275,7 @@ class SelectVolume final : public Block {
         if (!in.volumes || !in.device)
             return fail(make_error_code(Errc::internal_error), "volume", "", "no layout before this step");
         const VolumeSet &set = *in.volumes;
-        const bool rw = env.access == Access::ReadWrite;
+        const bool rw = env.access != Access::ReadOnly;
         Field f{.key = "volume", .label = "Disk"};
         bool danger = false;
         std::size_t hidden = 0;
@@ -324,7 +324,7 @@ class SelectVolume final : public Block {
         const Volume *v = set.find(id);
         if (!v)
             return fail(make_error_code(Errc::flow_stale_selection), "volume", "volume");
-        const bool rw = env.access == Access::ReadWrite;
+        const bool rw = env.access != Access::ReadOnly;
         if (rw && (has_severity(v->notices, Severity::danger) || has_severity(set.notices, Severity::danger))) {
             const auto ack = a.find("acknowledge");
             if (ack == a.end() || ack->second != "yes")

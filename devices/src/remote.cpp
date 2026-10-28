@@ -273,7 +273,7 @@ Result<std::unique_ptr<BlockDevice>> RemoteSession::open(const DeviceInfo &info,
         return fail(Errc::invalid_argument);
     std::vector<std::byte> p;
     Writer w(p);
-    w.u8(access == Access::ReadWrite ? 1 : 0);
+    w.u8(static_cast<std::uint8_t>(access));
     w.u64(info.size_bytes);
     w.u32(info.sector_size);
     w.str(info.path);
@@ -292,7 +292,7 @@ Result<std::unique_ptr<BlockDevice>> RemoteSession::open(const DeviceInfo &info,
     const std::uint64_t count = r.u64();
     const bool writable = r.u8() != 0;
     if (!r.done() || reply->handle == 0 || !valid_sector_size(ss) || count == 0 ||
-        count > std::numeric_limits<std::uint64_t>::max() / ss || writable != (access == Access::ReadWrite))
+        count > std::numeric_limits<std::uint64_t>::max() / ss || writable != (access != Access::ReadOnly))
         return mark_broken(make_error_code(Errc::helper_protocol));
 
     try {
@@ -437,7 +437,7 @@ Result<void> serve(Stream &stream, const Opener &opener) noexcept {
                 const std::uint8_t removable = in.u8();
                 info.carrier_id = in.str();
                 info.connection_id = in.str();
-                if (!in.done() || access > 1 || removable > 1 || h->handle != 0)
+                if (!in.done() || access > 2 || removable > 1 || h->handle != 0)
                     return violation();
                 info.removable = removable == 1;
                 reply_handle = 0;
@@ -445,7 +445,7 @@ Result<void> serve(Stream &stream, const Opener &opener) noexcept {
                     ec = Errc::too_many_handles;
                     break;
                 }
-                auto dev = opener(info, access == 1 ? Access::ReadWrite : Access::ReadOnly);
+                auto dev = opener(info, static_cast<Access>(access));
                 if (!dev) {
                     ec = dev.error();
                     break;

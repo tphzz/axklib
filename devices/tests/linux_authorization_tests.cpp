@@ -67,7 +67,7 @@ void test_exchange(Access access) {
             dbus_message_iter_init(request, &args);
             const char *mode = nullptr;
             dbus_message_iter_get_basic(&args, &mode);
-            CHECK(std::string_view(mode) == (access == Access::ReadWrite ? "rw" : "r"));
+            CHECK(std::string_view(mode) == (access != Access::ReadOnly ? "rw" : "r"));
             dbus_message_iter_next(&args);
             dbus_message_iter_recurse(&args, &array);
             dbus_message_iter_recurse(&array, &entry);
@@ -81,8 +81,8 @@ void test_exchange(Access access) {
             CHECK((flags & O_ACCMODE) == 0);
             CHECK((flags & O_DIRECT) != 0);
             CHECK((flags & O_CLOEXEC) != 0);
-            CHECK(((flags & O_EXCL) != 0) == (access == Access::ReadWrite));
-            return descriptor(access == Access::ReadWrite ? O_RDWR : O_RDONLY);
+            CHECK(((flags & O_EXCL) != 0) == (access != Access::ReadOnly));
+            return descriptor(access != Access::ReadOnly ? O_RDWR : O_RDONLY);
         });
     CHECK(opened.has_value());
     CHECK(calls == 2U);
@@ -141,6 +141,7 @@ void test_failures() {
 int main() {
     test_exchange(Access::ReadOnly);
     test_exchange(Access::ReadWrite);
+    test_exchange(Access::ReadWriteUnmounted);
     test_failures();
     return finish_tests();
 }

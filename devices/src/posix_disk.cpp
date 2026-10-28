@@ -43,6 +43,7 @@ namespace {
 std::error_code last_errno() { return detail::errno_code(errno); }
 
 using Fd = detail::PosixFd;
+Result<void> verify_identity(int fd, const DeviceInfo &info);
 
 class PosixDisk final : public BlockDevice {
   public:
@@ -65,6 +66,15 @@ class PosixDisk final : public BlockDevice {
 #endif
 
   protected:
+    Result<void> verify_non_dismounting_claim_raw(const DeviceInfo &expected) override {
+        if (!is_device_ || !writable_)
+            return detail::fail(Errc::device_busy);
+#if defined(__APPLE__)
+        if (!claim_ || !claim_->valid())
+            return detail::fail(Errc::device_busy);
+#endif
+        return verify_identity(fd_.get(), expected);
+    }
     Result<void> read_raw(std::uint64_t off, std::span<std::byte> out) override {
 #if defined(__APPLE__)
         if (claim_ && !claim_->valid())
@@ -182,7 +192,8 @@ Result<void> verify_identity(int fd, const DeviceInfo &info) {
 
 #if defined(__linux__)
 
-Result<Fd> open_linux(const DeviceInfo &info, bool rw, AuthorizationSession &authorization) {
+Result<Fd> open_linux(const DeviceInfo &info, Access access, AuthorizationSession &authorization) {
+    const bool rw = access != Access::ReadOnly;
     // O_EXCL on a block device is an exclusive open: it fails with EBUSY while the disk or
     // any of its partitions is mounted or claimed, so we can never write under a filesystem.
     const int flags = (rw ? O_RDWR | O_EXCL : O_RDONLY) | O_DIRECT | O_CLOEXEC | O_NOCTTY;
@@ -202,7 +213,7 @@ Result<Fd> open_linux(const DeviceInfo &info, bool rw, AuthorizationSession &aut
             return detail::fail(Errc::write_protected);
     }
     if ((e == EACCES || e == EPERM) && detail::AuthorizationSessionAccess::options(authorization).allow)
-        return detail::linux_authorized_open(info.path, rw ? Access::ReadWrite : Access::ReadOnly, authorization);
+        return detail::linux_authorized_open(info.path, access, authorization);
     return detail::fail(detail::errno_code(e));
 }
 
@@ -237,7 +248,8 @@ Result<void> check_not_mounted(const std::string &raw_path) {
     return detail::fail(Errc::device_busy);
 }
 
-Result<Fd> open_macos(const DeviceInfo &info, bool rw, AuthorizationSession &authorization) {
+Result<Fd> open_macos(const DeviceInfo &info, Access access, AuthorizationSession &authorization) {
+    const bool rw = access != Access::ReadOnly;
     if (rw) {
         if (auto m = check_not_mounted(info.path); !m)
             return detail::fail(m.error());
@@ -248,7 +260,7 @@ Result<Fd> open_macos(const DeviceInfo &info, bool rw, AuthorizationSession &aut
         return fd;
     const int e = errno;
     if ((e == EACCES || e == EPERM) && detail::AuthorizationSessionAccess::options(authorization).allow)
-        return detail::macos_authorized_open(info.path, rw ? Access::ReadWrite : Access::ReadOnly, authorization);
+        return detail::macos_authorized_open(info.path, access, authorization);
     if (e == EROFS)
         return detail::fail(Errc::write_protected);
     if (e == EBUSY)
@@ -262,12 +274,12 @@ Result<Fd> open_macos(const DeviceInfo &info, bool rw, AuthorizationSession &aut
 
 Result<std::unique_ptr<BlockDevice>> detail::open_platform(const DeviceInfo &info, Access access,
                                                            AuthorizationSession &authorization) {
-    const bool rw = access == Access::ReadWrite;
+    const bool rw = access != Access::ReadOnly;
     if (!info.path.starts_with("/dev/") || info.path.find("..") != std::string::npos)
         return fail(Errc::not_a_usb_disk);
 
 #if defined(__linux__)
-    auto fd = open_linux(info, rw, authorization);
+    auto fd = open_linux(info, access, authorization);
 #else
     std::unique_ptr<detail::MacosWriteClaim> claim;
     if (rw) {
@@ -276,7 +288,7 @@ Result<std::unique_ptr<BlockDevice>> detail::open_platform(const DeviceInfo &inf
             return fail(acquired.error());
         claim = std::move(*acquired);
     }
-    auto fd = open_macos(info, rw, authorization);
+    auto fd = open_macos(info, access, authorization);
 #endif
     if (!fd)
         return fail(fd.error());
@@ -324,7 +336,7 @@ Result<std::unique_ptr<BlockDevice>> detail::open_platform(const DeviceInfo &inf
 
 Result<std::unique_ptr<BlockDevice>> detail::open_image_platform(const std::filesystem::path &path, Access access,
                                                                  std::uint32_t sector_size) {
-    const bool rw = access == Access::ReadWrite;
+    const bool rw = access != Access::ReadOnly;
     Fd fd(::open(path.c_str(), (rw ? O_RDWR : O_RDONLY) | O_CLOEXEC | O_NOCTTY));
     if (!fd.valid())
         return fail(last_errno());

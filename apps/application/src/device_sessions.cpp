@@ -21,8 +21,7 @@ Result<void> require_target(const device_detail::Connection &connection, const D
         return std::unexpected(Error{"device_disconnected", "device session is invalidated; select it again"});
     if (!target)
         return std::unexpected(Error{"device_target_missing", "device target is unavailable"});
-    if (target->size_bytes == 0U || target->size_bytes > maximum_sampler_device_bytes ||
-        target->offset > connection.device.transport->size() ||
+    if (target->size_bytes == 0U || target->offset > connection.device.transport->size() ||
         target->size_bytes > connection.device.transport->size() - target->offset ||
         target->offset % connection.device.transport->sector_size() != 0U ||
         target->size_bytes % connection.device.transport->sector_size() != 0U)
@@ -153,7 +152,10 @@ Result<void> DeviceSessionManager::authorize_writes(std::string_view id, std::st
     const auto *target = device_detail::find_target(**connection, target_id);
     if (auto checked = require_target(**connection, target); !checked)
         return checked;
-    if (target->read_only || target->sector_size != 512U || !(*connection)->metadata_guards.contains(target->id))
+    if (!(*connection)->initialization_operation.empty())
+        return std::unexpected(Error{"device_busy", "A device initialization owns this carrier"});
+    if (target->read_only || target->sector_size != 512U || !(*connection)->metadata_guards.contains(target->id) ||
+        !(*connection)->logical_sizes.contains(target->id))
         return std::unexpected(Error{"device_read_only", "open a supported SFS target before authorizing writes"});
     if (auto checked = device_detail::verify_guards(
             **connection, *target, (*connection)->metadata_guards.at(target->id), {}, cancellation, progress);
@@ -187,7 +189,12 @@ Result<OpenedDeviceSource> DeviceSessionManager::open_source(std::string_view id
     const auto *target = device_detail::find_target(**connection, target_id);
     if (auto checked = require_target(**connection, target); !checked)
         return std::unexpected(checked.error());
-    auto source = std::make_shared<device_detail::Source>(*connection, *target);
+    if (!(*connection)->initialization_operation.empty())
+        return std::unexpected(Error{"device_busy", "A device initialization owns this carrier"});
+    auto prepared = device_detail::prepare_source(*connection, *target);
+    if (!prepared)
+        return std::unexpected(prepared.error());
+    auto source = std::move(*prepared);
     return OpenedDeviceSource{
         source,
         [value = *connection, revision = (*connection)->revision]() -> Result<void> {
@@ -226,7 +233,7 @@ Result<std::shared_ptr<MutationTarget>> DeviceSessionManager::begin_mutation(std
     if (!writes_supported() || (*connection)->authorized_target != target_id || target->read_only)
         return std::unexpected(
             Error{"device_write_authorization_required", "authorize writes for this owned target first"});
-    if ((*connection)->mutation_active)
+    if ((*connection)->mutation_active || !(*connection)->initialization_operation.empty())
         return std::unexpected(Error{"device_busy", "a device mutation is already active"});
     if (operation_id.empty() || operation_id.size() > 128U)
         return std::unexpected(
@@ -235,6 +242,10 @@ Result<std::shared_ptr<MutationTarget>> DeviceSessionManager::begin_mutation(std
     const auto directory = implementation_->directory / "operations" /
                            *device_detail::digest(std::as_bytes(std::span{key.data(), key.size()}));
     const std::scoped_lock admission{implementation_->operation_admission};
+    if (auto clear = device_detail::require_clear_carrier(implementation_->directory / "operations",
+                                                          device_detail::carrier_fence(**connection));
+        !clear)
+        return std::unexpected(clear.error());
     std::error_code error;
     if (std::filesystem::exists(directory, error) || error)
         return std::unexpected(
@@ -253,19 +264,23 @@ Result<std::shared_ptr<MutationTarget>> DeviceSessionManager::begin_mutation(std
     if (auto prepared = detail::prepare_private_directory(directory); !prepared)
         return std::unexpected(prepared.error());
     const device_detail::Json record{{"operationId", operation_id},
+                                     {"kind", "edit"},
+                                     {"claimPolicy", "ordinary"},
+                                     {"carrierFence", device_detail::carrier_fence(**connection)},
                                      {"owner", owner},
                                      {"state", "no_write"},
                                      {"model", (*connection)->device.candidate.model},
                                      {"serial", (*connection)->device.candidate.serial},
                                      {"targetLabel", target->label},
                                      {"targetSize", target->size_bytes},
+                                     {"operationSize", (*connection)->logical_sizes.at(target->id)},
                                      {"targetOffset", target->offset},
                                      {"targetSectorSize", target->sector_size},
                                      {"identity", device_detail::target_identity(**connection, *target)}};
     if (auto saved = device_detail::save_json(directory / "operation.json", record, true); !saved)
         return std::unexpected(saved.error());
-    auto mutation =
-        std::make_shared<device_detail::Mutation>(*connection, *target, std::string{operation_id}, directory);
+    auto mutation = std::make_shared<device_detail::Mutation>(
+        *connection, *target, std::string{operation_id}, directory, false, (*connection)->logical_sizes.at(target->id));
     if (auto verified = mutation->verify_unchanged(); !verified)
         return std::unexpected(verified.error());
     return mutation;

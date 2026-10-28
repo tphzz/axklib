@@ -14,8 +14,8 @@
 namespace axk::sfs_detail {
 
 Result<detail::SfsAllocationBitmapLayout> read_partition_geometry(const RandomAccessReader &image, Partition &partition,
-                                                                  std::uint32_t sector_size,
-                                                                  const OpenOptions &options) {
+                                                                  std::uint32_t sector_size, const OpenOptions &options,
+                                                                  bool require_readable_backup) {
     const auto start = checked_multiply(partition.start_sector, sector_size);
     if (!start)
         return std::unexpected{start.error()};
@@ -103,6 +103,8 @@ Result<detail::SfsAllocationBitmapLayout> read_partition_geometry(const RandomAc
     if (!backup_offset)
         return std::unexpected{backup_offset.error()};
     const auto backup = read_bytes(image, *backup_offset, sector_size, options.cancellation);
+    if (!backup && require_readable_backup)
+        return std::unexpected(backup.error());
     partition.backup_header_matches = backup && *backup == *header;
     if (!partition.backup_header_matches)
         partition.diagnostics.push_back(partition_error(

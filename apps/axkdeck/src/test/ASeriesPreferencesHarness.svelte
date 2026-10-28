@@ -10,7 +10,8 @@
     import { serverDirectoryLocation } from '../lib/storageLocations';
     import PreferencesDialog from '../lib/components/PreferencesDialog.svelte';
     import AssignSampleBankDialog from '../lib/components/AssignSampleBankDialog.svelte';
-    import CreateHardDiskImageDialog from '../lib/components/CreateHardDiskImageDialog.svelte';
+    import CreateImagePanel from '../lib/components/CreateImagePanel.svelte';
+    import { modal } from '../lib/modal';
     import { sampleFormatFixture } from './sampleFormatFixture';
 
     let ready = $state(false);
@@ -129,12 +130,23 @@
         }}
     />
 {:else if dialog === 'image'}
-    <CreateHardDiskImageDialog
-        {transport}
-        directory={serverDirectoryLocation({ rootId: 'mock', relativePath: 'images' }, 'Synthetic images')}
-        oncancel={() => (dialog = null)}
-        onsuccess={() => (dialog = null)}
-    />
+    <div class="dialog-backdrop" role="presentation">
+        <div
+            class="dialog-shell"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Create image"
+            use:modal={{ onescape: () => (dialog = null) }}
+        >
+            <header class="dialog-header"><h2>Create</h2></header>
+            <CreateImagePanel
+                {transport}
+                directory={serverDirectoryLocation({ rootId: 'mock', relativePath: 'images' }, 'Synthetic images')}
+                oncancel={() => (dialog = null)}
+                onsuccess={() => (dialog = null)}
+            />
+        </div>
+    </div>
 {/if}
 
 <style>

@@ -450,21 +450,28 @@ axk::app::Result<void> axk::app::journal_io::recognize_uncommitted_target(const 
     return {};
 }
 
-axk::app::Result<void> axk::app::journal_io::restore_original_bytes(MutationTarget &target,
-                                                                    const std::filesystem::path &journal_path,
-                                                                    const Inspection &journal, std::size_t chunk_bytes,
-                                                                    const std::function<bool()> &after_flush) {
+axk::app::Result<void>
+axk::app::journal_io::restore_original_bytes(MutationTarget &target, const std::filesystem::path &journal_path,
+                                             const Inspection &journal, std::size_t chunk_bytes,
+                                             const std::function<bool()> &after_flush,
+                                             const std::function<Result<void>()> &admit_restore) {
     auto reader = Reader::open(journal_path, std::numeric_limits<std::uint64_t>::max());
     if (!reader)
         return std::unexpected(reader.error());
     const auto maximum_chunk = std::max<std::size_t>(chunk_bytes, 1U);
     std::vector<std::byte> original(maximum_chunk);
+    bool attempted{};
     for (const auto &patch : std::views::reverse(journal.patches)) {
         for (std::uint64_t offset = 0U; offset < patch.size;) {
             const auto size = static_cast<std::size_t>(std::min<std::uint64_t>(maximum_chunk, patch.size - offset));
             auto chunk = std::span{original}.first(size);
             if (auto read = read_journal_chunk(*reader, patch.original_file_offset + offset, chunk); !read)
                 return read;
+            if (!attempted && admit_restore) {
+                if (auto admitted = admit_restore(); !admitted)
+                    return admitted;
+            }
+            attempted = true;
             if (auto written = target.write_exact_at(patch.target_offset + offset, chunk); !written)
                 return written;
             offset += size;

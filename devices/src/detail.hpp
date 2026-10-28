@@ -1,6 +1,7 @@
 #pragma once
 
 #include "rawdisk/block_device.hpp"
+#include "rawdisk/inspection.hpp"
 
 #include <expected>
 #include <filesystem>
@@ -15,6 +16,8 @@ namespace rawdisk::detail {
 
 // ---- implemented once per platform -------------------------------------------------------
 Result<std::vector<DeviceInfo>> list_platform();
+Result<DevicePresentation> presentation_platform(const DeviceInfo &info);
+Result<DeviceInventory> inventory_platform(const DeviceInfo &info, bool retained_claim);
 // `info` comes from a fresh enumeration. Must verify identity on the opened handle.
 Result<std::unique_ptr<BlockDevice>> open_platform(const DeviceInfo &info, Access access,
                                                    AuthorizationSession &authorization);

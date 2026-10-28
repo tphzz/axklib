@@ -8,6 +8,7 @@
 #include "win32_common.hpp"
 
 #include <algorithm>
+#include <cstddef>
 #include <cstring>
 #include <cwchar>
 #include <format>
@@ -256,7 +257,7 @@ class Win32Disk final : public BlockDevice {
 
 // Opens the device in this process. Fails with ERROR_ACCESS_DENIED when not elevated.
 Result<std::unique_ptr<BlockDevice>> open_direct(const DeviceInfo &info, Access access) {
-    const bool rw = access == Access::ReadWrite;
+    const bool rw = access != Access::ReadOnly;
     if (!is_physical_drive_path(info.path))
         return fail(Errc::not_a_usb_disk);
     const std::wstring path = widen_ascii(info.path);
@@ -269,10 +270,16 @@ Result<std::unique_ptr<BlockDevice>> open_direct(const DeviceInfo &info, Access 
         auto num = disk_number(probe.h);
         if (!num)
             return fail(num.error());
-        auto l = lock_and_dismount_volumes(*num);
-        if (!l)
-            return fail(l.error());
-        locked = std::move(*l);
+        if (access == Access::ReadWriteUnmounted) {
+            auto inventory = detail::inventory_platform(info, false);
+            if (!inventory || !inventory->complete || !inventory->non_dismounting_claim_supported)
+                return fail(Errc::device_busy);
+        } else {
+            auto l = lock_and_dismount_volumes(*num);
+            if (!l)
+                return fail(l.error());
+            locked = std::move(*l);
+        }
     }
 
     Handle h = open_path(path, GENERIC_READ | (rw ? GENERIC_WRITE : 0), rw ? 0 : kShareAll,
@@ -365,6 +372,15 @@ Result<std::vector<DeviceInfo>> detail::list_platform() {
     return out;
 }
 
+Result<DeviceInventory> detail::inventory_platform(const DeviceInfo &, bool) {
+    DeviceInventory result;
+    // PhysicalDrive sharing is not a volume mount-inhibition claim. Do not
+    // inspect volume filesystem handles as a substitute for a retained mount guard.
+    result.notices.push_back("Windows formatting is unavailable: complete non-dismounting mount inspection and "
+                             "automatic-remount inhibition are not qualified.");
+    return result;
+}
+
 Result<std::unique_ptr<BlockDevice>> detail::open_platform(const DeviceInfo &info, Access access,
                                                            AuthorizationSession &authorization) {
     auto direct = open_direct(info, access);
@@ -384,7 +400,7 @@ Result<std::unique_ptr<BlockDevice>> detail::open_platform(const DeviceInfo &inf
 
 Result<std::unique_ptr<BlockDevice>> detail::open_image_platform(const std::filesystem::path &path, Access access,
                                                                  std::uint32_t sector_size) {
-    const bool rw = access == Access::ReadWrite;
+    const bool rw = access != Access::ReadOnly;
     const std::wstring &w = path.native();
 
     // Never let an "image" path reach a device: that would bypass every device check.

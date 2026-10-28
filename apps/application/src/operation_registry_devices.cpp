@@ -1,12 +1,47 @@
 #include "operation_registry_devices.hpp"
 #include "axklib/application/device_xml.hpp"
+#include "device_format.hpp"
+#include "device_wire.hpp"
 
 #include <array>
 #include <utility>
 
 namespace axk::app {
-const std::array<OperationDescriptor, 9U> &device_descriptors() {
-    static const std::array descriptors{OperationDescriptor{"devices.xml.inspect",
+const std::array<OperationDescriptor, 12U> &device_descriptors() {
+    static const std::array descriptors{OperationDescriptor{"devices.inspect",
+                                                            {},
+                                                            HttpMethod::post,
+                                                            "/api/v1/device-inspections",
+                                                            ExecutionMode::job,
+                                                            {},
+                                                            "DeviceInspectionRequest",
+                                                            "DeviceInspection",
+                                                            OperationClass::read,
+                                                            false,
+                                                            false},
+                                        OperationDescriptor{"devices.sfs.plan",
+                                                            {},
+                                                            HttpMethod::post,
+                                                            "/api/v1/device-sfs-format-plans",
+                                                            ExecutionMode::job,
+                                                            {},
+                                                            "DeviceSfsFormatPlanRequest",
+                                                            "DeviceSfsFormatPlan",
+                                                            OperationClass::read,
+                                                            false,
+                                                            false},
+                                        OperationDescriptor{"devices.sfs.format",
+                                                            {},
+                                                            HttpMethod::post,
+                                                            "/api/v1/device-sfs-formats",
+                                                            ExecutionMode::job,
+                                                            {},
+                                                            "DeviceSfsFormatRequest",
+                                                            "DeviceSfsFormatResult",
+                                                            OperationClass::write,
+                                                            true,
+                                                            false},
+                                        OperationDescriptor{"devices.xml.inspect",
                                                             {},
                                                             HttpMethod::post,
                                                             "/api/v1/device-xml-inspections",
@@ -110,36 +145,11 @@ const std::array<OperationDescriptor, 9U> &device_descriptors() {
 
 namespace {
 using Json = nlohmann::json;
-Json candidate_json(const DeviceCandidate &candidate) {
-    return {{"id", candidate.id},
-            {"model", candidate.model},
-            {"serial", candidate.serial},
-            {"sizeBytes", candidate.size_bytes},
-            {"sectorSize", candidate.sector_size}};
-}
+using device_detail::candidate_json;
 Json session_json(const DeviceSessionSummary &session, bool write_supported) {
     auto targets = Json::array();
-    for (const auto &target : session.targets) {
-        Json scsi = nullptr;
-        if (target.scsi) {
-            static constexpr std::array types{"FIXED",  "REMOVABLE",       "OPTICAL",
-                                              "FLOPPY", "MAGNETO_OPTICAL", "SEQUENTIAL"};
-            scsi = {{"id", target.scsi->id},
-                    {"deviceType", types.at(target.scsi->device_type)},
-                    {"vendor", target.scsi->vendor},
-                    {"product", target.scsi->product},
-                    {"revision", target.scsi->revision},
-                    {"serial", target.scsi->serial}};
-        }
-        targets.push_back({{"id", target.id},
-                           {"label", target.label},
-                           {"offsetBytes", target.offset},
-                           {"scsi", std::move(scsi)},
-                           {"sizeBytes", target.size_bytes},
-                           {"sectorSize", target.sector_size},
-                           {"readOnly", target.read_only},
-                           {"notices", target.notices}});
-    }
+    for (const auto &target : session.targets)
+        targets.push_back(device_detail::target_json(target, session.candidate));
     return {{"sessionId", session.session_id},
             {"candidate", candidate_json(session.candidate)},
             {"targets", targets},
@@ -235,6 +245,7 @@ Result<void> bind_device_operations(OperationRegistry &registry, DeviceSessionMa
                               auto values = Json::array();
                               for (const auto &operation : *operations)
                                   values.push_back({{"operationId", operation.operation_id},
+                                                    {"kind", operation.kind},
                                                     {"state", operation.state},
                                                     {"model", operation.model},
                                                     {"serial", operation.serial},
@@ -251,6 +262,7 @@ Result<void> bind_device_operations(OperationRegistry &registry, DeviceSessionMa
                               if (!operation)
                                   return std::unexpected(operation.error());
                               return Json{{"operationId", operation->operation_id},
+                                          {"kind", operation->kind},
                                           {"state", operation->state},
                                           {"model", operation->model},
                                           {"serial", operation->serial},
@@ -259,13 +271,20 @@ Result<void> bind_device_operations(OperationRegistry &registry, DeviceSessionMa
                           });
         !bound)
         return bound;
-    return bind("devices.recover", [&devices](const Json &input, const OperationContext &context) -> Result<Json> {
-        auto result = devices.recover(input.at("operationId").get<std::string>(),
-                                      input.at("sessionId").get<std::string>(), input.at("targetId").get<std::string>(),
-                                      context.owner_id, input.at("exclusiveUseAcknowledged").get<bool>());
-        if (!result)
-            return std::unexpected(result.error());
-        return Json{{"recovered", true}};
-    });
+    if (auto bound = bind("devices.recover",
+                          [&devices](const Json &input, const OperationContext &context) -> Result<Json> {
+                              auto result = devices.recover(
+                                  input.at("operationId").get<std::string>(), input.at("sessionId").get<std::string>(),
+                                  input.at("targetId").get<std::string>(), context.owner_id,
+                                  input.at("exclusiveUseAcknowledged").get<bool>(),
+                                  input.value("confirmationText", std::string{}),
+                                  input.value("dataLossAcknowledged", false), context.cancellation);
+                              if (!result)
+                                  return std::unexpected(result.error());
+                              return Json{{"recovered", true}};
+                          });
+        !bound)
+        return bound;
+    return bind_device_format_operations(registry, devices);
 }
 } // namespace axk::app

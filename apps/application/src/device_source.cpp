@@ -149,10 +149,10 @@ Result<void> verify_guards(const Connection &connection, const DeviceTargetDescr
     return {};
 }
 
-Source::Source(std::shared_ptr<Connection> connection, DeviceTargetDescription target)
+Source::Source(std::shared_ptr<Connection> connection, DeviceTargetDescription target, std::uint64_t logical_size)
     : connection_(std::move(connection)), target_(std::move(target)), revision_(connection_->revision),
-      initial_reads_(connection_->reads) {}
-std::uint64_t Source::size() const noexcept { return target_.size_bytes; }
+      initial_reads_(connection_->reads), logical_size_(logical_size == 0U ? target_.size_bytes : logical_size) {}
+std::uint64_t Source::size() const noexcept { return logical_size_; }
 
 axk::Result<void> Source::read_exact_at(std::uint64_t offset, std::span<std::byte> bytes) const {
     std::unique_lock lock{connection_->io, std::defer_lock};
@@ -202,22 +202,40 @@ Result<void> Source::seal(const CancellationToken &cancellation, ProgressSink *p
     if (auto verified = verify_guards(*connection_, target_, guards_, {}, cancellation, progress); !verified)
         return verified;
     connection_->metadata_guards[target_.id] = guards_;
+    connection_->logical_sizes[target_.id] = logical_size_;
     sealed_ = true;
     return {};
 }
 
 Mutation::Mutation(std::shared_ptr<Connection> value, DeviceTargetDescription description, std::string operation,
-                   std::filesystem::path path, bool recovery)
+                   std::filesystem::path path, bool recovery, std::uint64_t logical_size)
     : connection(std::move(value)), target(std::move(description)), operation_id(std::move(operation)),
-      directory(std::move(path)), lease_(connection->io), writing_(recovery), initial_reads_(connection->reads) {
+      directory(std::move(path)), lease_(connection->io), writing_(recovery), initial_reads_(connection->reads),
+      logical_size_(logical_size == 0U ? target.size_bytes : logical_size) {
     connection->mutation_active = true;
-    guards = connection->metadata_guards[target.id];
+    const auto found = connection->metadata_guards.find(target.id);
+    if (found != connection->metadata_guards.end())
+        guards = found->second;
 }
-Mutation::~Mutation() { connection->mutation_active = false; }
-std::uint64_t Mutation::size() const noexcept { return target.size_bytes; }
+Mutation::~Mutation() {
+    connection->mutation_active = false;
+    try {
+        auto record = load_json(directory / "operation.json");
+        if (record && record->value("state", "") == "no_write") {
+            (*record)["fenced"] = true;
+            if (!save_json(directory / "operation.json", *record, false))
+                connection->invalidated = true;
+        }
+    } catch (...) {
+        connection->invalidated = true;
+    }
+}
+std::uint64_t Mutation::size() const noexcept { return logical_size_; }
 std::uint32_t Mutation::write_alignment() const noexcept { return connection->device.transport->sector_size(); }
 
 axk::Result<void> Mutation::read_exact_at(std::uint64_t offset, std::span<std::byte> bytes) const {
+    if (offset > size() || bytes.size() > size() - offset)
+        return std::unexpected(make_error(ErrorCode::out_of_bounds, ErrorCategory::io, "device mutation view bounds"));
     if (writing_ || journal_streaming_ || bytes.empty())
         return read_target(*connection, target, offset, bytes);
     const auto alignment = write_alignment();
@@ -242,16 +260,8 @@ axk::Result<void> Mutation::read_exact_at(std::uint64_t offset, std::span<std::b
 Result<void> Mutation::write_exact_at(std::uint64_t offset, std::span<const std::byte> bytes) {
     if (offset > size() || bytes.size() > size() - offset)
         return std::unexpected(Error{"device_write_range", "device write is outside the selected target"});
-    if (!writing_) {
-        Json entries = Json::array();
-        for (const auto &[at, hash] : guards)
-            entries.push_back({{"offset", at}, {"sha256", hash}});
-        if (auto saved =
-                save_json(directory / "guards.json", {{"sectors", std::move(entries)}}, false, &connection->reads);
-            !saved)
-            return saved;
+    if (!writing_)
         ++connection->revision;
-    }
     cache_.clear();
     writing_ = true;
     const IoTiming timing{connection->reads.writes, connection->reads.write_nanoseconds};
@@ -279,6 +289,12 @@ Result<void> Mutation::set_state(std::string_view state) const {
         return std::unexpected(record.error());
     (*record)["state"] = state;
     return save_json(directory / "operation.json", *record, false, &connection->reads);
+}
+Result<void> Mutation::publish_guards(bool create) const {
+    Json entries = Json::array();
+    for (const auto &[offset, hash] : guards)
+        entries.push_back({{"offset", offset}, {"sha256", hash}});
+    return save_json(directory / "guards.json", {{"sectors", std::move(entries)}}, create, &connection->reads);
 }
 
 namespace {

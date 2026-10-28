@@ -55,7 +55,6 @@
                         })),
                     ]}
                     disabled={workflow.busy || !!workflow.connection}
-                    initialFocus
                 />
             </label>
             <label class="field"
@@ -116,7 +115,7 @@
                     <SelectControl
                         label="Target"
                         value={workflow.targetId}
-                        onchange={(value) => (workflow.targetId = value)}
+                        onchange={(value) => workflow.selectTarget(value)}
                         disabled={workflow.busy}
                         options={[
                             { value: '', label: 'Select a target' },
@@ -154,7 +153,7 @@
                     <SelectControl
                         label="Interrupted operation"
                         value={workflow.recoveryId}
-                        onchange={(value) => (workflow.recoveryId = value)}
+                        onchange={(value) => workflow.selectOperation(value)}
                         disabled={workflow.busy}
                         options={[
                             { value: '', label: 'Select an interrupted operation' },
@@ -165,6 +164,34 @@
                         ]}
                     />
                 </label>
+                {#if workflow.formatRecovery}
+                    <p class="dialog-warning">
+                        Recovery will write the recorded original bytes to this device. Verify the physical device and
+                        card again. No volumes will be unmounted automatically.
+                    </p>
+                    <label class="acknowledgement"
+                        ><input
+                            class="dialog-checkbox"
+                            type="checkbox"
+                            disabled={workflow.busy}
+                            bind:checked={workflow.dataLossAcknowledged}
+                        /> I have verified this device and accept the recovery write.</label
+                    >
+                    <label class="field"
+                        >Type <code>{workflow.target?.recoveryConfirmationText || 'Select a device target'}</code>
+                        <input
+                            class="dialog-field-control"
+                            aria-label="Device recovery confirmation"
+                            disabled={workflow.busy || !workflow.target?.recoveryConfirmationText}
+                            bind:value={workflow.confirmationText}
+                            autocomplete="off"
+                            spellcheck="false"
+                            onkeydown={(event) => {
+                                if (event.key === 'Enter') event.preventDefault();
+                            }}
+                        />
+                    </label>
+                {/if}
                 <div class="operation-list" aria-label="Device operation status">
                     {#each workflow.operations as operation}<p>
                             <strong>{operation.state}</strong>
@@ -196,18 +223,13 @@
                     class="secondary-button"
                     type="button"
                     disabled={workflow.busy}
+                    data-dialog-initial-focus
                     onclick={() => void workflow.close()}>Cancel</button
                 >
                 <button
                     class="danger-button"
                     type="button"
-                    disabled={workflow.busy ||
-                        !workflow.acknowledged ||
-                        !workflow.target ||
-                        workflow.target.readOnly ||
-                        !workflow.connection?.writesSupported ||
-                        workflow.connection.invalidated ||
-                        !workflow.recoveryId}
+                    disabled={!workflow.canRecover}
                     onclick={() => void workflow.recover()}>Recover</button
                 >
             </div>

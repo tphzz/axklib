@@ -24,12 +24,14 @@
         audition,
         children,
         selection = null,
+        operationBlocked = () => false,
     }: {
         transport: ImageTransport;
         imageSession: ImageSessionWorkflow;
         audition: AuditionWorkflow;
         children: Snippet;
         selection?: InspectorSelection;
+        operationBlocked?: () => boolean;
     } = $props();
     const editors = new ObjectEditorWorkflow({
         transport: untrack(() => transport),
@@ -88,6 +90,10 @@
     let desktop = $state.raw<Awaited<ReturnType<typeof installDesktopEditorGuard>>>();
     let previousSession: number | null = null;
     async function confirmLeave(): Promise<boolean> {
+        if (operationBlocked()) {
+            imageSession.setStatus('Resolve the active or uncertain device operation before continuing');
+            return false;
+        }
         if (editors.locked) {
             imageSession.setStatus('Resolve the pending editor save before continuing');
             return false;
@@ -146,7 +152,7 @@
         editors.confirmStructuralChange = confirmLeave;
         let disposed = false;
         const beforeUnload = (event: BeforeUnloadEvent) => {
-            if (editors.dirtyCount || editors.locked) {
+            if (editors.dirtyCount || editors.locked || operationBlocked()) {
                 event.preventDefault();
                 event.returnValue = '';
             }
@@ -177,7 +183,7 @@
         };
     });
     $effect(() => {
-        desktop?.setBlocked(editors.dirtyCount > 0 || editors.locked);
+        desktop?.setBlocked(editors.dirtyCount > 0 || editors.locked || operationBlocked());
     });
 </script>
 

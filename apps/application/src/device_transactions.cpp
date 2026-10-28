@@ -1,3 +1,4 @@
+#include "device_format_internal.hpp"
 #include "device_sessions_internal.hpp"
 
 #include <algorithm>
@@ -45,8 +46,8 @@ Result<std::filesystem::path> operation_directory(const std::filesystem::path &r
     return root / *digest(std::as_bytes(std::span{key.data(), key.size()}));
 }
 
-Result<Guards> load_guards(const std::filesystem::path &directory) {
-    auto json = load_json(directory / "guards.json");
+Result<Guards> load_guards(const std::filesystem::path &directory, std::string_view name = "guards.json") {
+    auto json = load_json(directory / name);
     if (!json)
         return std::unexpected(json.error());
     try {
@@ -57,7 +58,9 @@ Result<Guards> load_guards(const std::filesystem::path &directory) {
         for (const auto &entry : entries) {
             const auto offset = entry.at("offset").get<std::uint64_t>();
             const auto hash = entry.at("sha256").get<std::string>();
-            if (hash.size() != 64U || !result.emplace(offset, hash).second)
+            if (hash.size() != 64U || offset % 512U != 0U ||
+                !std::ranges::all_of(hash, [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); }) ||
+                !result.emplace(offset, hash).second)
                 return std::unexpected(Error{"device_state_unavailable", "invalid or duplicate device guard"});
         }
         return result;
@@ -105,8 +108,8 @@ Result<std::vector<DeviceOperationStatus>> DeviceSessionManager::operations(std:
             result.push_back({record->at("operationId").get<std::string>(), record->at("state").get<std::string>(),
                               record->at("model").get<std::string>(), record->at("serial").get<std::string>(),
                               record->at("targetLabel").get<std::string>(),
-                              record->at("targetSize").get<std::uint64_t>(),
-                              record->at("identity").get<std::string>()});
+                              record->at("targetSize").get<std::uint64_t>(), record->at("identity").get<std::string>(),
+                              record->at("kind").get<std::string>()});
         } catch (const Json::exception &) {
             return std::unexpected(Error{"device_state_unavailable", "device operation record is malformed"});
         }
@@ -133,7 +136,7 @@ Result<DeviceOperationStatus> DeviceSessionManager::resolve(std::string_view ope
                 return std::unexpected(
                     Error{"device_state_unavailable", "device operation storage cannot be inspected"});
         }
-        auto retained = operations(owner);
+        auto retained = operation_directories(implementation_->directory / "operations");
         if (!retained || retained->size() >= 4096U)
             return std::unexpected(
                 Error{"device_operation_capacity", "device operation status retention is unavailable"});
@@ -141,6 +144,7 @@ Result<DeviceOperationStatus> DeviceSessionManager::resolve(std::string_view ope
             return std::unexpected(prepared.error());
         const Json record{{"operationId", operation_id},
                           {"owner", owner},
+                          {"kind", "unstarted"},
                           {"state", "no_write"},
                           {"fenced", true},
                           {"model", ""},
@@ -167,17 +171,19 @@ Result<DeviceOperationStatus> DeviceSessionManager::resolve(std::string_view ope
             record->at("operationId").get<std::string>(), record->at("state").get<std::string>(),
             record->at("model").get<std::string>(),       record->at("serial").get<std::string>(),
             record->at("targetLabel").get<std::string>(), record->at("targetSize").get<std::uint64_t>(),
-            record->at("identity").get<std::string>()};
+            record->at("identity").get<std::string>(),    record->at("kind").get<std::string>()};
     } catch (const Json::exception &) {
         return std::unexpected(Error{"device_state_unavailable", "device operation record is malformed"});
     }
 }
 
-Result<void> DeviceSessionManager::apply(
-    const std::shared_ptr<MutationTarget> &target, std::span<const AlterationJournalPatch> patches,
-    const CancellationToken &cancellation, const std::function<Result<void>()> &validate,
-    const std::function<void()> &on_rollback_verified,
-    const std::function<Result<void>(std::shared_ptr<const RandomAccessReader>)> &admit_frozen) {
+Result<void>
+DeviceSessionManager::apply(const std::shared_ptr<MutationTarget> &target,
+                            std::span<const AlterationJournalPatch> patches, const CancellationToken &cancellation,
+                            const std::function<Result<void>()> &validate,
+                            const std::function<void()> &on_rollback_verified,
+                            const std::function<Result<void>(std::shared_ptr<const RandomAccessReader>)> &admit_frozen,
+                            const std::function<Result<void>()> &admit_forward) {
     auto mutation = std::dynamic_pointer_cast<Mutation>(target);
     if (!mutation)
         return std::unexpected(Error{"device_mutation_invalid", "mutation does not belong to a device session"});
@@ -196,12 +202,7 @@ Result<void> DeviceSessionManager::apply(
         return std::unexpected(aligned.error());
     // The journal's entry check verifies all guards after alignment and before
     // publishing anything. Its later publication/admission checks remain fresh.
-    Json entries = Json::array();
-    for (const auto &[offset, hash] : mutation->guards)
-        entries.push_back({{"offset", offset}, {"sha256", hash}});
-    if (auto saved = save_json(mutation->directory / "guards.json", {{"sectors", std::move(entries)}}, true,
-                               &mutation->connection->reads);
-        !saved)
+    if (auto saved = mutation->publish_guards(true); !saved)
         return saved;
     auto encoded = journal_io::encoded_size(target->journal_identity(), target->stable_identity(), *aligned);
     std::error_code error;
@@ -239,6 +240,11 @@ Result<void> DeviceSessionManager::apply(
             auto admitted = admit_frozen(std::move(reader));
             mutation->journal_streaming(true);
             return admitted;
+        },
+        [&]() -> Result<void> {
+            if (auto saved = mutation->publish_guards(false); !saved)
+                return saved;
+            return admit_forward ? admit_forward() : Result<void>{};
         });
     if (!applied) {
         if (!journals.storage_ready() || (rolled_back && !rollback_state_saved)) {
@@ -269,7 +275,9 @@ Result<void> DeviceSessionManager::apply(
 }
 
 Result<void> DeviceSessionManager::recover(std::string_view operation_id, std::string_view session_id,
-                                           std::string_view target_id, std::string_view owner, bool acknowledged) {
+                                           std::string_view target_id, std::string_view owner, bool acknowledged,
+                                           std::string_view confirmation_text, bool data_loss_acknowledged,
+                                           const CancellationToken &cancellation) {
     if (!writes_supported() || !acknowledged)
         return std::unexpected(
             Error{"device_write_authorization_required", "explicit recovery authorization is required"});
@@ -288,18 +296,59 @@ Result<void> DeviceSessionManager::recover(std::string_view operation_id, std::s
     auto record = load_json(*directory / "operation.json");
     if (!record)
         return std::unexpected(record.error());
+    std::uint64_t operation_size{};
+    bool formatting{};
+    std::optional<DeviceWriteSafety> safety;
     try {
+        const auto kind = record->at("kind").get<std::string>();
+        formatting = kind == "format";
+        if ((kind != "edit" && !formatting) ||
+            record->at("claimPolicy") != (formatting ? "require_unmounted" : "ordinary"))
+            return std::unexpected(Error{"device_state_unavailable", "Device recovery claim policy is invalid"});
+        operation_size = record->at("operationSize").get<std::uint64_t>();
         if (record->at("owner").get<std::string>() != owner ||
             record->at("operationId").get<std::string>() != operation_id ||
-            record->at("identity").get<std::string>() != target_identity(**connection, *description))
+            record->at("identity").get<std::string>() != target_identity(**connection, *description) ||
+            operation_size == 0U || operation_size > description->size_bytes ||
+            operation_size % (*connection)->device.transport->sector_size() != 0U)
             return std::unexpected(
                 Error{"device_recovery_identity", "selected device target does not match the recovery record"});
         const auto state = record->at("state").get<std::string>();
         if (state != "prepared" && state != "recovery_required")
             return std::unexpected(
                 Error{"device_operation_terminal", "this operation is complete; recovery must not replay it"});
+        if (formatting) {
+            if ((*connection).use_count() > 2U)
+                return std::unexpected(Error{"device_busy", "Recovery requires a fresh read-only connection"});
+            if (auto fresh = format_detail::require_fresh(**connection); !fresh)
+                return fresh;
+            auto inspected = (*connection)->device.transport->inspect_write_safety();
+            if (!inspected)
+                return std::unexpected(inspected.error());
+            if (auto checked = format_detail::require_safe(*inspected); !checked)
+                return checked;
+            if (record->at("targetOffset") != description->offset ||
+                record->at("targetSize") != description->size_bytes ||
+                record->at("targetSectorSize") != description->sector_size ||
+                record->at("recoveryMembership") != inspected->recovery_membership)
+                return std::unexpected(
+                    Error{"device_recovery_identity", "Recovery carrier membership or target bounds changed"});
+            auto candidate = (*connection)->device.candidate;
+            candidate.identity = inspected->identity;
+            if (!data_loss_acknowledged || confirmation_text != device_confirmation(candidate, *description, "RESTORE"))
+                return std::unexpected(Error{"device_format_confirmation",
+                                             "Fresh device-specific typed recovery confirmation is required"});
+            safety = std::move(*inspected);
+        }
     } catch (const Json::exception &) {
         return std::unexpected(Error{"device_state_unavailable", "device recovery record is malformed"});
+    }
+    {
+        const std::scoped_lock admission{implementation_->operation_admission};
+        if (auto clear = require_clear_carrier(implementation_->directory / "operations", carrier_fence(**connection),
+                                               directory->filename().string());
+            !clear)
+            return clear;
     }
     std::vector<std::filesystem::path> paths;
     std::error_code error;
@@ -319,8 +368,7 @@ Result<void> DeviceSessionManager::recover(std::string_view operation_id, std::s
     auto journal = journal_io::inspect(paths.front(), default_maximum_alteration_journal_bytes, 1024U * 1024U);
     if (!journal || journal->target.kind != MutationSourceKind::device ||
         journal->target_identity != target_identity(**connection, *description) ||
-        journal->image_size_bytes != description->size_bytes ||
-        std::ranges::any_of(journal->patches, [&](const auto &patch) {
+        journal->image_size_bytes != operation_size || std::ranges::any_of(journal->patches, [&](const auto &patch) {
             return patch.target_offset % (*connection)->device.transport->sector_size() != 0U ||
                    patch.size % (*connection)->device.transport->sector_size() != 0U;
         }))
@@ -337,19 +385,45 @@ Result<void> DeviceSessionManager::recover(std::string_view operation_id, std::s
         return verified;
     if (auto verified = verify_guards(**connection, *description, *guards, excluded); !verified)
         return verified;
-    if (auto authorized = (*connection)->device.transport->authorize_writes(); !authorized)
+    std::optional<Guards> physical;
+    if (formatting) {
+        auto loaded = load_guards(*directory, "physical-guards.json");
+        if (!loaded || loaded->empty())
+            return std::unexpected(Error{"device_recovery_required", "Complete physical format guards are required"});
+        physical = std::move(*loaded);
+        if (auto verified =
+                verify_physical_guards(**connection, *physical, description->offset, excluded, cancellation);
+            !verified)
+            return verified;
+    }
+    if (cancellation.is_cancelled())
+        return std::unexpected(Error{"operation_cancelled", "Recovery cancelled before writing"});
+    const auto authorized = formatting ? (*connection)->device.transport->authorize_initialization(*safety)
+                                       : (*connection)->device.transport->authorize_writes();
+    if (!authorized)
         return authorized;
     struct InvalidateAfterRecovery {
         Connection &connection;
         ~InvalidateAfterRecovery() {
             connection.authorized_target.clear();
             connection.metadata_guards.clear();
+            connection.logical_sizes.clear();
             connection.invalidated = true;
         }
     } invalidate{**connection};
+    if (cancellation.is_cancelled())
+        return std::unexpected(Error{"operation_cancelled", "Recovery cancelled before writing"});
+    if (formatting) {
+        if (auto claim = (*connection)->device.transport->verify_initialization_claim(); !claim)
+            return claim;
+        if (auto verified =
+                verify_physical_guards(**connection, *physical, description->offset, excluded, cancellation);
+            !verified)
+            return verified;
+    }
     if (auto verified = verify_guards(**connection, *description, *guards, excluded); !verified)
         return verified;
-    Mutation mutation{*connection, *description, std::string{operation_id}, *directory, true};
+    Mutation mutation{*connection, *description, std::string{operation_id}, *directory, true, operation_size};
     auto committed = journal_io::commit_marker_matches(paths.front(), journal->file_checksum);
     if (!committed)
         return std::unexpected(committed.error());
@@ -362,7 +436,16 @@ Result<void> DeviceSessionManager::recover(std::string_view operation_id, std::s
                 journal_io::recognize_uncommitted_target(mutation, paths.front(), *journal, 1024U * 1024U);
             !recognized)
             return recognized;
-        if (auto restored = journal_io::restore_original_bytes(mutation, paths.front(), *journal, 1024U * 1024U);
+        if (cancellation.is_cancelled())
+            return std::unexpected(Error{"operation_cancelled", "Recovery cancelled before first restoration write"});
+        if (auto restored = journal_io::restore_original_bytes(
+                mutation, paths.front(), *journal, 1024U * 1024U, {},
+                [&]() -> Result<void> {
+                    if (cancellation.is_cancelled())
+                        return std::unexpected(
+                            Error{"operation_cancelled", "Recovery cancelled before first restoration admission"});
+                    return {};
+                });
             !restored)
             return std::unexpected(Error{"device_recovery_required", restored.error().message});
     }

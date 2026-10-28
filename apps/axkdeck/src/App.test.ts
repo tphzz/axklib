@@ -1270,7 +1270,7 @@ describe('App panel layout', () => {
 
         const navigator = screen.getByRole('complementary', { name: 'Image navigator' });
         expect(screen.getByRole('button', { name: 'Open' }).closest('aside')).toBe(navigator);
-        expect(screen.getByRole('button', { name: 'Create image' }).closest('aside')).toBe(navigator);
+        expect(screen.getByRole('button', { name: 'Create' }).closest('aside')).toBe(navigator);
         expect(screen.queryByRole('textbox', { name: 'Disk image path' })).toBeNull();
         expect(screen.queryByRole('button', { name: 'Eject image' })).toBeNull();
         expect(screen.getByText('No source set open')).toBeTruthy();
@@ -2701,15 +2701,18 @@ describe('App panel layout', () => {
         expect(mocks.sandboxDirectory).toHaveBeenLastCalledWith({ rootId: 'workspace', relativePath: 'images' });
     });
 
-    it('starts hard-disk image creation through a dedicated destination picker', async () => {
+    it('opens Create first and chooses the image directory inside its Image tab', async () => {
         renderAcknowledgedApp();
 
-        await fireEvent.click(screen.getByRole('button', { name: 'Create image' }));
+        await fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+        expect(await screen.findByRole('dialog', { name: 'Create' })).toBeTruthy();
+        expect(screen.getByRole('tab', { name: 'Image' }).getAttribute('aria-selected')).toBe('true');
+        await fireEvent.click(screen.getByRole('button', { name: 'Browse' }));
         await fireEvent.click(await screen.findByText('Yamaha'));
         await fireEvent.click(await screen.findByText('images'));
         await fireEvent.click(screen.getByRole('button', { name: 'Select directory' }));
 
-        const dialog = await screen.findByRole('dialog', { name: 'Create HD/Floppy image' });
+        const dialog = await screen.findByRole('dialog', { name: 'Create' });
         expect(dialog.querySelector('output')?.textContent).toBe('Yamaha/images');
     });
 });

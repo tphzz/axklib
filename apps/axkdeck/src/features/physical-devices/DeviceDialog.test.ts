@@ -1,3 +1,4 @@
+import { deviceIdentity } from '../../test/deviceFixture';
 import { selectValue } from '../../test/selectControl';
 import { fireEvent, render, waitFor } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
@@ -10,8 +11,15 @@ function fixture() {
     const workflow = new DeviceWorkflow(service, {} as ImageSessionWorkflow);
     workflow.mode = 'recovery';
     workflow.candidates = [
-        { id: 'small', model: 'Test', serial: '1', sizeBytes: 1024, sectorSize: 512 },
-        { id: 'carrier', model: 'Large carrier', serial: '2', sizeBytes: 32_000_000_000, sectorSize: 512 },
+        { identity: deviceIdentity, id: 'small', model: 'Test', serial: '1', sizeBytes: 1024, sectorSize: 512 },
+        {
+            identity: deviceIdentity,
+            id: 'carrier',
+            model: 'Large carrier',
+            serial: '2',
+            sizeBytes: 32_000_000_000,
+            sectorSize: 512,
+        },
     ];
     return { workflow, service };
 }

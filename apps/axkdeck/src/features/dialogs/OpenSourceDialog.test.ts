@@ -1,3 +1,4 @@
+import { deviceIdentity } from '../../test/deviceFixture';
 import { openSelect, selectValue } from '../../test/selectControl';
 import { fireEvent, render, waitFor, within } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
@@ -7,7 +8,14 @@ import type { DeviceService, DeviceSession } from '../../lib/httpDevices';
 
 function fixture() {
     const transport = storagePickerFixture();
-    const candidate = { id: 'test', model: 'USB test', serial: 'unit-only', sizeBytes: 1024, sectorSize: 512 };
+    const candidate = {
+        identity: deviceIdentity,
+        id: 'test',
+        model: 'USB test',
+        serial: 'unit-only',
+        sizeBytes: 1024,
+        sectorSize: 512,
+    };
     const service = {
         available: vi.fn(async () => true),
         list: vi.fn(async () => ({
@@ -17,6 +25,7 @@ function fixture() {
         inspectXml: vi.fn(async () => ({
             targets: [
                 {
+                    recoveryConfirmationText: 'RESTORE /dev/synthetic',
                     id: '0',
                     label: 'SCSI ID 0',
                     enabled: true,
@@ -34,6 +43,7 @@ function fixture() {
             targets: [
                 {
                     id: layout === 'SCSI2SD_XML' ? '0' : 'disk',
+                    recoveryConfirmationText: 'RESTORE /dev/synthetic',
                     label: 'Disk',
                     sizeBytes: 1024,
                     offsetBytes: 0,
@@ -236,6 +246,7 @@ describe('Open dialog', () => {
         const connection: DeviceSession = {
             sessionId: 'v6-preview',
             candidate: {
+                identity: deviceIdentity,
                 id: 'large',
                 model: 'Large card',
                 serial: 'unit-only',
@@ -244,6 +255,7 @@ describe('Open dialog', () => {
             },
             targets: [
                 {
+                    recoveryConfirmationText: 'RESTORE /dev/synthetic',
                     id: '2',
                     label: 'SCSI ID 2',
                     sizeBytes: 2048000,

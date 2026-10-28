@@ -5,6 +5,7 @@ import { HttpJobController } from './httpJobController';
 import { randomIdempotencyKey } from './httpTransportWire';
 import type { PendingDeviceWrite } from './deviceWriteTracking';
 import type { JobState } from './transport';
+import { HttpDeviceFormatting, type DeviceFormattingService } from './httpDeviceFormatting';
 
 export function createHttpDeviceConnection(connection: AxklibApiConnection & { mode: string }) {
     const enabled = connection.mode === 'local' && '__TAURI_INTERNALS__' in window;
@@ -20,6 +21,7 @@ export type DeviceLayout = components['schemas']['DeviceConnectRequest']['layout
 export type DeviceXmlInspection = components['schemas']['DeviceXmlInspection'];
 export type DeviceProgress = NonNullable<JobState['progress']>;
 export interface DeviceService {
+    readonly formatting?: DeviceFormattingService;
     available(): Promise<boolean>;
     inspectXml(xml: string): Promise<DeviceXmlInspection>;
     list(): Promise<components['schemas']['DeviceCandidateList']>;
@@ -27,15 +29,23 @@ export interface DeviceService {
     status(sessionId: string): Promise<DeviceSession>;
     close(sessionId: string): Promise<void>;
     authorize(sessionId: string, targetId: string, onProgress?: (progress: DeviceProgress) => void): Promise<void>;
-    recover(operationId: string, sessionId: string, targetId: string): Promise<void>;
+    recover(
+        operationId: string,
+        sessionId: string,
+        targetId: string,
+        consent?: { confirmationText: string; dataLossAcknowledged: true },
+    ): Promise<void>;
     operations(): Promise<{ operations: DeviceOperation[]; uncertain: PendingDeviceWrite[] }>;
 }
 
 export class HttpDevices implements DeviceService {
+    readonly formatting: DeviceFormattingService;
     constructor(
         private readonly client: AxklibHttpApiClient,
         private readonly jobs: HttpJobController,
-    ) {}
+    ) {
+        this.formatting = new HttpDeviceFormatting(client, jobs);
+    }
     async available(): Promise<boolean> {
         const capabilities = await this.client.serverCapabilities();
         return ['devices.list', 'devices.connect', 'devices.xml.inspect'].every((id) =>
@@ -66,8 +76,19 @@ export class HttpDevices implements DeviceService {
     ): Promise<void> {
         await this.run('devices.authorize', { sessionId, targetId, exclusiveUseAcknowledged: true }, onProgress);
     }
-    async recover(operationId: string, sessionId: string, targetId: string): Promise<void> {
-        await this.run('devices.recover', { operationId, sessionId, targetId, exclusiveUseAcknowledged: true });
+    async recover(
+        operationId: string,
+        sessionId: string,
+        targetId: string,
+        consent?: { confirmationText: string; dataLossAcknowledged: true },
+    ): Promise<void> {
+        await this.run('devices.recover', {
+            operationId,
+            sessionId,
+            targetId,
+            exclusiveUseAcknowledged: true,
+            ...consent,
+        });
     }
     async operations() {
         const result = (await this.client.invoke<components['schemas']['DeviceOperationList']>(
@@ -81,11 +102,13 @@ export class HttpDevices implements DeviceService {
                         if (error instanceof AxklibApiError && error.code === 'job_not_found') return null;
                         throw error;
                     });
-                if (job && ['COMPLETED', 'FAILED', 'CANCELLED'].includes(job.state))
+                if (job && ['COMPLETED', 'FAILED', 'CANCELLED'].includes(job.state)) {
                     this.client.deviceWrites.terminal(job.jobId);
-                if (job) continue;
+                    if (record.operation !== 'devices.sfs.format') continue;
+                } else if (job) continue;
             }
-            {
+            if (record.operation === 'devices.sfs.format') await this.formatting.resolve(record.operationId);
+            else {
                 const resolved = (await this.client.invoke<DeviceOperation>('devices.resolve', {
                     operationId: record.operationId,
                 })) as DeviceOperation;

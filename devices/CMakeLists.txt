@@ -41,6 +41,7 @@ add_library(rawdisk
     # core
     src/errors.cpp
     src/block_device.cpp
+    src/inspection.cpp
     src/authorization_session.cpp
     src/ownership.cpp
     src/remote.cpp
@@ -92,7 +93,7 @@ elseif(APPLE)
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(RAWDISK_DBUS REQUIRED IMPORTED_TARGET dbus-1>=1.10)
-    target_sources(rawdisk PRIVATE src/posix_disk.cpp src/posix_authorization.cpp src/enumerate_linux.cpp src/linux_authorization.cpp)
+    target_sources(rawdisk PRIVATE src/posix_disk.cpp src/posix_authorization.cpp src/enumerate_linux.cpp src/linux_authorization.cpp src/inspection_linux.cpp)
     target_link_libraries(rawdisk PRIVATE PkgConfig::RAWDISK_DBUS)
 else()
     message(FATAL_ERROR "rawdisk supports Windows, macOS and Linux")

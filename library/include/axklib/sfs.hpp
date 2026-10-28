@@ -175,6 +175,24 @@ struct Partition {
     std::vector<Error> diagnostics;
 };
 
+struct SfsLayoutPartition {
+    PartitionIndex index;
+    std::string name;
+    std::uint32_t start_sector{};
+    std::uint32_t sector_count{};
+};
+
+struct SfsLayout {
+    std::uint32_t sector_size_bytes{};
+    std::uint64_t declared_size_bytes{};
+    std::vector<SfsLayoutPartition> partitions;
+};
+
+// Validates mirrored headers, disjoint partition bounds and metadata geometry.
+// Header-only inspection does not inventory files or establish allocation safety.
+[[nodiscard]] AXK_API Result<SfsLayout> inspect_sfs_layout(const RandomAccessReader &reader,
+                                                           const CancellationToken &cancellation = {});
+
 class AXK_API Container {
   public:
     [[nodiscard]] const std::filesystem::path &source_path() const noexcept;

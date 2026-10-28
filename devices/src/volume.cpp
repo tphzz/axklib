@@ -93,7 +93,7 @@ Result<std::shared_ptr<BlockDevice>> open_volume(std::shared_ptr<BlockDevice> pa
         const Volume &vol = **v;
         if (!vol.usable || vol.range.empty() || vol.sector_count == 0)
             return fail(Errc::layout_invalid);
-        const bool rw = access == Access::ReadWrite;
+        const bool rw = access != Access::ReadOnly;
         if (rw) {
             if (!parent->writable())
                 return fail(Errc::read_only_handle);

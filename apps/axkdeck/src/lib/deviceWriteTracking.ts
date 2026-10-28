@@ -44,15 +44,20 @@ export class DeviceWriteTracking {
     begin(imageId: unknown, operation: string, operationId?: string): string | undefined {
         const location = typeof imageId === 'string' ? this.images.get(imageId) : undefined;
         if (!location) return undefined;
+        return this.beginTarget(location.displayName, operation, operationId);
+    }
+    beginTarget(displayName: string, operation: string, operationId?: string): string {
         if (!this.storage)
             throw new Error('Durable local operation tracking is unavailable. Device writing is disabled.');
         if (!operationId) throw new Error('Device mutations require a known operation identity before submission.');
+        if (this.records.some((record) => record.operation === 'devices.sfs.format'))
+            throw new Error('Resolve the pending device format before submitting another write.');
         if (this.records.some((record) => !record.jobId))
             throw new Error(
                 'A device write has an uncertain outcome. Check device operation status before submitting another write.',
             );
         if (this.records.length >= 4096) throw new Error('Device operation tracking capacity is exhausted.');
-        this.records.push({ operationId, operation, displayName: location.displayName });
+        this.records.push({ operationId, operation, displayName });
         this.persist();
         return operationId;
     }
@@ -64,8 +69,10 @@ export class DeviceWriteTracking {
         }
     }
     terminal(jobId: string): void {
-        if (!this.records.some((record) => record.jobId === jobId)) return;
-        this.records = this.records.filter((record) => record.jobId !== jobId);
+        if (!this.records.some((record) => record.jobId === jobId && record.operation !== 'devices.sfs.format')) return;
+        this.records = this.records.filter(
+            (record) => record.jobId !== jobId || record.operation === 'devices.sfs.format',
+        );
         this.persist();
     }
     reconcile(operationId: string): void {

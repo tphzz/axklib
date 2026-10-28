@@ -2555,6 +2555,9 @@
             "minLength": 1,
             "type": "string"
           },
+          "identity": {
+            "$ref": "#/components/schemas/DeviceIdentityDetails"
+          },
           "model": {
             "type": "string"
           },
@@ -2575,7 +2578,8 @@
           "model",
           "serial",
           "sizeBytes",
-          "sectorSize"
+          "sectorSize",
+          "identity"
         ],
         "type": "object"
       },
@@ -2642,9 +2646,216 @@
         ],
         "type": "object"
       },
+      "DeviceDetectedContent": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "offsetBytes": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "sizeBytes": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "validation": {
+            "enum": [
+              "STRUCTURE_VALIDATED",
+              "SIGNATURE_ONLY"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "type",
+          "label",
+          "offsetBytes",
+          "sizeBytes",
+          "validation"
+        ],
+        "type": "object"
+      },
+      "DeviceHostVolume": {
+        "additionalProperties": false,
+        "properties": {
+          "device": {
+            "type": "string"
+          },
+          "filesystem": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "mountPoint": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "device",
+          "mountPoint",
+          "filesystem",
+          "label"
+        ],
+        "type": "object"
+      },
+      "DeviceIdentityDetails": {
+        "additionalProperties": false,
+        "properties": {
+          "devicePath": {
+            "type": "string"
+          },
+          "usbManufacturer": {
+            "type": "string"
+          },
+          "usbProduct": {
+            "type": "string"
+          },
+          "usbProductId": {
+            "type": "string"
+          },
+          "usbSerial": {
+            "type": "string"
+          },
+          "usbVendorId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "devicePath",
+          "usbManufacturer",
+          "usbProduct",
+          "usbSerial",
+          "usbVendorId",
+          "usbProductId"
+        ],
+        "type": "object"
+      },
+      "DeviceInspection": {
+        "additionalProperties": false,
+        "properties": {
+          "blockedReasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "candidate": {
+            "$ref": "#/components/schemas/DeviceCandidate"
+          },
+          "complete": {
+            "type": "boolean"
+          },
+          "confirmationText": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "contents": {
+            "items": {
+              "$ref": "#/components/schemas/DeviceDetectedContent"
+            },
+            "type": "array"
+          },
+          "formattedSizeBytes": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "inspectionToken": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "mountedVolumes": {
+            "items": {
+              "$ref": "#/components/schemas/DeviceHostVolume"
+            },
+            "type": "array"
+          },
+          "partitionOptions": {
+            "items": {
+              "$ref": "#/components/schemas/HardDiskCreationPartitionOption"
+            },
+            "type": "array"
+          },
+          "sessionId": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "target": {
+            "$ref": "#/components/schemas/DeviceTarget"
+          },
+          "unusedSuffixBytes": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "inspectionToken",
+          "sessionId",
+          "candidate",
+          "target",
+          "contents",
+          "mountedVolumes",
+          "warnings",
+          "blockedReasons",
+          "complete",
+          "formattedSizeBytes",
+          "unusedSuffixBytes",
+          "partitionOptions",
+          "confirmationText"
+        ],
+        "type": "object"
+      },
+      "DeviceInspectionRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "sessionId": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "targetId": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "sessionId",
+          "targetId"
+        ],
+        "type": "object"
+      },
       "DeviceOperation": {
         "additionalProperties": false,
         "properties": {
+          "kind": {
+            "enum": [
+              "EDIT",
+              "FORMAT",
+              "UNSTARTED"
+            ],
+            "type": "string",
+            "x-axklib-application-enum": {
+              "EDIT": "edit",
+              "FORMAT": "format",
+              "UNSTARTED": "unstarted"
+            }
+          },
           "model": {
             "type": "string"
           },
@@ -2686,7 +2897,8 @@
           "model",
           "serial",
           "targetLabel",
-          "targetSize"
+          "targetSize",
+          "kind"
         ],
         "type": "object"
       },
@@ -2722,6 +2934,15 @@
       "DeviceRecoveryRequest": {
         "additionalProperties": false,
         "properties": {
+          "confirmationText": {
+            "maxLength": 512,
+            "minLength": 1,
+            "type": "string"
+          },
+          "dataLossAcknowledged": {
+            "const": true,
+            "type": "boolean"
+          },
           "exclusiveUseAcknowledged": {
             "const": true,
             "type": "boolean"
@@ -2852,6 +3073,126 @@
         ],
         "type": "object"
       },
+      "DeviceSfsFormatPlan": {
+        "additionalProperties": false,
+        "properties": {
+          "expiresInSeconds": {
+            "const": 900,
+            "type": "integer"
+          },
+          "inspection": {
+            "$ref": "#/components/schemas/DeviceInspection"
+          },
+          "partitionCount": {
+            "maximum": 8,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "planToken": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "planToken",
+          "inspection",
+          "partitionCount",
+          "expiresInSeconds"
+        ],
+        "type": "object"
+      },
+      "DeviceSfsFormatPlanRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "inspectionToken": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "partitionCount": {
+            "maximum": 8,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "sessionId": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "sessionId",
+          "inspectionToken",
+          "partitionCount"
+        ],
+        "type": "object"
+      },
+      "DeviceSfsFormatRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "confirmationText": {
+            "maxLength": 512,
+            "minLength": 1,
+            "type": "string"
+          },
+          "dataLossAcknowledged": {
+            "const": true,
+            "type": "boolean"
+          },
+          "exclusiveUseAcknowledged": {
+            "const": true,
+            "type": "boolean"
+          },
+          "planToken": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "sessionId": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "sessionId",
+          "planToken",
+          "confirmationText",
+          "exclusiveUseAcknowledged",
+          "dataLossAcknowledged"
+        ],
+        "type": "object"
+      },
+      "DeviceSfsFormatResult": {
+        "additionalProperties": false,
+        "properties": {
+          "operationId": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "partitionCount": {
+            "maximum": 8,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "sessionId": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "sizeBytes": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "targetId": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "operationId",
+          "sessionId",
+          "targetId",
+          "sizeBytes",
+          "partitionCount"
+        ],
+        "type": "object"
+      },
       "DeviceTarget": {
         "additionalProperties": false,
         "properties": {
@@ -2874,6 +3215,9 @@
           },
           "readOnly": {
             "type": "boolean"
+          },
+          "recoveryConfirmationText": {
+            "type": "string"
           },
           "scsi": {
             "oneOf": [
@@ -2903,7 +3247,8 @@
           "sizeBytes",
           "sectorSize",
           "readOnly",
-          "notices"
+          "notices",
+          "recoveryConfirmationText"
         ],
         "type": "object"
       },
@@ -20953,6 +21298,365 @@
         ]
       }
     },
+    "/device-inspections": {
+      "post": {
+        "operationId": "devices.inspect",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "examples": {
+                "default": {
+                  "value": {
+                    "sessionId": "x",
+                    "targetId": "x"
+                  }
+                }
+              },
+              "schema": {
+                "$ref": "#/components/schemas/DeviceInspectionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "success": {
+                    "value": {
+                      "data": {
+                        "error": {},
+                        "jobId": "x",
+                        "latestSequence": 1,
+                        "operationId": "x",
+                        "progress": {
+                          "completed": 0,
+                          "message": "x",
+                          "phase": "x",
+                          "total": 0
+                        },
+                        "result": {},
+                        "state": "QUEUED"
+                      },
+                      "meta": {
+                        "requestId": "request-1"
+                      }
+                    }
+                  },
+                  "warning": {
+                    "value": {
+                      "data": {
+                        "error": {},
+                        "jobId": "x",
+                        "latestSequence": 1,
+                        "operationId": "x",
+                        "progress": {
+                          "completed": 0,
+                          "message": "x",
+                          "phase": "x",
+                          "total": 0
+                        },
+                        "result": {},
+                        "state": "QUEUED"
+                      },
+                      "meta": {
+                        "requestId": "request-1",
+                        "warnings": [
+                          {
+                            "code": "example_warning",
+                            "context": {},
+                            "message": "operation completed with a warning"
+                          }
+                        ]
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/JobResponse"
+                }
+              }
+            },
+            "description": "Job accepted",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Malformed or schema-invalid request",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication is required",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authenticated caller is not authorized",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Referenced resource does not exist",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Request conflicts with current state",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Configured request limit exceeded",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unsupported or invalid domain request",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Transient server capacity exhausted",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Contained internal failure",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          }
+        },
+        "x-axklib-operation-descriptors": [
+          {
+            "cliCommand": null,
+            "cliParity": false,
+            "id": "devices.inspect",
+            "mode": "job",
+            "operationClass": "read",
+            "requestSchema": "DeviceInspectionRequest",
+            "requiresIdempotency": false,
+            "resultSchema": "DeviceInspection",
+            "variant": null
+          }
+        ],
+        "x-axklib-operation-ids": [
+          "devices.inspect"
+        ]
+      }
+    },
     "/device-operation-status": {
       "post": {
         "operationId": "devices.resolve",
@@ -20981,6 +21685,7 @@
                   "success": {
                     "value": {
                       "data": {
+                        "kind": "EDIT",
                         "model": "x",
                         "operationId": "x",
                         "serial": "x",
@@ -20996,6 +21701,7 @@
                   "warning": {
                     "value": {
                       "data": {
+                        "kind": "EDIT",
                         "model": "x",
                         "operationId": "x",
                         "serial": "x",
@@ -22005,6 +22711,728 @@
         ]
       }
     },
+    "/device-sfs-format-plans": {
+      "post": {
+        "operationId": "devices.sfs.plan",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "examples": {
+                "default": {
+                  "value": {
+                    "inspectionToken": "x",
+                    "partitionCount": 1,
+                    "sessionId": "x"
+                  }
+                }
+              },
+              "schema": {
+                "$ref": "#/components/schemas/DeviceSfsFormatPlanRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "success": {
+                    "value": {
+                      "data": {
+                        "error": {},
+                        "jobId": "x",
+                        "latestSequence": 1,
+                        "operationId": "x",
+                        "progress": {
+                          "completed": 0,
+                          "message": "x",
+                          "phase": "x",
+                          "total": 0
+                        },
+                        "result": {},
+                        "state": "QUEUED"
+                      },
+                      "meta": {
+                        "requestId": "request-1"
+                      }
+                    }
+                  },
+                  "warning": {
+                    "value": {
+                      "data": {
+                        "error": {},
+                        "jobId": "x",
+                        "latestSequence": 1,
+                        "operationId": "x",
+                        "progress": {
+                          "completed": 0,
+                          "message": "x",
+                          "phase": "x",
+                          "total": 0
+                        },
+                        "result": {},
+                        "state": "QUEUED"
+                      },
+                      "meta": {
+                        "requestId": "request-1",
+                        "warnings": [
+                          {
+                            "code": "example_warning",
+                            "context": {},
+                            "message": "operation completed with a warning"
+                          }
+                        ]
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/JobResponse"
+                }
+              }
+            },
+            "description": "Job accepted",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Malformed or schema-invalid request",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication is required",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authenticated caller is not authorized",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Referenced resource does not exist",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Request conflicts with current state",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Configured request limit exceeded",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unsupported or invalid domain request",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Transient server capacity exhausted",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Contained internal failure",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          }
+        },
+        "x-axklib-operation-descriptors": [
+          {
+            "cliCommand": null,
+            "cliParity": false,
+            "id": "devices.sfs.plan",
+            "mode": "job",
+            "operationClass": "read",
+            "requestSchema": "DeviceSfsFormatPlanRequest",
+            "requiresIdempotency": false,
+            "resultSchema": "DeviceSfsFormatPlan",
+            "variant": null
+          }
+        ],
+        "x-axklib-operation-ids": [
+          "devices.sfs.plan"
+        ]
+      }
+    },
+    "/device-sfs-formats": {
+      "post": {
+        "operationId": "devices.sfs.format",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "examples": {
+                "default": {
+                  "value": {
+                    "confirmationText": "x",
+                    "dataLossAcknowledged": true,
+                    "exclusiveUseAcknowledged": true,
+                    "planToken": "x",
+                    "sessionId": "x"
+                  }
+                }
+              },
+              "schema": {
+                "$ref": "#/components/schemas/DeviceSfsFormatRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "success": {
+                    "value": {
+                      "data": {
+                        "error": {},
+                        "jobId": "x",
+                        "latestSequence": 1,
+                        "operationId": "x",
+                        "progress": {
+                          "completed": 0,
+                          "message": "x",
+                          "phase": "x",
+                          "total": 0
+                        },
+                        "result": {},
+                        "state": "QUEUED"
+                      },
+                      "meta": {
+                        "requestId": "request-1"
+                      }
+                    }
+                  },
+                  "warning": {
+                    "value": {
+                      "data": {
+                        "error": {},
+                        "jobId": "x",
+                        "latestSequence": 1,
+                        "operationId": "x",
+                        "progress": {
+                          "completed": 0,
+                          "message": "x",
+                          "phase": "x",
+                          "total": 0
+                        },
+                        "result": {},
+                        "state": "QUEUED"
+                      },
+                      "meta": {
+                        "requestId": "request-1",
+                        "warnings": [
+                          {
+                            "code": "example_warning",
+                            "context": {},
+                            "message": "operation completed with a warning"
+                          }
+                        ]
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/JobResponse"
+                }
+              }
+            },
+            "description": "Job accepted",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Malformed or schema-invalid request",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authentication is required",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Authenticated caller is not authorized",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Referenced resource does not exist",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Request conflicts with current state",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Configured request limit exceeded",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Unsupported or invalid domain request",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Transient server capacity exhausted",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "context": {},
+                        "message": "request could not be processed",
+                        "requestId": "request-1",
+                        "retryable": false
+                      }
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            },
+            "description": "Contained internal failure",
+            "headers": {
+              "X-Request-Id": {
+                "$ref": "#/components/headers/XRequestId"
+              }
+            }
+          }
+        },
+        "x-axklib-operation-descriptors": [
+          {
+            "cliCommand": null,
+            "cliParity": false,
+            "id": "devices.sfs.format",
+            "mode": "job",
+            "operationClass": "write",
+            "requestSchema": "DeviceSfsFormatRequest",
+            "requiresIdempotency": true,
+            "resultSchema": "DeviceSfsFormatResult",
+            "variant": null
+          }
+        ],
+        "x-axklib-operation-ids": [
+          "devices.sfs.format"
+        ]
+      }
+    },
     "/device-status": {
       "post": {
         "operationId": "devices.status",
@@ -22035,6 +23463,14 @@
                       "data": {
                         "candidate": {
                           "id": "x",
+                          "identity": {
+                            "devicePath": "x",
+                            "usbManufacturer": "x",
+                            "usbProduct": "x",
+                            "usbProductId": "x",
+                            "usbSerial": "x",
+                            "usbVendorId": "x"
+                          },
                           "model": "x",
                           "sectorSize": 512,
                           "serial": "x",
@@ -22056,6 +23492,14 @@
                       "data": {
                         "candidate": {
                           "id": "x",
+                          "identity": {
+                            "devicePath": "x",
+                            "usbManufacturer": "x",
+                            "usbProduct": "x",
+                            "usbProductId": "x",
+                            "usbSerial": "x",
+                            "usbVendorId": "x"
+                          },
                           "model": "x",
                           "sectorSize": 512,
                           "serial": "x",

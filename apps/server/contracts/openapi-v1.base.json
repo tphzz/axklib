@@ -2881,7 +2881,8 @@
           "model",
           "serial",
           "sizeBytes",
-          "sectorSize"
+          "sectorSize",
+          "identity"
         ],
         "properties": {
           "id": {
@@ -2901,6 +2902,323 @@
           "sectorSize": {
             "type": "integer",
             "minimum": 512
+          },
+          "identity": {
+            "$ref": "#/components/schemas/DeviceIdentityDetails"
+          }
+        }
+      },
+      "DeviceIdentityDetails": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "devicePath",
+          "usbManufacturer",
+          "usbProduct",
+          "usbSerial",
+          "usbVendorId",
+          "usbProductId"
+        ],
+        "properties": {
+          "devicePath": {
+            "type": "string"
+          },
+          "usbManufacturer": {
+            "type": "string"
+          },
+          "usbProduct": {
+            "type": "string"
+          },
+          "usbSerial": {
+            "type": "string"
+          },
+          "usbVendorId": {
+            "type": "string"
+          },
+          "usbProductId": {
+            "type": "string"
+          }
+        }
+      },
+      "DeviceHostVolume": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "device",
+          "mountPoint",
+          "filesystem",
+          "label"
+        ],
+        "properties": {
+          "device": {
+            "type": "string"
+          },
+          "mountPoint": {
+            "type": "string"
+          },
+          "filesystem": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          }
+        }
+      },
+      "DeviceDetectedContent": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "kind",
+          "type",
+          "label",
+          "offsetBytes",
+          "sizeBytes",
+          "validation"
+        ],
+        "properties": {
+          "kind": {
+            "type": "string",
+            "minLength": 1
+          },
+          "type": {
+            "type": "string",
+            "minLength": 1
+          },
+          "label": {
+            "type": "string"
+          },
+          "offsetBytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "validation": {
+            "type": "string",
+            "enum": [
+              "STRUCTURE_VALIDATED",
+              "SIGNATURE_ONLY"
+            ]
+          }
+        }
+      },
+      "DeviceInspectionRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "sessionId",
+          "targetId"
+        ],
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "targetId": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "DeviceInspection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "inspectionToken",
+          "sessionId",
+          "candidate",
+          "target",
+          "contents",
+          "mountedVolumes",
+          "warnings",
+          "blockedReasons",
+          "complete",
+          "formattedSizeBytes",
+          "unusedSuffixBytes",
+          "partitionOptions",
+          "confirmationText"
+        ],
+        "properties": {
+          "inspectionToken": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sessionId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "candidate": {
+            "$ref": "#/components/schemas/DeviceCandidate"
+          },
+          "target": {
+            "$ref": "#/components/schemas/DeviceTarget"
+          },
+          "contents": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeviceDetectedContent"
+            }
+          },
+          "mountedVolumes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DeviceHostVolume"
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "blockedReasons": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "complete": {
+            "type": "boolean"
+          },
+          "formattedSizeBytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "unusedSuffixBytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "partitionOptions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/HardDiskCreationPartitionOption"
+            }
+          },
+          "confirmationText": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "DeviceSfsFormatPlanRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "sessionId",
+          "inspectionToken",
+          "partitionCount"
+        ],
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "inspectionToken": {
+            "type": "string",
+            "minLength": 1
+          },
+          "partitionCount": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 8
+          }
+        }
+      },
+      "DeviceSfsFormatPlan": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "planToken",
+          "inspection",
+          "partitionCount",
+          "expiresInSeconds"
+        ],
+        "properties": {
+          "planToken": {
+            "type": "string",
+            "minLength": 1
+          },
+          "inspection": {
+            "$ref": "#/components/schemas/DeviceInspection"
+          },
+          "partitionCount": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 8
+          },
+          "expiresInSeconds": {
+            "type": "integer",
+            "const": 900
+          }
+        }
+      },
+      "DeviceSfsFormatRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "sessionId",
+          "planToken",
+          "confirmationText",
+          "exclusiveUseAcknowledged",
+          "dataLossAcknowledged"
+        ],
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "planToken": {
+            "type": "string",
+            "minLength": 1
+          },
+          "confirmationText": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "exclusiveUseAcknowledged": {
+            "type": "boolean",
+            "const": true
+          },
+          "dataLossAcknowledged": {
+            "type": "boolean",
+            "const": true
+          }
+        }
+      },
+      "DeviceSfsFormatResult": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "operationId",
+          "sessionId",
+          "targetId",
+          "sizeBytes",
+          "partitionCount"
+        ],
+        "properties": {
+          "operationId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sessionId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "targetId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sizeBytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "partitionCount": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 8
           }
         }
       },
@@ -3084,7 +3402,8 @@
           "sizeBytes",
           "sectorSize",
           "readOnly",
-          "notices"
+          "notices",
+          "recoveryConfirmationText"
         ],
         "properties": {
           "id": {
@@ -3125,6 +3444,9 @@
             "items": {
               "type": "string"
             }
+          },
+          "recoveryConfirmationText": {
+            "type": "string"
           }
         }
       },
@@ -3248,7 +3570,8 @@
           "model",
           "serial",
           "targetLabel",
-          "targetSize"
+          "targetSize",
+          "kind"
         ],
         "properties": {
           "operationId": {
@@ -3284,6 +3607,19 @@
           "targetSize": {
             "type": "integer",
             "minimum": 0
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "EDIT",
+              "FORMAT",
+              "UNSTARTED"
+            ],
+            "x-axklib-application-enum": {
+              "EDIT": "edit",
+              "FORMAT": "format",
+              "UNSTARTED": "unstarted"
+            }
           }
         }
       },
@@ -3340,6 +3676,15 @@
             "minLength": 1
           },
           "exclusiveUseAcknowledged": {
+            "type": "boolean",
+            "const": true
+          },
+          "confirmationText": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "dataLossAcknowledged": {
             "type": "boolean",
             "const": true
           }

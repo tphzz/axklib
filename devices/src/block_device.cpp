@@ -131,6 +131,15 @@ Result<void> BlockDevice::verify_binding() noexcept {
 }
 
 Result<void> BlockDevice::verify_binding_raw() { return detail::fail(Errc::not_a_usb_disk); }
+Result<void> BlockDevice::verify_non_dismounting_claim(const DeviceInfo &expected) noexcept {
+    return detail::guard([&] {
+        const std::lock_guard lock{mutex_};
+        return verify_non_dismounting_claim_raw(expected);
+    });
+}
+Result<void> BlockDevice::verify_non_dismounting_claim_raw(const DeviceInfo &) {
+    return detail::fail(Errc::device_busy);
+}
 
 Result<std::vector<DeviceInfo>> list_usb_devices() noexcept {
     return detail::guard([] { return detail::list_platform(); });
@@ -139,6 +148,8 @@ Result<std::vector<DeviceInfo>> list_usb_devices() noexcept {
 Result<std::unique_ptr<BlockDevice>> open_device(const DeviceInfo &expected, Access access,
                                                  std::shared_ptr<AuthorizationSession> authorization) noexcept {
     return detail::guard([&]() -> Result<std::unique_ptr<BlockDevice>> {
+        if (access != Access::ReadOnly && access != Access::ReadWrite && access != Access::ReadWriteUnmounted)
+            return detail::fail(Errc::invalid_argument);
         auto devices = detail::list_platform();
         if (!devices)
             return detail::fail(devices.error());
@@ -154,6 +165,20 @@ Result<std::unique_ptr<BlockDevice>> open_device(const DeviceInfo &expected, Acc
             return detail::fail(Errc::device_changed);
         }
 
+        const auto check_format = [&](BlockDevice *retained_claim) -> Result<void> {
+            if (access != Access::ReadWriteUnmounted)
+                return {};
+            auto inventory = inspect_usb_device(*it, retained_claim);
+            if (!inventory)
+                return detail::fail(inventory.error());
+            if (!inventory->complete || !inventory->non_dismounting_claim_supported ||
+                inventory->members.size() != 1U || !inventory->mounted.empty())
+                return detail::fail(Errc::device_busy);
+            return {};
+        };
+        if (auto inspected = check_format(nullptr); !inspected)
+            return detail::fail(inspected.error());
+
         if (!authorization) {
             auto created = create_authorization_session();
             if (!created)
@@ -165,6 +190,8 @@ Result<std::unique_ptr<BlockDevice>> open_device(const DeviceInfo &expected, Acc
             return dev;
         if (!*dev)
             return detail::fail(Errc::internal_error);
+        if (auto inspected = check_format(dev->get()); !inspected)
+            return detail::fail(inspected.error());
         if (auto r = check_capacity(**dev); !r)
             return detail::fail(r.error());
         return dev;

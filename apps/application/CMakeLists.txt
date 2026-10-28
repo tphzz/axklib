@@ -84,12 +84,17 @@ add_library(axk_application STATIC src/alteration_journal.cpp src/alteration_jou
                                    src/write_manifest_support.cpp src/write_operations.cpp src/write_plan_support.cpp)
 add_library(axklib::application ALIAS axk_application)
 target_sources(axk_application PRIVATE src/read_diagnostics.cpp src/image_audition_access.cpp src/operation_read_scheduling.cpp src/image_read_jobs.cpp)
+target_sources(axk_application PRIVATE src/operation_job_admission.cpp)
 target_sources(axk_application PRIVATE src/image_document_discovery.cpp src/image_document_browsing.cpp src/native_document_snapshot.cpp
   src/conversion_plan_store.cpp src/conversion_operations.cpp src/conversion_sources.cpp src/prepared_session_commit.cpp
   src/image_source_read.cpp src/image_filesystem_workspace.cpp src/formats/a_series/admission.cpp
   src/formats/tx16w/session_state.cpp src/formats/tx16w/audio.cpp src/formats/tx16w/admission.cpp)
 set_target_properties(axk_application PROPERTIES POSITION_INDEPENDENT_CODE ON CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
 target_sources(axk_application PRIVATE src/device_provider.cpp src/device_xml.cpp src/device_source.cpp src/device_sessions.cpp
+                                       src/device_content_inspection.cpp
+                                       src/device_sfs_view.cpp
+                                       src/device_format_operations.cpp src/device_format_inspection.cpp
+                                       src/device_format_execution.cpp src/device_format_support.cpp src/device_format_validation.cpp
                                        src/device_patch_alignment.cpp src/device_transactions.cpp src/image_device_mutation.cpp
                                        src/operation_registry_devices.cpp)
 if(AXK_BUILD_DEVICES)
@@ -164,6 +169,11 @@ if(BUILD_TESTING)
   target_compile_features(axk_application_tests PRIVATE cxx_std_23)
   target_sources(axk_application_tests PRIVATE tests/conversion_plan_store_test.cpp tests/conversion_operations_test.cpp)
   target_sources(axk_application_tests PRIVATE tests/device_sessions_test.cpp tests/device_guard_reads_test.cpp tests/device_platform_test.cpp)
+  target_sources(axk_application_tests PRIVATE tests/device_content_inspection_test.cpp)
+  target_sources(axk_application_tests PRIVATE tests/device_prefix_test.cpp)
+  target_sources(axk_application_tests PRIVATE tests/job_admission_test.cpp)
+  target_sources(axk_application_tests PRIVATE tests/journal_forward_admission_test.cpp)
+  target_sources(axk_application_tests PRIVATE tests/device_format_test.cpp)
   target_sources(axk_application_tests PRIVATE tests/read_diagnostics_test.cpp tests/read_job_scheduling_test.cpp)
   if(AXK_BUILD_DEVICES)
     target_compile_definitions(axk_application_tests PRIVATE AXK_BUILD_DEVICES=1)

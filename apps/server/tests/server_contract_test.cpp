@@ -63,6 +63,7 @@ TEST(ServerContract, RequiresExactDeviceTargetMetadataAndRejectsMalformedScsiIde
                           {"sizeBytes", 2048000U},
                           {"sectorSize", 2048U},
                           {"readOnly", true},
+                          {"recoveryConfirmationText", "RESTORE /dev/synthetic SCSI 2"},
                           {"notices", nlohmann::json::array()},
                           {"scsi",
                            {{"id", 2U},
@@ -77,6 +78,9 @@ TEST(ServerContract, RequiresExactDeviceTargetMetadataAndRejectsMalformedScsiIde
     EXPECT_FALSE(validator.validate("DeviceTarget", missing));
     missing = target;
     missing.erase("scsi");
+    EXPECT_FALSE(validator.validate("DeviceTarget", missing));
+    missing = target;
+    missing.erase("recoveryConfirmationText");
     EXPECT_FALSE(validator.validate("DeviceTarget", missing));
     target["scsi"]["id"] = 8;
     EXPECT_FALSE(validator.validate("DeviceTarget", target));
@@ -362,7 +366,7 @@ TEST(ServerContract, SystemProgramContextsArePartitionScopedAndIndependentlyAvai
 TEST(ServerContract, RegistryIsTheOnlyDomainOperationRouteInventory) {
     const auto registry = axk::app::make_operation_registry();
     const auto entries = registry.entries();
-    EXPECT_EQ(entries.size(), 88U);
+    EXPECT_EQ(entries.size(), 91U);
     EXPECT_EQ(entries.front().descriptor.id, "system.version");
     EXPECT_EQ(entries.front().descriptor.route, "/api/v1/system/version");
 }

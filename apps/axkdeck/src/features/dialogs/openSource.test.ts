@@ -1,9 +1,18 @@
+import { deviceIdentity } from '../../test/deviceFixture';
 import { describe, expect, it, vi } from 'vitest';
 import { OpenSourceWorkflow } from './openSource.svelte';
 import type { DeviceService, DeviceSession, DeviceXmlInspection } from '../../lib/httpDevices';
 
-const candidate = { id: 'usb', model: 'Card', serial: 'test', sizeBytes: 1024, sectorSize: 512 };
+const candidate = {
+    identity: deviceIdentity,
+    id: 'usb',
+    model: 'Card',
+    serial: 'test',
+    sizeBytes: 1024,
+    sectorSize: 512,
+};
 const target: DeviceSession['targets'][number] = {
+    recoveryConfirmationText: 'RESTORE /dev/synthetic',
     id: '0',
     label: 'SCSI ID 0',
     sizeBytes: 1024,

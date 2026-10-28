@@ -1,6 +1,5 @@
 interface ImageSessionDialogState {
     companionRequest: unknown;
-    hardDiskDirectory: unknown;
 }
 
 interface MutationDialogState {
@@ -31,6 +30,7 @@ interface ExportDialogState {
 }
 
 interface AppDialogState {
+    create: { visible: boolean };
     pickerRequest: unknown;
     imageSession: ImageSessionDialogState;
     connectionSettings: unknown;
@@ -54,7 +54,7 @@ interface AppDialogState {
 export function hasOpenAppDialog(state: AppDialogState): boolean {
     return [
         state.imageSession.companionRequest,
-        state.imageSession.hardDiskDirectory,
+        state.create.visible,
         state.connectionSettings,
         state.mutation.volumeAction,
         state.mutation.placementRepairRequest,

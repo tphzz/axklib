@@ -43,7 +43,7 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
-function setup() {
+function setup(operationBlocked = () => false) {
     let current = {
         formatId: 'yamaha.a-series',
         profile: 'a-series',
@@ -124,6 +124,7 @@ function setup() {
         transport: transport as unknown as ImageTransport,
         imageSession: imageSession as unknown as ImageSessionWorkflow,
         audition: audition as unknown as AuditionWorkflow,
+        operationBlocked,
     });
     return { view, transport, imageSession, complete: () => complete() };
 }
@@ -139,6 +140,17 @@ async function dirtyDraft() {
 }
 
 describe('Unsaved editor exit confirmation', () => {
+    it('reads operation ownership synchronously without waiting for a Svelte prop update', async () => {
+        let blocked = false;
+        const { imageSession } = setup(() => blocked);
+        expect(await imageSession.confirmEditorLeave()).toBe(true);
+        blocked = true;
+        expect(await imageSession.confirmEditorLeave()).toBe(false);
+        expect(window.dispatchEvent(new Event('beforeunload', { cancelable: true }))).toBe(false);
+        blocked = false;
+        expect(await imageSession.confirmEditorLeave()).toBe(true);
+        expect(window.dispatchEvent(new Event('beforeunload', { cancelable: true }))).toBe(true);
+    });
     it.each(['Discard', 'Save'] as const)(
         '%s keeps the mounted selection tracked when the structural action is cancelled',
         async (action) => {

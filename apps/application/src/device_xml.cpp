@@ -29,7 +29,7 @@ Result<std::vector<DeviceXmlTarget>> inspect_scsi2sd_xml(std::string_view xml) {
                               size,
                               target.bytes_per_sector,
                               target.enabled,
-                              target.enabled && volume && volume->usable && size <= maximum_sampler_device_bytes,
+                              target.enabled && volume && volume->usable,
                               !volume || !rawdisk::check_writable(volumes, id) || target.bytes_per_sector != 512U,
                               {}};
         if (target.enabled && volume) {
@@ -39,8 +39,6 @@ Result<std::vector<DeviceXmlTarget>> inspect_scsi2sd_xml(std::string_view xml) {
         }
         if (!target.enabled)
             value.notices.push_back("Disabled in XML.");
-        if (size > maximum_sampler_device_bytes)
-            value.notices.push_back("Target exceeds the 9 GB device limit.");
         result.push_back(std::move(value));
     }
     return result;

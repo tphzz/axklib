@@ -142,6 +142,8 @@ struct TestServer {
                         return detail::fail(std::make_error_code(std::errc::no_such_file_or_directory));
                     if (info.model == "fail-system")
                         return detail::fail(std::error_code(1234, std::system_category()));
+                    if (info.model == "require-unmounted" && access != Access::ReadWriteUnmounted)
+                        return detail::fail(Errc::device_busy);
                     if (info.model == "identity-bound" &&
                         (info.carrier_id != "usb-parent" || info.connection_id != std::string(1000, 'D')))
                         return detail::fail(Errc::device_connection_changed);
@@ -233,6 +235,7 @@ static void test_image_validation() {
         AlignedBuffer b(512);
         CHECK(err((*ro)->write(0, b.span())) == Errc::read_only_handle);
         CHECK((*ro)->flush().has_value());
+        CHECK(err((*ro)->verify_non_dismounting_claim(DeviceInfo{})) == Errc::device_busy);
         // Shared lock held: a writer must be refused, a second reader allowed.
         CHECK(err(open_image(p, Access::ReadWrite)) == Errc::device_busy);
         CHECK(open_image(p, Access::ReadOnly).has_value());
@@ -241,6 +244,8 @@ static void test_image_validation() {
         ro->reset();
     auto rw = open_image(p, Access::ReadWrite);
     CHECK(rw.has_value());
+    if (rw)
+        CHECK(err((*rw)->verify_non_dismounting_claim(DeviceInfo{})) == Errc::device_busy);
     CHECK(err(open_image(p, Access::ReadOnly)) == Errc::device_busy);
     CHECK(err(open_image(p, Access::ReadWrite)) == Errc::device_busy);
 }
@@ -367,6 +372,32 @@ static void test_remote_connection_identity() {
     CHECK(opened.has_value());
     if (opened)
         opened->reset();
+}
+
+static void test_remote_preserves_non_dismounting_policy() {
+    auto [client, server] = make_pipe();
+    TestServer srv(std::move(server));
+    auto session = detail::RemoteSession::start(std::move(client));
+    CHECK(session.has_value());
+    if (!session)
+        return;
+    DeviceInfo info{.path = make_image("strict-policy.img", 4096).string(),
+                    .model = "require-unmounted",
+                    .serial = "synthetic",
+                    .size_bytes = 4096U,
+                    .sector_size = 512U};
+    CHECK(err((*session)->open(info, Access::ReadWrite)) == Errc::device_busy);
+    auto device = (*session)->open(info, Access::ReadWriteUnmounted);
+    CHECK(device.has_value());
+    if (!device)
+        return;
+    CHECK((*device)->writable());
+    const auto bytes = pattern(512U, 9U);
+    CHECK((*device)->write(0U, bytes).has_value());
+    std::vector<std::byte> restored(bytes.size());
+    CHECK((*device)->read(0U, restored).has_value());
+    CHECK(restored == bytes);
+    CHECK((*device)->flush().has_value());
 }
 
 static void test_remote_handle_limit() {
@@ -794,6 +825,7 @@ int main() {
     test_threads();
     test_remote_roundtrip();
     test_remote_connection_identity();
+    test_remote_preserves_non_dismounting_policy();
     test_remote_handle_limit();
     test_broken_session_releases_transport();
     test_failed_close_releases_transport();

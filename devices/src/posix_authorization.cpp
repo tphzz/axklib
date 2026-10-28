@@ -120,7 +120,7 @@ Result<PosixFd> validate_authorized_fd(PosixFd fd, Access access) {
     const int flags = ::fcntl(fd.get(), F_GETFL);
     if (flags < 0)
         return fail(errno_code(errno));
-    if ((flags & O_ACCMODE) != (access == Access::ReadWrite ? O_RDWR : O_RDONLY))
+    if ((flags & O_ACCMODE) != (access != Access::ReadOnly ? O_RDWR : O_RDONLY))
         return fail(Errc::helper_protocol);
     if (::fcntl(fd.get(), F_SETFD, FD_CLOEXEC) != 0)
         return fail(errno_code(errno));

@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -60,11 +61,15 @@ class OperationRegistry {
     using PathAccessResolver = std::function<Result<std::vector<PathAccess>>(const Json &, const OperationContext &)>;
     using ReadSchedulingResolver =
         std::function<Result<std::optional<ReadJobScheduling>>(const Json &, const OperationContext &)>;
+    using JobAdmission = std::function<Result<std::shared_ptr<void>>(const Json &, const OperationContext &)>;
 
     Result<void> declare(OperationDescriptor descriptor);
     Result<void> bind(std::string_view operation_id, Handler handler);
     Result<void> bind_path_accesses(std::string_view operation_id, PathAccessResolver resolver);
     Result<void> bind_read_scheduling(std::string_view operation_id, ReadSchedulingResolver resolver);
+    Result<void> bind_job_admission(std::string_view operation_id, JobAdmission admission);
+    [[nodiscard]] Result<std::shared_ptr<void>> admit_job(std::string_view operation_id, const Json &input,
+                                                          const OperationContext &context) const;
     [[nodiscard]] Result<std::optional<ReadJobScheduling>>
     read_scheduling(std::string_view operation_id, const Json &input, const OperationContext &context) const;
 
@@ -101,6 +106,7 @@ class OperationRegistry {
         PathAccessResolver path_access_resolver;
         std::size_t handler_type_hash{};
         ReadSchedulingResolver read_scheduling_resolver{};
+        JobAdmission job_admission{};
     };
 
     std::vector<RegisteredOperation> operations_;

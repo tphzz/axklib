@@ -8,7 +8,9 @@
     import DeviceTargetDetails from './DeviceTargetDetails.svelte';
     import { deviceTargetLabel } from './deviceTargetPresentation';
     import { useDevices } from '../physical-devices/workflow.svelte';
-    import { OpenSourceWorkflow, openSourceTabs, type OpenSourceTab } from './openSource.svelte';
+    import { OpenSourceWorkflow } from './openSource.svelte';
+    import SourceTabs from './SourceTabs.svelte';
+    import DevicePicker from './DevicePicker.svelte';
 
     let browser: ComponentProps<typeof StorageBrowserPanel> = $props();
     const devices = useDevices();
@@ -59,29 +61,6 @@
     async function open() {
         if (await workflow.open()) browser.oncancel();
     }
-    function navigateTabs(event: KeyboardEvent) {
-        if (
-            !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key) ||
-            workflow.busy ||
-            workflow.connectionBlocksControls
-        )
-            return;
-        event.preventDefault();
-        const tabs = workflow.available ? openSourceTabs : [openSourceTabs[0]!];
-        const current = tabs.indexOf(workflow.tab);
-        const index =
-            event.key === 'Home'
-                ? 0
-                : event.key === 'End'
-                  ? tabs.length - 1
-                  : (current + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
-        const tab = tabs[index]!;
-        void workflow.activate(tab);
-        (event.currentTarget as HTMLElement).querySelector<HTMLButtonElement>(`[data-tab="${tab}"]`)?.focus();
-    }
-    function selectTab(tab: OpenSourceTab) {
-        void workflow.activate(tab);
-    }
 </script>
 
 <div
@@ -108,35 +87,15 @@
                 onclick={() => void cancel()}><Icon name="close" size={15} /></button
             >
         </header>
-        <div
-            class="open-source-tabs dialog-segmented-control"
-            role="tablist"
-            aria-label="Open source"
-            tabindex="-1"
-            aria-describedby={!workflow.available ? 'open-device-unavailable' : undefined}
-            onkeydown={navigateTabs}
-        >
-            {#each openSourceTabs as tab}
-                <button
-                    type="button"
-                    role="tab"
-                    id={`open-tab-${tab.replaceAll(' ', '-')}`}
-                    data-tab={tab}
-                    aria-selected={workflow.tab === tab}
-                    aria-controls={`open-panel-${tab.replaceAll(' ', '-')}`}
-                    tabindex={workflow.tab === tab ? 0 : -1}
-                    disabled={workflow.busy ||
-                        workflow.connectionBlocksControls ||
-                        (tab !== 'Image' && !workflow.available)}
-                    title={tab !== 'Image' ? workflow.unavailableReason || undefined : undefined}
-                    aria-describedby={tab !== 'Image' && !workflow.available ? 'open-device-unavailable' : undefined}
-                    onclick={() => selectTab(tab)}>{tab}</button
-                >
-            {/each}
-        </div>
-        {#if !workflow.available}<p id="open-device-unavailable" class="open-source-reason">
-                {workflow.unavailableReason}
-            </p>{/if}
+        <SourceTabs
+            id="open"
+            label="Open source"
+            value={workflow.tab}
+            available={workflow.available}
+            reason={workflow.unavailableReason}
+            disabled={workflow.busy || workflow.connectionBlocksControls}
+            onchange={(tab) => workflow.activate(tab)}
+        />
         <div
             class="open-source-panel"
             id="open-panel-Image"
@@ -183,49 +142,26 @@
                             </div>
                         </div>
                     {/if}
-                    <div class="open-source-field">
-                        <label for={`open-device-${tab.replaceAll(' ', '-')}`}>Device</label>
-                        <div class="open-source-device">
-                            <SelectControl
-                                id={`open-device-${tab.replaceAll(' ', '-')}`}
-                                label="Device"
-                                value={tab === 'Device'
-                                    ? workflow.candidateId
-                                    : tab === 'SCSI2SDv6'
-                                      ? workflow.v6CandidateId
-                                      : workflow.xmlCandidateId}
-                                disabled={workflow.busy ||
-                                    workflow.listing ||
-                                    workflow.connectionBlocksControls ||
-                                    (tab === 'SCSI2SD XML' && !workflow.xml)}
-                                options={[
-                                    { value: '', label: 'Select a device' },
-                                    ...workflow.visibleCandidates.map((candidate) => ({
-                                        value: candidate.id,
-                                        label: `${candidate.model} / ${candidate.serial} / ${(candidate.sizeBytes / 1e9).toFixed(2)} GB / ${candidate.sectorSize} B`,
-                                    })),
-                                ]}
-                                emptyLabel="No devices available"
-                                onchange={(value) => {
-                                    if (tab === 'Device') workflow.candidateId = value;
-                                    else if (tab === 'SCSI2SDv6') void workflow.selectV6Device(value);
-                                    else workflow.xmlCandidateId = value;
-                                }}
-                            />
-                            <button
-                                class="icon-button"
-                                type="button"
-                                aria-label="Refresh devices"
-                                title="Refresh devices"
-                                disabled={workflow.busy ||
-                                    workflow.listing ||
-                                    workflow.connectionBlocksControls ||
-                                    workflow.readingConfiguration ||
-                                    (tab === 'SCSI2SD XML' && !workflow.xml)}
-                                onclick={() => void workflow.refresh()}><Icon name="refresh" size={14} /></button
-                            >
-                        </div>
-                    </div>
+                    <DevicePicker
+                        id={`open-device-${tab.replaceAll(' ', '-')}`}
+                        candidates={workflow.visibleCandidates}
+                        value={tab === 'Device'
+                            ? workflow.candidateId
+                            : tab === 'SCSI2SDv6'
+                              ? workflow.v6CandidateId
+                              : workflow.xmlCandidateId}
+                        disabled={workflow.busy ||
+                            workflow.listing ||
+                            workflow.connectionBlocksControls ||
+                            (tab === 'SCSI2SD XML' && !workflow.xml)}
+                        refreshDisabled={workflow.readingConfiguration}
+                        onchange={(value) => {
+                            if (tab === 'Device') workflow.candidateId = value;
+                            else if (tab === 'SCSI2SDv6') void workflow.selectV6Device(value);
+                            else workflow.xmlCandidateId = value;
+                        }}
+                        onrefresh={() => void workflow.refresh()}
+                    />
                     {#if tab === 'SCSI2SDv6'}
                         <label class="open-source-field"
                             >SCSI target
@@ -373,12 +309,6 @@
 </div>
 
 <style>
-    .open-source-tabs {
-        margin: 10px 12px;
-        flex: 0 0 auto;
-        width: max-content;
-        max-width: calc(100% - 24px);
-    }
     .open-source-panel {
         display: flex;
         flex-direction: column;
@@ -404,8 +334,7 @@
         gap: 8px;
         font-size: var(--dialog-label-font-size);
     }
-    .open-source-file,
-    .open-source-device {
+    .open-source-file {
         display: flex;
         align-items: center;
         min-width: 0;
@@ -416,12 +345,6 @@
         overflow: hidden;
         white-space: nowrap;
         text-overflow: ellipsis;
-        font-size: var(--dialog-body-font-size);
-    }
-    .open-source-device > :global(.select-control) {
-        flex: 1;
-        min-width: 0;
-        width: 100%;
         font-size: var(--dialog-body-font-size);
     }
     .open-source-identity {
@@ -450,10 +373,6 @@
     dd {
         margin: 0;
         overflow-wrap: anywhere;
-    }
-    .open-source-reason {
-        margin: 0 12px 6px;
-        font-size: var(--dialog-label-font-size);
     }
     @media (max-width: 540px) {
         .open-source-field {

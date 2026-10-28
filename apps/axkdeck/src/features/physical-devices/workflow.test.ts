@@ -1,3 +1,4 @@
+import { deviceIdentity } from '../../test/deviceFixture';
 import { describe, expect, it, vi } from 'vitest';
 import { DeviceWorkflow } from './workflow.svelte';
 import type { DeviceService, DeviceSession } from '../../lib/httpDevices';
@@ -5,9 +6,17 @@ import type { ImageSessionWorkflow } from '../image-session/workflow.svelte';
 
 const connection: DeviceSession = {
     sessionId: 'owned',
-    candidate: { id: 'candidate', model: 'Test', serial: '1', sizeBytes: 1024, sectorSize: 512 },
+    candidate: {
+        identity: deviceIdentity,
+        id: 'candidate',
+        model: 'Test',
+        serial: '1',
+        sizeBytes: 1024,
+        sectorSize: 512,
+    },
     targets: [
         {
+            recoveryConfirmationText: 'RESTORE /dev/synthetic',
             id: 'disk',
             label: 'Disk',
             sizeBytes: 1024,
@@ -77,5 +86,34 @@ describe('physical device workflow', () => {
         expect(service.close).toHaveBeenCalledWith('owned');
         expect(images.open).not.toHaveBeenCalled();
         expect(workflow.connection).toBeNull();
+    });
+    it('requires new typed consent whenever a recovery operation or target changes', async () => {
+        const { workflow, service } = fixture();
+        workflow.mode = 'recovery';
+        workflow.connection = connection;
+        workflow.operations = ['first', 'second'].map((operationId) => ({
+            operationId,
+            kind: 'FORMAT',
+            state: 'RECOVERY_REQUIRED',
+            model: 'Test',
+            serial: '1',
+            targetLabel: 'Disk',
+            targetSize: 1024,
+        }));
+        workflow.selectTarget('disk');
+        workflow.selectOperation('first');
+        workflow.confirmationText = connection.targets[0]!.recoveryConfirmationText;
+        workflow.dataLossAcknowledged = workflow.acknowledged = true;
+        expect(workflow.canRecover).toBe(true);
+        workflow.selectOperation('second');
+        expect(workflow.canRecover).toBe(false);
+        expect(workflow.confirmationText).toBe('');
+        expect(workflow.dataLossAcknowledged).toBe(false);
+        expect(workflow.acknowledged).toBe(false);
+        workflow.confirmationText = connection.targets[0]!.recoveryConfirmationText;
+        workflow.dataLossAcknowledged = workflow.acknowledged = true;
+        workflow.selectTarget('disk');
+        await workflow.recover();
+        expect(service.recover).not.toHaveBeenCalled();
     });
 });

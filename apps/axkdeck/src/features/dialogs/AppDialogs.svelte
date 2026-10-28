@@ -17,7 +17,8 @@
     import type { ProgramAssignmentCleanupWorkflow } from '../program-assignment-cleanup/workflow.svelte';
     import AudioImportDialog from '../../lib/components/AudioImportDialog.svelte';
     import CompanionDiskDialog from '../../lib/components/CompanionDiskDialog.svelte';
-    import CreateHardDiskImageDialog from '../../lib/components/CreateHardDiskImageDialog.svelte';
+    import CreateDialog from '../create/CreateDialog.svelte';
+    import type { CreateWorkflow } from '../create/workflow.svelte';
     import AssignSampleBankDialog from '../../lib/components/AssignSampleBankDialog.svelte';
     import Icon from '../../lib/components/Icon.svelte';
     import ImportUnavailableDialog from '../../lib/components/ImportUnavailableDialog.svelte';
@@ -72,9 +73,11 @@
         removeCompanion: (source: ImageLocation) => void;
         attachCompanions: (selection: CompanionSelection) => void;
         cancelCompanions: () => void;
-        hardDiskDirectory: DirectoryLocation | null;
+        create: CreateWorkflow;
+        createDirectory: DirectoryLocation | null;
+        chooseCreateDirectory: () => void;
         finishHardDisk: (file: FileLocation) => void;
-        cancelHardDisk: () => void;
+        openDeviceRecovery: () => void;
         connectionSettings: RemoteServerSettingsView | null;
         saveRemoteConnection: (input: RemoteServerSettingsInput) => Promise<void>;
         switchToLocalConnection: () => Promise<void>;
@@ -111,9 +114,11 @@
         removeCompanion,
         attachCompanions,
         cancelCompanions,
-        hardDiskDirectory,
+        create,
+        createDirectory,
+        chooseCreateDirectory,
         finishHardDisk,
-        cancelHardDisk,
+        openDeviceRecovery,
         connectionSettings,
         saveRemoteConnection,
         switchToLocalConnection,
@@ -187,12 +192,14 @@
         oncancel={cancelCompanions}
     />
 {/if}
-{#if hardDiskDirectory}
-    <CreateHardDiskImageDialog
+{#if create.visible}
+    <CreateDialog
         {transport}
-        directory={hardDiskDirectory}
+        workflow={create}
+        directory={createDirectory}
+        onbrowse={chooseCreateDirectory}
         onsuccess={finishHardDisk}
-        oncancel={cancelHardDisk}
+        onrecovery={openDeviceRecovery}
     />
 {/if}
 {#if connectionSettings}

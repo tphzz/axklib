@@ -98,7 +98,7 @@ Result<PosixFd> run_macos_authorization_process(const std::string &path, Access 
     SpawnSetup setup;
     if (auto ready = setup.initialize(ours.get(), theirs.get()); !ready)
         return fail(ready.error());
-    const std::string flags = std::to_string(access == Access::ReadWrite ? O_RDWR : O_RDONLY);
+    const std::string flags = std::to_string(access != Access::ReadOnly ? O_RDWR : O_RDONLY);
     const char *argv[]{executable.c_str(), "-stdoutpipe", "-extauth", "-o", flags.c_str(), path.c_str(), nullptr};
     pid_t pid{};
     const auto status =

@@ -32,4 +32,26 @@ describe('physical write identities', () => {
         expect(() => tracking.begin('image', 'images.alter', 'known-id')).toThrow('unavailable');
         expect(tracking.begin('file-image', 'images.alter', 'file-id')).toBeUndefined();
     });
+    it('tracks initialization before an image session exists and excludes other writes until terminal', () => {
+        const tracking = new DeviceWriteTracking(localStorage);
+        tracking.bind('image', source);
+        tracking.beginTarget('Selected USB target', 'devices.sfs.format', 'format-id');
+        expect(new DeviceWriteTracking(localStorage).pending()[0]?.displayName).toBe('Selected USB target');
+        tracking.acknowledge('format-id', 'format-job');
+        expect(() => tracking.begin('image', 'images.alter', 'other-id')).toThrow('format');
+        tracking.terminal('format-job');
+        expect(tracking.pending()).toHaveLength(1);
+        expect(() => tracking.begin('image', 'images.alter', 'other-id')).toThrow('format');
+        tracking.reconcile('format-id');
+        expect(tracking.begin('image', 'images.alter', 'other-id')).toBe('other-id');
+    });
+    it('refuses an unpersisted target write before submission', () => {
+        const tracking = new DeviceWriteTracking({
+            getItem: () => null,
+            setItem: () => {
+                throw new Error('Storage full');
+            },
+        } as unknown as Storage);
+        expect(() => tracking.beginTarget('USB target', 'devices.sfs.format', 'format-id')).toThrow('Storage full');
+    });
 });

@@ -10,10 +10,12 @@
         transport,
         imageSession,
         audition,
+        operationBlocked = () => false,
     }: {
         transport: ImageTransport;
         imageSession: ImageSessionWorkflow;
         audition: AuditionWorkflow;
+        operationBlocked?: () => boolean;
     } = $props();
     const selection = {
         kind: 'sample',
@@ -22,6 +24,6 @@
     } as unknown as InspectorSelection;
 </script>
 
-<EditorBoundary {transport} {imageSession} {audition}>
+<EditorBoundary {transport} {imageSession} {audition} {operationBlocked}>
     <DeviceEditorHost sessionId={1} {selection} />
 </EditorBoundary>

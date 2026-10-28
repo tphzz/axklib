@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { HardDiskCreationProfile, HardDiskCreationProfileId, ImageTransport } from '../transport';
 import { serverDirectoryLocation } from '../storageLocations';
-import CreateHardDiskImageDialog from './CreateHardDiskImageDialog.svelte';
+import CreateImagePanel from './CreateImagePanel.svelte';
 
 function profile(
     profileId: HardDiskCreationProfileId,
@@ -54,7 +54,7 @@ function transport(): ImageTransport {
     } as unknown as ImageTransport;
 }
 
-describe('CreateHardDiskImageDialog', () => {
+describe('CreateImagePanel', () => {
     it.each([
         ['HDS_128_MIB', '128 MiB', 1],
         ['HDS_256_MIB', '256 MiB', 1],
@@ -64,7 +64,7 @@ describe('CreateHardDiskImageDialog', () => {
         'selects %s with admitted counts and a reason for disabled choices',
         async (id, label, minimumCount) => {
             const imageTransport = transport();
-            render(CreateHardDiskImageDialog, {
+            render(CreateImagePanel, {
                 props: {
                     transport: imageTransport,
                     directory: serverDirectoryLocation({ rootId: 'workspace', relativePath: '' }, 'Yamaha'),
@@ -105,7 +105,7 @@ describe('CreateHardDiskImageDialog', () => {
     );
 
     it('preserves admitted partition counts and resets unsupported counts to the next profile default', async () => {
-        render(CreateHardDiskImageDialog, {
+        render(CreateImagePanel, {
             props: {
                 transport: transport(),
                 directory: serverDirectoryLocation({ rootId: 'workspace', relativePath: '' }, 'Yamaha'),
@@ -139,7 +139,7 @@ describe('CreateHardDiskImageDialog', () => {
     it('renders server-admitted profile defaults and creates an exact HDS file reference', async () => {
         const imageTransport = transport();
         const onsuccess = vi.fn();
-        render(CreateHardDiskImageDialog, {
+        render(CreateImagePanel, {
             props: {
                 transport: imageTransport,
                 directory: serverDirectoryLocation({ rootId: 'workspace', relativePath: 'images' }, 'Yamaha/images'),
@@ -148,7 +148,7 @@ describe('CreateHardDiskImageDialog', () => {
             },
         });
 
-        expect(screen.getByRole('dialog', { name: 'Create HD/Floppy image' })).toBeTruthy();
+        expect(screen.getByRole('form', { name: 'Create image' })).toBeTruthy();
         expect((screen.getByLabelText('Type') as HTMLButtonElement).value).toBe('HD');
         await waitFor(() =>
             expect(screen.getByRole('combobox', { name: 'Capacity' })).toHaveProperty('disabled', false),
@@ -190,7 +190,7 @@ describe('CreateHardDiskImageDialog', () => {
             result: {},
         });
         const onsuccess = vi.fn();
-        render(CreateHardDiskImageDialog, {
+        render(CreateImagePanel, {
             props: {
                 transport: imageTransport,
                 directory: serverDirectoryLocation({ rootId: 'workspace', relativePath: 'images' }, 'Yamaha/images'),
@@ -228,7 +228,7 @@ describe('CreateHardDiskImageDialog', () => {
     it('keeps invalid names and server failures in the dialog', async () => {
         const imageTransport = transport();
         vi.mocked(imageTransport.planHardDiskCreation).mockRejectedValueOnce(new Error('Destination already exists'));
-        render(CreateHardDiskImageDialog, {
+        render(CreateImagePanel, {
             props: {
                 transport: imageTransport,
                 directory: serverDirectoryLocation({ rootId: 'workspace', relativePath: '' }, 'Yamaha'),
@@ -259,7 +259,7 @@ describe('CreateHardDiskImageDialog', () => {
                 }),
         );
         const oncancel = vi.fn();
-        render(CreateHardDiskImageDialog, {
+        render(CreateImagePanel, {
             props: {
                 transport: imageTransport,
                 directory: serverDirectoryLocation({ rootId: 'workspace', relativePath: '' }, 'Yamaha'),

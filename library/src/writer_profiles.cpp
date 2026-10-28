@@ -71,6 +71,27 @@ Result<HdsCreationProfileId> parse_hds_creation_profile_id(std::string_view id) 
     return *found;
 }
 
+Result<std::vector<HdsCreationPartitionOption>> hds_creation_partition_options(std::uint64_t size_bytes) {
+    if (size_bytes < minimum_hds_size || size_bytes > maximum_hds_size || size_bytes % 512U != 0U)
+        return std::unexpected{profile_error("SFS capacity must be sector aligned and between 1 MiB and 8 GiB")};
+    std::vector<HdsCreationPartitionOption> result;
+    for (std::uint8_t count = 1; count <= 8; ++count) {
+        HdsBuildManifest manifest{std::string{build_manifest_schema_version}, size_bytes, {}};
+        for (std::uint8_t index = 0; index < count; ++index)
+            manifest.partitions.push_back({"PARTITION " + std::to_string(index + 1U), {}});
+        auto geometry = plan_hds_geometry(manifest);
+        if (!geometry)
+            continue;
+        const auto &last = geometry->back();
+        const auto tail = size_bytes / 512U - (last.start_sector + last.filesystem_sector_count);
+        // Only equal-slot rounding may remain unused; do not silently discard
+        // a fractional GiB when an arbitrary device capacity clips the slot limit.
+        if (tail < count)
+            result.push_back({count, std::move(*geometry), tail});
+    }
+    return result;
+}
+
 const std::vector<HdsCreationProfile> &hds_creation_profiles() {
     static const auto profiles = [] {
         constexpr std::array definitions{
@@ -87,19 +108,7 @@ const std::vector<HdsCreationProfile> &hds_creation_profiles() {
         std::vector<HdsCreationProfile> result;
         for (const auto &[id, size_bytes, default_partition_count] : definitions) {
             HdsCreationProfile profile{id, size_bytes, default_partition_count, {}};
-            for (std::uint8_t count = 1; count <= 8; ++count) {
-                HdsBuildManifest manifest{std::string{build_manifest_schema_version}, size_bytes, {}};
-                for (std::uint8_t index = 0; index < count; ++index)
-                    manifest.partitions.push_back({"PARTITION " + std::to_string(index + 1U), {}});
-                auto geometry = plan_hds_geometry(manifest);
-                if (!geometry)
-                    continue;
-                const auto &last = geometry->back();
-                const auto unused_tail_sectors = size_bytes / 512U - (last.start_sector + last.filesystem_sector_count);
-                if (unused_tail_sectors >= last.slot_sector_count)
-                    continue;
-                profile.partition_options.push_back({count, std::move(*geometry), unused_tail_sectors});
-            }
+            profile.partition_options = *hds_creation_partition_options(size_bytes);
             result.push_back(std::move(profile));
         }
         return result;

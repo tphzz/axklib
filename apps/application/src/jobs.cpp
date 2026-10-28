@@ -84,6 +84,13 @@ axk::app::Result<axk::app::JobSnapshot> axk::app::JobManager::submit(std::string
             return impl_->snapshot(replayed);
     }
 
+    // Admission may fsync a device-operation fence. Never hold the runtime
+    // mutex while calling a resource owner that can wait for device I/O.
+    auto admission_context = context;
+    admission_context.mutation_id = idempotency_key.value_or("");
+    auto admitted = impl_->registry.admit_job(operation_id, request, admission_context);
+    if (!admitted)
+        return std::unexpected(admitted.error());
     PathReservationCoordinator::Lease path_lease;
     if (impl_->path_reservations != nullptr) {
         auto resolved_accesses = impl_->registry.path_accesses(operation_id, request, context);
@@ -111,6 +118,7 @@ axk::app::Result<axk::app::JobSnapshot> axk::app::JobManager::submit(std::string
         record->read_group = std::to_string(record->context.owner_id.size()) + ':' + record->context.owner_id + ':' +
                              record->scheduling->scope;
     record->path_lease = std::move(path_lease);
+    record->admission_lease = std::move(*admitted);
     if (impl_->uploads != nullptr) {
         std::vector<std::string> upload_ids;
         job_detail::collect_upload_ids(record->request, upload_ids);
@@ -255,33 +263,24 @@ axk::app::Result<void> axk::app::JobManager::cancel(std::string_view job_id, std
     }
 
     std::optional<JobEvent> event;
-    std::vector<UploadLease> released_upload_leases;
+    bool queued{};
     {
         const std::scoped_lock lock{impl_->mutex, record->mutex};
-        if (is_terminal(record->state) || record->cancellation_requested)
+        if (is_terminal(record->state) || record->cancellation_requested || record->finishing)
             return {};
         record->cancellation_requested = true;
         record->cancellation_requested_at = impl_->now();
         record->cancellation.cancel();
         if (record->state == JobState::queued) {
-            record->path_lease = {};
-            released_upload_leases = std::move(record->upload_leases);
-            for (const auto &key : record->destination_keys) {
-                const auto found = impl_->destination_reservations.find(key);
-                if (found != impl_->destination_reservations.end() && found->second == record->job_id)
-                    impl_->destination_reservations.erase(found);
-            }
-            const auto previous = record->state;
-            record->state = JobState::cancelled;
-            impl_->record_transition_locked(*record, previous, record->state);
-            event = impl_->append_event_locked(*record, "cancelled");
-            impl_->terminal_jobs.push_back({impl_->now(), record->job_id});
+            queued = true;
         } else {
             event = impl_->append_event_locked(*record, "cancellation_requested", record->progress);
         }
     }
-    released_upload_leases.clear();
-    impl_->emit(*event);
+    if (queued)
+        impl_->transition(record, JobState::cancelled, "cancelled");
+    else if (event)
+        impl_->emit(*event);
     impl_->condition.notify_all();
     return {};
 }

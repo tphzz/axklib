@@ -2,12 +2,14 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <functional>
 #include <map>
 #include <memory>
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "axklib/floppy_catalog_internal.hpp"
@@ -39,6 +41,13 @@ struct PreparedRecord {
     std::uint32_t cluster{};
     std::uint32_t clusters{};
 };
+
+Result<std::vector<std::byte>> sfs_ascii(std::string_view value, std::size_t size, std::byte pad = std::byte{' '});
+Result<WrittenImageLayout>
+emit_hds_records(const HdsBuildManifest &manifest, const std::vector<PartitionGeometry> &geometry,
+                 const std::vector<std::vector<PreparedRecord>> &all_records, const std::filesystem::path &output_path,
+                 const std::function<Result<void>(std::uint64_t, std::span<const std::byte>)> &write_at,
+                 const CancellationToken &cancellation);
 
 struct PreparedWaveformMember {
     std::string name;

@@ -102,7 +102,7 @@
                     <Icon name="folder-open" size={14} /> Open
                 </button>
                 <button class="secondary-button" type="button" disabled={opening} onclick={oncreate}>
-                    <Icon name="file-plus" size={14} /> Create image
+                    <Icon name="file-plus" size={14} /> Create
                 </button>
             </div>
         </div>
@@ -145,7 +145,7 @@
                         oncreate();
                     }}
                 >
-                    <Icon name="file-plus" size={14} /> Create new image
+                    <Icon name="file-plus" size={14} /> Create
                 </button>
             {/if}
             <button

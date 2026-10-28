@@ -23,10 +23,12 @@ struct Connection {
     ConnectedDevice device;
     std::recursive_mutex io;
     std::string authorized_target;
+    std::string initialization_operation;
     bool invalidated{};
     bool mutation_active{};
     std::uint64_t revision{1U};
     std::map<std::string, Guards, std::less<>> metadata_guards;
+    std::map<std::string, std::uint64_t, std::less<>> logical_sizes;
     mutable ReadCounters reads;
 };
 
@@ -47,7 +49,7 @@ struct Connection {
 
 class Source final : public RandomAccessReader {
   public:
-    Source(std::shared_ptr<Connection> connection, DeviceTargetDescription target);
+    Source(std::shared_ptr<Connection> connection, DeviceTargetDescription target, std::uint64_t logical_size = 0U);
     std::uint64_t size() const noexcept override;
     axk::Result<void> read_exact_at(std::uint64_t offset, std::span<std::byte> bytes) const override;
     Result<void> seal(const CancellationToken &cancellation, ProgressSink *progress);
@@ -61,12 +63,13 @@ class Source final : public RandomAccessReader {
     mutable bool sealed_{};
     std::uint64_t revision_{};
     ReadCounters initial_reads_;
+    std::uint64_t logical_size_{};
 };
 
 class Mutation final : public MutationTarget {
   public:
     Mutation(std::shared_ptr<Connection> connection, DeviceTargetDescription target, std::string operation,
-             std::filesystem::path directory, bool recovery = false);
+             std::filesystem::path directory, bool recovery = false, std::uint64_t logical_size = 0U);
     ~Mutation() override;
     std::uint64_t size() const noexcept override;
     axk::Result<void> read_exact_at(std::uint64_t offset, std::span<std::byte> bytes) const override;
@@ -79,6 +82,7 @@ class Mutation final : public MutationTarget {
     MutationIdentity journal_identity() const override;
     std::uint32_t write_alignment() const noexcept override;
     Result<void> set_state(std::string_view state) const;
+    Result<void> publish_guards(bool create) const;
     Json read_metrics() const;
     void journal_streaming(bool value) noexcept {
         cache_.clear();
@@ -97,10 +101,23 @@ class Mutation final : public MutationTarget {
     bool journal_streaming_{};
     mutable MetadataReadCache cache_;
     ReadCounters initial_reads_;
+    std::uint64_t logical_size_{};
 };
 
 [[nodiscard]] Result<std::vector<AlterationJournalPatch>>
 align_patches(const std::shared_ptr<MutationTarget> &target, std::span<const AlterationJournalPatch> patches);
+
+[[nodiscard]] Result<std::shared_ptr<Source>> prepare_source(const std::shared_ptr<Connection> &connection,
+                                                             const DeviceTargetDescription &target);
+[[nodiscard]] std::string carrier_fence(const Connection &connection);
+[[nodiscard]] Result<void> require_clear_carrier(const std::filesystem::path &directory, std::string_view fence,
+                                                 std::string_view except_operation = {});
+[[nodiscard]] std::string device_confirmation(const DeviceCandidate &candidate, const DeviceTargetDescription &target,
+                                              std::string_view verb);
+[[nodiscard]] Result<void> verify_physical_guards(const Connection &connection, const Guards &guards,
+                                                  std::uint64_t target_offset = 0U,
+                                                  std::span<const AlterationJournalPatch> excluded = {},
+                                                  const CancellationToken &cancellation = {});
 
 } // namespace axk::app::device_detail
 

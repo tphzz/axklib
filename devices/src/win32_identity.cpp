@@ -2,6 +2,7 @@
 #include "win32_common.hpp"
 
 #include <array>
+#include <charconv>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -87,6 +88,39 @@ struct NodeApi {
 Result<void> win32_verify_usb_identity(const Win32UsbIdentity &bound) {
     NodeApi api;
     return win32_revalidate_identity(api, bound);
+}
+
+Result<DevicePresentation> presentation_platform(const DeviceInfo &info) {
+    DevicePresentation result;
+    NodeApi api;
+    const auto node = api.locate(info.carrier_id);
+    if (!node)
+        return result;
+    const auto property = [&](const DEVPROPKEY &key) -> std::string {
+        std::array<wchar_t, 2048U> value{};
+        DEVPROPTYPE type{};
+        ULONG size = static_cast<ULONG>(sizeof value);
+        if (::CM_Get_DevNode_PropertyW(static_cast<DEVINST>(*node), &key, &type, reinterpret_cast<PBYTE>(value.data()),
+                                       &size, 0) != CR_SUCCESS ||
+            type != DEVPROP_TYPE_STRING || size < sizeof(wchar_t) || size > sizeof value ||
+            value[(size / sizeof(wchar_t)) - 1U] != L'\0')
+            return {};
+        return utf8(value.data());
+    };
+    result.usb_manufacturer = property(DEVPKEY_Device_Manufacturer);
+    result.usb_product = property(DEVPKEY_Device_BusReportedDeviceDesc);
+    const auto id = [&](std::string_view marker) -> std::string {
+        const auto at = info.carrier_id.find(marker);
+        if (at == std::string::npos || info.carrier_id.size() - at < marker.size() + 4U)
+            return {};
+        const auto text = info.carrier_id.substr(at + marker.size(), 4U);
+        unsigned value{};
+        const auto parsed = std::from_chars(text.data(), text.data() + text.size(), value, 16);
+        return parsed.ec == std::errc{} && parsed.ptr == text.data() + text.size() ? text : std::string{};
+    };
+    result.usb_vendor_id = id("VID_");
+    result.usb_product_id = id("PID_");
+    return result;
 }
 
 Result<Win32UsbIdentity> win32_usb_identity(HANDLE disk) {

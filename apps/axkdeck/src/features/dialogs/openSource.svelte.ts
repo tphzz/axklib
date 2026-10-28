@@ -3,14 +3,13 @@ import type { ImageLocation } from '../../lib/storageLocations';
 import type { ImageSessionPreparation } from '../image-session/actions';
 import { userFacingMessage } from '../../lib/userFacingMessage';
 import { AxklibApiError } from '../../lib/httpErrors';
+import type { SourceTab } from './sourceTabs';
 
-export type OpenSourceTab = 'Image' | 'Device' | 'SCSI2SDv6' | 'SCSI2SD XML';
-export const openSourceTabs: OpenSourceTab[] = ['Image', 'Device', 'SCSI2SDv6', 'SCSI2SD XML'];
 type XmlFile = Pick<File, 'name' | 'size' | 'text'>;
 type DeviceAccess = 'read-only' | 'read-write';
 
 export class OpenSourceWorkflow {
-    tab = $state<OpenSourceTab>('Image');
+    tab = $state<SourceTab>('Image');
     available = $state(false);
     unavailableReason = $state('Device access requires the local desktop backend.');
     busy = $state(false);
@@ -100,7 +99,7 @@ export class OpenSourceWorkflow {
         return this.candidates.filter((candidate) =>
             this.tab === 'SCSI2SD XML' || this.tab === 'SCSI2SDv6'
                 ? candidate.sectorSize === 512
-                : candidate.sizeBytes <= 9_000_000_000,
+                : candidate.sizeBytes > 0,
         );
     }
     get selectedCandidate() {
@@ -143,7 +142,7 @@ export class OpenSourceWorkflow {
             if (!this.disposed) this.unavailableReason = userFacingMessage(error);
         }
     }
-    async activate(tab: OpenSourceTab) {
+    async activate(tab: SourceTab) {
         if (this.disposed || this.busy || (tab !== 'Image' && !this.available)) return;
         if (this.tab !== tab && (this.connection || this.readingConfiguration)) {
             this.busy = true;
@@ -184,8 +183,7 @@ export class OpenSourceWorkflow {
             if (this.writesSupported !== result.writesSupported) this.acknowledged = false;
             this.writesSupported = result.writesSupported;
             this.candidates = result.devices;
-            if (!result.devices.some((value) => value.id === this.candidateId && value.sizeBytes <= 9_000_000_000))
-                this.candidateId = '';
+            if (!result.devices.some((value) => value.id === this.candidateId)) this.candidateId = '';
             if (!result.devices.some((value) => value.id === this.xmlCandidateId && value.sectorSize === 512))
                 this.xmlCandidateId = '';
             if (

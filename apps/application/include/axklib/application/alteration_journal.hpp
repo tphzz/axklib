@@ -70,7 +70,8 @@ class AlterationJournalStore {
     apply(const std::shared_ptr<MutationTarget> &target, std::uint64_t image_size_bytes,
           std::span<const AlterationJournalPatch> patches, const CancellationToken &cancellation = {},
           const std::function<Result<void>()> &validate = {}, const std::function<void()> &on_rollback_verified = {},
-          const std::function<Result<void>(std::shared_ptr<const RandomAccessReader>)> &admit_frozen = {});
+          const std::function<Result<void>(std::shared_ptr<const RandomAccessReader>)> &admit_frozen = {},
+          const std::function<Result<void>()> &admit_forward = {});
 
   private:
     std::filesystem::path directory_;

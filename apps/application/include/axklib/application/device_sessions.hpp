@@ -17,8 +17,18 @@
 namespace axk::app {
 
 class OperationRegistry;
+class DeviceFormatService;
 
 inline constexpr std::uint64_t maximum_sampler_device_bytes = 9'000'000'000ULL;
+
+struct DeviceIdentityDetails {
+    std::string device_path;
+    std::string usb_manufacturer;
+    std::string usb_product;
+    std::string usb_serial;
+    std::string usb_vendor_id;
+    std::string usb_product_id;
+};
 
 struct DeviceCandidate {
     std::string id;
@@ -26,6 +36,24 @@ struct DeviceCandidate {
     std::string serial;
     std::uint64_t size_bytes{};
     std::uint32_t sector_size{};
+    DeviceIdentityDetails identity{};
+};
+
+struct DeviceHostVolume {
+    std::string device;
+    std::string mount_point;
+    std::string filesystem;
+    std::string label;
+};
+
+struct DeviceWriteSafety {
+    DeviceIdentityDetails identity;
+    std::string membership;
+    std::string recovery_membership;
+    std::vector<DeviceHostVolume> mounted;
+    std::vector<std::string> notices;
+    bool complete{};
+    bool non_dismounting_claim_supported{};
 };
 
 struct DeviceScsiTarget {
@@ -60,6 +88,16 @@ class DeviceTransport : public RandomAccessReader {
     virtual std::string carrier_identity() const = 0;
     virtual std::string media_identity() const = 0;
     virtual std::uint32_t sector_size() const noexcept = 0;
+    virtual bool has_write_handle() const { return false; }
+    virtual Result<DeviceWriteSafety> inspect_write_safety() const {
+        return std::unexpected(Error{"device_format_unavailable", "Native format safety inspection is unavailable"});
+    }
+    virtual Result<void> authorize_initialization(const DeviceWriteSafety &) {
+        return std::unexpected(Error{"device_format_unavailable", "Non-dismounting format claims are unavailable"});
+    }
+    virtual Result<void> verify_initialization_claim() const {
+        return std::unexpected(Error{"device_format_unavailable", "No initialization claim is held"});
+    }
 };
 
 struct ConnectedDevice {
@@ -103,6 +141,7 @@ struct DeviceOperationStatus {
     std::string target_label;
     std::uint64_t target_size{};
     std::string target_identity{};
+    std::string kind;
 };
 
 class DeviceSessionManager {
@@ -139,16 +178,19 @@ class DeviceSessionManager {
     apply(const std::shared_ptr<MutationTarget> &target, std::span<const AlterationJournalPatch> patches,
           const CancellationToken &cancellation, const std::function<Result<void>()> &validate,
           const std::function<void()> &on_rollback_verified,
-          const std::function<Result<void>(std::shared_ptr<const RandomAccessReader>)> &admit_frozen);
+          const std::function<Result<void>(std::shared_ptr<const RandomAccessReader>)> &admit_frozen,
+          const std::function<Result<void>()> &admit_forward = {});
     [[nodiscard]] Result<std::vector<DeviceOperationStatus>> operations(std::string_view owner) const;
     // Host metadata only: fences an unstarted request so delayed submission
     // cannot write after an absent/no-write result has been acknowledged.
     [[nodiscard]] Result<DeviceOperationStatus> resolve(std::string_view operation_id, std::string_view owner);
     [[nodiscard]] Result<void> recover(std::string_view operation_id, std::string_view session_id,
                                        std::string_view target_id, std::string_view owner,
-                                       bool exclusive_use_acknowledged);
+                                       bool exclusive_use_acknowledged, std::string_view confirmation_text = {},
+                                       bool data_loss_acknowledged = false, const CancellationToken &cancellation = {});
 
   private:
+    friend class DeviceFormatService;
     struct Implementation;
     std::unique_ptr<Implementation> implementation_;
 };

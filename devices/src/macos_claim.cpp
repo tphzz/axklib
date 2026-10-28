@@ -2,6 +2,7 @@
 
 #include "detail.hpp"
 
+#include <array>
 #include <atomic>
 #include <charconv>
 #include <chrono>
@@ -131,6 +132,48 @@ std::error_code claim_error(DADissenterRef dissenter) {
 }
 
 } // namespace
+
+Result<DeviceInventory> inventory_platform(const DeviceInfo &info, bool) {
+    DeviceInventory result;
+    CFObject<DASessionRef> session{DASessionCreate(nullptr)};
+    if (!session)
+        return fail(Errc::device_busy);
+    const int count = ::getfsstat(nullptr, 0, MNT_NOWAIT);
+    if (count < 0 || count > 4096)
+        return fail(Errc::device_busy);
+    std::vector<struct statfs> mounts(static_cast<std::size_t>(count) + 8U);
+    const int got = ::getfsstat(mounts.data(), static_cast<int>(mounts.size() * sizeof(struct statfs)), MNT_NOWAIT);
+    if (got < 0 || static_cast<std::size_t>(got) >= mounts.size())
+        return fail(Errc::device_busy);
+    mounts.resize(static_cast<std::size_t>(got));
+    for (const auto &mount : mounts) {
+        if (!std::string_view{mount.f_mntfromname}.starts_with("/dev/"))
+            continue;
+        CFObject<DADiskRef> disk{DADiskCreateFromBSDName(nullptr, session.get(), mount.f_mntfromname)};
+        if (!disk)
+            return fail(Errc::device_busy);
+        const auto matches = matches_disk(disk.get(), info);
+        if (!matches)
+            return fail(matches.error());
+        if (*matches) {
+            std::string label;
+            CFObject<CFDictionaryRef> description{DADiskCopyDescription(disk.get())};
+            if (description) {
+                const auto value = CFDictionaryGetValue(description.get(), kDADiskDescriptionVolumeNameKey);
+                if (value && CFGetTypeID(value) == CFStringGetTypeID()) {
+                    std::array<char, 4096U> text{};
+                    if (CFStringGetCString(static_cast<CFStringRef>(value), text.data(),
+                                           static_cast<CFIndex>(text.size()), kCFStringEncodingUTF8))
+                        label = text.data();
+                }
+            }
+            result.mounted.push_back({mount.f_mntfromname, mount.f_mntonname, mount.f_fstypename, std::move(label)});
+        }
+    }
+    result.complete = true;
+    result.non_dismounting_claim_supported = true;
+    return result;
+}
 
 struct MacosWriteClaim::State {
     DeviceInfo info;

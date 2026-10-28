@@ -2,6 +2,8 @@
 #include "rawdisk/block_device.hpp"
 
 #include <algorithm>
+#include <charconv>
+#include <format>
 #include <memory>
 #include <optional>
 #include <type_traits>
@@ -147,6 +149,37 @@ std::optional<DeviceInfo> describe(DASessionRef session, const std::string &bsd)
 } // namespace
 
 namespace detail {
+
+Result<DevicePresentation> presentation_platform(const DeviceInfo &info) {
+    DevicePresentation result;
+    std::uint64_t identity{};
+    const auto parsed =
+        std::from_chars(info.carrier_id.data(), info.carrier_id.data() + info.carrier_id.size(), identity);
+    if (parsed.ec != std::errc{} || parsed.ptr != info.carrier_id.data() + info.carrier_id.size())
+        return result;
+    auto matching = IORegistryEntryIDMatching(identity);
+    if (!matching)
+        return result;
+    IOObject usb{IOServiceGetMatchingService(MACH_PORT_NULL, matching)};
+    if (!usb.obj)
+        return result;
+    const auto string = [&](CFStringRef key) {
+        CFPtr<CFTypeRef> value{IORegistryEntryCreateCFProperty(usb.obj, key, kCFAllocatorDefault, 0)};
+        return to_string(value.get());
+    };
+    const auto hex = [&](CFStringRef key) -> std::string {
+        CFPtr<CFTypeRef> value{IORegistryEntryCreateCFProperty(usb.obj, key, kCFAllocatorDefault, 0)};
+        if (!value)
+            return {};
+        return std::format("{:04x}", to_u64(value.get()));
+    };
+    result.usb_manufacturer = string(CFSTR("USB Vendor Name"));
+    result.usb_product = string(CFSTR("USB Product Name"));
+    result.usb_serial = string(CFSTR("USB Serial Number"));
+    result.usb_vendor_id = hex(CFSTR("idVendor"));
+    result.usb_product_id = hex(CFSTR("idProduct"));
+    return result;
+}
 
 std::optional<DeviceInfo> macos_describe(const std::string &bsd_name) {
     CFPtr<DASessionRef> session{DASessionCreate(kCFAllocatorDefault)};

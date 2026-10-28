@@ -238,6 +238,19 @@ struct HdsCreationPlan {
     std::uint64_t unused_tail_sectors{};
 };
 
+struct HdsInitializationWrite {
+    std::uint64_t offset{};
+    std::vector<std::byte> bytes;
+};
+
+// Complete sector-aligned initialization, including reserved zero-filled metadata.
+// Unallocated user-data sectors are intentionally absent: this is not secure erase.
+struct HdsInitialization {
+    std::uint64_t size_bytes{};
+    std::vector<PartitionGeometry> partitions;
+    std::vector<HdsInitializationWrite> writes;
+};
+
 enum class FloppyFormatMode : std::uint8_t { quick, full };
 
 struct FloppyCreationPlan {
@@ -372,6 +385,9 @@ AXK_AUDIO_API Result<std::vector<PartitionGeometry>> plan_hds_geometry(const Hds
 AXK_AUDIO_API std::string_view hds_creation_profile_id(HdsCreationProfileId id);
 AXK_AUDIO_API Result<HdsCreationProfileId> parse_hds_creation_profile_id(std::string_view id);
 AXK_AUDIO_API const std::vector<HdsCreationProfile> &hds_creation_profiles();
+AXK_AUDIO_API Result<std::vector<HdsCreationPartitionOption>> hds_creation_partition_options(std::uint64_t size_bytes);
+AXK_AUDIO_API Result<HdsInitialization> plan_hds_initialization(std::uint64_t size_bytes, std::uint8_t partition_count,
+                                                                const CancellationToken &cancellation = {});
 AXK_AUDIO_API Result<HdsCreationPlan> plan_hds_creation(const HdsCreationRequest &request,
                                                         const CancellationToken &cancellation = {});
 AXK_AUDIO_API Result<FloppyCreationPlan> plan_floppy_creation(FloppyFormatMode mode = FloppyFormatMode::full,

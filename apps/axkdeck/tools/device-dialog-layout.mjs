@@ -1,4 +1,5 @@
 import { selectValue, openSelect, controlValue } from './select-control.mjs';
+import { exerciseCreate } from './create-dialog-check.mjs';
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -35,12 +36,19 @@ try {
     port = server.httpServer.address().port;
     browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH, headless: true });
     for (const width of [1366, 640, 390])
-        for (const mode of ['image', 'device', 'xml', 'v6', 'v6-invalid', 'readonly', 'denied', 'recovery']) {
+        for (const mode of ['image', 'device', 'xml', 'v6', 'v6-invalid', 'readonly', 'denied', 'recovery', 'create-device', 'create-mounted', 'create-unconfirmed', 'create-v6', 'create-xml']) {
             const page = await browser.newPage({ viewport: { width, height: 844 } });
             page.setDefaultTimeout(10000);
             const errors = [];
             page.on('pageerror', (error) => errors.push(error.message));
             await page.goto(`http://127.0.0.1:${port}/tools/layout-fixtures/device-dialog.html?mode=${mode}`);
+            if (mode.startsWith('create-')) {
+                await exerciseCreate(page, mode, width, output);
+                assert.deepEqual(errors, []);
+                results.push({ width, mode, passed: true });
+                await page.close();
+                continue;
+            }
             const dialog = page.getByRole('dialog');
             await dialog.waitFor();
             const source = mode !== 'recovery';
@@ -194,8 +202,11 @@ try {
                 await acknowledgement.focus();
                 await page.keyboard.press('Space');
                 assert.equal(await acknowledgement.isChecked(), true);
-                if (mode === 'recovery')
+                if (mode === 'recovery') {
                     await selectValue(dialog.getByRole('combobox', { name: 'Interrupted operation', exact: true }), 'synthetic-operation-0');
+                    assert.equal(await acknowledgement.isChecked(), false, 'Changing the operation clears recovery consent');
+                    await acknowledgement.check();
+                }
             }
             for (const select of await dialog.locator('select:visible').all()) {
                 const theme = await select.evaluate((node) => {

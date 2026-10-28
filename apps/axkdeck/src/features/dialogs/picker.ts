@@ -2,6 +2,7 @@ import type { DirectoryLocation, DirectoryRef, FileLocation, FileRef, ImageLocat
 
 export type PickerMode = 'file' | 'directory' | 'save-file' | 'save-directory' | 'media-source' | 'floppy-source';
 export type PickerParentDialog =
+    | 'create'
     | 'audio-import'
     | 'companion-disks'
     | 'package-import'
