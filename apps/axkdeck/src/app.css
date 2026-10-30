@@ -11,6 +11,7 @@
   --color-panel: #1b1e20;
   --color-panel-raised: #2a2e31;
   --color-border: #3d4448;
+  --color-control-border: #69747d;
   --color-text: #c0c8cf;
   --color-text-strong: #f1f1f1;
   --color-text-muted: #87919a;
@@ -19,8 +20,16 @@
   --color-brand: #cc7832;
   --color-success: #34d399;
   --color-danger: #f1a4a4;
+  --color-danger-surface: #7c3030;
+  --color-warning: #dfbd7b;
+  --color-action-text: #0b0d0f;
+  --color-text-inverse: #ffffff;
   --color-popup: #101516;
   --color-selection: #294958;
+  --state-hover-surface: var(--color-panel-raised);
+  --state-selected-surface: var(--color-selection);
+  --state-active-border: var(--color-accent);
+  --state-focus: var(--color-accent);
   --control-background: var(--color-bg-deep);
   --control-text: var(--color-text);
   --control-font-size: 11px;
@@ -127,7 +136,7 @@ button {
 
 button:focus-visible,
 input:focus-visible {
-  outline: 2px solid var(--color-accent);
+  outline: 2px solid var(--state-focus);
   outline-offset: 2px;
 }
 
@@ -140,7 +149,7 @@ input:focus-visible {
   height: 100%;
   min-width: 760px;
   color: var(--color-text);
-  background: radial-gradient(circle at 55% -15%, rgb(104 151 187 / 7%), transparent 36%), var(--color-bg);
+  background: radial-gradient(circle at 55% -15%, color-mix(in srgb, var(--color-accent) 7%, transparent), transparent 36%), var(--color-bg);
 }
 
 .app-shell.sidebar-closed {
@@ -206,7 +215,7 @@ input:focus-visible {
   color: var(--color-text-strong);
   font-size: 14px;
   font-weight: 700;
-  letter-spacing: -0.01em;
+  letter-spacing: 0;
 }
 
 .workspace-tabs {
@@ -278,7 +287,7 @@ input:focus-visible {
 }
 
 .package-selection-delete:hover {
-  color: #ffb0ad;
+  color: var(--color-danger);
   background: rgb(174 47 47 / 18%);
 }
 
@@ -338,8 +347,8 @@ input:focus-visible {
 
 .secondary-button:hover {
   color: var(--color-text-strong);
-  border-color: rgb(104 151 187 / 55%);
-  background: rgb(104 151 187 / 12%);
+  border-color: color-mix(in srgb, var(--color-accent) 55%, transparent);
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
 }
 
 .image-navigator,
@@ -585,7 +594,7 @@ input:focus-visible {
   gap: 6px;
   padding: 0 8px;
   color: var(--color-text-muted);
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--color-control-border);
   border-radius: 7px;
   background: #101214;
   transition: 140ms ease;
@@ -593,8 +602,8 @@ input:focus-visible {
 
 .search-field:focus-within {
   color: var(--color-accent);
-  border-color: rgb(104 151 187 / 65%);
-  background: rgb(104 151 187 / 6%);
+  border-color: color-mix(in srgb, var(--state-focus) 65%, transparent);
+  background: color-mix(in srgb, var(--color-accent) 6%, transparent);
 }
 
 .search-field input {
@@ -608,7 +617,7 @@ input:focus-visible {
 }
 
 .search-field input::placeholder {
-  color: #6f6f6f;
+  color: var(--color-text-muted);
 }
 
 .tree-row {
@@ -629,13 +638,13 @@ input:focus-visible {
 
 .tree-row:hover {
   color: var(--color-text-strong);
-  background: var(--color-panel-raised);
+  background: var(--state-hover-surface);
 }
 
 .tree-row.selected {
-  color: #e8edf1;
-  border-color: rgb(104 151 187 / 35%);
-  background: linear-gradient(90deg, rgb(55 91 119 / 76%), rgb(55 91 119 / 32%));
+  color: var(--color-text);
+  border-color: var(--state-active-border);
+  background: var(--state-selected-surface);
 }
 
 .tree-chevron {
@@ -726,7 +735,7 @@ input:focus-visible {
 
 .tree-context-menu button:focus-visible {
   background: rgb(255 255 255 / 7%);
-  outline: 1px solid var(--color-accent);
+  outline: 1px solid var(--state-focus);
   outline-offset: -1px;
 }
 
@@ -742,7 +751,7 @@ input:focus-visible {
 }
 
 .tree-context-menu .danger-menu-item {
-  color: #f3a4a4;
+  color: var(--color-danger);
 }
 
 .context-menu-separator {
@@ -762,7 +771,7 @@ input:focus-visible {
 .empty-copy {
   margin: 0;
   padding: 22px 12px;
-  color: #5d6878;
+  color: var(--color-text-muted);
   font-size: 10px;
   text-align: center;
 }
@@ -958,8 +967,8 @@ input:focus-visible {
 
 .program-multi-table > button.active {
   color: var(--color-text-strong);
-  background: rgb(104 151 187 / 18%);
-  box-shadow: inset 2px 0 var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 18%, transparent);
+  box-shadow: inset 2px 0 var(--state-active-border);
 }
 
 .sequence-list {
@@ -988,24 +997,20 @@ input:focus-visible {
 }
 
 .sequence-row:hover {
-  border-color: rgb(104 151 187 / 42%);
+  border-color: var(--state-active-border);
   border-radius: 5px;
-  background: #293036;
+  background: var(--state-hover-surface);
 }
 
 .sequence-row.active {
-  border-color: rgb(104 151 187 / 68%);
+  border-color: var(--state-active-border);
   border-radius: 5px;
-}
-
-.sequence-row.active:not(.selected) {
-  background: rgb(104 151 187 / 10%);
 }
 
 .sequence-row.selected {
-  border-color: rgb(104 151 187 / 68%);
+  border-color: var(--state-active-border);
   border-radius: 5px;
-  background: linear-gradient(120deg, rgb(55 91 119 / 68%), rgb(49 60 68 / 68%));
+  background: var(--state-selected-surface);
 }
 
 .sequence-row strong {
@@ -1035,7 +1040,7 @@ input:focus-visible {
   height: 30px;
   padding: 0 11px;
   color: var(--color-text);
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--color-control-border);
   background: var(--color-panel);
 }
 
@@ -1043,9 +1048,9 @@ input:focus-visible {
   height: 30px;
   margin: 0;
   padding: 0 14px;
-  color: #fff;
-  border: 1px solid rgb(224 146 79 / 55%);
-  background: linear-gradient(135deg, #cc7832, #9d5b27);
+  color: var(--color-action-text);
+  border: 1px solid var(--color-control-border);
+  background: var(--color-brand);
   box-shadow: 0 7px 20px rgb(0 0 0 / 24%);
 }
 
@@ -1140,10 +1145,10 @@ input:focus-visible {
   align-items: center;
   padding: 10px;
   color: var(--color-accent);
-  border: 1px solid rgb(104 151 187 / 24%);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 24%, transparent);
   border-radius: 9px;
   background:
-    linear-gradient(rgb(104 151 187 / 4%), rgb(104 151 187 / 4%)),
+    linear-gradient(color-mix(in srgb, var(--color-accent) 4%, transparent), color-mix(in srgb, var(--color-accent) 4%, transparent)),
     repeating-linear-gradient(90deg, transparent 0 21px, rgb(255 255 255 / 2%) 22px), #0f1214;
 }
 
@@ -1191,14 +1196,14 @@ input:focus-visible {
   min-height: 49px;
   overflow: hidden;
   color: var(--color-accent);
-  border: 1px solid rgb(104 151 187 / 24%);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 24%, transparent);
   border-radius: 6px;
   background: #0f1214;
 }
 
 .inspector-wave-label {
   padding: 2px 6px 0;
-  border-bottom: 1px solid rgb(104 151 187 / 18%);
+  border-bottom: 1px solid color-mix(in srgb, var(--color-accent) 18%, transparent);
 }
 
 .inspector-wave-canvas {
@@ -1206,7 +1211,7 @@ input:focus-visible {
   min-width: 0;
   padding: 3px 6px;
   background:
-    linear-gradient(rgb(104 151 187 / 4%), rgb(104 151 187 / 4%)),
+    linear-gradient(color-mix(in srgb, var(--color-accent) 4%, transparent), color-mix(in srgb, var(--color-accent) 4%, transparent)),
     repeating-linear-gradient(90deg, transparent 0 21px, rgb(255 255 255 / 2%) 22px);
 }
 
@@ -1244,7 +1249,7 @@ input:focus-visible {
   width: 27px;
   height: 27px;
   place-items: center;
-  color: #fff;
+  color: var(--color-action-text);
   border: 1px solid rgb(224 146 79 / 55%);
   border-radius: 50%;
   background: var(--color-brand);
@@ -1423,8 +1428,8 @@ input:focus-visible {
   overflow: hidden;
   appearance: none;
   place-content: center;
-  color: #fff;
-  border: 1px solid var(--color-border);
+  color: var(--color-action-text);
+  border: 1px solid var(--color-control-border);
   border-radius: 2px;
   background: var(--color-bg-deep);
   cursor: pointer;
@@ -1466,7 +1471,7 @@ input:focus-visible {
   display: grid;
   grid-auto-flow: column;
   overflow: hidden;
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--color-control-border);
   border-radius: 4px;
   background: var(--color-bg-deep);
 }
@@ -1494,14 +1499,14 @@ input:focus-visible {
 .dialog-segmented-control > button:focus-visible {
   position: relative;
   z-index: 1;
-  outline: 1px solid var(--color-accent);
+  outline: 1px solid var(--state-focus);
   outline-offset: -2px;
 }
 
 .dialog-segmented-control > button[aria-pressed='true'],
 .dialog-segmented-control > button[aria-selected='true'] {
-  color: #fff;
-  background: var(--color-accent-strong);
+  color: var(--color-action-text);
+  background: var(--color-accent);
 }
 
 .dialog-segmented-control > button:disabled {
@@ -1597,7 +1602,7 @@ input:focus-visible {
   gap: 11px;
   min-height: 52px;
   padding: 8px 11px;
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--color-control-border);
   border-radius: 6px;
   background: rgb(255 255 255 / 2%);
   cursor: pointer;
@@ -1621,7 +1626,7 @@ input:focus-visible {
 }
 
 .source-choice-button:hover:not(:disabled) {
-  border-color: var(--color-border-strong);
+  border-color: var(--state-active-border);
   background: rgb(255 255 255 / 5%);
 }
 
@@ -1738,7 +1743,7 @@ input:focus-visible {
   overflow-y: auto;
   border: 1px solid var(--color-border);
   border-radius: 5px;
-  background: var(--color-surface);
+  background: var(--color-panel);
 }
 
 .package-tree-row {
@@ -1796,7 +1801,7 @@ input:focus-visible {
   align-items: center;
   gap: 6px;
   margin: 12px 0 0;
-  color: #85d8ad;
+  color: var(--color-success);
   font-size: var(--dialog-body-font-size);
 }
 
@@ -1812,15 +1817,15 @@ input:focus-visible {
   min-width: 0;
   margin: 0;
   padding: 10px;
-  border: 1px solid #765d2d;
+  border: 1px solid color-mix(in srgb, var(--color-warning) 50%, transparent);
   border-radius: 5px;
-  background: rgb(150 108 26 / 8%);
+  background: color-mix(in srgb, var(--color-warning) 8%, transparent);
 }
 
 .opaque-sequence-choices legend {
   max-width: 100%;
   padding: 0 4px;
-  color: #e4c17c;
+  color: var(--color-warning);
   font-size: var(--dialog-section-font-size);
   font-weight: 600;
   overflow-wrap: anywhere;
@@ -1881,8 +1886,8 @@ input:focus-visible {
 }
 
 .program-slot-placements section.program-slot-placement-pending {
-  border-color: #765d2d;
-  background: rgb(150 108 26 / 8%);
+  border-color: color-mix(in srgb, var(--color-warning) 50%, transparent);
+  background: color-mix(in srgb, var(--color-warning) 8%, transparent);
 }
 
 .program-slot-placement-heading {
@@ -1951,9 +1956,9 @@ input:focus-visible {
   width: 74px;
   height: 28px;
   padding: 0 8px;
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--color-control-border);
   border-radius: 4px;
-  background: var(--color-surface);
+  background: var(--control-background);
   color: var(--color-text-strong);
   font-size: var(--dialog-control-font-size);
 }
@@ -1963,13 +1968,13 @@ input:focus-visible {
   gap: 8px;
   margin-top: 12px;
   padding: 10px;
-  border: 1px solid #765d2d;
+  border: 1px solid color-mix(in srgb, var(--color-warning) 50%, transparent);
   border-radius: 5px;
-  background: rgb(150 108 26 / 10%);
+  background: color-mix(in srgb, var(--color-warning) 10%, transparent);
 }
 
 .package-conflicts > strong {
-  color: #e4c17c;
+  color: var(--color-warning);
   font-size: var(--dialog-section-font-size);
 }
 
@@ -1987,9 +1992,9 @@ input:focus-visible {
   width: 100%;
   height: 28px;
   padding: 0 8px;
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--color-control-border);
   border-radius: 4px;
-  background: var(--color-surface);
+  background: var(--control-background);
   color: var(--color-text-strong);
   font-size: var(--dialog-control-font-size);
 }
@@ -2003,7 +2008,7 @@ input:focus-visible {
 }
 
 .package-conflict-actions small {
-  color: #e4c17c;
+  color: var(--color-warning);
   font-size: var(--dialog-metadata-font-size);
 }
 
@@ -2043,7 +2048,7 @@ input:focus-visible {
 
 .package-warning {
   margin: 9px 0 0;
-  color: #dfbd7b;
+  color: var(--color-warning);
   font-size: var(--dialog-metadata-font-size);
 }
 
@@ -2280,7 +2285,7 @@ input:focus-visible {
   height: var(--density-control);
   padding: 0 8px;
   color: var(--control-text);
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--color-control-border);
   border-radius: 5px;
   outline: none;
   background: var(--control-background);
@@ -2292,7 +2297,7 @@ input:focus-visible {
 }
 
 .dialog-field-control:focus {
-  border-color: var(--color-accent);
+  border-color: var(--state-focus);
 }
 
 .select-control {
@@ -2306,7 +2311,7 @@ input:focus-visible {
   padding: 3px 8px;
   color: var(--control-text);
   background: var(--control-background);
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--color-control-border);
   border-radius: 3px;
   font-family: var(--font-sans);
   font-size: var(--control-font-size);
@@ -2317,9 +2322,9 @@ input:focus-visible {
 }
 .select-control[data-size='header'] { height: 25px; }
 .select-control[data-size='toolbar'] { height: 28px; }
-.select-control:focus { border-color: var(--color-accent); }
+.select-control:focus { border-color: var(--state-focus); }
 .select-control:focus-visible {
-  outline: 1px solid var(--color-accent);
+  outline: 1px solid var(--state-focus);
   outline-offset: 2px;
 }
 .select-control:disabled { opacity: 0.45; cursor: default; }
@@ -2356,15 +2361,40 @@ input:focus-visible {
   border-radius: 2px;
   cursor: pointer;
 }
-.select-popup .active { background: var(--color-selection); }
+.select-popup .active { background: var(--state-selected-surface); }
 .select-option-label { min-width: 0; overflow-wrap: anywhere; }
 .select-option-check { flex: 0 0 12px; height: 12px; }
 .select-popup [aria-disabled='true'] { color: var(--color-text-muted); opacity: 0.5; cursor: not-allowed; }
 .select-empty { padding: 5px 7px; color: var(--color-text-muted); }
+
+/* Metadata uses the readable state foreground without changing default microcopy. */
+:is(.collection-row, .object-row, .sequence-row, .contained-row, .wave-data-row, .tree-row, .file-row, .storage-picker-row):is(:hover, .selected),
+.storage-picker-row-active,
+.source-choice-button:hover,
+.image-options-menu,
+.tree-context-menu,
+.program-system-info-popover,
+.select-popup .active,
+.editor-select-popup .active {
+  --color-text-muted: var(--color-text);
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--color-text-muted);
+  opacity: 1;
+}
+
 @media (forced-colors: active) {
   .select-control, .select-popup { border-color: ButtonText; }
   .select-popup .active { background: Highlight; color: HighlightText; forced-color-adjust: none; }
   .select-control:focus-visible { outline-color: Highlight; }
+  .compact-checkbox, .dialog-checkbox { color: ButtonText; border-color: ButtonText; background: Canvas; }
+  .compact-checkbox:checked, .dialog-checkbox:checked, .dialog-checkbox:indeterminate {
+    color: HighlightText;
+    background: Highlight;
+    forced-color-adjust: none;
+  }
 }
 
 .dialog-autocomplete-control {
@@ -2401,7 +2431,7 @@ input:focus-visible {
 
 .dialog-autocomplete-clear:focus-visible {
   color: var(--color-text-strong);
-  outline: 1px solid var(--color-accent);
+  outline: 1px solid var(--state-focus);
   outline-offset: -2px;
 }
 
@@ -2472,11 +2502,11 @@ input:focus-visible {
 
 .field-help-error,
 .dialog-error {
-  color: #f3a4a4;
+  color: var(--color-danger);
 }
 
 .dialog-warning {
-  color: #dfbd7b;
+  color: var(--color-warning);
 }
 
 .connection-mode {
@@ -2490,7 +2520,7 @@ input:focus-visible {
 
 .connection-mode.remote {
   color: #a7d9f3;
-  border-color: rgb(76 151 191 / 55%);
+  border-color: color-mix(in srgb, var(--color-accent) 55%, transparent);
 }
 
 .connection-settings form {
@@ -2511,7 +2541,7 @@ input:focus-visible {
   height: 30px;
   padding: 0 10px;
   color: var(--color-text-strong);
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--color-control-border);
   border-radius: 6px;
   outline: none;
   background: var(--color-bg-deep);
@@ -2520,7 +2550,7 @@ input:focus-visible {
 }
 
 .connection-settings input:focus {
-  border-color: rgb(76 151 191 / 70%);
+  border-color: color-mix(in srgb, var(--state-focus) 70%, transparent);
 }
 
 .connection-security {
@@ -2534,10 +2564,10 @@ input:focus-visible {
 .connection-settings-error {
   margin: 0;
   padding: 8px 10px;
-  color: #f1a4a4;
-  border: 1px solid rgb(190 80 80 / 35%);
+  color: var(--color-danger);
+  border: 1px solid color-mix(in srgb, var(--color-danger) 35%, transparent);
   border-radius: 5px;
-  background: rgb(120 35 35 / 20%);
+  background: color-mix(in srgb, var(--color-danger-surface) 20%, transparent);
   font-size: 9px;
 }
 
@@ -2679,7 +2709,7 @@ input:focus-visible {
 }
 
 .storage-picker-list:focus-visible {
-  outline: 1px solid var(--color-accent);
+  outline: 1px solid var(--state-focus);
   outline-offset: -1px;
 }
 
@@ -2713,12 +2743,12 @@ input:focus-visible {
   height: 14px;
   place-items: center;
   color: var(--color-text-strong);
-  border: 1px solid var(--color-border-strong);
+  border: 1px solid var(--color-control-border);
   border-radius: 3px;
 }
 
 .storage-picker-selection-checked {
-  color: white;
+  color: var(--color-action-text);
   border-color: var(--color-accent);
   background: var(--color-accent);
 }
@@ -2734,7 +2764,7 @@ input:focus-visible {
 }
 
 .storage-picker-list:focus-visible .storage-picker-row-active {
-  border-color: var(--color-accent);
+  border-color: var(--state-focus);
 }
 
 .storage-picker-row:disabled {
@@ -2766,9 +2796,9 @@ input:focus-visible {
 .storage-picker-error {
   margin: 0;
   padding: 8px 14px;
-  color: #f1a4a4;
-  border-top: 1px solid rgb(190 80 80 / 35%);
-  background: rgb(120 35 35 / 20%);
+  color: var(--color-danger);
+  border-top: 1px solid color-mix(in srgb, var(--color-danger) 35%, transparent);
+  background: color-mix(in srgb, var(--color-danger-surface) 20%, transparent);
   font-size: 9px;
 }
 
@@ -2803,7 +2833,7 @@ input:focus-visible {
   height: 30px;
   padding: 0 9px;
   color: var(--color-text);
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--color-control-border);
   border-radius: 5px;
   background: var(--color-bg-deep);
   font-family: var(--font-mono);
@@ -2841,7 +2871,7 @@ input:focus-visible {
   height: 30px;
   padding: 0 9px;
   color: var(--color-text-strong);
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--color-control-border);
   border-radius: 5px;
   outline: none;
   background: var(--color-bg-deep);
@@ -2853,16 +2883,16 @@ input:focus-visible {
   height: 30px;
   margin: 0;
   padding: 0 11px;
-  color: #ffe8e8;
-  border: 1px solid rgb(222 91 91 / 70%);
+  color: var(--color-text-inverse);
+  border: 1px solid var(--color-danger);
   border-radius: 5px;
-  background: rgb(151 48 48 / 72%);
+  background: var(--color-danger-surface);
   font-size: 9px;
   font-weight: 700;
 }
 
-.danger-button:hover {
-  background: rgb(177 57 57 / 82%);
+.danger-button:hover:not(:disabled) {
+  filter: brightness(1.1);
 }
 
 @media (max-width: 1100px) {
@@ -2959,38 +2989,6 @@ input:focus-visible {
   font-size: 9px;
 }
 
-.audition-autoplay input {
-  display: grid;
-  width: 12px;
-  height: 12px;
-  appearance: none;
-  place-content: center;
-  margin: 0;
-  color: var(--color-text-strong);
-  border: 1px solid var(--color-border);
-  border-radius: 2px;
-  background: var(--color-bg);
-  cursor: pointer;
-}
-
-.audition-autoplay input::before {
-  width: 7px;
-  height: 6px;
-  background: currentcolor;
-  clip-path: polygon(14% 44%, 0 59%, 40% 100%, 100% 16%, 84% 0, 38% 62%);
-  content: '';
-  transform: scale(0);
-}
-
-.audition-autoplay input:checked {
-  border-color: var(--color-brand);
-  background: var(--color-brand);
-}
-
-.audition-autoplay input:checked::before {
-  transform: scale(1);
-}
-
 .audition-status {
   min-width: 0;
   flex: 1;
@@ -3028,7 +3026,7 @@ input:focus-visible {
   padding: 4px 8px;
   border-bottom: 1px solid var(--color-border);
   color: var(--color-text-muted);
-  background: rgb(104 151 187 / 8%);
+  background: color-mix(in srgb, var(--color-accent) 8%, transparent);
   font-size: 8.5px;
 }
 
@@ -3121,8 +3119,8 @@ input:focus-visible {
   overflow: hidden;
   appearance: none;
   place-content: center;
-  color: #fff;
-  border: 1px solid var(--color-border);
+  color: var(--color-action-text);
+  border: 1px solid var(--color-control-border);
   border-radius: 2px;
   background: var(--color-bg-deep);
   cursor: pointer;
@@ -3238,21 +3236,21 @@ input:focus-visible {
   background: transparent;
 }
 
-.contained-row:hover,
-.contained-row.active {
-  border-color: rgb(104 151 187 / 45%);
+.contained-row:hover {
+  border-color: var(--state-active-border);
   border-radius: 5px;
-  background: rgb(104 151 187 / 10%);
+  background: var(--state-hover-surface);
 }
 
-.contained-row.active:not(.selected) {
-  border-color: rgb(104 151 187 / 68%);
+.contained-row.active {
+  border-color: var(--state-active-border);
+  border-radius: 5px;
 }
 
 .contained-row.selected {
-  border-color: rgb(104 151 187 / 68%);
+  border-color: var(--state-active-border);
   border-radius: 5px;
-  background: linear-gradient(120deg, rgb(55 91 119 / 68%), rgb(49 60 68 / 68%));
+  background: var(--state-selected-surface);
 }
 
 .contained-identity {
@@ -3342,7 +3340,7 @@ input:focus-visible {
 }
 
 .assignment-table > button:hover {
-  background: rgb(104 151 187 / 10%);
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
 }
 
 .assignment-table > button:disabled {
@@ -3533,7 +3531,7 @@ input:focus-visible {
 .inspector-relationship-group button:hover,
 .inspector-relationship-group button:focus-visible {
   color: var(--color-text-strong);
-  background: rgb(104 151 187 / 10%);
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
 }
 
 .inspector-relationship-group strong {
@@ -3597,26 +3595,23 @@ input:focus-visible {
 }
 
 .wave-data-selection:focus-visible {
-  outline: 1px solid var(--color-accent);
+  outline: 1px solid var(--state-focus);
   outline-offset: -2px;
 }
 
 .wave-data-row:hover {
-  border-color: rgb(104 151 187 / 42%);
-  background: #293036;
+  border-color: var(--state-active-border);
+  background: var(--state-hover-surface);
 }
 
 .wave-data-row.active {
-  border-color: rgb(104 151 187 / 68%);
+  border-color: var(--state-active-border);
 }
 
-.wave-data-row.active:not(.selected) {
-  background: rgb(104 151 187 / 10%);
-}
 
 .wave-data-row.selected {
-  border-color: rgb(104 151 187 / 68%);
-  background: linear-gradient(120deg, rgb(55 91 119 / 68%), rgb(49 60 68 / 68%));
+  border-color: var(--state-active-border);
+  background: var(--state-selected-surface);
 }
 
 .wave-data-row .waveform {

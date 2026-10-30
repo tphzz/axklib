@@ -105,7 +105,7 @@
     }
     button.selected {
         background: var(--color-selection);
-        border-color: #497590;
+        border-color: var(--state-active-border);
     }
     button span {
         overflow: hidden;

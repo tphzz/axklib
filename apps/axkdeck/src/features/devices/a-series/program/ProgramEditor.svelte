@@ -1,4 +1,5 @@
 <script lang="ts">
+    import SwitchControl from '../../../../lib/components/SwitchControl.svelte';
     import { setContext, untrack } from 'svelte';
     import type { ObjectEditorDocument } from '../../../object-editor/workflow.svelte';
     import type { EditorNavigation } from '../../../object-editor/navigation.svelte';
@@ -151,14 +152,12 @@
                             <span>{String(channel).padStart(2, '0')}</span>
                             {#each ['controller_reset', 'note_toggle'] as group}
                                 {@const key = `${group}.${port}.${channel}`}
-                                <button
-                                    class="editor-switch"
-                                    role="switch"
-                                    aria-label={field(key)?.label}
-                                    aria-checked={values[key] === true}
+                                <SwitchControl
+                                    label={field(key)?.label ?? key}
+                                    checked={values[key] === true}
                                     disabled={disabled || values[key] === undefined}
-                                    onclick={() => document.draft.set(key, values[key] !== true)}><span></span></button
-                                >
+                                    onchange={(next) => document.draft.set(key, next)}
+                                />
                             {/each}
                         {/each}
                     </div>

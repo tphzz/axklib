@@ -197,7 +197,7 @@
     }
 
     .program-placement.pending {
-        border-color: #765d2d;
+        border-color: color-mix(in srgb, var(--color-warning) 50%, transparent);
     }
 
     .placement-heading {

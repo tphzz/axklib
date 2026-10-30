@@ -223,7 +223,7 @@
         border-radius: 4px;
     }
     .program-assignment-cleanup-group + .program-assignment-cleanup-group {
-        border-top: 1px solid var(--color-border-strong);
+        border-top: 1px solid var(--color-border);
     }
     .program-assignment-cleanup-program {
         position: sticky;

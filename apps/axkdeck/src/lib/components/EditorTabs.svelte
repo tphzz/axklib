@@ -112,10 +112,10 @@
         background: var(--color-panel-raised);
     }
     button[aria-selected='true'] {
-        border-bottom-color: var(--color-accent);
+        border-bottom-color: var(--state-active-border);
     }
     button:focus-visible {
-        outline: 1px solid var(--color-accent);
+        outline: 1px solid var(--state-focus);
         outline-offset: -2px;
     }
     .secondary {
@@ -128,6 +128,6 @@
         border-radius: 3px;
     }
     .secondary button[aria-pressed='true'] {
-        border-color: var(--color-accent);
+        border-color: var(--state-active-border);
     }
 </style>

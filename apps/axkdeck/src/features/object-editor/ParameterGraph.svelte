@@ -286,7 +286,7 @@
     .plot-handle:not(:disabled):hover,
     .plot-handle:not(:disabled):focus-visible,
     .plot-handle.dragging {
-        outline: 2px solid var(--color-accent);
+        outline: 2px solid var(--state-focus);
         outline-offset: 1px;
     }
     .trace-handle {

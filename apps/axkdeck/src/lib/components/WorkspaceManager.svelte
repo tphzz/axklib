@@ -365,17 +365,17 @@
     .workspace-error {
         margin: 10px 12px;
         padding: 8px 10px;
-        border: 1px solid rgb(104 151 187 / 28%);
+        border: 1px solid color-mix(in srgb, var(--color-accent) 28%, transparent);
         border-radius: 6px;
-        background: rgb(104 151 187 / 8%);
+        background: color-mix(in srgb, var(--color-accent) 8%, transparent);
     }
     .workspace-notice {
         color: var(--color-text);
     }
     .workspace-error {
-        color: #f1a4a4;
-        border-color: rgb(190 80 80 / 35%);
-        background: rgb(120 35 35 / 20%);
+        color: var(--color-danger);
+        border-color: color-mix(in srgb, var(--color-danger) 35%, transparent);
+        background: color-mix(in srgb, var(--color-danger-surface) 20%, transparent);
     }
     .workspace-list {
         display: grid;
@@ -462,13 +462,13 @@
         min-height: 30px;
         padding: 0 10px;
         color: var(--color-text-strong);
-        border: 1px solid var(--color-border);
+        border: 1px solid var(--color-control-border);
         border-radius: 6px;
         outline: none;
         background: var(--color-bg-deep);
     }
     .workspace-form input[type='text']:focus {
-        border-color: rgb(76 151 191 / 70%);
+        border-color: color-mix(in srgb, var(--state-focus) 70%, transparent);
     }
     .workspace-toggle {
         grid-template-columns: auto 1fr !important;

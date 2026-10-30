@@ -109,7 +109,7 @@
         justify-content: center;
         gap: 4px;
         padding: 5px 8px;
-        border: 1px solid var(--color-border);
+        border: 1px solid var(--color-control-border);
         border-radius: 3px;
         background: var(--color-panel);
         font-size: 11px;
@@ -124,7 +124,8 @@
         max-width: 100%;
     }
     button.selected {
-        border-color: var(--color-accent);
+        --color-text-muted: var(--color-text);
+        border-color: var(--state-active-border);
         background: var(--color-panel-raised);
     }
     button.bypassed {

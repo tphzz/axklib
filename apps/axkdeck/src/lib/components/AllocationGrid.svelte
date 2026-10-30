@@ -6,6 +6,7 @@
         allocationGridColumns,
         allocationConsistencyLabel,
         allocationRunVisualKind,
+        allocationPalette,
         findAllocationRun,
         type AllocationRun,
     } from '../allocationGrid';
@@ -33,33 +34,6 @@
     const canvasTop = $derived(firstRow * (cellSize + gap));
     const canvasHeight = $derived(Math.min(totalHeight - canvasTop, visibleRows * (cellSize + gap)));
 
-    function runColor(run: AllocationRun): string {
-        switch (allocationRunVisualKind(run)) {
-            case 'multiple-claims':
-                return '#ef4444';
-            case 'claimed-but-free':
-                return '#fb7185';
-            case 'bitmap-mismatch':
-                return '#e879f9';
-            case 'used-without-claim':
-                return '#60a5fa';
-            case 'reserved':
-                return '#718096';
-            case 'continuation':
-                return '#fbbf24';
-            case 'directory':
-                return '#2dd4bf';
-            case 'support':
-                return '#94a3b8';
-            case 'data':
-                return '#34d399';
-            case 'unknown':
-                return '#f97316';
-            default:
-                return '#252b2e';
-        }
-    }
-
     function draw(): void {
         if (!canvas || canvasHeight <= 0) return;
         const scale = window.devicePixelRatio || 1;
@@ -79,7 +53,7 @@
             if (!run) continue;
             const localRow = Math.floor(cluster / columns) - firstRow;
             const column = cluster % columns;
-            context.fillStyle = runColor(run);
+            context.fillStyle = allocationPalette[allocationRunVisualKind(run)].color;
             context.fillRect(column * (cellSize + gap), localRow * (cellSize + gap), cellSize, cellSize);
         }
         if (hovered && hovered.cluster >= startCluster && hovered.cluster < endCluster) {
@@ -187,8 +161,8 @@
         min-height: 0;
         height: 100%;
         overflow-y: auto;
-        background: #111416;
-        border: 1px solid var(--line, #384044);
+        background: var(--color-bg);
+        border: 1px solid var(--color-border);
     }
     .allocation-surface {
         position: relative;
@@ -206,25 +180,25 @@
         width: min(350px, calc(100vw - 24px));
         gap: 3px;
         padding: 10px 12px;
-        color: #e8edef;
-        background: #202527;
-        border: 1px solid #566166;
+        color: var(--color-text);
+        background: var(--color-panel-raised);
+        border: 1px solid var(--color-control-border);
         box-shadow: 0 8px 24px rgb(0 0 0 / 45%);
         pointer-events: none;
         font-size: 12px;
     }
     .allocation-tooltip > span,
     .owner span {
-        color: #9eabb1;
+        color: var(--color-text);
     }
     .owner {
         display: grid;
         gap: 2px;
         margin-top: 6px;
         padding-top: 6px;
-        border-top: 1px solid #3a4246;
+        border-top: 1px solid var(--color-border);
     }
     .problem {
-        color: #fca5a5 !important;
+        color: var(--color-danger) !important;
     }
 </style>

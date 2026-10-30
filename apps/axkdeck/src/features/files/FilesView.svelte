@@ -543,8 +543,8 @@
         cursor: default;
     }
     .file-row.selected {
-        background: #263f50;
-        outline: 1px solid #497590;
+        background: var(--state-selected-surface);
+        outline: 1px solid var(--state-active-border);
         border-radius: 4px;
     }
     .file-row.drop-target,
@@ -562,8 +562,8 @@
         text-overflow: ellipsis;
         white-space: nowrap;
     }
-    .file-row:hover {
-        background-color: rgb(104 151 187 / 10%);
+    .file-row:hover:not(.selected):not(.drop-target) {
+        background-color: var(--state-hover-surface);
     }
     .file-row > span {
         font-size: 10px;
@@ -611,7 +611,7 @@
     }
     .files-error {
         padding: 8px;
-        color: #e0b765;
+        color: var(--color-warning);
         display: flex;
         justify-content: space-between;
     }

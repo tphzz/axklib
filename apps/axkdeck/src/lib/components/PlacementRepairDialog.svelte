@@ -17,6 +17,7 @@
 
     let { item, inspection, busy, phase, error, message, oncancel, onsubmit }: Props = $props();
     let recoveryVolumeName = $state('');
+    const resultId = $props.id();
     let initializedRecoveryName = false;
 
     $effect(() => {
@@ -35,7 +36,23 @@
                 /^[\x20-\x7e]+$/.test(trimmedRecoveryName)),
     );
     const canSubmit = $derived(inspection?.canRepair === true && recoveryNameValid && !busy);
-    const submitLabel = $derived(phase === 'repairing' ? 'Repairing' : 'Repair placement');
+    const status = $derived(
+        error
+            ? 'Inspection or repair failed'
+            : busy
+              ? phase === 'inspecting'
+                  ? 'Inspecting object placement...'
+                  : 'Repairing object placement...'
+              : message
+                ? 'Repair completed'
+                : inspection?.canRepair
+                  ? recoveryNameValid
+                      ? 'Ready to repair placement'
+                      : 'Enter a valid recovery volume name'
+                  : inspection
+                    ? 'Inspection complete'
+                    : 'Inspection unavailable',
+    );
     const scopeLabel = $derived(item.kind === 'partition' ? `partition “${item.name}”` : `volume “${item.name}”`);
 
     function objectTypeLabel(type: string, count: number): string {
@@ -65,6 +82,10 @@
         if (!canSubmit) return;
         onsubmit(createsRecoveryVolume ? trimmedRecoveryName : undefined);
     }
+
+    function cancel(): void {
+        if (!busy) oncancel();
+    }
 </script>
 
 <div class="dialog-backdrop dialog-backdrop-raised" role="presentation">
@@ -73,14 +94,14 @@
         role="dialog"
         aria-modal="true"
         aria-label="Repair object placement"
-        use:modal={{ onescape: oncancel }}
+        use:modal={{ onescape: cancel }}
     >
         <header class="dialog-header">
             <div>
                 <Icon name="layers" size={16} />
                 <h2>Repair object placement</h2>
             </div>
-            <button class="icon-button" type="button" aria-label="Close" disabled={busy} onclick={oncancel}
+            <button class="icon-button" type="button" aria-label="Close" disabled={busy} onclick={cancel}
                 ><Icon name="close" size={15} /></button
             >
         </header>
@@ -94,9 +115,7 @@
                 </p>
             </div>
 
-            {#if phase === 'inspecting' && !inspection}
-                <p role="status">Inspecting object placement…</p>
-            {:else if inspection}
+            {#if inspection}
                 {#if inspection.destinations.length > 0}
                     <section class="placement-destinations" aria-label="Repair destinations">
                         <h3>{inspection.repairObjectCount} objects can be repaired</h3>
@@ -118,6 +137,7 @@
                     <label class="recovery-volume-field">
                         <span>Recovery volume name</span>
                         <input
+                            class="dialog-field-control"
                             bind:value={recoveryVolumeName}
                             data-dialog-initial-focus="select"
                             disabled={busy}
@@ -147,19 +167,34 @@
                 {/if}
             {/if}
 
-            {#if message}<p class="placement-message" role="status">{message}</p>{/if}
-            {#if error}<p class="dialog-error" role="alert">{error}</p>{/if}
+            {#if message || error}
+                <!-- svelte-ignore a11y_no_noninteractive_tabindex (Scrollable details need keyboard access in native WebViews.) -->
+                <div class="placement-results" id={resultId} tabindex="0" role="region" aria-label="Repair details">
+                    {#if message}<p class="placement-message">{message}</p>{/if}
+                    {#if error}<p class="dialog-error">{error}</p>{/if}
+                </div>
+            {/if}
         </div>
 
         <footer class="dialog-footer">
-            <button class="secondary-button" type="button" disabled={busy} onclick={oncancel}>
-                {message || (inspection && !inspection.canRepair) ? 'Close' : 'Cancel'}
-            </button>
-            {#if !message && inspection?.canRepair}
-                <button class="primary-button" type="button" disabled={!canSubmit} onclick={submit}
-                    >{submitLabel}</button
-                >
-            {/if}
+            <div
+                class="dialog-footer-status"
+                class:dialog-error={!!error}
+                role={error ? 'alert' : 'status'}
+                aria-describedby={message || error ? resultId : undefined}
+            >
+                {status}
+            </div>
+            <div class="dialog-footer-actions">
+                <button class="secondary-button" type="button" disabled={busy} onclick={cancel}>
+                    {message ? 'Done' : inspection && !inspection.canRepair ? 'Close' : 'Cancel'}
+                </button>
+                {#if !message && inspection?.canRepair}
+                    <button class="primary-button" type="button" disabled={!canSubmit} onclick={submit}
+                        >Repair placement</button
+                    >
+                {/if}
+            </div>
         </footer>
     </div>
 </div>
@@ -175,6 +210,17 @@
         gap: 12px;
         padding: 14px;
         overflow-y: auto;
+    }
+
+    .placement-results {
+        max-height: 150px;
+        overflow-y: auto;
+        overflow-wrap: anywhere;
+    }
+
+    .placement-results:focus-visible {
+        outline: 1px solid var(--state-focus);
+        outline-offset: 2px;
     }
 
     .placement-repair-content strong,
@@ -238,27 +284,17 @@
         font-size: var(--dialog-label-font-size);
     }
 
-    .recovery-volume-field input {
-        height: var(--density-control);
-        padding: 0 8px;
-        color: var(--color-text-strong);
-        border: 1px solid var(--color-border);
-        border-radius: 5px;
-        background: var(--color-bg-deep);
-    }
-
     .placement-blockers {
         padding: 9px;
-        color: #f3c18f;
-        border-left: 2px solid #d08a45;
-        background: rgb(208 138 69 / 7%);
+        color: var(--color-warning);
+        border-left: 2px solid var(--color-warning);
+        background: color-mix(in srgb, var(--color-warning) 7%, transparent);
     }
 
-    .placement-complete,
-    .placement-message {
+    .placement-complete {
         display: flex;
         align-items: center;
         gap: 6px;
-        color: #76ddb4;
+        color: var(--color-success);
     }
 </style>

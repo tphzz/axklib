@@ -36,7 +36,7 @@
         white-space: nowrap;
     }
     .warning {
-        color: var(--color-warning, #e6a34c);
+        color: var(--color-warning);
         display: inline-flex;
         flex: none;
         align-items: center;

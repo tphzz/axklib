@@ -218,7 +218,7 @@
     }
 
     .program-generation-table {
-        border: 1px solid var(--color-border-strong);
+        border: 1px solid var(--color-border);
         border-radius: 6px;
         overflow: hidden;
     }
@@ -234,7 +234,7 @@
     .program-generation-header {
         align-items: center;
         padding-block: 6px;
-        color: var(--color-text-muted);
+        color: var(--color-text);
         background: var(--color-panel-raised);
         font-size: var(--dialog-table-header-font-size);
     }
@@ -245,7 +245,7 @@
     }
 
     .program-generation-row + .program-generation-row {
-        border-top: 1px solid var(--color-border-subtle);
+        border-top: 1px solid var(--color-border);
     }
 
     .program-generation-row.excluded > :not(.selection-cell) {

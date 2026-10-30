@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url';
 import { createServer } from 'vite';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { createServer as createSocketServer } from 'node:net';
 
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE ? pathToFileURL(process.env.PLAYWRIGHT_MODULE).href : 'playwright');
 const output = resolve(process.argv[2] ?? '../../../build/logs/log-viewer/00001/browser');
@@ -142,5 +143,12 @@ try {
 } finally {
     clearTimeout(deadline); process.removeListener('SIGINT', onSignal); process.removeListener('SIGTERM', onSignal);
     await stop();
-    await writeFile(resolve(output, 'results.json'), JSON.stringify({ port, serverStopped: true, results }, null, 2) + '\n');
+    if (port) await new Promise((done, reject) => {
+        const socket = createSocketServer(); socket.once('error', reject);
+        socket.listen(port, '127.0.0.1', () => socket.close(error => error ? reject(error) : done()));
+    });
+    await writeFile(resolve(output, 'results.json'), JSON.stringify({ port, serverStopped: true, browserStopped: !browser?.isConnected(), portReleased: !!port, results }, null, 2) + '\n');
 }
+
+// Vite plugins may retain worker handles after their browser and port have closed.
+process.exit(process.exitCode ?? 0);

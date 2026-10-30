@@ -86,6 +86,6 @@
         overflow-wrap: anywhere;
     }
     .format-issue {
-        color: var(--color-warning, #e6a34c);
+        color: var(--color-warning);
     }
 </style>

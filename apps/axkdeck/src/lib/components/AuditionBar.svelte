@@ -26,6 +26,7 @@
     <section class="audition-bar" aria-label="Audition controls" aria-live="polite">
         <label class="audition-autoplay">
             <input
+                class="compact-checkbox"
                 checked={autoplay}
                 type="checkbox"
                 onchange={(event) => onautoplaychange(event.currentTarget.checked)}

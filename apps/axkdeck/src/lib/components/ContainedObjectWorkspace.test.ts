@@ -425,9 +425,13 @@ describe('ContainedObjectWorkspace', () => {
     });
 
     it('distinguishes inspected rows from export-selected rows in specialized collection layouts', () => {
-        expect(appStyles).toContain('.sequence-row.active:not(.selected)');
-        expect(appStyles).toContain('.contained-row.active:not(.selected)');
-        expect(appStyles).toContain('.wave-data-row.active:not(.selected)');
+        for (const name of ['sequence-row', 'contained-row', 'wave-data-row']) {
+            const active = appStyles.split(`.${name}.active {`)[1]?.split('}')[0];
+            const selected = appStyles.split(`.${name}.selected {`)[1]?.split('}')[0];
+            expect(active).toContain('var(--state-active-border)');
+            expect(active).not.toContain('background:');
+            expect(selected).toContain('var(--state-selected-surface)');
+        }
     });
 
     it('naturally orders every displayed object lane before filtering', () => {

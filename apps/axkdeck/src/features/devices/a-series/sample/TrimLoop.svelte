@@ -1,4 +1,5 @@
 <script lang="ts">
+    import SwitchControl from '../../../../lib/components/SwitchControl.svelte';
     import { sampleSnapshot } from '../../../../lib/objectEditing';
     import { onDestroy } from 'svelte';
     import type { SampleWaveformPreview } from '../../../../lib/types';
@@ -171,17 +172,15 @@
             label="Snap"
             description="Snap dragged markers to a nearby zero crossing in the mono or left channel. Stereo boundaries move together. Numeric entry remains exact."
         />
-        <button
-            role="switch"
-            aria-label="Zero-cross snap"
-            aria-checked={view.snap}
-            class="editor-switch"
+        <SwitchControl
+            label="Zero-cross snap"
+            checked={view.snap}
             disabled={view.loading}
-            onclick={async () => {
-                if (view.snap) view.snap = false;
+            onchange={async (next) => {
+                if (!next) view.snap = false;
                 else if (await view.load(document, audio)) view.snap = true;
-            }}><span></span></button
-        >
+            }}
+        />
         <button
             class="editor-icon"
             aria-label="Zoom out"

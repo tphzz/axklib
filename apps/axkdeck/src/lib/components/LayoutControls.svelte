@@ -229,7 +229,7 @@
 
     .interface-scale-menu button[aria-checked='true'] {
         color: var(--color-text-strong);
-        background: rgb(104 151 187 / 18%);
+        background: color-mix(in srgb, var(--color-accent) 18%, transparent);
     }
 
     @media (max-width: 850px) {

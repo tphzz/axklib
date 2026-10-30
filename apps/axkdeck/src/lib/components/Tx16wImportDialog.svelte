@@ -285,7 +285,7 @@
         flex-shrink: 0;
     }
     .disk-set header span {
-        color: var(--text-muted);
+        color: var(--color-text-muted);
         font-size: var(--dialog-metadata-font-size);
     }
     .disk-set label {

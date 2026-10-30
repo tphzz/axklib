@@ -15,6 +15,34 @@ export type AllocationVisualKind =
     | 'unknown'
     | 'free';
 
+export const allocationPalette = {
+    reserved: { color: '#718096', label: 'Reserved' },
+    continuation: { color: '#fbbf24', label: 'Record continuation' },
+    directory: { color: '#2dd4bf', label: 'Directory data' },
+    support: { color: '#94a3b8', label: 'SFS support data' },
+    data: { color: '#34d399', label: 'Object data' },
+    unknown: { color: '#f97316', label: 'Unknown record data' },
+    free: { color: '#252b2e', label: 'Free' },
+    'used-without-claim': { color: '#60a5fa', label: 'Allocated without owner' },
+    'bitmap-mismatch': { color: '#e879f9', label: 'Bitmap copies differ' },
+    'claimed-but-free': { color: '#fb7185', label: 'Index claim, bitmap free' },
+    'multiple-claims': { color: '#ef4444', label: 'Multiple claims' },
+} as const satisfies Record<AllocationVisualKind, { color: string; label: string }>;
+
+export const allocationLegendOrder = [
+    'reserved',
+    'continuation',
+    'directory',
+    'support',
+    'data',
+    'unknown',
+    'free',
+    'used-without-claim',
+    'bitmap-mismatch',
+    'claimed-but-free',
+    'multiple-claims',
+] as const satisfies readonly AllocationVisualKind[];
+
 export function allocationRunVisualKind(run: AllocationRun): AllocationVisualKind {
     if (run.consistencyFlags.includes('MULTIPLE_CLAIMS')) return 'multiple-claims';
     if (run.consistencyFlags.includes('CLAIMED_BUT_FREE')) return 'claimed-but-free';

@@ -520,9 +520,9 @@
         display: grid;
         gap: 10px;
         padding: 10px;
-        border: 1px solid #765d2d;
+        border: 1px solid color-mix(in srgb, var(--color-warning) 50%, transparent);
         border-radius: 6px;
-        background: rgb(150 108 26 / 10%);
+        background: color-mix(in srgb, var(--color-warning) 10%, transparent);
     }
 
     .batch-sequence-decisions fieldset {

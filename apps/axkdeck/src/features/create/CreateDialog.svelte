@@ -321,7 +321,7 @@
     th {
         position: sticky;
         top: 0;
-        background: var(--color-bg-panel);
+        background: var(--color-panel);
         text-align: left;
         font-weight: 500;
     }

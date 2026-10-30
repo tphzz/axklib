@@ -149,10 +149,10 @@
     }
     small {
         display: block;
-        color: var(--text-muted);
+        color: var(--color-text-muted);
         font-size: var(--dialog-metadata-font-size);
     }
     .blocker {
-        color: var(--danger);
+        color: var(--color-danger);
     }
 </style>

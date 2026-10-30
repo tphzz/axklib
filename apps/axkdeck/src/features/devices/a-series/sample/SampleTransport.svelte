@@ -258,7 +258,8 @@
             bind:value={view.volume}
         />
     </div>
-    {#if audio}<label class="autoplay"><input type="checkbox" bind:checked={audio.audition.autoplay} />Autoplay</label
+    {#if audio}<label class="autoplay"
+            ><input class="compact-checkbox" type="checkbox" bind:checked={audio.audition.autoplay} />Autoplay</label
         >{/if}
     <span class="loop-readout editor-meta"
         >Loop {(Number(document.draft.values.loop_length_frames ?? 0) / rate).toFixed(3)} s</span
@@ -294,7 +295,7 @@
         border: 1px solid var(--color-accent);
         border-radius: 3px;
         background: var(--color-accent);
-        color: var(--color-panel-deep);
+        color: var(--color-action-text);
         font-size: 11px;
         font-weight: 600;
     }
@@ -333,12 +334,6 @@
         color: var(--color-text-muted);
         white-space: nowrap;
         flex-shrink: 0;
-    }
-    .autoplay input {
-        accent-color: var(--color-accent);
-        width: 12px;
-        height: 12px;
-        margin: 0;
     }
     .transport-status {
         flex: 1;

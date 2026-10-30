@@ -41,7 +41,7 @@
 
 <style>
     .different {
-        color: var(--color-warning, #e9a34d);
+        color: var(--color-warning);
     }
     .difference-mark {
         margin-left: 3px;

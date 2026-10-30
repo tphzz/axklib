@@ -5,6 +5,7 @@
     import EditorChoice from '../../../object-editor/EditorChoice.svelte';
     import EditorAutocomplete from '../../../object-editor/EditorAutocomplete.svelte';
     import AttributeHelp from '../../../../lib/components/AttributeHelp.svelte';
+    import SwitchControl from '../../../../lib/components/SwitchControl.svelte';
     import ExtendedParameterMarker from '../../../object-editor/ExtendedParameterMarker.svelte';
     import { measureWidth } from '../../../object-editor/measureWidth';
     import { noteName } from '../sample/geometry';
@@ -70,15 +71,12 @@
             />
         {/if}
     {:else if field.boolean}
-        <button
-            type="button"
-            role="switch"
-            class="editor-switch"
-            aria-label={field.label}
-            aria-checked={value === true}
+        <SwitchControl
+            label={field.label}
+            checked={value === true}
             disabled={locked}
-            onclick={() => document.draft.set(field.key, value !== true)}><span></span></button
-        >
+            onchange={(next) => document.draft.set(field.key, next)}
+        />
     {:else}
         <EditorNumber
             label={field.label}

@@ -78,7 +78,8 @@ try {
         assert.equal(await page.getByLabel('Write count').textContent(), '0');
         await page.getByRole('button', {name:'Select B',exact:true}).click();
         await page.getByRole('tab', {name:'Map/Out',exact:true}).click();
-        assert.equal(await level.inputValue(), '100');
+        await page.waitForFunction(() => document.querySelector('input[aria-label="Level"]')?.value === '75');
+        assert.equal(await level.inputValue(), '75');
         await page.getByRole('button', {name:'Select A',exact:true}).click();
         await page.waitForFunction(() => document.querySelector('input[aria-label="Level"]')?.value === '81');
         await save.click();
@@ -94,7 +95,7 @@ try {
         await page.getByRole('tab', {name:'Map/Out',exact:true}).click();
         await level.fill('70');
         await page.getByRole('button', {name:'Close image',exact:true}).click();
-        await page.getByRole('button', {name:'Discard and continue',exact:true}).click();
+        await page.getByRole('dialog', {name:'Unsaved edits'}).getByRole('button', {name:'Discard',exact:true}).click();
         assert.equal(await page.getByLabel('Closed', {exact:true}).textContent(), 'true');
         results.push({width,pixels,writes:1});
         await page.close();

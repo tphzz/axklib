@@ -175,7 +175,7 @@
         text-align: right;
     }
     .export-row:focus {
-        outline: 1px solid var(--color-accent);
+        outline: 1px solid var(--state-focus);
         outline-offset: -1px;
     }
     .export-heading {

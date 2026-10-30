@@ -341,10 +341,10 @@
     .create-hds-error {
         margin: 0;
         padding: 7px 9px;
-        color: #f1a4a4;
-        border: 1px solid rgb(190 80 80 / 35%);
+        color: var(--color-danger);
+        border: 1px solid color-mix(in srgb, var(--color-danger) 35%, transparent);
         border-radius: 5px;
-        background: rgb(120 35 35 / 20%);
+        background: color-mix(in srgb, var(--color-danger-surface) 20%, transparent);
         font-size: var(--dialog-body-font-size);
     }
 </style>

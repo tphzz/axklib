@@ -148,7 +148,7 @@
         margin-top: 6px;
     }
     .entry-issue {
-        color: #e0b765;
+        color: var(--color-warning);
         font-size: 10px;
     }
 </style>

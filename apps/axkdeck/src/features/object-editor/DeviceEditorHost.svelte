@@ -271,7 +271,7 @@
         white-space: nowrap;
         padding: 2px 6px;
         background: var(--color-panel-raised);
-        color: var(--color-text-muted);
+        color: var(--color-text);
     }
     .comparison,
     p {

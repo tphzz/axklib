@@ -152,7 +152,7 @@
     }
     .bank-switch button[aria-pressed='true'] {
         background: var(--color-selection);
-        border-color: var(--color-accent);
+        border-color: var(--state-active-border);
     }
     .bank-number {
         min-width: 0;

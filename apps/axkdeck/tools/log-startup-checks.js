@@ -21,6 +21,12 @@ window.runLogStartupChecks = async function () {
         return { failures };
     }
     await wait(() => document.querySelector('.log-toolbar') && window.logStartup.reads > 0);
+    for (const control of document.querySelectorAll('[role="switch"]')) {
+        const track = control.querySelector('.switch-track');
+        if (!track || getComputedStyle(track).width !== '26px' || getComputedStyle(track).height !== '14px') failures.push('Standalone Logs switch density is not loaded');
+        if (track && getComputedStyle(track).borderColor !== 'rgb(105, 116, 125)') failures.push('Standalone Logs switch boundary does not use the shared token');
+        if (track && getComputedStyle(track).backgroundColor === 'rgba(0, 0, 0, 0)') failures.push('Standalone Logs switch depends on absent editor CSS');
+    }
     if (scenario === 'read-error') {
         await wait(() => document.querySelector('[role="status"]').textContent.includes('Log files unavailable'));
     } else if (scenario === 'empty') {

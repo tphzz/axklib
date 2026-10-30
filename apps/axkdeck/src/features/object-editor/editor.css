@@ -10,7 +10,7 @@
     box-sizing: border-box;
     color: var(--control-text);
     background: var(--control-background);
-    border: 1px solid var(--color-border);
+    border: 1px solid var(--color-control-border);
     border-radius: 3px;
     font-family: var(--font-sans);
     font-size: var(--control-font-size);
@@ -36,7 +36,7 @@
     cursor: default;
 }
 .device-editor :is(button, input):focus-visible {
-    outline: 1px solid var(--color-accent);
+    outline: 1px solid var(--state-focus);
     outline-offset: 2px;
 }
 .device-editor [aria-invalid='true'] {
@@ -46,11 +46,11 @@
     outline: none;
 }
 .editor-slider:focus-visible::-webkit-slider-thumb {
-    outline: 2px solid var(--color-accent);
+    outline: 2px solid var(--state-focus);
     outline-offset: 3px;
 }
 .editor-slider:focus-visible::-moz-range-thumb {
-    outline: 2px solid var(--color-accent);
+    outline: 2px solid var(--state-focus);
     outline-offset: 3px;
 }
 .device-editor :is(button, .field-label, .editor-heading, .editor-meta, .graph-frame) {
@@ -138,7 +138,7 @@
     min-width: 0;
     gap: 2px;
     padding: 2px;
-    border: 1px solid var(--color-border);
+    border: 1px solid var(--color-control-border);
     background: var(--color-panel-deep);
     border-radius: 4px;
 }
@@ -155,9 +155,9 @@
     white-space: nowrap;
 }
 .editor-choice[aria-pressed='true'] {
-    color: var(--color-text);
-    background: var(--color-selection, #294958);
-    box-shadow: inset 0 0 0 1px var(--color-accent);
+    color: var(--color-action-text);
+    background: var(--color-accent);
+    box-shadow: inset 0 0 0 1px var(--state-active-border);
 }
 .editor-choice:hover:not(:disabled) {
     color: var(--color-text);
@@ -195,29 +195,7 @@
     border-radius: 2px;
 }
 .editor-select-popup .active {
-    background: var(--color-selection);
-}
-.editor-switch {
-    width: 30px;
-    height: 17px;
-    padding: 2px;
-    border: 1px solid var(--color-border);
-    border-radius: 10px;
-    background: var(--color-panel-deep);
-}
-.editor-switch > span {
-    display: block;
-    width: 11px;
-    height: 11px;
-    border-radius: 50%;
-    background: var(--color-text-muted);
-}
-.editor-switch[aria-checked='true'] {
-    background: var(--color-accent);
-}
-.editor-switch[aria-checked='true'] > span {
-    transform: translateX(12px);
-    background: var(--color-panel-deep);
+    background: var(--state-selected-surface);
 }
 .parameter-field {
     display: grid;

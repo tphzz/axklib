@@ -76,7 +76,7 @@
         padding: 8px 0;
     }
     .capacity-control > span {
-        color: var(--text-muted);
+        color: var(--color-text-muted);
         font-size: var(--dialog-label-font-size);
     }
     .capacity-summary {
@@ -85,6 +85,6 @@
         white-space: pre-line;
         overflow-wrap: anywhere;
         font-size: var(--dialog-metadata-font-size);
-        color: var(--text-muted);
+        color: var(--color-text-muted);
     }
 </style>

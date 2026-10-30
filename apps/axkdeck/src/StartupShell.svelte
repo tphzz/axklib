@@ -131,7 +131,7 @@
         color: var(--color-text-muted);
         font-size: 9px;
         font-weight: 700;
-        letter-spacing: 0.12em;
+        letter-spacing: 0;
     }
     .startup-placeholder {
         height: 44px;

@@ -43,7 +43,7 @@
 
     p {
         margin: 0;
-        color: var(--text-secondary);
+        color: var(--color-text-muted);
         line-height: 1.45;
     }
 </style>

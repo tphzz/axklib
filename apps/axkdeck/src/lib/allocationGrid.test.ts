@@ -4,6 +4,8 @@ import {
     allocationGridCluster,
     allocationGridColumns,
     allocationRunVisualKind,
+    allocationPalette,
+    allocationLegendOrder,
     findAllocationRun,
     type AllocationRun,
 } from './allocationGrid';
@@ -31,6 +33,26 @@ describe('allocation grid indexing', () => {
 });
 
 describe('allocation grid diagnostics', () => {
+    it('shares all eleven existing category colors and legend labels in display order', () => {
+        expect(
+            allocationLegendOrder.map((kind) => [kind, allocationPalette[kind].color, allocationPalette[kind].label]),
+        ).toEqual([
+            ['reserved', '#718096', 'Reserved'],
+            ['continuation', '#fbbf24', 'Record continuation'],
+            ['directory', '#2dd4bf', 'Directory data'],
+            ['support', '#94a3b8', 'SFS support data'],
+            ['data', '#34d399', 'Object data'],
+            ['unknown', '#f97316', 'Unknown record data'],
+            ['free', '#252b2e', 'Free'],
+            ['used-without-claim', '#60a5fa', 'Allocated without owner'],
+            ['bitmap-mismatch', '#e879f9', 'Bitmap copies differ'],
+            ['claimed-but-free', '#fb7185', 'Index claim, bitmap free'],
+            ['multiple-claims', '#ef4444', 'Multiple claims'],
+        ]);
+        expect(new Set(allocationLegendOrder).size).toBe(11);
+        expect(Object.keys(allocationPalette)).toHaveLength(11);
+    });
+
     function run(allocationKind: AllocationRun['allocationKind'], consistencyFlags: AllocationRun['consistencyFlags']) {
         return { allocationKind, consistencyFlags } as AllocationRun;
     }

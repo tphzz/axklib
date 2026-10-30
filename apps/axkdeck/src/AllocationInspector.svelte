@@ -1,6 +1,7 @@
 <script lang="ts">
     import { onMount } from 'svelte';
     import AllocationGrid from './lib/components/AllocationGrid.svelte';
+    import { allocationLegendOrder, allocationPalette } from './lib/allocationGrid';
     import Icon from './lib/components/Icon.svelte';
     import type { components } from './lib/generated/axklibApiV1';
     import { AxklibHttpApiClient } from './lib/httpApiClient';
@@ -164,17 +165,9 @@
             </div>
         </section>
         <section class="legend" aria-label="Allocation legend">
-            <span><i class="reserved"></i>Reserved</span>
-            <span><i class="continuation"></i>Record continuation</span>
-            <span><i class="directory"></i>Directory data</span>
-            <span><i class="support"></i>SFS support data</span>
-            <span><i class="data"></i>Object data</span>
-            <span><i class="unknown"></i>Unknown record data</span>
-            <span><i class="free"></i>Free</span>
-            <span><i class="unclaimed"></i>Allocated without owner</span>
-            <span><i class="mismatch"></i>Bitmap copies differ</span>
-            <span><i class="claim-mismatch"></i>Index claim, bitmap free</span>
-            <span><i class="conflict"></i>Multiple claims</span>
+            {#each allocationLegendOrder as kind (kind)}
+                <span><i style:background={allocationPalette[kind].color}></i>{allocationPalette[kind].label}</span>
+            {/each}
         </section>
         <section class="map-region">
             <AllocationGrid {map} {cellSize} />
@@ -340,39 +333,6 @@
         width: 9px;
         height: 9px;
         border: 1px solid rgb(255 255 255 / 18%);
-    }
-    .reserved {
-        background: #718096;
-    }
-    .continuation {
-        background: #fbbf24;
-    }
-    .directory {
-        background: #2dd4bf;
-    }
-    .support {
-        background: #94a3b8;
-    }
-    .data {
-        background: #34d399;
-    }
-    .unknown {
-        background: #f97316;
-    }
-    .free {
-        background: #252b2e;
-    }
-    .unclaimed {
-        background: #60a5fa;
-    }
-    .mismatch {
-        background: #e879f9;
-    }
-    .claim-mismatch {
-        background: #fb7185;
-    }
-    .conflict {
-        background: #ef4444;
     }
     .map-region {
         min-height: 0;

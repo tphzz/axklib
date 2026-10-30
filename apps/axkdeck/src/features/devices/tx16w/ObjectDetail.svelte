@@ -225,7 +225,7 @@
 
 <style>
     .warning {
-        color: var(--color-warning, #e0b765);
+        color: var(--color-warning);
         font-size: 11px;
     }
     table {
@@ -249,6 +249,6 @@
         color: var(--color-text-muted);
     }
     .unresolved {
-        color: #e0b765;
+        color: var(--color-warning);
     }
 </style>

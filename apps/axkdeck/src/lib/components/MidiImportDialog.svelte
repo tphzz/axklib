@@ -499,7 +499,7 @@
         font-size: var(--dialog-table-header-font-size);
     }
     .midi-import-row {
-        border-bottom: 1px solid var(--color-border-subtle);
+        border-bottom: 1px solid var(--color-border);
         font-size: var(--dialog-body-font-size);
     }
     .midi-import-row:last-of-type {
@@ -515,7 +515,7 @@
         height: 27px;
         padding: 0 7px;
         color: var(--color-text-strong);
-        border: 1px solid var(--color-border);
+        border: 1px solid var(--color-control-border);
         border-radius: 4px;
         background: var(--color-bg-deep);
         font-family: var(--font-mono);

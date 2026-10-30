@@ -150,7 +150,7 @@
         max-height: 200px;
         overflow: auto;
         background: var(--color-panel);
-        border: 1px solid var(--color-border);
+        border: 1px solid var(--color-control-border);
     }
     .document-error {
         font-size: 11px;

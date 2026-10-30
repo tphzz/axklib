@@ -423,10 +423,10 @@
         text-align: left;
         min-height: 26px;
         padding: 3px 6px;
-        border: 1px solid rgb(104 151 187 / 35%);
+        border: 1px solid color-mix(in srgb, var(--state-active-border) 35%, transparent);
         border-radius: 4px;
-        background: linear-gradient(90deg, rgb(55 91 119 / 76%), rgb(55 91 119 / 32%));
-        color: #e8edf1;
+        background: var(--state-selected-surface);
+        color: var(--color-text);
         font-size: 11px;
     }
     .tx-objects {

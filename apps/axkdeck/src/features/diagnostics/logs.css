@@ -27,9 +27,9 @@
 .log-toolbar input {
     height: 28px;
     min-width: 0;
-    border: 1px solid var(--color-border);
+    border: 1px solid var(--color-control-border);
     border-radius: 4px;
-    background: var(--color-bg-deep, #0b0e0f);
+    background: var(--control-background);
     color: var(--color-text);
     padding: 3px 8px;
     font: inherit;
@@ -57,7 +57,7 @@
     min-width: 110px;
     height: 28px;
     padding: 3px 8px;
-    border: 1px solid var(--color-border);
+    border: 1px solid var(--color-control-border);
     border-radius: 4px;
     background: var(--control-background);
     color: var(--color-text);
@@ -103,7 +103,7 @@
     place-items: center;
     width: 12px;
     height: 12px;
-    border: 1px solid var(--color-border);
+    border: 1px solid var(--color-control-border);
     font-size: 10px;
 }
 .log-search {
@@ -115,45 +115,6 @@
     align-items: center;
     flex-wrap: wrap;
     min-height: 28px;
-}
-.log-switch {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    background: none;
-    border: 0;
-    color: var(--color-text);
-    padding: 0;
-    font-size: 10px;
-    white-space: nowrap;
-}
-.log-switch > span {
-    display: block;
-    width: 26px;
-    height: 14px;
-    border-radius: 8px;
-    border: 1px solid var(--color-border);
-    background: #0b0e0f;
-    position: relative;
-    flex: none;
-}
-.log-switch > span::after {
-    content: '';
-    position: absolute;
-    left: 2px;
-    top: 2px;
-    height: 8px;
-    width: 8px;
-    border-radius: 50%;
-    background: var(--color-text-muted);
-}
-.log-switch[aria-checked='true'] > span {
-    background: #294b5b;
-    border-color: #70a6c3;
-}
-.log-switch[aria-checked='true'] > span::after {
-    left: 14px;
-    background: #aad7e6;
 }
 .log-actions {
     display: flex;
@@ -181,7 +142,7 @@
     opacity: 0.4;
 }
 .log-viewer :focus-visible {
-    outline: 2px solid #70a6c3;
+    outline: 2px solid var(--state-focus);
     outline-offset: 1px;
 }
 .log-save {
@@ -228,7 +189,7 @@
 .log-new {
     background: transparent;
     border: 0;
-    color: #83b8d5;
+    color: var(--color-accent);
     font-size: 10px;
     padding: 4px;
 }
@@ -255,13 +216,13 @@
     color: var(--color-text-muted);
 }
 .log-level {
-    color: #84b7d1;
+    color: var(--color-text);
 }
 .log-record[data-level='warning'] .log-level {
-    color: #e3aa61;
+    color: var(--color-warning);
 }
 .log-record[data-level='error'] .log-level {
-    color: #f18b84;
+    color: var(--color-danger);
 }
 .log-empty {
     font-family: inherit;

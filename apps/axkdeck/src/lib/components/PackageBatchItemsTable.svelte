@@ -206,6 +206,7 @@
     }
 
     .capacity-summary {
+        --color-text-muted: var(--color-text);
         display: flex;
         align-items: center;
         justify-content: space-between;
@@ -237,8 +238,8 @@
     }
 
     .capacity-unavailable {
-        border-color: #765d2d;
-        background: rgb(150 108 26 / 10%);
+        border-color: color-mix(in srgb, var(--color-warning) 50%, transparent);
+        background: color-mix(in srgb, var(--color-warning) 10%, transparent);
     }
 
     .capacity-unavailable strong,
@@ -270,7 +271,7 @@
     .batch-table-header {
         align-items: center;
         padding-block: 6px;
-        color: var(--color-text-muted);
+        color: var(--color-text);
         background: var(--color-panel-raised);
         font-size: var(--dialog-table-header-font-size);
     }

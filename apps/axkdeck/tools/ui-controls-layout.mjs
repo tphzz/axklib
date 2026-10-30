@@ -12,6 +12,7 @@ const output = resolve(process.argv[2]);
 await mkdir(output, { recursive: true });
 const server = await createServer({ server: { host: '127.0.0.1', port: 0, strictPort: false } });
 const checks = await readFile(new URL('./ui-controls-checks.js', import.meta.url), 'utf8');
+const designChecks = await readFile(new URL('./design-system-checks.js', import.meta.url), 'utf8');
 let browser, child;
 let childExit;
 let port;
@@ -76,6 +77,33 @@ try {
             await page.screenshot({ path: resolve(output, `forced-colors-${name}.png`) });
             await page.keyboard.press('Escape');
             await page.emulateMedia({ forcedColors: 'none' });
+            await page.goto(`${base}/tools/layout-fixtures/design-system.html`);
+            await page.getByRole('switch', { name: 'Editor switch', exact: true }).waitFor();
+            await page.evaluate(scale => { document.documentElement.style.zoom = String(scale); }, scale);
+            await page.addScriptTag({ content: designChecks });
+            const designResult = await page.evaluate(() => window.runDesignSystemChecks());
+            assert.deepEqual(designResult.failures, []);
+            const editorSwitch = page.getByRole('switch', { name: 'Editor switch', exact: true });
+            await editorSwitch.focus();
+            await page.keyboard.press('Space');
+            assert.equal(await editorSwitch.getAttribute('aria-checked'), 'true');
+            await page.keyboard.press('Enter');
+            assert.equal(await editorSwitch.getAttribute('aria-checked'), 'false');
+            await page.screenshot({ path: resolve(output, `design-system-${name}.png`) });
+            await page.getByRole('button', { name: 'Repair success', exact: true }).click();
+            const details = page.getByRole('region', { name: 'Repair details', exact: true });
+            const footerTop = await page.locator('[role=dialog] .dialog-footer').evaluate(node => node.getBoundingClientRect().top);
+            await details.focus();
+            await page.keyboard.press('PageDown');
+            await page.waitForFunction(() => document.querySelector('.placement-results').scrollTop > 0);
+            assert.equal(await page.locator('[role=dialog] .dialog-footer').evaluate(node => node.getBoundingClientRect().top), footerTop);
+            await page.screenshot({ path: resolve(output, `repair-details-${name}.png`) });
+            await page.keyboard.press('Escape');
+            await page.emulateMedia({ forcedColors: 'active' });
+            await editorSwitch.focus();
+            assert.notEqual(await editorSwitch.evaluate(node => getComputedStyle(node).outlineStyle), 'none');
+            await page.screenshot({ path: resolve(output, `design-forced-colors-${name}.png`) });
+            await page.emulateMedia({ forcedColors: 'none' });
             await page.goto(`${base}/tools/layout-fixtures/device-dialog.html?mode=empty`);
             const deviceDialog = page.getByRole('dialog');
             await deviceDialog.getByRole('tab', { name: 'Device', exact: true }).click();
@@ -91,7 +119,7 @@ try {
             await selectValue(page.getByRole('combobox', { name: 'Device', exact: true }), 'fixture');
             assert.equal(await page.getByRole('button', { name: 'Open', exact: true }).isDisabled(), true);
             assert.deepEqual(errors, []);
-            results.push({ name, ...result });
+            results.push({ name, ...result, design: designResult });
             console.log(`PASS ${name}`);
         } catch (error) {
             process.exitCode = 1;
@@ -101,12 +129,17 @@ try {
         } finally { await page.close(); }
     }
     if (process.env.UI_CONTROLS_WEBKIT === '1') {
+        for (const [fixture, checkScript, checkFunction, directory] of [
+            ['/tools/layout-fixtures/ui-controls.html', 'tools/ui-controls-checks.js', 'runUiControlsChecks', 'webkit'],
+            ['/tools/layout-fixtures/design-system.html', 'tools/design-system-checks.js', 'runDesignSystemChecks', 'design-webkit'],
+        ]) {
         await new Promise((resolveRun, reject) => {
-            child = spawn('/usr/bin/python3', ['tools/sample-editor-webkit.py', base, resolve(output, 'webkit'), '--fixture', '/tools/layout-fixtures/ui-controls.html', '--checks', 'tools/ui-controls-checks.js', '--checks-function', 'runUiControlsChecks', '--zoom', '1', '--zoom', '1.25', '--zoom', '1.5'], { stdio: 'inherit', detached: true });
+            child = spawn('/usr/bin/python3', ['tools/sample-editor-webkit.py', base, resolve(output, directory), '--fixture', fixture, '--checks', checkScript, '--checks-function', checkFunction, '--zoom', '1', '--zoom', '1.25', '--zoom', '1.5', ...(directory === 'design-webkit' ? ['--focused'] : [])], { stdio: 'inherit', detached: true });
             childExit = new Promise(done => child.once('close', done));
             child.once('error', reject);
             child.once('close', code => { child = undefined; code === 0 ? resolveRun() : reject(new Error(`WebKitGTK exited ${code}`)); });
         });
+        }
     }
 } finally {
     clearTimeout(deadline);
@@ -118,3 +151,6 @@ try {
     });
     await writeFile(resolve(output, 'results.json'), JSON.stringify({ serverStopped: true, browserStopped: true, portReleased: !!port, results }, null, 2) + '\n');
 }
+
+// Vite plugins may retain worker handles after their browser and port have closed.
+process.exit(process.exitCode ?? 0);

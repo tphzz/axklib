@@ -1,4 +1,5 @@
 <script lang="ts">
+    import SwitchControl from '../../lib/components/SwitchControl.svelte';
     import { onMount, tick, untrack } from 'svelte';
     import { on } from 'svelte/events';
     import Icon from '../../lib/components/Icon.svelte';
@@ -197,20 +198,22 @@
             /></label
         >
         <div class="log-switches">
-            <button
-                type="button"
-                class="log-switch"
-                role="switch"
-                aria-checked={logs.wrap}
-                onclick={() => (logs.wrap = !logs.wrap)}><span></span>Word wrap</button
-            >
-            <button
-                type="button"
-                class="log-switch"
-                role="switch"
-                aria-checked={logs.follow}
-                onclick={() => logs.setFollow(!logs.follow)}><span></span>Follow latest</button
-            >
+            <SwitchControl
+                label="Word wrap"
+                checked={logs.wrap}
+                density="diagnostic"
+                showLabel
+                onchange={(next) => {
+                    logs.wrap = next;
+                }}
+            />
+            <SwitchControl
+                label="Follow latest"
+                checked={logs.follow}
+                density="diagnostic"
+                showLabel
+                onchange={(next) => logs.setFollow(next)}
+            />
         </div>
         <div class="log-actions">
             <button

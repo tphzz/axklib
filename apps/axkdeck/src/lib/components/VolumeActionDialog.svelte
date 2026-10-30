@@ -222,7 +222,7 @@
 
     .volume-deletion-targets h3 {
         margin: 0;
-        font-size: var(--font-size-value);
+        font-size: var(--dialog-section-font-size);
     }
 
     .volume-deletion-targets ul {

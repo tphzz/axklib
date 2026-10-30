@@ -135,7 +135,7 @@
         overflow-y: auto;
     }
     .format-blocker {
-        color: var(--color-warning, #e6a34c);
+        color: var(--color-warning);
         overflow-wrap: anywhere;
     }
 </style>

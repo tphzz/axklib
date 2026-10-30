@@ -63,16 +63,21 @@ window.runSampleEditorRegression = async function () {
     document.querySelector('[aria-label="Undo Sample edit"]').click(); await settle();
     assert(JSON.stringify(tabs()) === cleanTabs, 'undo moves tabs');
     if (location.search.includes('short-stereo')) {
-        const help = document.querySelector('.attribute-help-label[aria-label="Portamento type"]');
-        help.focus(); await settle();
-        assert(document.querySelector('[role=tooltip]')?.textContent.includes('full parameter layout'), 'short-layout conversion is explained on focus');
-        help.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); await settle();
-        assert(!document.querySelector('[role=tooltip]'), 'conversion help closes with Escape');
+        assert(!document.querySelector('[aria-label="Portamento type"][role=combobox]').disabled, 'A3000 portamento choices remain available');
+        assert(!document.querySelector('input[aria-label="Portamento rate"]'), 'A3000-only browsing does not expose unsupported portamento editing');
     }
     await page('Map/Out', 'Expansion & Velocity');
     if (location.search.includes('short-stereo')) {
         assert(!document.querySelector('input[aria-label="Detune"]').disabled, 'true stereo supports scalar detune editing');
-        assert(!document.querySelector('input[aria-label="Low crossfade"]').disabled, 'short-layout crossfade is editable through conversion');
+        assert(!document.querySelector('input[aria-label="Low crossfade"]'), 'A3000 crossfade requires explicit conversion');
+        const help = document.querySelector('.attribute-help-label[aria-label="Low crossfade: Unavailable"]');
+        assert(!!help, 'unavailable crossfade has accessible help');
+        if (help) {
+            help.focus(); await settle();
+            assert(document.querySelector('[role=tooltip]')?.textContent.includes('Convert explicitly'), 'format conversion is explained on focus');
+            help.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); await settle();
+            assert(!document.querySelector('[role=tooltip]'), 'conversion help closes with Escape');
+        }
     }
     await page('Map/Out', 'Level scaling');
     const scaling = document.querySelector('.breakpoint-graph button');

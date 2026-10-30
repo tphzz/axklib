@@ -83,7 +83,7 @@
         color: var(--color-accent);
     }
     .inspector-section-heading button:focus-visible {
-        outline: 1px solid var(--color-accent);
+        outline: 1px solid var(--state-focus);
         outline-offset: 2px;
     }
     .inspector-section-title {

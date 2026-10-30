@@ -236,7 +236,7 @@
         stroke: none;
     }
     .root-marker {
-        fill: var(--color-warning, #e4b15b);
+        fill: var(--color-warning);
         stroke-width: 1px;
         pointer-events: none;
     }

@@ -637,6 +637,6 @@
         border: 2px solid var(--color-accent);
     }
     .root-key {
-        background: var(--color-warning, #e4b15b);
+        background: var(--color-warning);
     }
 </style>

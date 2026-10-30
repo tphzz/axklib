@@ -1,4 +1,4 @@
-import { act, render, waitFor } from '@testing-library/svelte';
+import { act, fireEvent, render, waitFor } from '@testing-library/svelte';
 import { fromStore, writable } from 'svelte/store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ObjectDetail, PreviewEnvelope } from '../../../../lib/transport';
@@ -7,6 +7,7 @@ import DeviceEditorHostHarness from '../../../../test/DeviceEditorHostHarness.sv
 import { sampleConversionFixture, sampleFormatFixture } from '../../../../test/sampleFormatFixture';
 import type { EditorAudioServices } from '../../../object-editor/audioContext';
 import { ObjectEditorWorkflow } from '../../../object-editor/workflow.svelte';
+import { sampleView } from './view.svelte';
 
 let width = 1200;
 const observers = new Set<(entries: ResizeObserverEntry[]) => void>();
@@ -134,6 +135,40 @@ async function resize(next: number) {
 }
 
 describe('TrimLoop adaptive preview requests', () => {
+    it('keeps snap off until audio loading succeeds and disables the switch while pending', async () => {
+        const fixture = setup();
+        const control = await fixture.view.findByRole('switch', { name: 'Zero-cross snap' });
+        const model = sampleView(fixture.workflow.find(1, 'A')!);
+        let complete!: (value: NonNullable<typeof model.source> | undefined) => void;
+        const load = vi.spyOn(model, 'load').mockImplementation(async () => {
+            model.loading = true;
+            const source = await new Promise<NonNullable<typeof model.source> | undefined>(
+                (resolve) => (complete = resolve),
+            );
+            model.loading = false;
+            return source;
+        });
+        await fireEvent.click(control);
+        expect(control.getAttribute('aria-checked')).toBe('false');
+        expect((control as HTMLButtonElement).disabled).toBe(true);
+        await act(async () => complete({} as NonNullable<typeof model.source>));
+        expect(control.getAttribute('aria-checked')).toBe('true');
+        expect((control as HTMLButtonElement).disabled).toBe(false);
+        await fireEvent.click(control);
+        expect(control.getAttribute('aria-checked')).toBe('false');
+        expect(load).toHaveBeenCalledOnce();
+    });
+
+    it('does not enable snap when source audio loading fails', async () => {
+        const fixture = setup();
+        const control = await fixture.view.findByRole('switch', { name: 'Zero-cross snap' });
+        const model = sampleView(fixture.workflow.find(1, 'A')!);
+        vi.spyOn(model, 'load').mockResolvedValue(undefined);
+        await fireEvent.click(control);
+        expect(model.snap).toBe(false);
+        expect(control.getAttribute('aria-checked')).toBe('false');
+    });
+
     it('bounds unresolved requests and coalesces repeated tier changes to the latest desired resolution', async () => {
         const fixture = setup();
         await waitFor(() =>

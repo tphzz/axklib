@@ -5,6 +5,7 @@
     import ExtendedParameterMarker from '../../../object-editor/ExtendedParameterMarker.svelte';
     import { formatField, sampleFormatContext, type SampleFormatContext } from './formatCapabilities';
     import AttributeHelp from '../../../../lib/components/AttributeHelp.svelte';
+    import SwitchControl from '../../../../lib/components/SwitchControl.svelte';
     import ParameterLabel from '../../../object-editor/ParameterLabel.svelte';
     import EditorNumber from '../../../object-editor/EditorNumber.svelte';
     import EditorChoice from '../../../object-editor/EditorChoice.svelte';
@@ -85,15 +86,12 @@
     {:else if readOnlyText}
         <input class="editor-control" aria-label={field.label} value={readOnlyText} readonly disabled />
     {:else if field.boolean && !field.options}
-        <button
-            type="button"
-            role="switch"
-            class="editor-switch"
-            aria-label={field.label}
-            aria-checked={value === true}
+        <SwitchControl
+            label={field.label}
+            checked={value === true}
             disabled={locked || unavailable}
-            onclick={() => draft.set(field.key, value !== true)}><span></span></button
-        >
+            onchange={(next) => draft.set(field.key, next)}
+        />
     {:else if field.options}
         {#if field.key === 'midi_receive_channel' || field.key.startsWith('controls.')}
             <EditorAutocomplete

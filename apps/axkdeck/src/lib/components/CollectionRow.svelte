@@ -66,24 +66,20 @@
     }
 
     .collection-row:hover {
-        border-color: rgb(104 151 187 / 42%);
+        border-color: var(--state-active-border);
         border-radius: 5px;
-        background: #293036;
+        background: var(--state-hover-surface);
     }
 
     .collection-row.active {
-        border-color: rgb(104 151 187 / 68%);
+        border-color: var(--state-active-border);
         border-radius: 5px;
-    }
-
-    .collection-row.active:not(.selected) {
-        background: rgb(104 151 187 / 10%);
     }
 
     .collection-row.selected {
-        border-color: rgb(104 151 187 / 68%);
+        border-color: var(--state-active-border);
         border-radius: 5px;
-        background: linear-gradient(120deg, rgb(55 91 119 / 68%), rgb(49 60 68 / 68%));
+        background: var(--state-selected-surface);
     }
 
     .collection-row-identity {

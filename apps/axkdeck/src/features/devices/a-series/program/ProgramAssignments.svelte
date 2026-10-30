@@ -306,6 +306,7 @@
         border: 0;
     }
     tr.selected {
+        --color-text-muted: var(--color-text);
         background: var(--color-panel-raised);
     }
     .target {
@@ -332,7 +333,7 @@
         font-size: 10px;
     }
     .target:focus-visible {
-        outline: 1px solid var(--color-accent);
+        outline: 1px solid var(--state-focus);
     }
     .remove-assignment {
         width: min(460px, calc(100vw - 32px));
