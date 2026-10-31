@@ -115,7 +115,7 @@
 >
     <header class="app-header">
         <button class="brand" type="button" aria-label="About axkdeck" title="About axkdeck" onclick={onabout}>
-            <span class="brand-mark"><Icon name="waveform" size={20} /></span><strong>axkdeck</strong>
+            <strong>axkdeck</strong>
         </button>
         <div class="workspace-image-context">
             {#if documentSelector}{@render documentSelector()}
@@ -232,6 +232,8 @@
 <style>
     .modular-shell {
         --workspace-accent: #dc8b35;
+        --workspace-mode-background: var(--action-primary-background);
+        --workspace-mode-text: var(--color-text-inverse);
         --workspace-inspector-width: 268px;
         grid-template-columns: var(--library-column-width) minmax(0, 1fr) var(--workspace-inspector-width);
         grid-template-rows: auto minmax(0, 1fr) var(--density-status-bar);
@@ -247,6 +249,8 @@
     }
     .modular-shell[data-workspace-mode='files'] {
         --workspace-accent: #58bdb4;
+        --workspace-mode-background: var(--workspace-accent);
+        --workspace-mode-text: #101214;
     }
     .app-header {
         border-bottom: 2px solid var(--workspace-accent);
@@ -298,11 +302,22 @@
         color: var(--color-text);
     }
     .workspace-mode-switch button.active {
-        background: var(--workspace-accent);
-        color: #101214;
+        background: var(--workspace-mode-background);
+        color: var(--workspace-mode-text);
     }
     .workspace-mode-switch button:disabled {
         opacity: 0.45;
+    }
+    @media (forced-colors: active) {
+        .workspace-mode-switch button.active {
+            background: Highlight;
+            color: HighlightText;
+            forced-color-adjust: none;
+        }
+        .workspace-mode-switch button.active:focus-visible {
+            outline: 2px solid Highlight;
+            outline-offset: 2px;
+        }
     }
     .workspace-center {
         grid-row: 2;

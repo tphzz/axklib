@@ -103,8 +103,53 @@ describe('design system contract', () => {
         expect(definitions.get('--state-active-border')).toBe('var(--color-accent)');
         expect(definitions.get('--state-focus')).toBe('var(--color-accent)');
         expect(app).toMatch(
-            /\.primary-button\s*\{[^}]*color:\s*var\(--color-action-text\)[^}]*background:\s*var\(--color-brand\)/s,
+            /\.primary-button\s*\{[^}]*color:\s*var\(--color-text-inverse\)[^}]*background:\s*var\(--action-primary-background\)/s,
         );
+    });
+
+    it('separates shared command paints from decorative and blue action roles', () => {
+        const stops = ['--color-primary-start', '--color-primary-end'];
+        const hoverStops = ['--color-primary-hover-start', '--color-primary-hover-end'];
+        for (const name of [...stops, ...hoverStops]) {
+            const owners = sources.flatMap(({ path, declarations }) =>
+                declarations.filter(({ property }) => property === name).map(() => path),
+            );
+            expect(owners, name).toEqual(['app.css']);
+        }
+        for (const [paint, names] of [
+            ['--action-primary-background', stops],
+            ['--action-primary-hover-background', hoverStops],
+        ] as const) {
+            const value = definitions.get(paint);
+            expect(value).toContain('linear-gradient(to bottom right');
+            for (const name of names) expect(value).toContain(`var(${name})`);
+        }
+        expect(app).toMatch(
+            /\.secondary-button\s*\{[^}]*color:\s*var\(--color-text-inverse\)[^}]*background:\s*var\(--color-bg-deep\)/s,
+        );
+        expect(app).toMatch(
+            /\.secondary-button:hover:not\(:disabled\):not\(\[aria-disabled='true'\]\)\s*\{[^}]*background:\s*var\(--color-panel\)/s,
+        );
+        expect(app).toMatch(
+            /\.primary-button:hover:not\(:disabled\):not\(\[aria-disabled='true'\]\)\s*\{\s*background:\s*var\(--action-primary-hover-background\);\s*\}/s,
+        );
+        const localCommandPaints = sources.flatMap(({ path, declarations }) =>
+            path === 'app.css' || path.startsWith('test/')
+                ? []
+                : declarations
+                      .filter(
+                          ({ property, states }) =>
+                              /primary-button|secondary-button/.test(states) &&
+                              /^(color|background(?:-color|-image)?|border-color|filter)$/.test(property),
+                      )
+                      .map(({ property }) => `${path}: ${property}`),
+        );
+        expect(localCommandPaints).toEqual([]);
+        const workspace = sources.find(({ path }) => path.endsWith('/WorkspaceShell.svelte'))!;
+        expect(workspace.source).toContain('--workspace-mode-background: var(--action-primary-background)');
+        expect(workspace.source).toContain('--workspace-mode-background: var(--workspace-accent)');
+        expect(workspace.source).toContain('--workspace-mode-text: #101214');
+        expect(app).not.toMatch(/\.(?:brand-mark|play-button)\s*\{/);
     });
 
     it('routes existing focus and active boundary consumers through the state aliases', () => {
@@ -130,7 +175,9 @@ describe('design system contract', () => {
     });
 
     it('keeps brand and startup tracking at zero without enlarging text', () => {
-        expect(app).toMatch(/\.brand strong\s*\{[^}]*font-size:\s*14px[^}]*letter-spacing:\s*0\s*;/s);
+        expect(app).toMatch(
+            /\.brand strong,\s*\.startup-brand strong\s*\{[^}]*font-size:\s*14px[^}]*letter-spacing:\s*0\s*;/s,
+        );
         const startup = sources.find((source) => source.path === 'StartupShell.svelte')!.source;
         expect(startup).toMatch(/\.startup-library p\s*\{[^}]*font-size:\s*9px[^}]*letter-spacing:\s*0\s*;/s);
     });

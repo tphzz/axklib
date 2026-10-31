@@ -25,7 +25,7 @@
 
 <div class="startup-shell" aria-busy={status === 'starting'}>
     <header class="startup-header">
-        <div class="startup-brand"><span aria-hidden="true">~</span><strong>axkdeck</strong></div>
+        <div class="startup-brand"><strong>axkdeck</strong></div>
         <TabStrip
             tabs={workspaceTabs}
             label="Object views"
@@ -101,16 +101,6 @@
         gap: 10px;
         padding: 0 10px;
         color: var(--color-text-strong);
-    }
-    .startup-brand span {
-        display: grid;
-        width: 28px;
-        height: 28px;
-        place-items: center;
-        border: 1px solid rgb(204 120 50 / 55%);
-        border-radius: 7px;
-        background: #8e5428;
-        font-weight: 700;
     }
     .startup-library {
         padding: 12px 10px;

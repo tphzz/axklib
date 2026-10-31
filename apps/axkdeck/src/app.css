@@ -18,6 +18,12 @@
   --color-accent: #6897bb;
   --color-accent-strong: #4e82a8;
   --color-brand: #cc7832;
+  --color-primary-start: #b35413;
+  --color-primary-end: #98430f;
+  --color-primary-hover-start: #b85c1a;
+  --color-primary-hover-end: #a34e16;
+  --action-primary-background: linear-gradient(to bottom right, var(--color-primary-start), var(--color-primary-end));
+  --action-primary-hover-background: linear-gradient(to bottom right, var(--color-primary-hover-start), var(--color-primary-hover-end));
   --color-success: #34d399;
   --color-danger: #f1a4a4;
   --color-danger-surface: #7c3030;
@@ -198,19 +204,8 @@ input:focus-visible {
   outline-offset: -3px;
 }
 
-.brand-mark {
-  display: grid;
-  width: 28px;
-  height: 28px;
-  place-items: center;
-  color: #f3d6bd;
-  border: 1px solid rgb(204 120 50 / 55%);
-  border-radius: 7px;
-  background: linear-gradient(145deg, #b86c2c, #70421f);
-  box-shadow: 0 7px 20px rgb(0 0 0 / 24%);
-}
-
-.brand strong {
+.brand strong,
+.startup-brand strong {
   display: block;
   color: var(--color-text-strong);
   font-size: 14px;
@@ -292,12 +287,6 @@ input:focus-visible {
   font-size: 11px;
   font-weight: 600;
   transition: 140ms ease;
-}
-
-.secondary-button:hover {
-  color: var(--color-text-strong);
-  border-color: color-mix(in srgb, var(--color-accent) 55%, transparent);
-  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
 }
 
 .image-navigator,
@@ -988,8 +977,12 @@ input:focus-visible {
 .secondary-button {
   height: 30px;
   padding: 0 11px;
-  color: var(--color-text);
+  color: var(--color-text-inverse);
   border: 1px solid var(--color-control-border);
+  background: var(--color-bg-deep);
+}
+
+.secondary-button:hover:not(:disabled):not([aria-disabled='true']) {
   background: var(--color-panel);
 }
 
@@ -997,19 +990,19 @@ input:focus-visible {
   height: 30px;
   margin: 0;
   padding: 0 14px;
-  color: var(--color-action-text);
+  color: var(--color-text-inverse);
   border: 1px solid var(--color-control-border);
-  background: var(--color-brand);
+  background: var(--action-primary-background);
   box-shadow: 0 7px 20px rgb(0 0 0 / 24%);
 }
 
-.primary-button:hover:not(:disabled) {
-  filter: brightness(1.1);
+.primary-button:hover:not(:disabled):not([aria-disabled='true']) {
+  background: var(--action-primary-hover-background);
 }
 
-.secondary-button:disabled,
-.primary-button:disabled,
-.danger-button:disabled {
+.secondary-button:is(:disabled, [aria-disabled='true']),
+.primary-button:is(:disabled, [aria-disabled='true']),
+.danger-button:is(:disabled, [aria-disabled='true']) {
   cursor: not-allowed;
   opacity: 0.45;
   filter: none;
@@ -1188,22 +1181,6 @@ input:focus-visible {
   border-radius: 6px;
   font-size: 9px;
   text-align: center;
-}
-
-.play-button {
-  position: absolute;
-  bottom: 8px;
-  left: 9px;
-  display: grid;
-  width: 27px;
-  height: 27px;
-  place-items: center;
-  color: var(--color-action-text);
-  border: 1px solid rgb(224 146 79 / 55%);
-  border-radius: 50%;
-  background: var(--color-brand);
-  cursor: pointer;
-  box-shadow: 0 5px 15px rgb(0 0 0 / 30%);
 }
 
 .object-id {
@@ -2336,6 +2313,40 @@ textarea::placeholder {
 }
 
 @media (forced-colors: active) {
+  .dialog-segmented-control {
+    overflow: visible;
+  }
+  .workspace-mode-switch button[aria-pressed='true'],
+  .dialog-segmented-control > button[aria-pressed='true'],
+  .dialog-segmented-control > button[aria-selected='true'],
+  .editor-choices button.editor-choice[aria-pressed='true'] {
+    position: relative;
+  }
+  /* Keep selection visible independently of the keyboard-focus outline. */
+  .workspace-mode-switch button[aria-pressed='true']::after,
+  .dialog-segmented-control > button[aria-pressed='true']::after,
+  .dialog-segmented-control > button[aria-selected='true']::after,
+  .editor-choices button.editor-choice[aria-pressed='true']::after {
+    content: '';
+    position: absolute;
+    inset: 3px;
+    border: 1px solid HighlightText;
+    border-radius: inherit;
+    pointer-events: none;
+  }
+  .dialog-segmented-control > button[aria-pressed='true'],
+  .dialog-segmented-control > button[aria-selected='true'],
+  .editor-choices button.editor-choice[aria-pressed='true'] {
+    color: HighlightText;
+    background: Highlight;
+    forced-color-adjust: none;
+  }
+  .dialog-segmented-control > button[aria-pressed='true']:focus-visible,
+  .dialog-segmented-control > button[aria-selected='true']:focus-visible,
+  .editor-choices button.editor-choice[aria-pressed='true']:focus-visible {
+    outline: 2px solid Highlight;
+    outline-offset: 2px;
+  }
   .select-control, .select-popup { border-color: ButtonText; }
   .select-popup .active { background: Highlight; color: HighlightText; forced-color-adjust: none; }
   .select-control:focus-visible { outline-color: Highlight; }
@@ -2841,7 +2852,7 @@ textarea::placeholder {
   font-weight: 700;
 }
 
-.danger-button:hover:not(:disabled) {
+.danger-button:hover:not(:disabled):not([aria-disabled='true']) {
   filter: brightness(1.1);
 }
 

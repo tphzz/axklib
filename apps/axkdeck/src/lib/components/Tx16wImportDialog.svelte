@@ -162,7 +162,7 @@
                     >
                 </header>
                 {#if !request.documentSource}
-                    <label class="secondary-button"
+                    <label class="secondary-button" aria-disabled={busy}
                         ><Icon name="file-plus" size={14} />Add disks
                         <input
                             type="file"

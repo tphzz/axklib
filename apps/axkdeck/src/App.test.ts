@@ -476,6 +476,8 @@ describe('App panel layout', () => {
     it('opens About from the brand and reuses the authoritative build information', async () => {
         renderAcknowledgedApp();
         const brand = screen.getByRole('button', { name: 'About axkdeck' });
+        expect(brand.textContent).toBe('axkdeck');
+        expect(brand.querySelector('svg, img, .brand-mark')).toBeNull();
 
         brand.focus();
         expect(document.activeElement).toBe(brand);

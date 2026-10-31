@@ -5,9 +5,13 @@ import StartupShell from './StartupShell.svelte';
 
 describe('StartupShell', () => {
     it('paints a stable starting state while retaining the startup warning', () => {
-        render(StartupShell, {
+        const { container } = render(StartupShell, {
             props: { onacknowledge: vi.fn(), onretry: vi.fn(), onopensettings: vi.fn() },
         });
+        const brand = container.querySelector('.startup-brand');
+        expect(brand?.textContent).toBe('axkdeck');
+        expect(brand?.children).toHaveLength(1);
+        expect(brand?.querySelector('span, svg, img, button')).toBeNull();
         expect(screen.getAllByText('Starting services...')).toHaveLength(2);
         const inspector = screen.getByRole('complementary', { name: 'Object inspector' });
         expect(inspector.querySelector('.panel-heading')).toBeTruthy();

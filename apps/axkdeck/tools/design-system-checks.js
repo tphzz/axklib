@@ -1,4 +1,5 @@
 window.runDesignSystemChecks = async function () {
+    const { contrastRatio, minimumGradientContrast } = await import('/tools/paint-contrast.js');
     const failures = [], measurements = [];
     const check = (condition, message) => { if (!condition) failures.push(message); };
     const settle = () => new Promise(resolve => setTimeout(resolve, 80));
@@ -7,10 +8,27 @@ window.runDesignSystemChecks = async function () {
     const click = async node => { if (!node) throw Error('Missing control'); node.scrollIntoView({ block: 'nearest' }); node.click(); await settle(); };
     const colorCanvas = document.createElement('canvas').getContext('2d');
     const rgb = color => { colorCanvas.clearRect(0, 0, 1, 1); colorCanvas.fillStyle = color; colorCanvas.fillRect(0, 0, 1, 1); return [...colorCanvas.getImageData(0, 0, 1, 1).data].slice(0, 3); };
-    const luminance = color => rgb(color).map(v => v / 255).map(v => v <= .04045 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4).reduce((v, n, i) => v + n * [.2126, .7152, .0722][i], 0);
-    const ratio = (a, b) => { const x = luminance(a), y = luminance(b); return (Math.max(x, y) + .05) / (Math.min(x, y) + .05); };
-    const background = node => { for (let p = node; p; p = p.parentElement) { const value = style(p).backgroundColor; if (value !== 'rgba(0, 0, 0, 0)' && value !== 'transparent') return value; } return style(document.documentElement).backgroundColor; };
-    const readable = (node, name) => { const contrast = ratio(style(node).color, background(node)); measurements.push({ name, contrast }); check(contrast >= 4.5, `${name}: contrast ${contrast.toFixed(3)}`); };
+    const ratio = (a, b) => contrastRatio(rgb(a), rgb(b));
+    const background = node => {
+        for (let parent = node; parent; parent = parent.parentElement) {
+            const paint = style(parent);
+            if (paint.backgroundImage !== 'none') {
+                const stops = paint.backgroundImage.match(/rgba?\([^)]*\)/g);
+                if (!paint.backgroundImage.startsWith('linear-gradient(') || !stops || stops.length < 2) throw Error(`Unsupported measured paint: ${paint.backgroundImage}`);
+                return stops;
+            }
+            if (paint.backgroundColor !== 'rgba(0, 0, 0, 0)' && paint.backgroundColor !== 'transparent') return [paint.backgroundColor];
+        }
+        throw Error('No measurable opaque background');
+    };
+    const readable = (node, name) => {
+        if (node.matches(':disabled')) return;
+        const stops = background(node).map(rgb);
+        const foreground = rgb(style(node).color);
+        const contrast = stops.length > 1 ? minimumGradientContrast(foreground, stops) : contrastRatio(foreground, stops[0]);
+        measurements.push({ name, contrast, stops });
+        check(contrast >= 4.5, `${name}: contrast ${contrast.toFixed(3)}`);
+    };
     for (let i = 0; i < 50 && !document.querySelector('[data-fixture=selected]'); i++) await settle();
     for (const node of document.querySelectorAll('.dialog-footer-actions button, .warning, .dialog-segmented-control button, .collection-identity-secondary, .storage-picker-row-active small, .sequence-row span')) readable(node, node.textContent.trim());
     const actions = [...document.querySelectorAll('.dialog-footer-actions button')];

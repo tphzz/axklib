@@ -89,7 +89,9 @@ describe('Tx16wImportDialog', () => {
                 onconfirm: vi.fn(),
             },
         });
-        expect((screen.getByLabelText('Add disks') as HTMLInputElement).disabled).toBe(true);
+        const fileInput = screen.getByLabelText('Add disks') as HTMLInputElement;
+        expect(fileInput.disabled).toBe(true);
+        expect(fileInput.closest('label')?.getAttribute('aria-disabled')).toBe('true');
         expect((screen.getByRole('combobox', { name: 'Destination volume' }) as HTMLInputElement).disabled).toBe(true);
         expect(screen.queryByRole('button', { name: 'Import' })).toBeNull();
         await fireEvent.click(screen.getByRole('button', { name: 'Done' }));
@@ -118,6 +120,9 @@ describe('Tx16wImportDialog', () => {
         });
 
         const importButton = screen.getByRole('button', { name: 'Import' });
+        const fileInput = screen.getByLabelText('Add disks') as HTMLInputElement;
+        expect(fileInput.disabled).toBe(false);
+        expect(fileInput.closest('label')?.getAttribute('aria-disabled')).toBe('false');
         expect((screen.getByRole('button', { name: 'New' }) as HTMLButtonElement).disabled).toBe(true);
         expect(screen.queryByRole('button', { name: 'Review' })).toBeNull();
         expect((importButton as HTMLButtonElement).disabled).toBe(false);
