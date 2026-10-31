@@ -347,10 +347,10 @@
                             audio.play(object.id);
                         }}
                         onstop={() => audio.stop()}
-                        onseek={(event) => {
-                            const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
-                            select(object.id, 'replace');
-                            audio.seek(object.id, (event.clientX - rect.left) / Math.max(1, rect.width));
+                        onseek={(ratio) => {
+                            if (selected !== object.id || selectedIds.size !== 1 || !selectedIds.has(object.id))
+                                select(object.id, 'replace');
+                            audio.seek(object.id, ratio);
                         }}
                     />
                 {:else}

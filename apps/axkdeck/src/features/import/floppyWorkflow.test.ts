@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { packageImportResult } from '../../test/packageImportResultFixture';
 import { fitsCapacity } from '../../test/samplerCapacityFixture';
 import { FloppyImportWorkflow } from './floppyWorkflow.svelte';
 import { floppySelection, floppyVolumeName } from './floppySelection';
@@ -102,9 +103,12 @@ function setup(value = inspection, isDesktop = false, connectionMode: ImageTrans
         releaseFloppyInspection: vi.fn().mockResolvedValue(undefined),
         planFloppyImport: vi.fn().mockResolvedValue(plan),
         releaseImagePackageImportPlan: vi.fn().mockResolvedValue(undefined),
-        startFloppyImport: vi
-            .fn()
-            .mockResolvedValue({ jobId: 2, kind: 'images.floppy_import', status: 'completed', result: {} }),
+        startFloppyImport: vi.fn().mockResolvedValue({
+            jobId: 2,
+            kind: 'images.floppy_import',
+            status: 'completed',
+            result: packageImportResult('FAT12_FLOPPY'),
+        }),
         uploadClientFile: vi
             .fn()
             .mockResolvedValue(clientUploadLocation({ uploadId: 'upload' }, 'DISK_IMAGE', 'disk.img')),

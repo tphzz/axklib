@@ -123,7 +123,7 @@ export class ImportCompletion {
             return false;
         }
         this.completed = job;
-        this.warnings = alterationWarnings(job.result, this.reviewedWarnings);
+        this.warnings = completionWarnings(job, this.reviewedWarnings);
         return this.refresh();
     }
 
@@ -151,8 +151,9 @@ export class ImportCompletion {
     }
 }
 
-function alterationWarnings(value: unknown, reviewed: readonly string[]): string[] {
-    if (value && typeof value === 'object' && 'planId' in value) {
+function completionWarnings(job: JobState, reviewed: readonly string[]): string[] {
+    const value = job.result;
+    if (job.kind === 'conversions.execute') {
         const result = value as components['schemas']['ConversionResult'];
         return [
             ...result.warnings.filter((message) => !reviewed.includes(message)),

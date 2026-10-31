@@ -104,11 +104,6 @@
         top: number;
     } | null>(null);
 
-    function seek(event: MouseEvent, item: WaveDataItem): void {
-        const bounds = (event.currentTarget as HTMLElement).getBoundingClientRect();
-        onseek(item, Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width)));
-    }
-
     function exportObject(object: SamplerObject, name = object.name): PackageExportObject {
         const kind = object.objectType === 'PROG' ? 'PROGRAM' : (object.objectType as PackageExportObject['kind']);
         const typeLabel =
@@ -155,10 +150,9 @@
         return mode;
     }
 
-    function selectWaveData(event: MouseEvent, item: WaveDataItem, seekAfterSelection = false): void {
+    function selectWaveData(event: MouseEvent, item: WaveDataItem): void {
         if (updateSelection(selectionMode(event), item.objectKey) !== 'replace') return;
         onwavedataselect(item);
-        if (seekAfterSelection) seek(event, item);
     }
 
     function clearWaveDataSelection(event: MouseEvent): void {
@@ -373,7 +367,17 @@
                     preparing={preparingObjectId === item.objectKey}
                     {playheadFrame}
                     onselect={(event) => selectWaveData(event, item)}
-                    onseek={(event) => selectWaveData(event, item, true)}
+                    onseek={(ratio) => {
+                        if (
+                            activeObjectId !== item.objectKey ||
+                            selection.items.length !== 1 ||
+                            selection.items[0]?.objectId !== item.objectKey
+                        ) {
+                            updateSelection('replace', item.objectKey);
+                            onwavedataselect(item);
+                        }
+                        onseek(item, ratio);
+                    }}
                     onpreview={(bins) => onpreviewrequest(item, bins)}
                     ondraw={(draw) => onwaveformdraw?.(item, draw)}
                     onplay={() => onplay(item)}

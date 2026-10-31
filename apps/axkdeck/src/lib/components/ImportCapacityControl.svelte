@@ -49,24 +49,29 @@
     }
 </script>
 
-<div class="capacity-control">
-    <span>Sampler load target</span>
-    <div class="dialog-segmented-control" role="group" aria-label="Sampler load target">
-        {#each ['A3000', 'A4000_A5000'] as target}
-            <button
-                type="button"
-                disabled={disabled || review.busy}
-                aria-pressed={review.target === target}
-                onclick={() => select(target as ASeriesGeneration)}
-            >
-                {target === 'A3000' ? 'a3k' : 'a4k/a5k'}
-            </button>
-        {/each}
+<div class="import-capacity">
+    <div class="capacity-control">
+        <span>Sampler load target</span>
+        <div class="dialog-segmented-control" role="group" aria-label="Sampler load target">
+            {#each ['A3000', 'A4000_A5000'] as target}
+                <button
+                    type="button"
+                    disabled={disabled || review.busy}
+                    aria-pressed={review.target === target}
+                    onclick={() => select(target as ASeriesGeneration)}
+                >
+                    {target === 'A3000' ? 'a3k' : 'a4k/a5k'}
+                </button>
+            {/each}
+        </div>
     </div>
+    <div class="capacity-summary" aria-live="polite" title={summary}>{review.busy ? review.message : summary}</div>
 </div>
-<div class="capacity-summary" aria-live="polite" title={summary}>{review.busy ? review.message : summary}</div>
 
 <style>
+    .import-capacity {
+        min-width: 0;
+    }
     .capacity-control {
         display: flex;
         flex-wrap: wrap;

@@ -153,11 +153,8 @@ try {
             await structureSearch.waitFor();
             assert.equal(await structureSearch.inputValue(), '/', 'Structure query survives source switching');
             await structureSearch.fill('');
-            assert.notEqual(
-                await root.evaluate((node) => getComputedStyle(node).backgroundImage),
-                'none',
-                'Structural selection must remain visible',
-            );
+            assert.equal(await root.evaluate(node => getComputedStyle(node).backgroundColor), 'rgb(41, 73, 88)', 'Structural selection uses the canonical opaque selection surface');
+            assert.equal(await root.evaluate(node => getComputedStyle(node).backgroundImage), 'none');
             await root.click({ button: 'right' });
             assert.equal(await page.getByRole('menuitem', { name: 'Add companion images...', exact: true }).count(), 0);
             await page.getByRole('menuitem', { name: 'Convert...', exact: true }).click();
@@ -187,7 +184,8 @@ try {
                 minHeight: style.minHeight,
                 identityFont: getComputedStyle(node.querySelector('.wave-data-identity')).fontSize,
                 metadataFont: getComputedStyle(node.querySelector('.wave-data-meta')).fontSize,
-                selectionBackground: style.backgroundImage,
+                selectionBackground: style.backgroundColor,
+                selectionImage: style.backgroundImage,
                 overlayWidth: overlay.width,
                 width: bounds.width,
                 containerWidth: node.closest('.wave-data-list').getBoundingClientRect().width,
@@ -222,7 +220,8 @@ try {
         assert.equal(waveGeometry.playbackHeight, 26);
         assert(waveGeometry.waveformWidth >= 150, 'Native wave preview retains inspectable width');
         assert(Math.abs(waveGeometry.overlayWidth - waveGeometry.width) <= 2);
-        assert.notEqual(waveGeometry.selectionBackground, 'none', 'Selected native object must remain visible');
+        assert.equal(waveGeometry.selectionBackground, 'rgb(41, 73, 88)', 'Selected native object uses the canonical selection surface');
+        assert.equal(waveGeometry.selectionImage, 'none');
         for (const item of waveGeometry.content) {
             assert(item.width > 0 && item.height > 0, `Wave content remains visible: ${JSON.stringify(item)}`);
             assert(
@@ -328,7 +327,11 @@ try {
         }
         await waveRow.getByRole('button', { name: 'Play Wave 20', exact: true }).click();
         await waveRow.getByRole('button', { name: 'Stop Wave 20', exact: true }).waitFor();
-        const seek = waveRow.getByRole('button', { name: 'Seek Wave 20', exact: true });
+        const seek = waveRow.getByRole('slider', { name: 'Seek Wave 20', exact: true });
+        await seek.focus();
+        await page.keyboard.press('Home');
+        await page.keyboard.press('ArrowRight');
+        assert(Number(await seek.inputValue()) > 0, 'Native TX16W keyboard seeking changes actual playback position');
         const seekBounds = await seek.boundingBox();
         await seek.click({ position: { x: seekBounds.width / 2, y: seekBounds.height / 2 } });
         await page.waitForFunction(
@@ -339,6 +342,13 @@ try {
                         ?.getAttribute('data-playhead-ratio'),
                 ) > 0.1,
         );
+        await seek.focus();
+        await page.keyboard.press('End');
+        await waveRow.getByRole('button', { name: 'Play Wave 20', exact: true }).waitFor();
+        await page.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === 'Select Wave 20 waveform');
+        assert.equal(await waveRow.getByRole('slider').count(), 0, 'Completed playback has no false idle seek position');
+        await waveRow.getByRole('button', { name: 'Play Wave 20', exact: true }).click();
+        await waveRow.getByRole('button', { name: 'Stop Wave 20', exact: true }).waitFor();
         await page.getByRole('button', { name: 'Files', exact: true }).click();
         await page.getByText('Files workspace').first().waitFor();
         const fileInspector = page.getByRole('complementary', { name: 'Filesystem inspector', includeHidden: true });

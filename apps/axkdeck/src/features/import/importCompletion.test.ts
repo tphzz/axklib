@@ -3,10 +3,62 @@ import type { JobState } from '../../lib/transport';
 import { JobController } from '../jobs/actions';
 import { ImportCompletion } from './importCompletion.svelte';
 import { AxklibApiError } from '../../lib/httpErrors';
+import { packageImportResult } from '../../test/packageImportResultFixture';
 
 const completed = { jobId: 7, status: 'completed' } as JobState;
 
 describe('ImportCompletion', () => {
+    it.each(['images.package_import', 'images.floppy_import'])(
+        'accepts canonical %s results and recovers without another write',
+        async (kind) => {
+            const result = packageImportResult(kind === 'images.floppy_import' ? 'FAT12_FLOPPY' : 'SFS');
+            const transport = {
+                waitForJob: vi
+                    .fn()
+                    .mockRejectedValueOnce(new Error('Disconnected'))
+                    .mockResolvedValue({ ...completed, kind, result }),
+                cancelJob: vi.fn(),
+            };
+            const state = new ImportCompletion(transport, new JobController(transport));
+            const start = vi.fn().mockResolvedValue({ ...completed, kind, status: 'queued' });
+            const finish = vi.fn().mockResolvedValue(undefined);
+            expect(await state.run(start, finish)).toBe(false);
+            expect(state.phase).toBe('unconfirmed');
+            expect(await state.recover()).toBe(true);
+            expect(state.phase).toBe('completed');
+            expect(state.canDismiss).toBe(true);
+            expect(finish).toHaveBeenCalledOnce();
+            expect(start).toHaveBeenCalledOnce();
+        },
+    );
+
+    it('retains canonical conversion warnings and pending cleanup on completion', async () => {
+        const job = {
+            ...completed,
+            kind: 'conversions.execute',
+            result: {
+                applied: true,
+                cleanupPending: true,
+                imageId: 'image-1',
+                documentId: 'document-1',
+                planId: 'plan-1',
+                revision: 2,
+                warnings: ['Reviewed', 'New warning'],
+            },
+        };
+        const transport = { waitForJob: vi.fn().mockResolvedValue(job), cancelJob: vi.fn() };
+        const state = new ImportCompletion(transport, new JobController(transport));
+        const finish = vi.fn().mockResolvedValue(undefined);
+        expect(await state.run(async () => job, finish, vi.fn(), ['Reviewed'])).toBe(false);
+        expect(state.phase).toBe('warnings');
+        expect(state.warnings).toEqual([
+            'New warning',
+            'Conversion saved; journal cleanup is pending. Retain recovery data.',
+        ]);
+        expect(finish).toHaveBeenCalledOnce();
+        expect(state.canDismiss).toBe(true);
+    });
+
     it('retains new completion warnings and clipping but not previously reviewed conversion notices', async () => {
         const result = {
             kind: 'ALTERATION',

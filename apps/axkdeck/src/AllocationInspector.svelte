@@ -1,6 +1,8 @@
 <script lang="ts">
     import { onMount } from 'svelte';
     import AllocationGrid from './lib/components/AllocationGrid.svelte';
+    import EditorChoice from './features/object-editor/EditorChoice.svelte';
+    import './features/object-editor/editor.css';
     import { allocationLegendOrder, allocationPalette } from './lib/allocationGrid';
     import Icon from './lib/components/Icon.svelte';
     import type { components } from './lib/generated/axklibApiV1';
@@ -105,16 +107,14 @@
         </div>
         <div class="header-actions">
             {#if exportError}<span class="export-error" role="alert" title={exportError}>{exportError}</span>{/if}
-            <div class="cell-size" aria-label="Cluster cell size">
-                {#each [4, 7, 11] as size}
-                    <button
-                        class:active={cellSize === size}
-                        onclick={() => (cellSize = size)}
-                        title={`${size} pixel cells`}
-                    >
-                        {size}
-                    </button>
-                {/each}
+            <div class="cell-size">
+                <EditorChoice
+                    label="Cluster cell size"
+                    value={cellSize}
+                    options={[4, 7, 11].map((size) => ({ value: size, label: String(size) }))}
+                    segmented
+                    onchange={(size) => (cellSize = size)}
+                />
             </div>
             <button
                 class="export-action"
@@ -241,29 +241,13 @@
         white-space: nowrap;
     }
     .cell-size {
-        overflow: hidden;
-        border: 1px solid var(--color-border);
-        border-radius: 5px;
+        width: 130px;
     }
-    .cell-size button,
     .export-action {
         height: 28px;
         border: 0;
         background: transparent;
         cursor: pointer;
-    }
-    .cell-size button {
-        width: 30px;
-        color: var(--color-text-muted);
-        border-right: 1px solid var(--color-border);
-        font-size: 10px;
-    }
-    .cell-size button:last-child {
-        border-right: 0;
-    }
-    .cell-size button.active {
-        color: var(--color-text-strong);
-        background: var(--color-accent-strong);
     }
     .export-action {
         gap: 6px;

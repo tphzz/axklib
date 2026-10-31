@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import workspaceManagerSource from './WorkspaceManager.svelte?raw';
 
@@ -161,6 +161,61 @@ describe('WorkspaceManager', () => {
 
         expect((await screen.findByRole('alert')).textContent).toContain('Native dialog unavailable');
     });
+
+    it.each(['local', 'remote'] as const)(
+        'locks every dismissal and editing route during %s registration',
+        async (mode) => {
+            window.__AXKLIB_SERVER__!.mode = mode;
+            let finish!: () => void;
+            const pending = new Promise<void>((resolve) => {
+                finish = resolve;
+            });
+            mocks.invoke.mockImplementation(async (command) => {
+                if (command === 'select_local_workspace')
+                    return { candidateId: 'candidate-1', suggestedName: 'Samples' };
+                await pending;
+            });
+            vi.mocked(fetch).mockImplementation(async (url, options) => {
+                if (String(url).endsWith('/workspaces') && options?.method === 'POST') {
+                    await pending;
+                    return new Response(JSON.stringify({ data: {} }));
+                }
+                if (String(url).includes('/roots'))
+                    return new Response(JSON.stringify({ data: { roots: [{ name: 'Samples', path: '/samples' }] } }));
+                if (String(url).includes('/list'))
+                    return new Response(
+                        JSON.stringify({ data: { path: '/samples', parentPath: null, entries: [], nextCursor: null } }),
+                    );
+                return activeWorkspaceResponse();
+            });
+            const onclose = vi.fn();
+            render(WorkspaceManager, { props: { open: true, onclose } });
+            await screen.findByText('Open image location');
+            await fireEvent.click(screen.getByRole('button', { name: 'Add storage location' }));
+            if (mode === 'remote') {
+                await fireEvent.click(await screen.findByRole('button', { name: /Samples/ }));
+                await fireEvent.click(await screen.findByRole('button', { name: 'Select' }));
+            }
+            const form = within(await screen.findByRole('dialog', { name: 'Add storage location' }));
+            const name = form.getByRole('textbox', { name: 'Location name' }) as HTMLInputElement;
+            expect(name.classList.contains('dialog-field-control')).toBe(true);
+            await fireEvent.click(form.getByRole('button', { name: 'Add storage location' }));
+            expect(name.disabled).toBe(true);
+            expect((form.getByRole('checkbox') as HTMLInputElement).disabled).toBe(true);
+            for (const label of ['Cancel', 'Close']) {
+                const button = form.getByRole('button', { name: label }) as HTMLButtonElement;
+                expect(button.disabled).toBe(true);
+                await fireEvent.click(button);
+            }
+            await fireEvent.keyDown(form.getByRole('button', { name: 'Cancel' }), { key: 'Escape' });
+            await fireEvent.focus(window);
+            expect(screen.getByRole('dialog', { name: 'Add storage location' })).toBeTruthy();
+            expect(form.getByRole('status').textContent).toContain('Adding storage location');
+            expect(onclose).not.toHaveBeenCalled();
+            finish();
+            await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Add storage location' })).toBeNull());
+        },
+    );
 
     it('protects only the storage location containing the open image', async () => {
         vi.mocked(fetch).mockResolvedValue(activeWorkspaceResponse());

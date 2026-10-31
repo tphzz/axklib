@@ -195,7 +195,8 @@ export async function checkNativeCollectionParity(page, output, width, scale) {
         assert(await programRows.nth(1).locator(text).getAttribute('title'), 'Truncated A-series text has a tooltip');
     }
     const selection = await checkSelection(page, programRows, 'program');
-    assert.notEqual(selection.backgroundImage, 'none');
+    assert.equal(selection.backgroundColor, 'rgb(41, 73, 88)');
+    assert.equal(selection.backgroundImage, 'none');
     const programSearch = programs.getByRole('searchbox', { name: 'Search Programs' });
     await programSearch.focus();
     const toolbar = await programSearch.boundingBox();

@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { fireEvent, render, screen, waitFor } from '@testing-library/svelte';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte';
 import { describe, expect, it, vi } from 'vitest';
 import type { PackageExportSelectionState } from '../objectSelection';
 import type { SamplerObject } from '../transport';
@@ -634,7 +634,9 @@ describe('ObjectWorkspace', () => {
 
         const selectionTarget = screen.getByRole('button', { name: 'Inspect SMP 001' });
         expect(selectionTarget.parentElement?.classList.contains('wave-data-row')).toBe(true);
-        expect(screen.getByRole('button', { name: 'Seek SMP 001' }).parentElement).toBe(selectionTarget.parentElement);
+        expect(screen.getByRole('button', { name: 'Select SMP 001 waveform' }).closest('.wave-data-row')).toBe(
+            selectionTarget.parentElement,
+        );
         expect(screen.getByRole('button', { name: 'Play SMP 001' }).parentElement).toBe(selectionTarget.parentElement);
 
         await fireEvent.click(selectionTarget);
@@ -761,8 +763,8 @@ describe('ObjectWorkspace', () => {
 
         const rows = [...document.querySelectorAll('.wave-data-row')];
         const row = rows[0]!;
-        const waveform = row.querySelector('canvas')!;
-        const secondWaveform = rows[1]!.querySelector('canvas')!;
+        const waveform = within(row as HTMLElement).getByRole('button', { name: 'Select SMP 001 waveform' });
+        const secondWaveform = within(rows[1] as HTMLElement).getByRole('button', { name: 'Select SMP 002 waveform' });
         const selectionTarget = screen.getByRole('button', { name: 'Inspect SMP 001' });
         expect(row.classList.contains('active')).toBe(true);
         expect(row.classList.contains('selected')).toBe(true);
@@ -800,15 +802,12 @@ describe('ObjectWorkspace', () => {
             view: 'wave-data',
             activeObjectId: waveObject.key,
             selection: { items: [], anchors: {} },
+            playingObjectId: secondWaveObject.key,
             onselectionchange,
             onwavedataselect,
             onseek,
         });
-        vi.spyOn(secondWaveform.closest('button')!, 'getBoundingClientRect').mockReturnValue({
-            left: 0,
-            width: 100,
-        } as DOMRect);
-        await fireEvent.click(secondWaveform, { clientX: 50 });
+        await fireEvent.input(within(rows[1] as HTMLElement).getByRole('slider'), { target: { value: '0.5' } });
         expect(
             onselectionchange.mock.calls.at(-1)?.[0].items.map((item: PackageExportObject) => item.objectId),
         ).toEqual([secondWaveObject.key]);

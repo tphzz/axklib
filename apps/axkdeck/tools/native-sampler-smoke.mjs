@@ -278,7 +278,7 @@ try {
     ]);
     assert((await audioResponse.body()).length > 44, 'Audition must deliver PCM, not only a WAV header');
     await wave.locator('button[title="Stop"]').waitFor();
-    await wave.getByRole('button', { name: `Seek ${waveName}`, exact: true }).click();
+    await wave.getByRole('slider', { name: `Seek ${waveName}`, exact: true }).click();
     await wave.getByRole('button', { name: `Stop ${waveName}`, exact: true }).click();
     await wave.getByRole('button', { name: `Play ${waveName}`, exact: true }).waitFor();
     await wave.getByRole('button', { name: `Play ${waveName}`, exact: true }).click();

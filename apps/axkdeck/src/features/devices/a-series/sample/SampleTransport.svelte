@@ -306,8 +306,9 @@
         text-align: right;
         white-space: nowrap;
     }
-    small {
-        color: var(--color-text-muted);
+    small,
+    .editor-meta {
+        color: var(--color-text);
         font-size: 10px;
     }
     .preview-note {
@@ -331,7 +332,7 @@
         align-items: center;
         gap: 4px;
         font-size: 10px;
-        color: var(--color-text-muted);
+        color: var(--color-text);
         white-space: nowrap;
         flex-shrink: 0;
     }
@@ -339,7 +340,7 @@
         flex: 1;
         min-width: 30px;
         text-align: right;
-        color: var(--color-text-muted);
+        color: var(--color-text);
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;

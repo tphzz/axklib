@@ -25,6 +25,7 @@
     let snapshot = $state<WorkspaceSnapshot | null>(null);
     let loading = $state(true);
     let choosing = $state(false);
+    let saving = $state(false);
     let error = $state('');
     let adding = $state(false);
     let selectedPath = $state('');
@@ -38,7 +39,9 @@
     const visible = $derived(open || forced);
 
     onMount(() => {
-        const revalidate = (): void => void refresh();
+        const revalidate = (): void => {
+            if (!loading && !choosing && !saving) void refresh();
+        };
         window.addEventListener('focus', revalidate);
         void refresh();
         return () => window.removeEventListener('focus', revalidate);
@@ -61,6 +64,7 @@
     }
 
     async function beginAdd(): Promise<void> {
+        if (loading || choosing || saving) return;
         error = '';
         selectedPath = '';
         candidateId = '';
@@ -112,6 +116,7 @@
     }
 
     function cancelAdd(): void {
+        if (saving) return;
         adding = false;
         selectedPath = '';
         candidateId = '';
@@ -121,10 +126,12 @@
     }
 
     async function saveWorkspace(): Promise<void> {
+        if (saving || loading) return;
         if (!snapshot || !displayName.trim()) {
             error = 'Enter a storage location name';
             return;
         }
+        saving = true;
         loading = true;
         error = '';
         try {
@@ -149,6 +156,7 @@
         } catch (reason) {
             error = userFacingMessage(reason);
         } finally {
+            saving = false;
             loading = false;
         }
     }
@@ -181,7 +189,7 @@
     }
 
     function close(): void {
-        if (!forced) onclose();
+        if (!forced && !loading && !choosing && !saving) onclose();
     }
 </script>
 
@@ -196,7 +204,12 @@
         >
             <header class="dialog-header">
                 <h2>Storage locations</h2>
-                {#if !forced}<button class="icon-button" type="button" aria-label="Close" onclick={close}>×</button
+                {#if !forced}<button
+                        class="icon-button"
+                        type="button"
+                        aria-label="Close"
+                        disabled={loading || choosing || saving}
+                        onclick={close}>×</button
                     >{/if}
             </header>
 
@@ -243,7 +256,7 @@
                                     title={containsOpenImage
                                         ? 'Close the open image before removing this storage location'
                                         : 'Remove storage location'}
-                                    disabled={containsOpenImage}
+                                    disabled={containsOpenImage || loading || choosing || saving}
                                     onclick={() => void removeWorkspace(workspace.id)}>×</button
                                 >
                             </div>
@@ -304,7 +317,12 @@
                             >{choosing ? 'Choosing folder…' : 'Add storage location'}</button
                         >
                     {/if}
-                    {#if !forced}<button class="secondary-button" type="button" onclick={close}>Close</button>{/if}
+                    {#if !forced}<button
+                            class="secondary-button"
+                            type="button"
+                            disabled={loading || choosing || saving}
+                            onclick={close}>Close</button
+                        >{/if}
                 </footer>
             {/if}
         </div>
@@ -321,28 +339,40 @@
             >
                 <header class="dialog-header">
                     <h2>Add storage location</h2>
-                    <button class="icon-button" type="button" aria-label="Close" onclick={cancelAdd}>×</button>
+                    <button class="icon-button" type="button" aria-label="Close" disabled={saving} onclick={cancelAdd}
+                        >×</button
+                    >
                 </header>
                 <div class="workspace-form">
                     {#if selectedPath}<p class="selected-path" title={selectedPath}>{selectedPath}</p>{/if}
                     <label
                         >Location name<input
+                            class="dialog-field-control"
                             type="text"
+                            disabled={saving}
                             bind:value={displayName}
                             data-dialog-initial-focus="caret"
                         /></label
                     >
                     <label class="workspace-toggle"
-                        ><input class="dialog-checkbox" type="checkbox" bind:checked={writable} /> Allow image creation and
-                        changes</label
+                        ><input class="dialog-checkbox" type="checkbox" bind:checked={writable} disabled={saving} /> Allow
+                        image creation and changes</label
                     >
                     {#if error}<p class="workspace-error" role="alert">{error}</p>{/if}
                 </div>
                 <footer class="dialog-footer">
-                    <button class="secondary-button" type="button" onclick={cancelAdd}>Cancel</button>
-                    <button class="primary-button" type="button" disabled={loading} onclick={() => void saveWorkspace()}
-                        >Add storage location</button
-                    >
+                    <span class="dialog-footer-status" role="status">{saving ? 'Adding storage location' : ''}</span>
+                    <div class="dialog-footer-actions">
+                        <button class="secondary-button" type="button" disabled={saving} onclick={cancelAdd}
+                            >Cancel</button
+                        >
+                        <button
+                            class="primary-button"
+                            type="button"
+                            disabled={loading}
+                            onclick={() => void saveWorkspace()}>Add storage location</button
+                        >
+                    </div>
                 </footer>
             </div>
         </div>
@@ -456,19 +486,6 @@
         gap: 4px;
         color: var(--color-text-muted);
         font-size: var(--dialog-label-font-size);
-    }
-    .workspace-form input[type='text'] {
-        width: 100%;
-        min-height: 30px;
-        padding: 0 10px;
-        color: var(--color-text-strong);
-        border: 1px solid var(--color-control-border);
-        border-radius: 6px;
-        outline: none;
-        background: var(--color-bg-deep);
-    }
-    .workspace-form input[type='text']:focus {
-        border-color: color-mix(in srgb, var(--state-focus) 70%, transparent);
     }
     .workspace-toggle {
         grid-template-columns: auto 1fr !important;

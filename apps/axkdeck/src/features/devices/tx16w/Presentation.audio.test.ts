@@ -40,6 +40,7 @@ async function setup() {
     const transport = nativeDocumentFixture();
     const preview = vi.spyOn(transport, 'preview');
     const nativeObjects = vi.spyOn(transport, 'nativeObjects');
+    const details = vi.spyOn(transport, 'nativeObjectDetail');
     const props = {
         transport,
         sessionId: 1,
@@ -53,7 +54,7 @@ async function setup() {
     await fireEvent.click(screen.getByRole('button', { name: 'Waves' }));
     const row = await screen.findByRole('group', { name: 'Wave 20 Wave Data' });
     await waitFor(() => expect(row.textContent).toContain('33,333 Hz'));
-    return { ...view, row, preview, nativeObjects };
+    return { ...view, row, preview, nativeObjects, details };
 }
 
 describe('TX16W shared wave controls', () => {
@@ -73,7 +74,7 @@ describe('TX16W shared wave controls', () => {
     });
 
     it('selects through the blank-area overlay without playing and keeps Play and Seek independent', async () => {
-        const { row } = await setup();
+        const { row, details } = await setup();
         const select = within(row).getByRole('button', { name: 'Inspect Wave 20' });
         expect(select.textContent).toBe('');
         await fireEvent.click(select);
@@ -81,11 +82,17 @@ describe('TX16W shared wave controls', () => {
         expect(audio.play).not.toHaveBeenCalled();
         await fireEvent.click(within(row).getByRole('button', { name: 'Play Wave 20' }));
         expect(audio.play).toHaveBeenCalledExactlyOnceWith(1, 'wave-20');
-        const seek = within(row).getByRole('button', { name: 'Seek Wave 20' });
-        vi.spyOn(seek, 'getBoundingClientRect').mockReturnValue({ left: 10, width: 200 } as DOMRect);
-        await fireEvent.click(seek, { clientX: 110 });
+        const seek = within(row).getByRole('slider', { name: 'Seek Wave 20' });
+        const detailCount = details.mock.calls.length;
+        await fireEvent.input(seek, { target: { value: '0.5' } });
         expect(audio.seek).toHaveBeenCalledExactlyOnceWith(Math.floor(fixtureFrames / 2));
         expect(audio.play).toHaveBeenCalledTimes(1);
+        expect(details).toHaveBeenCalledTimes(detailCount);
+        await fireEvent.input(seek, { target: { value: '0.6' } });
+        expect(details).toHaveBeenCalledTimes(detailCount);
+        expect((seek as HTMLInputElement).min).toBe('0');
+        expect((seek as HTMLInputElement).max).toBe('1');
+        expect(seek.getAttribute('aria-valuetext')).toContain('s');
         await fireEvent.click(within(row).getByRole('button', { name: 'Stop Wave 20' }));
         expect(within(row).getByRole('button', { name: 'Play Wave 20' })).toBeTruthy();
     });

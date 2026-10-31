@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { onDestroy } from 'svelte';
+    import { onDestroy, tick } from 'svelte';
     import type { WaveformBin } from '../types';
     import { waveformPlayheadRatio, type WaveformTimeline } from '../waveformTimeline';
     import Icon from './Icon.svelte';
@@ -44,7 +44,7 @@
         playheadFrame?: number;
         unavailable?: string;
         onselect: (event: MouseEvent) => void;
-        onseek: (event: MouseEvent) => void;
+        onseek: (ratio: number) => void;
         onpreview: (bins: number) => void;
         ondraw?: (draw: WaveformReadDraw) => void;
         onplay: () => void;
@@ -54,6 +54,20 @@
         onkeydown: (event: KeyboardEvent) => void;
     } = $props();
     let timer: ReturnType<typeof setTimeout> | undefined;
+    const position = $derived(playing ? waveformPlayheadRatio(timeline, playheadFrame, timeline.sampleRate) : 0);
+    let seekPosition = $state(0);
+    let seekInput = $state<HTMLInputElement>();
+    let plotSelection = $state<HTMLButtonElement>();
+    $effect(() => {
+        objectId;
+        seekPosition = position;
+    });
+    $effect.pre(() => {
+        if (!playing && seekInput && document.activeElement === seekInput)
+            void tick().then(() => {
+                if (!playing) plotSelection?.focus({ preventScroll: true });
+            });
+    });
     function clearPrefetch() {
         if (timer !== undefined) clearTimeout(timer);
         timer = undefined;
@@ -81,16 +95,46 @@
     ></button>
     <strong class="wave-data-identity">{name}</strong>
     <span class="wave-data-meta">{metadata}</span>
-    <button class="waveform-seek" type="button" aria-label={`Seek ${name}`} onclick={onseek} disabled={!!unavailable}>
+    <div class="waveform-seek">
         <ViewportWaveform
             {values}
             {timeline}
             onvisible={onpreview}
             {ondraw}
             redrawKey={active}
-            playheadRatio={playing ? waveformPlayheadRatio(timeline, playheadFrame, timeline.sampleRate) : 0}
+            playheadRatio={position}
         />
-    </button>
+        {#if playing}<input
+                bind:this={seekInput}
+                class="waveform-seek-input"
+                type="range"
+                aria-label={`Seek ${name}`}
+                aria-valuetext={`${((seekPosition * timeline.storedFrameCount) / Math.max(1, timeline.sampleRate)).toFixed(3)} s`}
+                min="0"
+                max="1"
+                step="0.001"
+                bind:value={seekPosition}
+                disabled={!!unavailable}
+                onpointerdown={(event) => {
+                    if (event.ctrlKey || event.metaKey || event.shiftKey) event.preventDefault();
+                }}
+                onclick={(event) => {
+                    if (event.ctrlKey || event.metaKey || event.shiftKey) onselect(event);
+                }}
+                oninput={(event) => {
+                    event.stopPropagation();
+                    onseek(event.currentTarget.valueAsNumber);
+                }}
+            />{:else}<button
+                bind:this={plotSelection}
+                class="waveform-seek-input"
+                type="button"
+                aria-label={`Select ${name} waveform`}
+                title={unavailable || name}
+                disabled={!!unavailable}
+                onclick={onselect}
+            ></button>{/if}
+    </div>
     <span class="wave-data-format">{format}</span>
     <button
         class="wave-data-playback icon-button"
@@ -112,3 +156,31 @@
         <Icon name={playing || preparing ? 'stop' : 'play'} size={13} />
     </button>
 </div>
+
+<style>
+    .waveform-seek {
+        position: relative;
+        z-index: 1;
+        display: block;
+        width: 100%;
+        height: 28px;
+    }
+    .waveform-seek:focus-within {
+        outline: 2px solid var(--state-focus);
+        outline-offset: 1px;
+    }
+    .waveform-seek-input {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        opacity: 0;
+        cursor: pointer;
+    }
+    @media (forced-colors: active) {
+        input.waveform-seek-input {
+            opacity: 1;
+        }
+    }
+</style>

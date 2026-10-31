@@ -7,6 +7,7 @@ import { PackageBatchImportWorkflow } from './packageBatchWorkflow.svelte';
 import { PackagePickerHistory } from './packagePickerHistory';
 import { PackageImportWorkflow } from './packageWorkflow.svelte';
 import { fitsCapacity } from '../../test/samplerCapacityFixture';
+import { packageImportResult } from '../../test/packageImportResultFixture';
 
 const source = serverFileLocation({ rootId: 'workspace', relativePath: 'One.axkvol' }, 'One.axkvol');
 const plan = {
@@ -15,7 +16,12 @@ const plan = {
     packages: [{ destinationVolumeName: 'One' }],
     capacity: fitsCapacity,
 } as ImageSessionPackageImportPlan;
-const completed: JobState = { jobId: 11, kind: 'package-import', status: 'completed' };
+const completed: JobState = {
+    jobId: 11,
+    kind: 'images.package_import',
+    status: 'completed',
+    result: packageImportResult(),
+};
 
 function fixture(batch: boolean, refreshSession = vi.fn().mockResolvedValue(undefined)) {
     const run = vi.fn().mockResolvedValue(completed);
