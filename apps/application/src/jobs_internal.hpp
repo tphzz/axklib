@@ -21,6 +21,7 @@
 #include <optional>
 #include <string>
 #include <thread>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -62,6 +63,51 @@ struct axk::app::JobManager::Impl {
         std::string operation_id;
         std::string request_fingerprint;
         std::string job_id;
+    };
+
+    struct PendingSubmission {
+        std::string operation_id;
+        std::string request_fingerprint;
+        Result<JobSnapshot> outcome{std::unexpected(
+            job_runtime_detail::job_error("job_submission_failed", "Job submission failed before acceptance", true))};
+        bool completed{};
+        bool reserved{true};
+    };
+
+    struct SubmissionCompletion {
+        Impl &owner;
+        const std::shared_ptr<PendingSubmission> &pending;
+        const std::optional<std::string> &index;
+        void finish() noexcept {
+            {
+                const std::scoped_lock lock{owner.mutex};
+                if (pending->completed)
+                    return;
+                if (pending->reserved)
+                    --owner.pending_admissions;
+                pending->completed = true;
+                if (index)
+                    owner.pending_submissions.erase(*index);
+            }
+            owner.condition.notify_all();
+        }
+        ~SubmissionCompletion() { finish(); }
+    };
+
+    struct SubmissionCall {
+        Impl &owner;
+        bool active{true};
+        void release() {
+            if (!active)
+                return;
+            {
+                const std::scoped_lock lock{owner.mutex};
+                --owner.active_submissions;
+                active = false;
+            }
+            owner.condition.notify_all();
+        }
+        ~SubmissionCall() { release(); }
     };
 
     struct TerminalRecord {
@@ -194,24 +240,29 @@ struct axk::app::JobManager::Impl {
         }
     }
 
-    void transition(const std::shared_ptr<Record> &record, JobState state, std::string type,
-                    std::optional<nlohmann::json> result = std::nullopt, std::optional<Error> error = std::nullopt) {
+    std::optional<JobEvent> transition(const std::shared_ptr<Record> &record, JobState state, std::string type,
+                                       std::optional<nlohmann::json> result = std::nullopt,
+                                       std::optional<Error> error = std::nullopt, bool publish = true) {
         std::optional<JobEvent> event;
         std::vector<UploadLease> released_upload_leases;
         PathReservationCoordinator::Lease released_path;
         std::shared_ptr<void> released_admission;
+        std::function<void(std::string_view)> cleanup_hook;
         if (is_terminal(state)) {
             {
                 const std::scoped_lock lock{mutex, record->mutex};
                 if (is_terminal(record->state) || record->finishing)
-                    return;
+                    return std::nullopt;
                 record->finishing = true;
                 released_path = std::move(record->path_lease);
                 released_upload_leases = std::move(record->upload_leases);
                 released_admission = std::move(record->admission_lease);
+                cleanup_hook = before_terminal_cleanup;
             }
             // Cleanup may acquire device locks or publish a durable write fence.
             // Terminal polling and events must observe the completed cleanup.
+            if (cleanup_hook)
+                cleanup_hook(error ? std::string_view{error->code} : std::string_view{});
             released_path = {};
             released_upload_leases.clear();
             released_admission.reset();
@@ -231,7 +282,7 @@ struct axk::app::JobManager::Impl {
         } else {
             const std::scoped_lock lock{record->mutex};
             if (is_terminal(record->state) || record->finishing)
-                return;
+                return std::nullopt;
             const auto previous = record->state;
             record->state = state;
             record->result = std::move(result);
@@ -241,7 +292,9 @@ struct axk::app::JobManager::Impl {
         }
         released_upload_leases.clear();
         released_admission.reset();
-        emit(*event);
+        if (publish)
+            emit(*event);
+        return event;
     }
 
     void report_progress(const std::shared_ptr<Record> &record, const Progress &progress) {
@@ -312,9 +365,13 @@ struct axk::app::JobManager::Impl {
     };
 
     struct PreemptedReads {
+        struct Queued {
+            std::shared_ptr<Record> record;
+            Error error;
+            std::string event_type{"cancelled"};
+        };
         std::vector<JobEvent> events;
-        std::vector<std::vector<UploadLease>> uploads;
-        std::vector<PathReservationCoordinator::Lease> paths;
+        std::vector<Queued> queued;
     };
 
     void prune_cancelled_locked() {
@@ -339,30 +396,25 @@ struct axk::app::JobManager::Impl {
         return result;
     }
 
-    void preempt_locked(const std::vector<std::shared_ptr<Record>> &candidates, PreemptedReads &released) {
+    void preempt_locked(const std::vector<std::shared_ptr<Record>> &candidates, PreemptedReads &released,
+                        Clock::time_point requested_at) {
         for (const auto &record : candidates) {
             const std::scoped_lock lock{record->mutex};
             if (is_terminal(record->state) || record->cancellation_requested)
                 continue;
             record->preempted = true;
             record->cancellation_requested = true;
-            record->cancellation_requested_at = now();
+            record->cancellation_requested_at = requested_at;
             record->cancellation.cancel();
-            if (record->state == JobState::queued) {
-                released.paths.push_back(std::move(record->path_lease));
-                released.uploads.push_back(std::move(record->upload_leases));
-                const auto previous = record->state;
-                record->state = JobState::cancelled;
-                record->error =
-                    job_runtime_detail::job_error("read_preempted", "Read yielded to foreground audio", true);
-                record_transition_locked(*record, previous, record->state);
-                terminal_jobs.push_back({now(), record->job_id});
-                released.events.push_back(append_event_locked(*record, "cancelled"));
-            } else {
-                released.events.push_back(append_event_locked(*record, "cancellation_requested", record->progress));
-            }
         }
-        prune_cancelled_locked();
+        std::erase_if(read_queue, [&](const auto &record) {
+            return std::ranges::any_of(released.queued, [&](const auto &queued) { return queued.record == record; });
+        });
+        for (const auto &record : candidates) {
+            const std::scoped_lock lock{record->mutex};
+            if (!is_terminal(record->state) && record->state != JobState::queued)
+                released.events.push_back(append_event_locked(*record, "cancellation_requested", record->progress));
+        }
     }
 
     bool claim_running(const std::shared_ptr<Record> &record) {
@@ -460,6 +512,7 @@ struct axk::app::JobManager::Impl {
     }
 
     void shutdown() noexcept {
+        const std::scoped_lock serialization{shutdown_mutex};
         std::vector<std::shared_ptr<Record>> active;
         {
             const std::scoped_lock lock{mutex};
@@ -475,6 +528,10 @@ struct axk::app::JobManager::Impl {
         for (const auto &record : active)
             record->cancellation.cancel();
         condition.notify_all();
+        {
+            std::unique_lock lock{mutex};
+            condition.wait(lock, [&] { return active_submissions == 0U; });
+        }
         for (auto &worker : workers) {
             if (worker.joinable())
                 worker.join();
@@ -490,11 +547,15 @@ struct axk::app::JobManager::Impl {
     Now now;
     UploadStore *uploads{};
     PathReservationCoordinator *path_reservations{};
-    std::mutex submission_mutex;
     mutable std::mutex mutex;
+    std::mutex shutdown_mutex;
     std::condition_variable condition;
     std::unordered_map<std::string, std::shared_ptr<Record>> jobs;
     std::unordered_map<std::string, IdempotentSubmission> idempotent_submissions;
+    std::unordered_map<std::string, std::shared_ptr<PendingSubmission>> pending_submissions;
+    std::size_t pending_admissions{};
+    std::size_t active_submissions{};
+    std::size_t submission_waiters{};
     std::unordered_map<std::string, std::string> destination_reservations;
     std::deque<TerminalRecord> terminal_jobs;
     std::deque<std::shared_ptr<Record>> read_queue;
@@ -502,6 +563,8 @@ struct axk::app::JobManager::Impl {
     std::unordered_map<std::string, std::string> active_read_groups;
     std::unordered_map<SubscriptionId, EventSink> subscribers;
     std::function<void()> before_running_claim;
+    std::function<void()> before_queue_publication;
+    std::function<void(std::string_view)> before_terminal_cleanup;
     std::vector<std::thread> workers;
     SubscriptionId next_subscription{1U};
     std::atomic_bool stopping{};

@@ -4,7 +4,9 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <future>
 #include <mutex>
+#include <stdexcept>
 #include <string>
 #include <thread>
 
@@ -124,6 +126,56 @@ TEST_F(ReadJobs, PlaybackReplacesQueuedLowerPriorityWorkWithoutRaisingQueueCapac
     if (queued)
         EXPECT_EQ(terminal(jobs, queued->job_id).state, JobState::cancelled);
     EXPECT_EQ(calls.load(), 2U);
+}
+
+TEST_F(ReadJobs, FailedPublicationDoesNotPreemptAnExistingQueuedRead) {
+    JobManager jobs{registry, 1U, 1U, 2U, 16U};
+    const auto active = jobs.submit("test.read", {{"hold", true}}, owner());
+    ASSERT_TRUE(active);
+    ASSERT_TRUE(wait_flag(started));
+    const auto queued = jobs.submit("test.read", nlohmann::json::object(), owner());
+    ASSERT_TRUE(queued);
+    JobManagerTestAccess::set_before_queue_publication(jobs, [] { throw std::runtime_error{"publication failure"}; });
+    const auto rejected = jobs.submit("test.read", {{"play", true}}, owner());
+    JobManagerTestAccess::set_before_queue_publication(jobs, {});
+    EXPECT_FALSE(rejected);
+    EXPECT_EQ(jobs.status(queued->job_id, "owner")->state, JobState::queued);
+    unblock();
+    EXPECT_EQ(terminal(jobs, active->job_id).state, JobState::completed);
+    EXPECT_EQ(terminal(jobs, queued->job_id).state, JobState::completed);
+    EXPECT_EQ(calls, 2U);
+}
+
+TEST_F(ReadJobs, QueuedPreemptionCannotPublishTerminalPollingBeforeCleanup) {
+    JobManager jobs{registry, 1U, 1U, 2U, 16U};
+    const auto active = jobs.submit("test.read", {{"hold", true}}, owner());
+    ASSERT_TRUE(active);
+    ASSERT_TRUE(wait_flag(started));
+    const auto queued = jobs.submit("test.read", nlohmann::json::object(), owner());
+    ASSERT_TRUE(queued);
+    std::promise<void> cleaning;
+    std::promise<void> finish;
+    std::atomic_bool cleaning_started{};
+    const auto released = finish.get_future().share();
+    JobManagerTestAccess::set_before_terminal_cleanup(jobs, [&](std::string_view code) {
+        if (code == "read_preempted" && !cleaning_started.exchange(true)) {
+            cleaning.set_value();
+            released.wait();
+        }
+    });
+    auto high = std::async(std::launch::async, [&] { return jobs.submit("test.read", {{"play", true}}, owner()); });
+    const auto entered = cleaning.get_future().wait_for(2s);
+    const auto during = jobs.status(queued->job_id, "owner");
+    finish.set_value();
+    const auto incoming = high.get();
+    unblock();
+    EXPECT_EQ(entered, std::future_status::ready);
+    ASSERT_TRUE(during);
+    EXPECT_FALSE(is_terminal(during->state));
+    EXPECT_TRUE(incoming);
+    EXPECT_EQ(terminal(jobs, queued->job_id).state, JobState::cancelled);
+    jobs.shutdown();
+    JobManagerTestAccess::set_before_terminal_cleanup(jobs, {});
 }
 
 TEST_F(ReadJobs, InvalidRequestsAndOtherOwnersCannotPreemptAnActiveRead) {

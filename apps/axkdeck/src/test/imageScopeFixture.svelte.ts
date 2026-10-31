@@ -11,6 +11,8 @@ import type { ImageTransport, OpenedImage } from '../lib/transport';
 import type { FilesystemEntry } from '../lib/filesystem';
 import { nativeWorkspaceFixture } from './nativeWorkspaceFixture';
 import { nativeDocumentFixture, tx16wDocument } from './nativeDocumentFixture';
+import { workspaceTabs } from '../features/workspace/tabs';
+import type { WorkspaceView } from '../lib/types';
 
 export function imageScopeFixture(ambiguousCompanion = false) {
     const native = nativeWorkspaceFixture();
@@ -38,6 +40,7 @@ export function imageScopeFixture(ambiguousCompanion = false) {
         });
     const summary = { imageId: 'image-1', revision: 1, sources, documents, discovery: native.discovery };
     let session = documentSession(summary);
+    let workspaceView = $state<WorkspaceView>('programs');
     let closed = $state(false);
     let blocked = $state(false);
     let decline = $state(false);
@@ -155,7 +158,13 @@ export function imageScopeFixture(ambiguousCompanion = false) {
         setStatus: noop,
     });
     const audition = {
-        laneQueries: { programs: { primary: '', secondary: '', tertiary: '' } },
+        laneQueries: {
+            programs: { primary: '', secondary: '', tertiary: '' },
+            'sample-banks': { primary: '', secondary: '', tertiary: '' },
+            samples: { primary: '', secondary: '', tertiary: '' },
+            'wave-data': { primary: '', secondary: '', tertiary: '' },
+            sequences: { primary: '', secondary: '', tertiary: '' },
+        },
         state: { status: 'idle' },
         invalidateSession: async () => {},
         stop: async () => {},
@@ -227,13 +236,13 @@ export function imageScopeFixture(ambiguousCompanion = false) {
                 catalog,
                 audition,
                 mutation,
-                workspaceTabs: [{ id: 'programs', label: 'Programs', icon: 'music' }],
-                workspaceView: 'programs',
+                workspaceTabs,
+                workspaceView,
                 sourceItems: [],
                 selectedSource: workflow.selectedSource,
                 selectedVolumeIds: [],
                 audioImport: {} as WorkspaceProps['audioImport'],
-                sequenceImport: {} as WorkspaceProps['sequenceImport'],
+                sequenceImport: { dropAvailable: () => false } as WorkspaceProps['sequenceImport'],
                 importAudio: noop,
                 importMidi: noop,
                 programs: [],
@@ -270,7 +279,7 @@ export function imageScopeFixture(ambiguousCompanion = false) {
                 selectSource: noop,
                 selectSourceForContext: noop,
                 imageAction: noop,
-                selectWorkspace: noop,
+                selectWorkspace: (view) => (workspaceView = view),
                 exportPackage: noop,
                 exportAudio: noop,
                 exportWav: noop,

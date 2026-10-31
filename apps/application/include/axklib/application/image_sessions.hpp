@@ -459,8 +459,10 @@ template <typename Item> struct ImagePage {
 
 class ImageSessionManager {
   public:
-    [[nodiscard]] Result<NativeDocumentSnapshot>
-    native_snapshot(const ImageDocumentRef &target, std::string_view owner_id, std::uint64_t expected_revision);
+    [[nodiscard]] Result<NativeDocumentSnapshot> native_snapshot(const ImageDocumentRef &target,
+                                                                 std::string_view owner_id,
+                                                                 std::uint64_t expected_revision,
+                                                                 const CancellationToken &cancellation = {});
     using Clock = std::function<std::chrono::steady_clock::time_point()>;
 
     ImageSessionManager(const Sandbox &sandbox, std::size_t maximum_sessions = 32U,

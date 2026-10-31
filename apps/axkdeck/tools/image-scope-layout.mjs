@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import { createServer as socketServer } from 'node:net';
 import { pathToFileURL } from 'node:url';
 import { createServer } from 'vite';
+import { checkWorkspaceTabUnderline } from './workspace-tab-underline.mjs';
 
 const { chromium } = await import(process.env.PLAYWRIGHT_MODULE ? pathToFileURL(process.env.PLAYWRIGHT_MODULE).href : 'playwright');
 const output = resolve(process.argv[2]);
@@ -50,6 +51,17 @@ try {
         await page.getByText('Multiple', { exact: true }).waitFor();
         assert.equal(await page.getByText('Multiple', { exact: true }).evaluate((label) => label.scrollWidth > label.clientWidth), false);
         await page.getByRole('button', { name: 'Eject all images', exact: true }).waitFor();
+        const tabs = page.getByRole('navigation', { name: 'Workspace views' });
+        const aSeriesUnderline = await checkWorkspaceTabUnderline(tabs, 'A-series workspace');
+        const aSeriesTabUnderlines = [aSeriesUnderline];
+        const workspaceButtons = tabs.locator('button');
+        for (let index = 1; index < await workspaceButtons.count(); index++) {
+            await workspaceButtons.nth(index).press('Enter');
+            await page.waitForFunction((index) => document.querySelectorAll('[aria-label="Workspace views"] button')[index]?.classList.contains('active'), index);
+            aSeriesTabUnderlines.push(await checkWorkspaceTabUnderline(tabs, `A-series tab ${index}`));
+            if (index === 1) await page.screenshot({ path: resolve(output, `sample-banks-tabs-${width}-${scale}.png`) });
+        }
+        await workspaceButtons.first().press('Enter');
         await page.getByRole('button', { name: 'Files', exact: true }).click();
         const rows = page.getByRole('treegrid', { name: 'Filesystem entries' });
         const search = page.getByRole('searchbox', { name: 'Search filesystem' });
@@ -96,6 +108,7 @@ try {
         await page.screenshot({ path: resolve(output, `files-${width}-${scale}.png`) });
         await select('source-3');
         await page.getByRole('button', { name: 'Waves', exact: true }).click();
+        const nativeUnderline = await checkWorkspaceTabUnderline(tabs, 'TX16W Waves');
         // The row's center is an independent waveform-seek button.
         await page.getByRole('button', { name: 'Inspect Wave 20', exact: true }).press('Enter');
         await page.getByRole('searchbox', { name: 'Search Waves' }).fill('Wave 2');
@@ -126,7 +139,7 @@ try {
         await page.getByRole('button', { name: 'Eject all images' }).click();
         await selector.waitFor({ state: 'detached' });
         assert.deepEqual(errors, []);
-        results.push({ width, scale, logicalWidth, passed: true, geometry });
+        results.push({ width, scale, logicalWidth, passed: true, geometry, aSeriesTabUnderlines, nativeUnderline });
         await page.close();
     }
 } catch (error) {

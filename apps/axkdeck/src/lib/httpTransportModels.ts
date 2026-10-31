@@ -43,6 +43,7 @@ export interface SessionState {
     summary: ApiImageSummary;
     activeSourceMemberId: string;
     documentId: string | null;
+    nativeReadGeneration: number;
     contentCursors: Map<string, Map<number, string | null>>;
     contentItems: Map<string, DiskTreeItem>;
     objectCursors: Map<string, Map<number, string | null>>;

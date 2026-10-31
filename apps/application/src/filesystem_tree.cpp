@@ -1,7 +1,10 @@
 #include "filesystem_internal.hpp"
 
 axk::app::Result<axk::app::SandboxTree> axk::app::Sandbox::open_tree(const DirectoryRef &reference,
-                                                                     const SandboxTreeLimits &limits) const {
+                                                                     const SandboxTreeLimits &limits,
+                                                                     const CancellationToken &cancellation) const {
+    if (const auto active = cancellation.check(); !active)
+        return std::unexpected(Error{"operation_cancelled", active.error().message});
     if (limits.maximum_entries == 0U || limits.maximum_total_file_bytes == 0U || limits.maximum_depth == 0U ||
         limits.maximum_path_bytes == 0U) {
         return std::unexpected(reference_error("directory traversal limits must be positive", reference.relative_path));
@@ -42,6 +45,8 @@ axk::app::Result<axk::app::SandboxTree> axk::app::Sandbox::open_tree(const Direc
     std::uint64_t total_bytes{};
     std::size_t total_path_bytes{};
     while (!pending.empty()) {
+        if (const auto active = cancellation.check(); !active)
+            return std::unexpected(Error{"operation_cancelled", active.error().message});
         auto current = std::move(pending.back());
         pending.pop_back();
 #if defined(_WIN32)
@@ -66,6 +71,8 @@ axk::app::Result<axk::app::SandboxTree> axk::app::Sandbox::open_tree(const Direc
 #if defined(_WIN32)
         alignas(FILE_ID_BOTH_DIR_INFO) std::array<std::byte, 64U * 1024U> buffer{};
         for (;;) {
+            if (const auto active = cancellation.check(); !active)
+                return std::unexpected(Error{"operation_cancelled", active.error().message});
             if (GetFileInformationByHandleEx(current_handle->get(), FileIdBothDirectoryInfo, buffer.data(),
                                              static_cast<DWORD>(buffer.size())) == 0) {
                 if (GetLastError() == ERROR_NO_MORE_FILES)
@@ -75,6 +82,8 @@ axk::app::Result<axk::app::SandboxTree> axk::app::Sandbox::open_tree(const Direc
             }
             auto *entry = reinterpret_cast<FILE_ID_BOTH_DIR_INFO *>(buffer.data());
             for (;;) {
+                if (const auto active = cancellation.check(); !active)
+                    return std::unexpected(Error{"operation_cancelled", active.error().message});
                 const std::wstring_view native_name{entry->FileName, entry->FileNameLength / sizeof(wchar_t)};
                 if (native_name != L"." && native_name != L"..") {
                     const std::filesystem::path name{native_name};
@@ -142,6 +151,10 @@ axk::app::Result<axk::app::SandboxTree> axk::app::Sandbox::open_tree(const Direc
         }
         errno = 0;
         while (const auto *entry = ::readdir(directory)) {
+            if (const auto active = cancellation.check(); !active) {
+                ::closedir(directory);
+                return std::unexpected(Error{"operation_cancelled", active.error().message});
+            }
             const std::string_view native_name{entry->d_name};
             if (native_name == "." || native_name == "..")
                 continue;
@@ -236,6 +249,8 @@ axk::app::Result<axk::app::SandboxTree> axk::app::Sandbox::open_tree(const Direc
     implementation->entries.reserve(collected.size());
     implementation->identities.reserve(collected.size());
     for (auto &value : collected) {
+        if (const auto active = cancellation.check(); !active)
+            return std::unexpected(Error{"operation_cancelled", active.error().message});
         value.entry.revision = revision_token(value.identity);
         implementation->entries.push_back(std::move(value.entry));
         implementation->identities.push_back(std::move(value.identity));
@@ -247,16 +262,25 @@ std::string axk::app::SandboxTree::revision() const {
     return implementation_ ? revision_token(implementation_->root_identity) : std::string{};
 }
 
-axk::app::Result<void> axk::app::SandboxTree::verify_same_tree(const SandboxTree &current) const {
+axk::app::Result<void> axk::app::SandboxTree::verify_same_tree(const SandboxTree &current,
+                                                               const CancellationToken &cancellation) const {
+    if (const auto active = cancellation.check(); !active)
+        return std::unexpected(Error{"operation_cancelled", active.error().message});
     if (!implementation_ || !current.implementation_ ||
         !same_file_revision(implementation_->root_identity, current.implementation_->root_identity) ||
-        !std::ranges::equal(implementation_->identities, current.implementation_->identities, same_file_revision) ||
-        !std::ranges::equal(
-            implementation_->entries, current.implementation_->entries, [](const auto &left, const auto &right) {
-                return left.relative_path == right.relative_path && left.kind == right.kind && left.size == right.size;
-            })) {
+        implementation_->entries.size() != current.implementation_->entries.size()) {
         return std::unexpected(
             Error{"image_source_changed", "Directory identity or membership changed after admission"});
+    }
+    for (std::size_t index = 0U; index < implementation_->entries.size(); ++index) {
+        if (const auto active = cancellation.check(); !active)
+            return std::unexpected(Error{"operation_cancelled", active.error().message});
+        const auto &left = implementation_->entries[index];
+        const auto &right = current.implementation_->entries[index];
+        if (!same_file_revision(implementation_->identities[index], current.implementation_->identities[index]) ||
+            left.relative_path != right.relative_path || left.kind != right.kind || left.size != right.size)
+            return std::unexpected(
+                Error{"image_source_changed", "Directory identity or membership changed after admission"});
     }
     return {};
 }

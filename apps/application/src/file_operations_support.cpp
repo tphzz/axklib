@@ -229,7 +229,8 @@ std::expected<LoadedSource, InfoLoadFailure> load_info_source(const axk::app::Sa
                                       {.maximum_entries = axk::AxkObjectDirectory::maximum_entries,
                                        .maximum_total_file_bytes = axk::AxkObjectDirectory::maximum_payload_bytes,
                                        .maximum_depth = axk::AxkObjectDirectory::maximum_depth,
-                                       .maximum_path_bytes = 64U * 1024U});
+                                       .maximum_path_bytes = 64U * 1024U},
+                                      context.cancellation);
         if (!tree) {
             return std::unexpected(
                 InfoLoadFailure{.error = tree.error(),

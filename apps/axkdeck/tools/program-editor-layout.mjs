@@ -88,6 +88,11 @@ async function geometry(page, zoom) {
             ...rect(header),
             tabs: rect(header.querySelector('nav')),
             activeTab: rect(header.querySelector('[aria-selected="true"], [aria-pressed="true"]')),
+            indicator: (() => {
+                const button = header.querySelector('button.active');
+                const line = getComputedStyle(button, '::after');
+                return { left: line.left, right: line.right, height: line.height, radius: line.borderRadius, color: line.backgroundColor, opacity: line.opacity, fontSize: getComputedStyle(button).fontSize };
+            })(),
             tools: rect(header.querySelector('.header-tools')),
             buttons: [...header.querySelectorAll('.header-tools button')].map(rect),
         }));
@@ -95,11 +100,12 @@ async function geometry(page, zoom) {
     });
     assert.equal(result.pageOverflow, false, 'Page must not overflow horizontally');
     near(result.headers[0].height, 32 * zoom, 'Primary header height');
-    if (result.headers[1]) near(result.headers[1].height, 28 * zoom, 'Secondary header height');
+    if (result.headers[1]) near(result.headers[1].height, 32 * zoom, 'Secondary header matches primary height');
     assert.ok(result.panel.y >= result.headers.at(-1).bottom - 1, 'Content must not overlap the last header');
     assert.ok(result.panel.bottom <= result.footer.y + 1, 'Content must not overlap the status footer');
     near(result.footer.bottom, result.editor.bottom, 'Footer must stay inside lower editor pane');
     for (const header of result.headers) {
+        assert.deepEqual(header.indicator, { left: '0px', right: '0px', height: '2px', radius: '0px', color: 'rgb(104, 151, 187)', opacity: '1', fontSize: '11px' }, 'Every editable Program row uses the shared full-width blue tab grammar');
         assert.ok(header.tabs.width >= header.activeTab.width - 1, `Active tab must fit visible strip: ${JSON.stringify(header)}`);
         assert.ok(header.activeTab.x >= header.tabs.x - 1 && header.activeTab.right <= header.tabs.right + 1, 'Active tab must be revealed within the strip');
         assert.ok(header.tabs.right <= header.tools.x + 1, 'Tabs and actions must not overlap');

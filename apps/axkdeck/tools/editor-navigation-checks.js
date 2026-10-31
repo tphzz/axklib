@@ -55,7 +55,17 @@ window.runEditorNavigationChecks = async () => {
                 check(tabRect.width > 30 * ratio, `${label}: ${kind} tab strip has no usable space`);
             }
             const second = header.parentElement.querySelector('.sample-pages');
-            if (kind !== 'program') check(second && Math.abs(parseFloat(getComputedStyle(second).height) - 28) <= 0.01, `${label}: ${kind} secondary row must be 28px`);
+            if (kind !== 'program') check(second && Math.abs(parseFloat(getComputedStyle(second).height) - 32) <= 0.01, `${label}: ${kind} secondary row must match the 32px primary row`);
+            for (const strip of header.parentElement.querySelectorAll('header .tab-strip')) {
+                const active = strip.querySelector('button.active');
+                if (!active) continue;
+                const underline = getComputedStyle(active, '::after');
+                check(underline.left === '0px' && underline.right === '0px' && underline.height === '2px' && underline.borderRadius === '0px', `${label}: ${kind} full-width square underline`);
+                check(underline.backgroundColor === 'rgb(104, 151, 187)' && underline.opacity === '1', `${label}: ${kind} blue selected underline`);
+                const button = getComputedStyle(active);
+                check(button.borderRadius === '0px' && button.borderLeftWidth === '0px' && button.fontSize === '11px', `${label}: ${kind} flat compact tabs at every level`);
+                check(Math.abs(parseFloat(getComputedStyle(strip).height) - 32) <= 0.01, `${label}: ${kind} matching tab-strip height`);
+            }
             const firstStyle = current[0].style;
             for (const key of ['fontSize', 'color', 'backgroundColor', 'borderBottomColor', 'borderBottomWidth'])
                 check(style[key] === firstStyle[key], `${label}: ${kind} selected-tab ${key} differs from Program`);
@@ -131,7 +141,7 @@ window.runEditorNavigationChecks = async () => {
         const last = pages.at(-1).getBoundingClientRect();
         const area = row.querySelector('nav').getBoundingClientRect();
         check(last.left >= area.left - 1 && last.right <= area.right + 1, `${kind}: secondary selected page is clipped`);
-        check(Math.abs(parseFloat(getComputedStyle(row).height) - 28) <= 0.01, `${kind}: secondary overflow changed row height`);
+        check(Math.abs(parseFloat(getComputedStyle(row).height) - 32) <= 0.01, `${kind}: secondary overflow changed row height`);
     }
     check(document.documentElement.scrollWidth <= document.documentElement.clientWidth, 'Horizontal viewport overflow');
     return { failures, geometries, surfaces };

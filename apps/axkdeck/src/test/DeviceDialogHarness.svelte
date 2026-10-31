@@ -161,6 +161,8 @@
         status: async () => ({ ...connection, targets: [{ ...connection.targets[0]!, id: '0' }] }),
         close: async () => {
             calls += 'close ';
+            if (new URLSearchParams(location.search).has('delayed-close'))
+                await new Promise((resolve) => setTimeout(resolve, 400));
         },
         authorize: async () => {
             calls += 'authorize ';

@@ -23,7 +23,7 @@ struct Payload {
     std::string destination_fingerprint;
     VolumeCapacityPolicy capacity_policy;
     std::shared_ptr<const native::Document> source;
-    std::function<Result<void>()> verify_workspace;
+    std::function<Result<void>(const CancellationToken &)> verify_workspace;
     std::uint64_t source_retention_bytes{};
     [[nodiscard]] std::uint64_t retained_bytes() const noexcept {
         return prepared->retained_bytes() + source_retention_bytes;

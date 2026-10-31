@@ -103,6 +103,32 @@ TEST(NativeRegistry, ChecksCancellationAndKeepsUnknownSourcesBrowseable) {
     EXPECT_FALSE(registry.open(sources(), {}, cancelled.token()));
 }
 
+TEST(NativeRegistry, RechecksMembershipBeforePublishingNoMatchAmbiguityOrDocuments) {
+    for (const auto mode : {0, 1, 2}) {
+        std::size_t checks{};
+        axk::native::SourceMember source{
+            "member", "disk", std::make_shared<axk::MemoryReader>(std::vector<std::byte>(16U)), {}};
+        source.verify_member = [&](const auto &) -> axk::Result<void> {
+            if (++checks == 2U)
+                return std::unexpected(
+                    axk::make_error(axk::ErrorCode::transaction_stale, axk::ErrorCategory::io, "Membership changed"));
+            return {};
+        };
+        source.verify_location = [](const auto &, const auto &) -> axk::Result<void> { return {}; };
+        auto admitted = axk::native::SourceSet::create({std::move(source)});
+        ASSERT_TRUE(admitted);
+        axk::native::FormatRegistry registry;
+        if (mode > 0)
+            ASSERT_TRUE(registry.add(provider("first")));
+        if (mode == 2)
+            ASSERT_TRUE(registry.add(provider("second")));
+        const auto opened = registry.open(*admitted);
+        ASSERT_FALSE(opened);
+        EXPECT_EQ(opened.error().code, axk::ErrorCode::transaction_stale);
+        EXPECT_EQ(checks, 2U);
+    }
+}
+
 TEST(NativeRegistry, OpensDisjointClaimsButRequiresSelectionForOverlappingClaims) {
     const auto scoped = [](std::string id, std::uint64_t offset) {
         auto result = provider(id);

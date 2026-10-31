@@ -51,7 +51,7 @@ Result<FloppyDirectorySources> open_floppy_directories(const Json &sources, cons
         const auto &reference = source.at("directoryRef");
         const DirectoryRef directory{reference.at("rootId").get<std::string>(),
                                      reference.at("relativePath").get<std::string>()};
-        auto tree = sandbox.open_tree(directory, limits);
+        auto tree = sandbox.open_tree(directory, limits, context.cancellation);
         if (!tree)
             return std::unexpected(tree.error());
         retained->trees.emplace_back(directory, tree_identity(*tree));
@@ -146,7 +146,7 @@ Result<FloppyDirectorySources> open_floppy_directories(const Json &sources, cons
         for (const auto &[reference, expected] : retained->trees) {
             if (auto checked = cancellation.check(); !checked)
                 return std::unexpected(core_error(checked.error()));
-            auto tree = sandbox.open_tree(reference, limits);
+            auto tree = sandbox.open_tree(reference, limits, cancellation);
             if (!tree)
                 return std::unexpected(tree.error());
             if (tree_identity(*tree) != expected)

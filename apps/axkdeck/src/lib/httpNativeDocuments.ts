@@ -16,10 +16,21 @@ export function documentPath(session: SessionState): string {
     return `/images/${encodeURIComponent(target.imageId)}/documents/${encodeURIComponent(target.documentId)}`;
 }
 
+export function assertNativeDocumentCurrent(current: SessionState, captured: SessionState): void {
+    if (
+        current.remoteId !== captured.remoteId ||
+        current.documentId !== captured.documentId ||
+        current.revision !== captured.revision ||
+        current.nativeReadGeneration !== captured.nativeReadGeneration
+    )
+        throw new Error('Native document changed during loading');
+}
+
 export function documentSession(
     summary: ApiImageSummary,
     selected?: string | null,
     sourceMemberId?: string,
+    previous?: SessionState,
 ): SessionState {
     const sources = summary.sources.map((member) => imageLocation(member.source));
     if (!sources.length) throw new Error('Workspace has no admitted sources');
@@ -32,6 +43,10 @@ export function documentSession(
     if (document && !documents.includes(document))
         throw new Error('Native document does not belong to the selected image');
     const documentId = selected === undefined ? (documents.length === 1 ? documents[0].id : null) : selected;
+    const unchanged =
+        previous?.remoteId === summary.imageId &&
+        previous.documentId === documentId &&
+        previous.revision === summary.revision;
     return {
         remoteId: summary.imageId,
         revision: summary.revision,
@@ -40,10 +55,11 @@ export function documentSession(
         summary,
         activeSourceMemberId,
         documentId,
-        contentCursors: new Map(),
-        contentItems: new Map(),
-        objectCursors: new Map(),
-        relationshipCursors: new Map(),
+        nativeReadGeneration: previous ? previous.nativeReadGeneration + (unchanged ? 0 : 1) : 0,
+        contentCursors: unchanged ? previous.contentCursors : new Map(),
+        contentItems: unchanged ? previous.contentItems : new Map(),
+        objectCursors: unchanged ? previous.objectCursors : new Map(),
+        relationshipCursors: unchanged ? previous.relationshipCursors : new Map(),
     };
 }
 
@@ -56,5 +72,5 @@ export function refreshedDocumentSession(summary: ApiImageSummary, previous: Ses
     )
         ? previous.documentId
         : undefined;
-    return documentSession(summary, selected, sourceMemberId);
+    return documentSession(summary, selected, sourceMemberId, previous);
 }

@@ -1,5 +1,6 @@
 <script lang="ts" generics="T">
     import type { Snippet } from 'svelte';
+    import TabStrip from '../../lib/components/TabStrip.svelte';
     let {
         groups,
         field,
@@ -8,12 +9,16 @@
     const active = $derived(groups.some((group) => group.title === selected) ? selected : groups[0]?.title);
 </script>
 
-<div class="parameter-group-switch" role="group" aria-label="Parameter groups">
-    {#each groups as group}<button
-            class="editor-choice"
-            aria-pressed={active === group.title}
-            onclick={() => (selected = group.title)}>{group.title}</button
-        >{/each}
+<div class="parameter-group-switch">
+    <TabStrip
+        tabs={groups.map((group) => ({ id: group.title, label: group.title }))}
+        {active}
+        label="Parameter groups"
+        semantics="navigation"
+        onselect={(id) => {
+            selected = id;
+        }}
+    />
 </div>
 <div class="parameter-sections">
     {#each groups as group}<section class:active={active === group.title}>
@@ -29,7 +34,6 @@
         display: none;
         min-width: 0;
         margin-bottom: 6px;
-        gap: 2px;
     }
     .parameter-sections {
         display: grid;

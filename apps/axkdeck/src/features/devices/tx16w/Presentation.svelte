@@ -16,6 +16,7 @@
     import { DocumentAudio, previewTimeline } from '../../../lib/audio/documentAudio.svelte';
     import ObjectDetail from './ObjectDetail.svelte';
     import Icon from '../../../lib/components/Icon.svelte';
+    import TabStrip from '../../../lib/components/TabStrip.svelte';
     import CollectionToolbar from '../../../lib/components/CollectionToolbar.svelte';
     import ObjectContextMenu from '../../../lib/components/ObjectContextMenu.svelte';
     import StructureNavigation from '../../../lib/components/StructureNavigation.svelte';
@@ -285,20 +286,14 @@
         />{/if}
 {/snippet}
 {#snippet deviceTabs()}
-    <nav class="workspace-tabs" aria-label="Workspace views">
-        {#each tabs as tab (tab.kind)}
-            <button
-                type="button"
-                class:active={kind === tab.kind}
-                aria-pressed={kind === tab.kind}
-                aria-label={tab.label}
-                title={tab.label}
-                onclick={() => selectKind(tab.kind)}
-            >
-                <Icon name={tab.icon} size={16} /><span>{tab.label}</span>
-            </button>
-        {/each}
-    </nav>
+    <TabStrip
+        tabs={tabs.map((tab) => ({ ...tab, id: tab.kind }))}
+        active={kind}
+        onselect={selectKind}
+        label="Workspace views"
+        appearance="workspace"
+        semantics="navigation"
+    />
 {/snippet}
 {#snippet content()}
     <section class="tx-objects" aria-label="TX16W native objects" aria-busy={loading} bind:this={contentElement}>

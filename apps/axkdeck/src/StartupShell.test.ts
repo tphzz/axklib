@@ -29,6 +29,14 @@ describe('StartupShell', () => {
             },
         });
         expect(screen.getByRole('alert').textContent).toContain('Connection timed out');
+        const views = screen.getByRole('navigation', { name: 'Object views' });
+        expect(views.getAttribute('data-appearance')).toBe('workspace');
+        expect(views.querySelectorAll('button')).toHaveLength(5);
+        for (const button of views.querySelectorAll('button')) {
+            expect(button.disabled).toBe(true);
+            expect(button.getAttribute('aria-pressed')).toBe('false');
+            expect(button.getAttribute('aria-label')).toBe(button.textContent?.trim());
+        }
         await fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
         await fireEvent.click(screen.getByRole('button', { name: 'Connection settings' }));
         expect(onretry).toHaveBeenCalledOnce();

@@ -1,14 +1,13 @@
 import type { AxklibHttpApiClient } from './httpApiClient';
 import type { ApiContentItem, ApiObjectItem, ApiPage, ApiRelationshipItem, SessionState } from './httpTransportModels';
 import type { NativeObjectDetail, PreviewEnvelope } from './transport';
-import { documentPath } from './httpNativeDocuments';
+import { assertNativeDocumentCurrent, documentPath, documentTarget } from './httpNativeDocuments';
 import { sameAudioIdentity } from './audio/audioIdentity';
 import { normalizeWaveformPreview } from './waveformPreview';
 import { finishReadTrace, readContext, readTrace } from './readDiagnostics';
 import type { PreviewReadOptions } from './audioReadOptions';
 import type { HttpJobController } from './httpJobController';
 import { AxklibApiError } from './httpApiClient';
-import { documentTarget } from './httpNativeDocuments';
 
 export class HttpNativeDocumentReads {
     constructor(
@@ -26,7 +25,7 @@ export class HttpNativeDocumentReads {
             const query = new URLSearchParams({ limit: '256' });
             if (cursor) query.set('cursor', cursor);
             const result = await this.client.request<ApiPage<Item>>('GET', `${path}/${resource}?${query}`);
-            if (this.session(sessionId) !== session) throw new Error('Native document changed during loading');
+            assertNativeDocumentCurrent(this.session(sessionId), session);
             items.push(...result.items);
             cursor = result.nextCursor;
             if (!cursor) return items;
@@ -50,7 +49,7 @@ export class HttpNativeDocumentReads {
             'GET',
             `${documentPath(session)}/objects/${encodeURIComponent(objectId)}`,
         );
-        if (this.session(sessionId) !== session) throw new Error('Native document changed during loading');
+        assertNativeDocumentCurrent(this.session(sessionId), session);
         return detail;
     }
 
@@ -86,11 +85,8 @@ export class HttpNativeDocumentReads {
                     completed.errorContext,
                 );
             const result = completed.result as PreviewEnvelope;
-            if (
-                this.session(sessionId) !== session ||
-                !sameAudioIdentity(result, identity) ||
-                result.objectId !== objectId
-            )
+            assertNativeDocumentCurrent(this.session(sessionId), session);
+            if (!sameAudioIdentity(result, identity) || result.objectId !== objectId)
                 throw new Error('Native document changed during loading');
             const trace = readTrace('preview-normalize', { sessionId, objectId, bins }, context);
             const preview = normalizeWaveformPreview(result);

@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { tick } from 'svelte';
+    import TabStrip from '../../lib/components/TabStrip.svelte';
     import { sourceTabs, type SourceTab } from './sourceTabs';
     let {
         id,
@@ -18,46 +18,21 @@
         disabled?: boolean;
         onchange: (value: SourceTab) => void | Promise<void>;
     } = $props();
-    async function navigate(event: KeyboardEvent) {
-        if (disabled || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
-        event.preventDefault();
-        const element = event.currentTarget as HTMLElement;
-        const tabs: readonly SourceTab[] = available ? sourceTabs : ['Image'];
-        const at = tabs.indexOf(value);
-        const next =
-            event.key === 'Home'
-                ? 0
-                : event.key === 'End'
-                  ? tabs.length - 1
-                  : (at + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
-        await onchange(tabs[next]!);
-        await tick();
-        element.querySelector<HTMLButtonElement>(`[data-tab="${tabs[next]}"]`)?.focus();
-    }
+    const tabs = $derived(
+        sourceTabs.map((tab) => ({
+            id: tab,
+            label: tab,
+            buttonId: `${id}-tab-${tab.replaceAll(' ', '-')}`,
+            panelId: `${id}-panel-${tab.replaceAll(' ', '-')}`,
+            disabled: tab !== 'Image' && !available,
+            reason: tab !== 'Image' && !available ? reason : undefined,
+            describedBy: tab !== 'Image' && !available && reason ? `${id}-device-unavailable` : undefined,
+        })),
+    );
 </script>
 
-<div
-    class="source-tabs dialog-segmented-control"
-    role="tablist"
-    aria-label={label}
-    tabindex="-1"
-    onkeydown={(event) => void navigate(event)}
->
-    {#each sourceTabs as tab}
-        <button
-            type="button"
-            role="tab"
-            id={`${id}-tab-${tab.replaceAll(' ', '-')}`}
-            data-tab={tab}
-            aria-selected={value === tab}
-            aria-controls={`${id}-panel-${tab.replaceAll(' ', '-')}`}
-            tabindex={value === tab ? 0 : -1}
-            disabled={disabled || (tab !== 'Image' && !available)}
-            title={tab !== 'Image' && !available ? reason : undefined}
-            aria-describedby={tab !== 'Image' && !available ? `${id}-device-unavailable` : undefined}
-            onclick={() => void onchange(tab)}>{tab}</button
-        >
-    {/each}
+<div class="source-tabs">
+    <TabStrip {tabs} active={value} {label} {disabled} onselect={onchange} />
 </div>
 {#if !available && reason}<p id={`${id}-device-unavailable`} class="source-reason">{reason}</p>{/if}
 

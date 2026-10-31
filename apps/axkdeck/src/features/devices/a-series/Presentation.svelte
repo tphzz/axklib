@@ -5,7 +5,7 @@
     import type { LaneQueries } from '../../audition/workflow.svelte';
     import AuditionBar from '../../../lib/components/AuditionBar.svelte';
     import SampleCollection from '../../backends/axklib/SampleCollection.svelte';
-    import Icon from '../../../lib/components/Icon.svelte';
+    import TabStrip from '../../../lib/components/TabStrip.svelte';
     import ImageNavigator from '../../../lib/components/ImageNavigator.svelte';
     import DeviceLowerZone from '../../object-editor/DeviceLowerZone.svelte';
     import ObjectInspector from '../../../lib/components/ObjectInspector.svelte';
@@ -442,13 +442,14 @@
     </div>
 {/snippet}
 {#snippet deviceTabs()}
-    <nav class="workspace-tabs" aria-label="Workspace views">
-        {#each workspaceTabs as tab (tab.id)}
-            <button class:active={workspaceView === tab.id} type="button" onclick={() => selectWorkspace(tab.id)}>
-                <Icon name={tab.icon} size={16} /><span>{tab.label}</span>
-            </button>
-        {/each}
-    </nav>
+    <TabStrip
+        tabs={workspaceTabs}
+        active={workspaceView}
+        onselect={selectWorkspace}
+        label="Workspace views"
+        appearance="workspace"
+        semantics="navigation"
+    />
 {/snippet}
 {#snippet deviceActions()}
     {#if (packageExportAvailable || audioExportAvailable || sequenceExportAvailable || objectDeletionAvailable) && packageSelection.items.length > 0}

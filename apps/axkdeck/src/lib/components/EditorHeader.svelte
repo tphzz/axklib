@@ -5,16 +5,14 @@
         children,
         status,
         tools,
-        secondary = false,
     }: {
         children: Snippet;
         status?: Snippet;
         tools?: Snippet;
-        secondary?: boolean;
     } = $props();
 </script>
 
-<header class="editor-header" class:secondary>
+<header class="editor-header">
     {@render children()}
     <div class="header-status">{@render status?.()}</div>
     {#if tools}<div class="header-tools">{@render tools()}</div>{/if}
@@ -30,12 +28,8 @@
         flex: 0 0 var(--density-section-toolbar);
         min-width: 0;
         padding: 0 8px;
-        border-bottom: 1px solid var(--color-border);
+        box-shadow: inset 0 -1px var(--color-border);
         background: var(--color-panel);
-    }
-    .secondary {
-        height: 28px;
-        flex-basis: 28px;
     }
     .header-status {
         min-width: 0;

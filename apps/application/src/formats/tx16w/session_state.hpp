@@ -10,7 +10,10 @@ class SessionState final : public NativeDocumentState, public NativeAudioProvide
     explicit SessionState(std::shared_ptr<const axk::tx16w::Document> document);
     std::string_view format_id() const noexcept override { return "yamaha.tx16w"; }
     std::string_view profile() const noexcept override { return "yamaha-native"; }
-    std::vector<std::string> available_operations(bool, bool) const override { return {"auditions.prepare"}; }
+    std::vector<std::string> available_operations(bool, bool) const override {
+        return {"images.content",           "images.objects", "images.relationships",
+                "images.validation.issues", "images.preview", "auditions.prepare"};
+    }
     Result<nlohmann::ordered_json> object_detail(const ImageDocumentContext &context,
                                                  std::string_view object_id) const override;
     NativeFilesystemBindings filesystem_bindings() const override { return {}; }

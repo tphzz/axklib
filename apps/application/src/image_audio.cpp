@@ -1,4 +1,5 @@
 #include "image_sessions_internal.hpp"
+#include "image_sources.hpp"
 #include "native_audio.hpp"
 #include "read_diagnostics.hpp"
 
@@ -18,6 +19,24 @@
 #include <vector>
 
 namespace {
+axk::app::Result<void> verify_filesystem_publication(const axk::app::AdmittedImageSources &sources,
+                                                     const axk::CancellationToken &cancellation) {
+    for (const auto &member : sources.members) {
+        if (cancellation.is_cancelled())
+            return std::unexpected(session_error("operation_cancelled", "operation cancelled"));
+        // Device binding/layout is verified once at operation entry; filesystem membership can change mid-read.
+        if (member->reference.kind == axk::app::ImageSourceKind::device)
+            continue;
+        if (auto verified = member->verify_unchanged(cancellation); !verified)
+            return std::unexpected(session_error(
+                verified.error().code == "operation_cancelled" ? "operation_cancelled" : "image_source_changed",
+                verified.error().message));
+    }
+    if (cancellation.is_cancelled())
+        return std::unexpected(session_error("operation_cancelled", "operation cancelled"));
+    return {};
+}
+
 axk::app::Result<void> validate_source(const axk::native::PcmSource &source) {
     if (source.members.empty() || source.members.size() > 2U)
         return std::unexpected(axk::app::Error{"audition_unsupported", "Audio requires one or two member lanes"});
@@ -142,6 +161,9 @@ axk::app::Result<axk::app::ImageWaveformPreview> axk::app::ImageSessionManager::
         }
         result.lanes.push_back(std::move(lane));
     }
+    trace.phase("source-verify-complete");
+    if (auto verified = verify_filesystem_publication((*session)->sources, cancellation); !verified)
+        return std::unexpected(verified.error());
     trace.complete();
     return result;
 }
@@ -260,6 +282,9 @@ axk::app::ImageSessionManager::prepare_audition(const ImageDocumentRef &target, 
     auto audition_id = random_identifier("audition-");
     if (!audition_id)
         return std::unexpected(audition_id.error());
+    trace.phase("source-verify-complete");
+    if (auto verified = verify_filesystem_publication((*session)->sources, cancellation); !verified)
+        return std::unexpected(verified.error());
     descriptor.audition_id = *audition_id;
     const auto now = implementation_->clock();
     std::vector<std::string> expired_auditions;
@@ -380,6 +405,9 @@ axk::app::ImageSessionManager::audition_range(std::string_view audition_id, std:
     }
     if (result.bytes.size() != size)
         return std::unexpected(session_error("invalid_audio_range", "audition bundle range is incomplete"));
+    trace.phase("source-verify-complete");
+    if (auto verified = verify_filesystem_publication(session->sources, cancellation); !verified)
+        return std::unexpected(verified.error());
     trace.complete();
     return result;
 }

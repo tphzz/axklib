@@ -232,7 +232,7 @@ struct ConversionService::Implementation {
             return std::unexpected(claimed.error());
         const auto &payload = **claimed;
         if (payload.verify_workspace) {
-            if (auto current = payload.verify_workspace(); !current)
+            if (auto current = payload.verify_workspace(context.cancellation); !current)
                 return std::unexpected(current.error());
         }
         // Release the target read mutex before mutation admission, including same-workspace conversions.

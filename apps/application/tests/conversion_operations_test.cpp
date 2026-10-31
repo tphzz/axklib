@@ -169,7 +169,7 @@ TEST_F(ConversionOperations, NativeSnapshotDoesNotRetainAnAccessLockAndClosedWor
     auto prepared = registry.invoke("conversions.prepare", request(), context);
     ASSERT_TRUE(prepared) << prepared.error().message;
     ASSERT_TRUE(images->close(workspace.image_id, "owner"));
-    EXPECT_FALSE(snapshot->verify_current());
+    EXPECT_FALSE(snapshot->verify_current({}));
     auto execution = service->execute(prepared->at("planId").get<std::string>(), acknowledge(*prepared), context);
     ASSERT_TRUE(execution);
     EXPECT_EQ(wait(execution->job_id).state, JobState::failed);

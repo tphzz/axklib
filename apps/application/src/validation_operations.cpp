@@ -75,8 +75,9 @@ Result<Json> execute_validation(const Sandbox &sandbox, const Json &input, const
     if (request->exports) {
         constexpr std::size_t maximum_export_files = 100'000U;
         constexpr std::uint64_t maximum_export_bytes = 16ULL * 1024ULL * 1024ULL * 1024ULL;
-        auto export_files = sandbox.open_tree(*request->exports,
-                                              {maximum_export_files, maximum_export_bytes, 64U, 32U * 1024U * 1024U});
+        auto export_files =
+            sandbox.open_tree(*request->exports, {maximum_export_files, maximum_export_bytes, 64U, 32U * 1024U * 1024U},
+                              context.cancellation);
         if (!export_files)
             return std::unexpected(export_files.error());
         issues = validate_export_directory(*export_files);

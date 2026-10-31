@@ -10,7 +10,7 @@
     import SampleEditor from '../devices/a-series/sample/SampleEditor.svelte';
     import ProgramEditor from '../devices/a-series/program/ProgramEditor.svelte';
     import { programTabs } from '../devices/a-series/program/fields';
-    import EditorTabs from '../../lib/components/EditorTabs.svelte';
+    import TabStrip from '../../lib/components/TabStrip.svelte';
     import Icon from '../../lib/components/Icon.svelte';
     import EditorHeader from '../../lib/components/EditorHeader.svelte';
     import { sampleConversionTitle } from '../../lib/sampleFormatLabels';
@@ -147,7 +147,7 @@
         >
             <EditorHeader>
                 {#if editing?.profile === 'a-series/program'}
-                    <EditorTabs
+                    <TabStrip
                         tabs={programTabs}
                         active={navigation.tab}
                         onselect={(id) => navigation.selectTab(id)}

@@ -8,7 +8,7 @@
     import type { InspectorSelection, ProgramSampleSelectRow } from '../types';
     import CollectionToolbar from './CollectionToolbar.svelte';
     import EditorHeader from './EditorHeader.svelte';
-    import EditorTabs from './EditorTabs.svelte';
+    import TabStrip from './TabStrip.svelte';
 
     type ProgramEditorTab = 'sample-select' | 'easy-edit' | 'effect-setup' | 'setup' | 'control';
     type SampleEditorTab = 'trim-loop' | 'map-out' | 'filter-eg' | 'lfo' | 'midi-ctrl';
@@ -106,10 +106,12 @@
     {#if selection?.kind === 'program'}
         {#if !embedded}
             <EditorHeader>
-                <EditorTabs
+                <TabStrip
                     tabs={programTabs}
                     active={programTab}
-                    onselect={(id) => (programTab = id)}
+                    onselect={(id) => {
+                        programTab = id;
+                    }}
                     label="Program editor"
                     idPrefix="program-tab"
                     panelId={`program-panel-${programTab}`}
@@ -172,10 +174,12 @@
         </div>
     {:else if selection?.kind === 'sample'}
         <EditorHeader>
-            <EditorTabs
+            <TabStrip
                 tabs={sampleTabs}
                 active={sampleTab}
-                onselect={(id) => (sampleTab = id)}
+                onselect={(id) => {
+                    sampleTab = id;
+                }}
                 label="Sample editor"
                 idPrefix="sample-tab"
                 panelId={`sample-panel-${sampleTab}`}

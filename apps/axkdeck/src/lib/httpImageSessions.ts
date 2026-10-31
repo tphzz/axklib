@@ -20,6 +20,7 @@ import {
 } from './httpTransportModels';
 import { aSeriesHierarchy, documentCapabilities } from '../features/devices/a-series/openedDocument';
 import {
+    assertNativeDocumentCurrent,
     documentPath,
     documentSession,
     documentTarget,
@@ -268,12 +269,16 @@ export class HttpImageSessions {
                 ?.sourceMemberIds.includes(previous.activeSourceMemberId)
                 ? previous.activeSourceMemberId
                 : undefined);
-        const next = documentSession(previous.summary, documentId, member);
+        const next = documentSession(previous.summary, documentId, member, previous);
         this.sessions.set(sessionId, next);
         try {
             return await this.openedImage(sessionId, previous.summary);
         } catch (error) {
-            if (this.get(sessionId) === next) this.sessions.set(sessionId, previous);
+            if (this.get(sessionId) === next)
+                this.sessions.set(
+                    sessionId,
+                    documentSession(previous.summary, previous.documentId, previous.activeSourceMemberId, next),
+                );
             throw error;
         }
     }
@@ -324,7 +329,7 @@ export class HttpImageSessions {
             'GET',
             `${documentPath(session)}/content?${query}`,
         );
-        this.assertCurrent(sessionId, session);
+        assertNativeDocumentCurrent(this.get(sessionId), session);
         if (page.nextCursor) cursors.set(offset + page.items.length, page.nextCursor);
         const parent = session.contentItems.get(parentId);
         const items = page.items.map((item) => mapContentItem(item, parent));
@@ -343,7 +348,7 @@ export class HttpImageSessions {
                 'GET',
                 `${documentPath(session)}/validation/issues?${query}`,
             );
-            this.assertCurrent(sessionId, session);
+            assertNativeDocumentCurrent(this.get(sessionId), session);
             issues.push(...page.items);
             cursor = page.nextCursor;
             if (!cursor) return issues;
@@ -381,7 +386,7 @@ export class HttpImageSessions {
             'GET',
             `${documentPath(session)}/objects?${query}`,
         );
-        this.assertCurrent(sessionId, session);
+        assertNativeDocumentCurrent(this.get(sessionId), session);
         if (page.nextCursor) cursors.set(offset + page.items.length, page.nextCursor);
         return { objects: page.items.map(mapObject), totalCount: page.totalCount };
     }
@@ -422,7 +427,7 @@ export class HttpImageSessions {
             'GET',
             `${documentPath(session)}/relationships?${query}`,
         );
-        this.assertCurrent(sessionId, session);
+        assertNativeDocumentCurrent(this.get(sessionId), session);
         if (page.nextCursor) cursors.set(offset + page.items.length, page.nextCursor);
         return { relationships: page.items.map(mapRelationship), totalCount: page.totalCount };
     }
@@ -434,7 +439,7 @@ export class HttpImageSessions {
             'GET',
             `${documentPath(session)}/system-program-contexts?${query}`,
         );
-        this.assertCurrent(sessionId, session);
+        assertNativeDocumentCurrent(this.get(sessionId), session);
         return result;
     }
 

@@ -14,15 +14,6 @@
 
 namespace axk::native {
 
-struct SourceMember {
-    std::string id;
-    std::string label;
-    std::shared_ptr<const RandomAccessReader> reader;
-    std::vector<filesystems::Root> roots;
-    // Mutable sources must retain their admission lease and identity check in this callback.
-    std::function<Result<void>()> verify_unchanged{};
-};
-
 struct SourceLocation {
     std::string member_id;
     std::string root_id;
@@ -31,6 +22,17 @@ struct SourceLocation {
     std::uint64_t length{};
 
     friend bool operator==(const SourceLocation &, const SourceLocation &) = default;
+};
+
+struct SourceMember {
+    std::string id;
+    std::string label;
+    std::shared_ptr<const RandomAccessReader> reader;
+    std::vector<filesystems::Root> roots;
+    // Mutable sources supply both checks and retain their admission ownership.
+    // Whole membership is checked at operation boundaries, the selected file at reads.
+    std::function<Result<void>(const CancellationToken &)> verify_member{};
+    std::function<Result<void>(const SourceLocation &, const CancellationToken &)> verify_location{};
 };
 
 class SourceSet final {

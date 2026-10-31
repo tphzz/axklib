@@ -95,13 +95,16 @@ class JobManager {
 
     [[nodiscard]] SubscriptionId subscribe(EventSink sink);
     void unsubscribe(SubscriptionId subscription_id) noexcept;
+    // Drains resource admission and workers. In-flight subscriber notifications
+    // can finish afterward and retain the runtime. Call from a non-worker
+    // thread; queued notifications on a submitting thread may reenter it.
     void shutdown() noexcept;
 
   private:
     friend class JobManagerTestAccess;
 
     struct Impl;
-    std::unique_ptr<Impl> impl_;
+    std::shared_ptr<Impl> impl_;
 };
 
 [[nodiscard]] std::string_view job_state_name(JobState state) noexcept;

@@ -229,6 +229,13 @@ result<page<validation_issue>> validation_issue_page(const std::shared_ptr<const
 
 struct image::impl {
     std::shared_ptr<const formats::a_series::Document> state;
+    ImageReadFactory acquire;
+
+    result<std::shared_ptr<void>> begin_read(const CancellationToken &cancellation) const {
+        if (const auto active = cancellation.check(); !active)
+            return public_error(active.error());
+        return acquire ? acquire(cancellation) : result<std::shared_ptr<void>>{std::shared_ptr<void>{}};
+    }
 };
 
 struct snapshot::impl {
@@ -254,7 +261,7 @@ result<image> image::open(const std::string &utf8_path, operation_context &conte
     });
 }
 
-result<image> image_factory::open(MediaContainer container, operation_context &context) {
+result<image> image_factory::open(MediaContainer container, operation_context &context, ImageReadFactory acquire) {
     return protect<image>([&]() -> result<image> {
         if (!context.impl_)
             return invalid_argument("operation context is not initialized");
@@ -263,7 +270,7 @@ result<image> image_factory::open(MediaContainer container, operation_context &c
         if (!document)
             return public_error(document.error());
         image output;
-        output.impl_ = std::make_unique<image::impl>(image::impl{std::move(*document)});
+        output.impl_ = std::make_unique<image::impl>(image::impl{std::move(*document), std::move(acquire)});
         return output;
     });
 }
@@ -347,6 +354,9 @@ result<waveform_preview> image::preview(const std::string &object_key, std::uint
             return invalid_argument("operation context is not initialized");
         if (object_key.empty() || bin_count == 0U || bin_count > std::numeric_limits<std::size_t>::max())
             return invalid_argument("waveform key and nonzero bin count are required");
+        auto access = impl_->begin_read(context.impl_->cancellation.token());
+        if (!access)
+            return access.error();
         const auto found =
             std::ranges::find(impl_->state->state().inventory.catalog.objects, object_key, &ObjectSnapshot::key);
         if (found == impl_->state->state().inventory.catalog.objects.end())
@@ -382,6 +392,9 @@ result<std::vector<std::uint8_t>> image::waveform_pcm(const std::string &object_
             return invalid_argument("operation context is not initialized");
         if (object_key.empty())
             return invalid_argument("waveform key is required");
+        auto access = impl_->begin_read(context.impl_->cancellation.token());
+        if (!access)
+            return access.error();
         const auto found =
             std::ranges::find(impl_->state->state().inventory.catalog.objects, object_key, &ObjectSnapshot::key);
         if (found == impl_->state->state().inventory.catalog.objects.end())
@@ -415,6 +428,9 @@ result<export_summary> image::export_audio(const std::string &utf8_output_direct
         auto directory = checked_path(utf8_output_directory, "output directory");
         if (!directory)
             return directory.error();
+        auto access = impl_->begin_read(context.impl_->cancellation.token());
+        if (!access)
+            return access.error();
         auto plan = build_export_plan(impl_->state->state().media, impl_->state->state().inventory.catalog,
                                       impl_->state->state().graph, context.impl_->cancellation.token());
         if (!plan)

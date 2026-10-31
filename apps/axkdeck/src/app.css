@@ -218,17 +218,6 @@ input:focus-visible {
   letter-spacing: 0;
 }
 
-.workspace-tabs {
-  display: flex;
-  min-width: 0;
-  height: 100%;
-  grid-column: 2;
-  align-items: stretch;
-  gap: 3px;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
 .global-controls {
   display: flex;
   grid-column: 4;
@@ -289,46 +278,6 @@ input:focus-visible {
 .package-selection-delete:hover {
   color: var(--color-danger);
   background: rgb(174 47 47 / 18%);
-}
-
-.workspace-tabs button {
-  position: relative;
-  display: flex;
-  align-items: center;
-  flex: none;
-  gap: 6px;
-  padding: 0 10px;
-  color: var(--color-text-muted);
-  border: 0;
-  background: transparent;
-  cursor: pointer;
-  font-size: 11px;
-  font-weight: 550;
-}
-
-.workspace-tabs button::after {
-  position: absolute;
-  right: 13px;
-  bottom: 0;
-  left: 13px;
-  height: 2px;
-  border-radius: 2px 2px 0 0;
-  background: var(--color-brand);
-  content: "";
-  opacity: 0;
-  transform: scaleX(0.45);
-  transition: 140ms ease;
-}
-
-.workspace-tabs button:hover,
-.workspace-tabs button.active {
-  color: var(--color-text-strong);
-  background: rgb(255 255 255 / 4%);
-}
-
-.workspace-tabs button.active::after {
-  opacity: 1;
-  transform: scaleX(1);
 }
 
 .secondary-button,
@@ -2932,12 +2881,6 @@ textarea::placeholder {
   .inspector {
     display: none;
   }
-  .workspace-tabs button {
-    padding: 0 8px;
-  }
-  .workspace-tabs button span {
-    display: none;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -3693,12 +3636,6 @@ textarea::placeholder {
   .wave-data-row .waveform-seek {
     grid-column: 1 / -1;
     grid-row: 3;
-  }
-}
-
-@media (max-width: 1200px) {
-  .workspace-tabs button span {
-    display: none;
   }
 }
 

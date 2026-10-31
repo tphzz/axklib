@@ -28,7 +28,8 @@ struct ImageSourceMember {
     std::shared_ptr<const RandomAccessReader> reader;
     std::shared_ptr<const MediaContainer> media;
     std::vector<filesystems::Root> roots;
-    std::function<Result<void>()> verify_unchanged;
+    std::function<Result<void>(const CancellationToken &)> verify_unchanged;
+    std::function<Result<void>(const native::SourceLocation &, const CancellationToken &)> verify_location;
     std::function<Result<void>(const CancellationToken &, ProgressSink *)> seal;
     std::shared_ptr<PathReservationCoordinator::Lease> reservation;
     std::optional<detail::ImageFilesystemIndex> filesystem_index;

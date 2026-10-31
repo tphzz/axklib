@@ -12,7 +12,7 @@
     import SampleTransport from './SampleTransport.svelte';
     import ParameterPage from './ParameterPage.svelte';
     import EditorHeader from '../../../../lib/components/EditorHeader.svelte';
-    import EditorTabs from '../../../../lib/components/EditorTabs.svelte';
+    import TabStrip from '../../../../lib/components/TabStrip.svelte';
     let {
         document: suppliedDocument,
         preview,
@@ -51,12 +51,14 @@
 </script>
 
 <div class="sample-pages" role="group" aria-label={`${activeTab.label} pages`}>
-    <EditorHeader secondary>
-        <EditorTabs
-            secondary
+    <EditorHeader>
+        <TabStrip
+            semantics="navigation"
             tabs={activeTab.pages}
             active={activePage.id}
-            onselect={(id) => (navigation.page = id)}
+            onselect={(id) => {
+                navigation.page = id;
+            }}
             label="Sample subpages"
         />
         {#snippet tools()}

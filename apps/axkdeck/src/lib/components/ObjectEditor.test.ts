@@ -400,7 +400,7 @@ describe('ObjectEditor', () => {
             'LFO',
             'MIDI/CTRL',
         ]);
-        expect(container.querySelector('.editor-header > .editor-tabs:first-child')).toBeTruthy();
+        expect(container.querySelector('.editor-header > .tab-strip:first-child')).toBeTruthy();
         expect(container.querySelector('.editor-object-title')).toBeNull();
         await fireEvent.click(screen.getByRole('tab', { name: 'LFO' }));
         await rerender({

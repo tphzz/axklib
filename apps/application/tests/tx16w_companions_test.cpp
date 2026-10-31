@@ -66,6 +66,27 @@ class Tx16wCompanions : public testing::Test {
     }
 };
 
+TEST_F(Tx16wCompanions, CompleteAndIncompleteSummariesAdvertiseExactlyTheSupportedReadOperations) {
+    const auto sandbox = axk::app::Sandbox::create({{"root", "Root", root, false}});
+    ASSERT_TRUE(sandbox);
+    axk::app::ImageSessionManager sessions{*sandbox};
+    const std::vector<std::string> expected{"images.content",           "images.objects", "images.relationships",
+                                            "images.validation.issues", "images.preview", "auditions.prepare"};
+    for (const auto &source : std::vector<axk::app::ImageSourceRef>{
+             {"root", "main", axk::app::ImageSourceKind::directory}, {"root", "TONE.W01"}}) {
+        const auto opened = sessions.open({{source}, {}}, "owner");
+        ASSERT_TRUE(opened) << opened.error().message;
+        ASSERT_EQ(opened->documents.size(), 1U);
+        const auto &document = opened->documents.front();
+        EXPECT_EQ(document.completeness,
+                  source.kind == axk::app::ImageSourceKind::directory ? "INCOMPLETE" : "COMPLETE");
+        EXPECT_EQ(document.available_operations, expected);
+        const auto inspected = sessions.inspect(opened->image_id, "owner");
+        ASSERT_TRUE(inspected);
+        EXPECT_EQ(inspected->documents.front().available_operations, expected);
+    }
+}
+
 TEST_F(Tx16wCompanions, WaveNamesAgreeAcrossCatalogDetailsAndAudioWithoutLosingFileNavigation) {
     write("catalog/nested/Tone.W01", odd_wave(true));
     const auto sandbox = axk::app::Sandbox::create({{"root", "Root", root, false}});

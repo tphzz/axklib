@@ -11,6 +11,7 @@
 
 #include "image_filesystem_internal.hpp"
 #include "image_sessions_internal.hpp"
+#include "source_verification_test_access.hpp"
 
 namespace axk::app {
 namespace {
@@ -79,11 +80,13 @@ Result<void> validate_paths(const Sandbox &sandbox, std::span<const ImageSourceR
 
 Result<void> admit_directory(const Sandbox &sandbox, ImageSourceMember &member, const CancellationToken &cancellation) {
     const DirectoryRef reference{member.reference.root_id, member.reference.relative_path};
-    auto tree = sandbox.open_tree(reference, directory_limits);
+    SourceVerificationObservation::tree_open();
+    auto tree = sandbox.open_tree(reference, directory_limits, cancellation);
     if (!tree)
         return std::unexpected(tree.error());
     filesystems::Root root{"directory", "directory", {}};
-    std::vector<std::function<Result<void>()>> verifiers;
+    using Checks = std::unordered_map<std::string, std::function<Result<void>()>>;
+    auto verifiers = std::make_shared<Checks>();
     const std::vector<SandboxTreeEntry> original{tree->entries().begin(), tree->entries().end()};
     member.revision = tree->revision();
     for (std::size_t index = 0U; index < original.size(); ++index) {
@@ -98,25 +101,57 @@ Result<void> admit_directory(const Sandbox &sandbox, ImageSourceMember &member, 
             if (!opened)
                 return std::unexpected(opened.error());
             file.reader = std::move(opened->reader);
-            verifiers.push_back(std::move(opened->verify_unchanged));
+            const FileRef file_reference{reference.root_id, reference.relative_path.empty()
+                                                                ? entry.relative_path
+                                                                : reference.relative_path + '/' + entry.relative_path};
+            verifiers->emplace(entry.relative_path,
+                               [retained = std::move(opened->verify_unchanged), sandbox, file_reference,
+                                revision = entry.revision]() -> Result<void> {
+                                   SourceVerificationObservation::file_check();
+                                   if (auto checked = retained(); !checked)
+                                       return checked;
+                                   auto current = sandbox.open_file(file_reference);
+                                   if (!current)
+                                       return std::unexpected(current.error());
+                                   if (current->revision != revision)
+                                       return std::unexpected(
+                                           Error{"image_source_changed", "Selected file identity changed"});
+                                   return current->verify_unchanged();
+                               });
         }
         root.entries.push_back(std::move(file));
     }
     member.roots.push_back(std::move(root));
     member.format = "directory";
+    const std::shared_ptr<const Checks> checks = std::move(verifiers);
     // Membership must remain unchanged too: a new companion can change native resolution.
     member.verify_unchanged = [retained_sandbox = sandbox, reference,
                                retained_tree = std::make_shared<SandboxTree>(std::move(*tree)),
-                               checks = std::move(verifiers)]() -> Result<void> {
-        auto current = retained_sandbox.open_tree(reference, directory_limits);
+                               checks](const CancellationToken &token) -> Result<void> {
+        SourceVerificationObservation::tree_open();
+        auto current = retained_sandbox.open_tree(reference, directory_limits, token);
         if (!current)
             return std::unexpected(current.error());
-        if (auto checked = retained_tree->verify_same_tree(*current); !checked)
+        if (auto checked = retained_tree->verify_same_tree(*current, token); !checked)
             return checked;
-        for (const auto &verify : checks)
+        for (const auto &[id, verify] : *checks) {
+            static_cast<void>(id);
+            if (auto active = token.check(); !active)
+                return std::unexpected(Error{"operation_cancelled", active.error().message});
             if (auto unchanged = verify(); !unchanged)
                 return unchanged;
+        }
         return {};
+    };
+    member.verify_location = [checks](const native::SourceLocation &location,
+                                      const CancellationToken &token) -> Result<void> {
+        if (auto active = token.check(); !active)
+            return std::unexpected(Error{"operation_cancelled", active.error().message});
+        const auto found = checks->find(location.entry_id);
+        if (location.root_id != "directory" || found == checks->end())
+            return std::unexpected(
+                Error{"image_source_changed", "Selected file is not part of the admitted directory"});
+        return found->second();
     };
     return {};
 }
@@ -188,6 +223,7 @@ Result<AdmittedImageSources> admit_image_sources(const Sandbox &sandbox, PathRes
             if (auto opened = admit_directory(sandbox, *member, cancellation); !opened)
                 return std::unexpected(opened.error());
         } else {
+            std::function<Result<void>()> identity_check;
             if (reference.kind == ImageSourceKind::device) {
                 if (!devices)
                     return std::unexpected(Error{"devices_unavailable", "Device sources are unavailable"});
@@ -196,7 +232,7 @@ Result<AdmittedImageSources> admit_image_sources(const Sandbox &sandbox, PathRes
                     return std::unexpected(opened.error());
                 member->reader = std::move(opened->reader);
                 member->revision = std::move(opened->revision);
-                member->verify_unchanged = std::move(opened->verify_unchanged);
+                identity_check = std::move(opened->verify_unchanged);
                 member->seal = std::move(opened->seal);
             } else {
                 auto opened = sandbox.open_file({reference.root_id, reference.relative_path});
@@ -204,8 +240,16 @@ Result<AdmittedImageSources> admit_image_sources(const Sandbox &sandbox, PathRes
                     return std::unexpected(opened.error());
                 member->reader = std::move(opened->reader);
                 member->revision = std::move(opened->revision);
-                member->verify_unchanged = std::move(opened->verify_unchanged);
+                identity_check = std::move(opened->verify_unchanged);
             }
+            member->verify_unchanged = [verify =
+                                            std::move(identity_check)](const CancellationToken &token) -> Result<void> {
+                if (auto active = token.check(); !active)
+                    return std::unexpected(Error{"operation_cancelled", active.error().message});
+                return verify();
+            };
+            member->verify_location = [verify = member->verify_unchanged](
+                                          const auto &, const CancellationToken &token) { return verify(token); };
             auto media = open_media(member->reader, member->canonical_path, cancellation, progress, diagnostics);
             if (media) {
                 member->format = media_kind_name(media->kind());
@@ -218,7 +262,7 @@ Result<AdmittedImageSources> admit_image_sources(const Sandbox &sandbox, PathRes
             if (auto projected = project_filesystem(*member); !projected)
                 return std::unexpected(projected.error());
         }
-        if (auto unchanged = member->verify_unchanged(); !unchanged)
+        if (auto unchanged = member->verify_unchanged(cancellation); !unchanged)
             return std::unexpected(unchanged.error());
         if (reference.kind != ImageSourceKind::device) {
             const auto admit_identity = [&](const std::string &identity) {
@@ -228,14 +272,25 @@ Result<AdmittedImageSources> admit_image_sources(const Sandbox &sandbox, PathRes
             if (!admit_identity(member->revision) || !std::ranges::all_of(member->entry_revisions, admit_identity))
                 return std::unexpected(Error{"overlapping_image_sources", "Selected sources share a filesystem entry"});
         }
-        native_members.push_back({member->id, reference.relative_path, member->reader, member->roots,
-                                  [retained = member]() -> axk::Result<void> {
-                                      if (auto checked = retained->verify_unchanged(); !checked)
-                                          return std::unexpected(make_error(ErrorCode::transaction_stale,
-                                                                            ErrorCategory::io,
-                                                                            checked.error().message));
-                                      return {};
-                                  }});
+        native_members.push_back(
+            {member->id, reference.relative_path, member->reader, member->roots,
+             [retained = member](const CancellationToken &token) -> axk::Result<void> {
+                 if (auto checked = retained->verify_unchanged(token); !checked)
+                     return std::unexpected(make_error(checked.error().code == "operation_cancelled"
+                                                           ? ErrorCode::operation_cancelled
+                                                           : ErrorCode::transaction_stale,
+                                                       ErrorCategory::io, checked.error().message));
+                 return {};
+             },
+             [retained = member](const native::SourceLocation &location,
+                                 const CancellationToken &token) -> axk::Result<void> {
+                 if (auto checked = retained->verify_location(location, token); !checked)
+                     return std::unexpected(make_error(checked.error().code == "operation_cancelled"
+                                                           ? ErrorCode::operation_cancelled
+                                                           : ErrorCode::transaction_stale,
+                                                       ErrorCategory::io, checked.error().message));
+                 return {};
+             }});
         result.members.push_back(std::move(member));
     }
     auto sources = native::SourceSet::create(std::move(native_members));
@@ -243,7 +298,9 @@ Result<AdmittedImageSources> admit_image_sources(const Sandbox &sandbox, PathRes
         return std::unexpected(Error{"invalid_image_sources", sources.error().message});
     result.native_sources = std::move(*sources);
     if (auto verified = result.native_sources->verify(cancellation); !verified)
-        return std::unexpected(Error{"image_source_changed", verified.error().message});
+        return std::unexpected(Error{verified.error().code == ErrorCode::operation_cancelled ? "operation_cancelled"
+                                                                                             : "image_source_changed",
+                                     verified.error().message});
     return result;
 }
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <new>
@@ -14,8 +15,9 @@
 namespace axk {
 
 class MediaContainer;
+using ImageReadFactory = std::function<result<std::shared_ptr<void>>(const CancellationToken &)>;
 struct image_factory {
-    static result<image> open(MediaContainer container, operation_context &context);
+    static result<image> open(MediaContainer container, operation_context &context, ImageReadFactory acquire = {});
 };
 
 struct AXK_SDK_HIDDEN operation_context::impl final : ProgressSink, diagnostic_sink {

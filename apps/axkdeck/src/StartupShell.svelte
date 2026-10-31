@@ -1,6 +1,8 @@
 <script lang="ts">
     import ExperimentalWarningDialog from './lib/components/ExperimentalWarningDialog.svelte';
     import OpenLogsButton from './features/diagnostics/OpenLogsButton.svelte';
+    import TabStrip from './lib/components/TabStrip.svelte';
+    import { workspaceTabs } from './features/workspace/tabs';
 
     interface Props {
         status?: 'starting' | 'unavailable';
@@ -24,13 +26,14 @@
 <div class="startup-shell" aria-busy={status === 'starting'}>
     <header class="startup-header">
         <div class="startup-brand"><span aria-hidden="true">~</span><strong>axkdeck</strong></div>
-        <nav aria-label="Object views">
-            <button type="button" disabled>Programs</button>
-            <button type="button" disabled>Sample Banks</button>
-            <button type="button" disabled>Samples</button>
-            <button type="button" disabled>Wave Data</button>
-            <button type="button" disabled>Sequences</button>
-        </nav>
+        <TabStrip
+            tabs={workspaceTabs}
+            label="Object views"
+            appearance="workspace"
+            semantics="navigation"
+            disabled
+            onselect={() => {}}
+        />
     </header>
     <aside class="startup-library">
         <p>IMAGE</p>
@@ -108,15 +111,6 @@
         border-radius: 7px;
         background: #8e5428;
         font-weight: 700;
-    }
-    nav {
-        display: flex;
-    }
-    nav button {
-        padding: 0 14px;
-        border: 0;
-        background: transparent;
-        color: var(--color-text-muted);
     }
     .startup-library {
         padding: 12px 10px;

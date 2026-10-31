@@ -107,6 +107,7 @@ class device_host final {
   private:
     struct impl;
     std::unique_ptr<impl> impl_;
+    friend struct device_host_factory;
 };
 
 } // namespace axk

@@ -60,6 +60,8 @@ Result<OpenResult> FormatRegistry::open(std::shared_ptr<const SourceSet> sources
         return std::unexpected(active.error());
     if (!sources)
         return std::unexpected(registry_error("Native discovery requires admitted sources"));
+    if (const auto verified = sources->verify(cancellation); !verified)
+        return std::unexpected(verified.error());
     std::set<std::string> selected_ids;
     for (const auto &format : selected_formats) {
         if (!selected_ids.insert(format).second)
@@ -68,6 +70,11 @@ Result<OpenResult> FormatRegistry::open(std::shared_ptr<const SourceSet> sources
             return std::unexpected(registry_error("Selected native format is not registered"));
     }
     OpenResult result;
+    const auto verified_result = [&]() -> Result<OpenResult> {
+        if (const auto verified = sources->verify(cancellation); !verified)
+            return std::unexpected(verified.error());
+        return std::move(result);
+    };
     std::vector<const FormatProvider *> candidates;
     for (const auto &provider : providers_) {
         if (const auto active = cancellation.check(); !active)
@@ -95,7 +102,7 @@ Result<OpenResult> FormatRegistry::open(std::shared_ptr<const SourceSet> sources
     if (candidates.empty()) {
         if (!selected_formats.empty())
             return std::unexpected(registry_error("Selected native format cannot open these sources"));
-        return result;
+        return verified_result();
     }
     const auto competing = [&](const FormatProvider *left, const FormatProvider *right) {
         const auto &left_claims =
@@ -126,7 +133,7 @@ Result<OpenResult> FormatRegistry::open(std::shared_ptr<const SourceSet> sources
         for (std::size_t right = left + 1U; right < candidates.size(); ++right)
             if (competing(candidates[left], candidates[right])) {
                 result.selection_required = true;
-                return result;
+                return verified_result();
             }
     }
     std::set<std::string> identities;
@@ -151,7 +158,7 @@ Result<OpenResult> FormatRegistry::open(std::shared_ptr<const SourceSet> sources
             result.documents.push_back(std::move(document));
         }
     }
-    return result;
+    return verified_result();
 }
 
 } // namespace axk::native

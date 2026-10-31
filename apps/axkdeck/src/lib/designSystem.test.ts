@@ -27,7 +27,7 @@ const sources = readdirSync(resolve('src'), { recursive: true })
     .map((path) => {
         const source = readFileSync(resolve('src', path), 'utf8');
         const ast = parse(path.endsWith('.css') ? `<style>${source}</style>` : source, { modern: true });
-        return { path, source, declarations: declarations(ast.css) };
+        return { path, source, ast, declarations: declarations(ast.css) };
     });
 const definitions = new Map(
     sources.flatMap((source) => source.declarations.map((entry) => [entry.property, entry.value])),
@@ -35,6 +35,44 @@ const definitions = new Map(
 const app = sources.find((source) => source.path === 'app.css')!.source;
 
 describe('design system contract', () => {
+    it('routes all view tabs through TabStrip instead of bespoke tab markup and CSS', () => {
+        function tabRoles(node: unknown): number {
+            if (!node || typeof node !== 'object') return 0;
+            const entry = node as Record<string, unknown>;
+            if (entry.type === 'Attribute' && entry.name === 'role')
+                return /"(?:data|value)":"(?:tab|tablist)"/.test(JSON.stringify(entry.value)) ? 1 : 0;
+            return Object.values(entry).reduce<number>(
+                (count, child) =>
+                    count +
+                    (Array.isArray(child) ? child.reduce((sum, value) => sum + tabRoles(value), 0) : tabRoles(child)),
+                0,
+            );
+        }
+        const bespoke = sources
+            .filter(({ path }) => !path.startsWith('test/') && path !== 'lib/components/TabStrip.svelte')
+            .filter(
+                ({ source, ast, declarations }) =>
+                    tabRoles(ast) > 0 ||
+                    /EditorTabs\.svelte/.test(source) ||
+                    declarations.some(({ states }) => /workspace-tabs|editor-tabs|tab-strip/.test(states)),
+            )
+            .map(({ path }) => path);
+        expect(bespoke).toEqual([]);
+        for (const path of [
+            'StartupShell.svelte',
+            'features/devices/a-series/Presentation.svelte',
+            'features/devices/tx16w/Presentation.svelte',
+            'features/devices/a-series/sample/SampleNavigation.svelte',
+            'features/devices/a-series/sample/SampleEditor.svelte',
+            'features/devices/a-series/program/ProgramEditor.svelte',
+            'features/object-editor/DeviceEditorHost.svelte',
+            'features/object-editor/ParameterGroups.svelte',
+            'features/dialogs/SourceTabs.svelte',
+            'lib/components/ObjectEditor.svelte',
+        ])
+            expect(sources.find((source) => source.path === path)?.source, path).toContain('<TabStrip');
+    });
+
     it('resolves semantic color and typography names without obsolete aliases', () => {
         const unresolved = sources.flatMap(({ path, declarations }) =>
             declarations.flatMap(({ value }) =>

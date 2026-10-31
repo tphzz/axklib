@@ -1,5 +1,6 @@
 import { selectValue, openSelect, controlValue } from './select-control.mjs';
 import { exerciseCreate } from './create-dialog-check.mjs';
+import { checkSourceTabTransitions } from './source-tab-transitions.mjs';
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -308,6 +309,7 @@ try {
             results.push({ width, mode, geometry, passed: true });
             await page.close();
         }
+    results.push(...await checkSourceTabTransitions(browser, `http://127.0.0.1:${port}`, output));
 } finally {
     clearTimeout(deadline);
     process.removeListener('SIGTERM', signal);

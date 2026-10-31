@@ -6,6 +6,7 @@ import { createServer as socketServer } from 'node:net';
 import { pathToFileURL } from 'node:url';
 import { createServer } from 'vite';
 import { checkNativeCollectionParity } from './native-collection-parity.mjs';
+import { checkWorkspaceTabUnderline } from './workspace-tab-underline.mjs';
 
 const { chromium } = await import(
     process.env.PLAYWRIGHT_MODULE ? pathToFileURL(process.env.PLAYWRIGHT_MODULE).href : 'playwright'
@@ -94,6 +95,7 @@ try {
         await selector.waitFor({ state: 'visible' });
         assert.equal(await selector.evaluate((node) => getComputedStyle(node).colorScheme), 'dark');
         const tabs = page.getByRole('navigation', { name: 'Workspace views' });
+        const tabUnderline = await checkWorkspaceTabUnderline(tabs, 'TX16W workspace');
         assert.deepEqual(
             await tabs.locator('button').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('aria-label'))),
             ['Performances', 'Voices', 'Timbres', 'Waves', 'Setups'],
@@ -387,7 +389,7 @@ try {
         await waveRow.scrollIntoViewIfNeeded();
         await page.screenshot({ path: resolve(output, `native-${width}-${scale}.png`) });
         assert.deepEqual(errors, []);
-        results.push({ width, scale, passed: true, geometry, collectionParity, waveGeometry, inspectorTypography });
+        results.push({ width, scale, passed: true, geometry, tabUnderline, collectionParity, waveGeometry, inspectorTypography });
         await page.close();
     }
 } catch (error) {

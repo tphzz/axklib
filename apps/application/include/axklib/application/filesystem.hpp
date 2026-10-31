@@ -131,7 +131,8 @@ class SandboxTree {
     [[nodiscard]] std::span<const SandboxTreeEntry> entries() const noexcept;
     [[nodiscard]] std::string revision() const;
     [[nodiscard]] Result<OpenedSandboxTreeFile> open_file(std::size_t index) const;
-    [[nodiscard]] Result<void> verify_same_tree(const SandboxTree &current) const;
+    [[nodiscard]] Result<void> verify_same_tree(const SandboxTree &current,
+                                                const CancellationToken &cancellation = {}) const;
 
   private:
     struct Implementation;
@@ -150,7 +151,8 @@ class Sandbox {
     [[nodiscard]] std::vector<RootInfo> roots() const;
     [[nodiscard]] Result<SandboxFile> open_file(const FileRef &reference) const;
     [[nodiscard]] Result<std::shared_ptr<SandboxMutation>> open_mutation(const FileRef &reference) const;
-    [[nodiscard]] Result<SandboxTree> open_tree(const DirectoryRef &reference, const SandboxTreeLimits &limits) const;
+    [[nodiscard]] Result<SandboxTree> open_tree(const DirectoryRef &reference, const SandboxTreeLimits &limits,
+                                                const CancellationToken &cancellation = {}) const;
     [[nodiscard]] Result<void> publish_file(const FileRef &destination, bool overwrite,
                                             const axk::RandomAccessReader &source) const;
     [[nodiscard]] Result<std::filesystem::path> create_staging_directory(std::string_view purpose) const;

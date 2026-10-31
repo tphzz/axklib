@@ -23,6 +23,9 @@ Result<std::shared_ptr<const SourceSet>> SourceSet::create(std::vector<SourceMem
     for (const auto &member : members) {
         if (member.id.empty() || (!member.reader && member.roots.empty()) || !member_ids.insert(member.id).second)
             return std::unexpected(source_error("Source member identity or reader is missing or duplicated"));
+        if (static_cast<bool>(member.verify_member) != static_cast<bool>(member.verify_location))
+            return std::unexpected(
+                source_error("Mutable sources require both member and selected-location verification"));
         std::set<std::string> root_ids;
         for (const auto &root : member.roots) {
             if (root.id.empty() || root.kind.empty() || !root_ids.insert(root.id).second)
@@ -75,8 +78,8 @@ Result<std::vector<std::byte>> SourceSet::read(const SourceLocation &location,
     const auto member = std::ranges::find(members_, location.member_id, &SourceMember::id);
     if (member == members_.end())
         return std::unexpected(source_error("Source member does not exist"));
-    if (member->verify_unchanged) {
-        if (const auto verified = member->verify_unchanged(); !verified)
+    if (member->verify_location) {
+        if (const auto verified = member->verify_location(location, cancellation); !verified)
             return std::unexpected(verified.error());
     }
     auto source = reader(location);
@@ -99,10 +102,12 @@ Result<std::vector<std::byte>> SourceSet::read(const SourceLocation &location,
     }
     if (const auto active = cancellation.check(); !active)
         return std::unexpected(active.error());
-    if (member->verify_unchanged) {
-        if (const auto verified = member->verify_unchanged(); !verified)
+    if (member->verify_location) {
+        if (const auto verified = member->verify_location(location, cancellation); !verified)
             return std::unexpected(verified.error());
     }
+    if (const auto active = cancellation.check(); !active)
+        return std::unexpected(active.error());
     return bytes;
 }
 
@@ -110,12 +115,12 @@ Result<void> SourceSet::verify(const CancellationToken &cancellation) const {
     for (const auto &member : members_) {
         if (const auto active = cancellation.check(); !active)
             return std::unexpected(active.error());
-        if (member.verify_unchanged) {
-            if (const auto verified = member.verify_unchanged(); !verified)
+        if (member.verify_member) {
+            if (const auto verified = member.verify_member(cancellation); !verified)
                 return verified;
         }
     }
-    return {};
+    return cancellation.check();
 }
 
 } // namespace axk::native

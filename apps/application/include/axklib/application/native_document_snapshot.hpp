@@ -15,7 +15,7 @@ struct NativeDocumentSnapshot {
     std::uint64_t revision{};
     std::shared_ptr<const native::Document> document;
     // Retains source admission, but never the workspace's access mutex.
-    std::function<Result<void>()> verify_current;
+    std::function<Result<void>(const CancellationToken &)> verify_current;
 };
 
 } // namespace axk::app

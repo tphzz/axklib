@@ -2,6 +2,7 @@ import { selectValue } from './select-control.mjs';
 import assert from 'node:assert/strict';
 import { writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { checkWorkspaceTabUnderline } from './workspace-tab-underline.mjs';
 
 async function rowGeometry(row) {
     return row.evaluate((node) => {
@@ -220,6 +221,7 @@ export async function checkNativeCollectionParity(page, output, width, scale) {
         ['Setups', 'setup'],
     ]) {
         await tabs.getByRole('button', { name: label, exact: true }).click();
+        const underline = await checkWorkspaceTabUnderline(tabs, `TX16W ${label}`);
         const rows = collection.locator('[data-collection-object-id]');
         await rows.nth(39).waitFor({ state: 'attached' });
         const geometry = await rowGeometry(rows.first());
@@ -249,7 +251,7 @@ export async function checkNativeCollectionParity(page, output, width, scale) {
         assert.equal(await rows.count(), 0);
         await search.fill('');
         await rows.nth(39).waitFor({ state: 'attached' });
-        results.push({ kind, count: await rows.count(), geometry, longGeometry });
+        results.push({ kind, count: await rows.count(), geometry, longGeometry, underline });
     }
     await tabs.getByRole('button', { name: 'Performances', exact: true }).click();
     assert.equal(

@@ -242,8 +242,10 @@ axk::app::DownloadArchiveStore::create(std::string owner_id, const Sandbox &sand
             archive_error("archive_storage_unavailable", "download archive staging directory is not private"));
     std::vector<SourceEntry> entries;
     std::uint64_t archive_size = tar_block_size * 2U;
-    auto tree = sandbox.open_tree(source, {implementation_->maximum_entries, implementation_->maximum_archive_bytes,
-                                           implementation_->maximum_depth, implementation_->maximum_path_bytes});
+    auto tree = sandbox.open_tree(source,
+                                  {implementation_->maximum_entries, implementation_->maximum_archive_bytes,
+                                   implementation_->maximum_depth, implementation_->maximum_path_bytes},
+                                  cancellation);
     if (!tree)
         return std::unexpected(tree.error());
     if (progress) {

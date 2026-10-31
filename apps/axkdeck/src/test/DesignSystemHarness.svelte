@@ -111,7 +111,9 @@
     <section class="controls" aria-label="Fields and states">
         <label>Volume<input class="dialog-field-control" placeholder="Volume name" /></label>
         <div class="warning">Warning<span>Unknown ownership</span></div>
-        <div class="dialog-segmented-control"><button aria-pressed="true">Image</button><button>Device</button></div>
+        <div class="dialog-segmented-control" role="group" aria-label="Access">
+            <button aria-pressed="true">Read only</button><button aria-pressed="false">Read &amp; write</button>
+        </div>
         <label><input class="dialog-checkbox" type="checkbox" checked />Dialog mark</label>
     </section>
     <section aria-label="Collection states">

@@ -112,7 +112,8 @@ TEST(NativeSources, SupportsDirectoryMembersWithoutAnInventedRawReader) {
 TEST(NativeSources, VerifiesSourceIdentityBeforeAndAfterReading) {
     auto source = member("mutable");
     auto checks = std::make_shared<std::size_t>(0U);
-    source.verify_unchanged = [checks]() -> axk::Result<void> {
+    source.verify_member = [](const auto &) -> axk::Result<void> { return {}; };
+    source.verify_location = [checks](const auto &, const auto &) -> axk::Result<void> {
         if (++*checks >= 2U)
             return std::unexpected(axk::make_error(axk::ErrorCode::transaction_stale, axk::ErrorCategory::io,
                                                    "source changed during the read"));
@@ -126,6 +127,33 @@ TEST(NativeSources, VerifiesSourceIdentityBeforeAndAfterReading) {
     ASSERT_FALSE(read);
     EXPECT_EQ(read.error().code, axk::ErrorCode::transaction_stale);
     EXPECT_EQ(*checks, 2U);
+}
+
+TEST(NativeSources, RejectsPartialVerificationAndSeparatesMembershipFromSelectedReads) {
+    auto source = member("mutable");
+    std::size_t member_checks{};
+    std::size_t location_checks{};
+    source.verify_member = [&](const auto &cancellation) {
+        ++member_checks;
+        return cancellation.check();
+    };
+    EXPECT_FALSE(axk::native::SourceSet::create({source}));
+    source.verify_location = [&](const auto &location, const auto &cancellation) {
+        EXPECT_EQ(location.entry_id, "file");
+        ++location_checks;
+        return cancellation.check();
+    };
+    auto sources = axk::native::SourceSet::create({source});
+    ASSERT_TRUE(sources);
+    const auto location = (*sources)->locate("mutable", "fat", "file");
+    ASSERT_TRUE(location);
+    EXPECT_TRUE((*sources)->read(*location));
+    EXPECT_EQ(location_checks, 2U);
+    EXPECT_EQ(member_checks, 0U);
+    EXPECT_TRUE((*sources)->verify());
+    EXPECT_EQ(member_checks, 1U);
+    source.verify_member = {};
+    EXPECT_FALSE(axk::native::SourceSet::create({source}));
 }
 
 TEST(NativeSources, BoundsReadsToTheSelectedEntryAndChecksCancellation) {

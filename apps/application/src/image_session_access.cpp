@@ -90,7 +90,7 @@ axk::app::Result<axk::app::ImageSessionMutation> axk::app::ImageSessionManager::
     }
     if ((*session)->mutating)
         return std::unexpected(session_error("entry_in_use", "image session mutation is already active", true));
-    if (auto unchanged = (*member)->verify_unchanged(); !unchanged)
+    if (auto unchanged = (*member)->verify_unchanged({}); !unchanged)
         return std::unexpected(session_error("image_source_changed", "image source changed after it was opened", true));
     const auto source = (*member)->reference;
     Result<std::shared_ptr<MutationTarget>> target;
@@ -159,7 +159,7 @@ axk::app::ImageSessionManager::prepare_mutation_commit(std::string_view image_id
     ImageOpenSources request;
     for (const auto &source : session->sources.members) {
         if (source->id != session->mutation_member_id)
-            if (auto checked = source->verify_unchanged(); !checked)
+            if (auto checked = source->verify_unchanged(cancellation); !checked)
                 return std::unexpected(checked.error());
         request.sources.push_back(source->reference);
     }
@@ -176,7 +176,7 @@ axk::app::ImageSessionManager::prepare_mutation_commit(std::string_view image_id
         return std::unexpected(preserved.error());
     for (const auto &source : session->sources.members)
         if (source->id != session->mutation_member_id)
-            if (auto checked = source->verify_unchanged(); !checked)
+            if (auto checked = source->verify_unchanged(cancellation); !checked)
                 return std::unexpected(checked.error());
     opened->image_id = session->image_id;
     opened->revision = expected_revision + 1U;

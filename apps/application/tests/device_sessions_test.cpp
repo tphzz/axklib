@@ -746,8 +746,10 @@ TEST_F(DeviceSessions, ForegroundReadsVerifyOnceAndCancelAtTheNextPcmBoundary) {
     auto checks = provider->storage->read_binding_checks;
     ASSERT_TRUE(images.object_detail(target, "owner", object_id));
     EXPECT_EQ(provider->storage->read_binding_checks - checks, 1U);
+    checks = provider->storage->read_binding_checks;
     const auto audition = images.prepare_audition(target, "owner", {object_id}, image->revision);
     ASSERT_TRUE(audition);
+    EXPECT_EQ(provider->storage->read_binding_checks - checks, 1U);
     checks = provider->storage->read_binding_checks;
     EXPECT_TRUE(images.audition_metadata(audition->audition_id, "owner"));
     EXPECT_EQ(provider->storage->read_binding_checks, checks);
@@ -766,14 +768,19 @@ TEST_F(DeviceSessions, ForegroundReadsVerifyOnceAndCancelAtTheNextPcmBoundary) {
     EXPECT_EQ(interrupted.error().code, "operation_cancelled");
     EXPECT_EQ(pcm_reads, 1U);
     provider->storage->before_read = {};
+    checks = provider->storage->read_binding_checks;
     const auto complete = images.preview(target, "owner", object_id, 1024U, image->revision);
     ASSERT_TRUE(complete) << complete.error().message;
+    EXPECT_EQ(provider->storage->read_binding_checks - checks, 1U);
     ASSERT_EQ(complete->lanes.size(), 1U);
     ASSERT_EQ(complete->lanes.front().bins.size(), 1024U);
     for (const auto &bin : complete->lanes.front().bins) {
         EXPECT_EQ(bin.minimum, 0x1212);
         EXPECT_EQ(bin.maximum, 0x1212);
     }
+    checks = provider->storage->read_binding_checks;
+    EXPECT_TRUE(images.preview(target, "owner", object_id, 1024U, image->revision));
+    EXPECT_EQ(provider->storage->read_binding_checks - checks, 1U);
     EXPECT_EQ(provider->storage->writes, 0U);
     EXPECT_EQ(provider->storage->upgrades, 0U);
 }

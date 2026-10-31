@@ -5,7 +5,7 @@
     import type { EditorNavigation } from '../../../object-editor/navigation.svelte';
     import type { InspectorSelection, ProgramSampleSelectRow } from '../../../../lib/types';
     import EditorHeader from '../../../../lib/components/EditorHeader.svelte';
-    import EditorTabs from '../../../../lib/components/EditorTabs.svelte';
+    import TabStrip from '../../../../lib/components/TabStrip.svelte';
     import ProgramAssignments from './ProgramAssignments.svelte';
     import EditorChoice from '../../../object-editor/EditorChoice.svelte';
     import GraphPanel from '../../../object-editor/GraphPanel.svelte';
@@ -88,12 +88,14 @@
 </script>
 
 {#if pages.length}
-    <EditorHeader secondary>
-        <EditorTabs
-            secondary
+    <EditorHeader>
+        <TabStrip
+            semantics="navigation"
             tabs={pages}
             active={page?.id ?? ''}
-            onselect={(id) => (navigation.page = id)}
+            onselect={(id) => {
+                navigation.page = id;
+            }}
             label="Program subpages"
         />
         {#snippet tools()}<span class="editor-meta">{tab.label} · {pages.indexOf(page!) + 1} / {pages.length}</span
