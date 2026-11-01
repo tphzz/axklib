@@ -1180,7 +1180,11 @@ not establish A3000 Version 1 support. Container capacity does not determine
 whether its Samples or Sample Banks use a3k or a4k/a5k parameter storage.
 
 Empty large images are written with bounded metadata buffers and may be sparse
-when supported by the host filesystem. Object authoring retains prepared object
+when supported by the host filesystem. Windows output explicitly requests sparse
+storage before resizing; filesystems that cannot provide it retain normal dense
+allocation. The logical size and bytes are identical in either case. Copying a
+sparse image to storage that does not preserve holes can require its full logical
+size in free space. Object authoring retains prepared object
 payloads in memory, so dense manifests need memory proportional to their content;
 the empty-image memory regression is not a bound for densely populated images.
 

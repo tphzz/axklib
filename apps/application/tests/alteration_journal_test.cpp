@@ -13,6 +13,7 @@
 #include <gtest/gtest.h>
 
 #include "axklib/application/alteration_journal.hpp"
+#include "axklib/file_publication.hpp"
 #include "axklib/writer.hpp"
 
 namespace {
@@ -292,13 +293,19 @@ TEST(AlterationJournalStoreTest, AppliesAndRecoversTinyPatchesAboveFourGiB) {
     constexpr std::uint64_t image_size = 8ULL * 1024ULL * 1024ULL * 1024ULL;
     constexpr std::uint64_t patch_offset = 7ULL * 1024ULL * 1024ULL * 1024ULL + 123U;
     {
-        std::ofstream image{path, std::ios::binary};
-        image.seekp(static_cast<std::streamoff>(image_size - 1U));
-        image.put('\0');
-        image.seekp(static_cast<std::streamoff>(patch_offset));
-        image.write("AB", 2);
-        ASSERT_TRUE(image);
+        auto image = axk::detail::TemporaryPublication::create(path);
+        ASSERT_TRUE(image) << image.error().message;
+        const auto resized = image->resize(image_size);
+        ASSERT_TRUE(resized) << resized.error().message;
+        const std::array original{std::byte{'A'}, std::byte{'B'}};
+        const auto written = image->write_at(patch_offset, original);
+        ASSERT_TRUE(written) << written.error().message;
+        const auto flushed = image->flush();
+        ASSERT_TRUE(flushed) << flushed.error().message;
+        const auto published = image->publish(axk::detail::PublicationMode::create_only);
+        ASSERT_TRUE(published) << published.error().message;
     }
+    ASSERT_EQ(std::filesystem::file_size(path), image_size);
     auto sandbox = axk::app::Sandbox::create({{"workspace", "Workspace", root / "workspace", true}});
     ASSERT_TRUE(sandbox) << sandbox.error().message;
     const auto read_patch = [&]() {

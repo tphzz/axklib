@@ -4,6 +4,7 @@
 #include <cerrno>
 #include <cstring>
 #include <limits>
+#include <string>
 #include <string_view>
 #include <system_error>
 #include <utility>
@@ -16,6 +17,7 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#include <winioctl.h>
 #include <winternl.h>
 
 extern "C" NTSYSAPI NTSTATUS NTAPI NtSetInformationFile(HANDLE file_handle, PIO_STATUS_BLOCK io_status_block,
@@ -354,15 +356,23 @@ Result<void> TemporaryPublication::resize(std::uint64_t size) {
         return std::unexpected{
             make_error(ErrorCode::io_unsupported_size, ErrorCategory::io, "temporary output size is unsupported")};
     }
+    // Sparse storage is optional; unsupported filesystems retain ordinary dense output.
+    DWORD returned{};
+    static_cast<void>(DeviceIoControl(impl_->handle, FSCTL_SET_SPARSE, nullptr, 0U, nullptr, 0U, &returned, nullptr));
     LARGE_INTEGER position{};
     position.QuadPart = static_cast<LONGLONG>(size);
-    if (SetFilePointerEx(impl_->handle, position, nullptr, FILE_BEGIN) == 0 || SetEndOfFile(impl_->handle) == 0)
+    if (SetFilePointerEx(impl_->handle, position, nullptr, FILE_BEGIN) == 0 || SetEndOfFile(impl_->handle) == 0) {
+        const auto native_error = GetLastError();
+        return std::unexpected{make_error(ErrorCode::io_read_failed, ErrorCategory::io,
+                                          "could not resize temporary output to " + std::to_string(size) +
+                                              " bytes (Windows error " + std::to_string(native_error) + ")")};
+    }
 #else
     if (size > static_cast<std::uint64_t>(std::numeric_limits<off_t>::max()) ||
         ::ftruncate(impl_->descriptor, static_cast<off_t>(size)) != 0)
-#endif
         return std::unexpected{
             make_error(ErrorCode::io_read_failed, ErrorCategory::io, "could not resize temporary output")};
+#endif
     impl_->append_offset = size;
     return {};
 }

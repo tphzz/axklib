@@ -790,6 +790,9 @@ if(BUILD_TESTING)
     axk_core_tests
     PRIVATE axklib::audio axk_test_support GTest::gtest_main SndFile::sndfile
   )
+  if(WIN32)
+    target_compile_definitions(axk_core_tests PRIVATE NOMINMAX _WIN32_WINNT=0x0A00)
+  endif()
   if(UNIX)
     find_program(AXK_TEST_ISOINFO NAMES isoinfo)
     find_program(AXK_TEST_XORRISO NAMES xorriso)
