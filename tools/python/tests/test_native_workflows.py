@@ -62,22 +62,38 @@ def test_native_and_standalone_runs_share_complete_prerequisites() -> None:
     assert "cargo +1.85 fmt" in desktop
 
 
-@pytest.mark.parametrize("target", TARGETS)
-def test_host_queues_are_shared_without_cross_workflow_cancellation(target: str) -> None:
+@pytest.mark.parametrize("target", (*TARGETS, "macos"))
+def test_platform_callers_do_not_share_host_queues(target: str) -> None:
     native = workflow("native.yml")
     standalone = workflow(f"native-{target}.yml")
-    queue = standalone["jobs"]["native"]["concurrency"]
-    assert queue == native["jobs"][f"native-{target}"]["concurrency"]
-    assert queue["group"] == ("native-apple-silicon-host" if target.endswith("arm64") else "native-x64-host")
-    assert queue["cancel-in-progress"] == "false"
-    assert queue["queue"] == "max"
+    caller = "macos" if target == "macos" else "native"
+    full_caller = "macos" if target == "macos" else f"native-{target}"
+    assert "concurrency" not in standalone["jobs"][caller]
+    assert "concurrency" not in native["jobs"][full_caller]
+    assert standalone["concurrency"]["group"] == (
+        f"native-{target}-only-" + "${{ github.ref }}-${{ inputs.debug && 'debug' || 'release' }}"
+    )
     assert standalone["concurrency"]["cancel-in-progress"] == "false"
     assert standalone["concurrency"]["queue"] == "max"
-    assert target in standalone["concurrency"]["group"]
+
+
+def test_reusable_checks_and_builds_keep_caller_scoped_concurrency() -> None:
     platform = workflow("native-platform.yml")
     assert "${{ github.workflow }}" in platform["jobs"]["native"]["concurrency"]["group"]
     checks = workflow("native-checks.yml")
     assert all("${{ github.workflow }}" in job["concurrency"]["group"] for job in checks["jobs"].values())
+
+
+def test_full_workflow_and_release_keep_their_own_concurrency() -> None:
+    native = workflow("native.yml")
+    assert native["concurrency"] == {
+        "group": "native-workflow-${{ github.ref }}-${{ inputs.debug && 'debug' || 'release' }}",
+        "cancel-in-progress": "true",
+    }
+    assert native["jobs"]["draft-release"]["concurrency"] == {
+        "group": "native-draft-release",
+        "cancel-in-progress": "false",
+    }
 
 
 def test_full_release_gate_remains_transitive_over_all_targets() -> None:
@@ -90,7 +106,7 @@ def test_full_release_gate_remains_transitive_over_all_targets() -> None:
     assert jobs["draft-release"]["if"] == "${{ github.event_name == 'workflow_dispatch' && !inputs.debug }}"
 
 
-def test_all_extended_host_queues_use_valid_non_cancelling_concurrency() -> None:
+def test_all_extended_queues_use_valid_non_cancelling_concurrency() -> None:
     for path in (ROOT / ".github/workflows").glob("native*.yml"):
         value = workflow(path.name)
         sections = [value, *value["jobs"].values()]

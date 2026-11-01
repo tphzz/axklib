@@ -26,10 +26,6 @@ concurrency:
 jobs:
   macos:
     name: macOS
-    concurrency:
-      group: native-apple-silicon-host
-      cancel-in-progress: false
-      queue: max
     uses: ./.github/workflows/native-macos-platform.yml
     with:
       debug: ${{ inputs.debug }}

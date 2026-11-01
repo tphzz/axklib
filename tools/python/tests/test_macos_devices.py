@@ -38,21 +38,24 @@ def test_macos_only_workflow_reuses_native_jobs_without_publishing_a_partial_rel
     assert inputs["notarize_macos"]["default"] == "false"
 
 
-def test_shared_apple_host_queue_cannot_cancel_other_platform_work() -> None:
+def test_macos_queues_are_platform_scoped_and_preserve_signing_exclusion() -> None:
     native = workflow("native.yml")
     standalone = workflow("native-macos.yml")
     callers = [native["jobs"][name] for name in ("native-linux-arm64", "native-windows-arm64", "macos")]
     callers.append(standalone["jobs"]["macos"])
-    queues = [caller["concurrency"] for caller in callers]
-    assert all(queue == queues[0] for queue in queues)
-    assert queues[0] == {"group": "native-apple-silicon-host", "cancel-in-progress": "false", "queue": "max"}
+    assert all("concurrency" not in caller for caller in callers)
     shared = workflow("native-macos-platform.yml")
     assert shared["env"]["RUSTUP_TOOLCHAIN"] == "1.85"
     for job in shared["jobs"].values():
         assert job["runs-on"] == ["self-hosted", "macOS", "ARM64"]
-        assert job["concurrency"]["group"] != queues[0]["group"]
         assert job["concurrency"]["cancel-in-progress"] == "false"
-    assert shared["jobs"]["macos-universal"]["concurrency"]["group"] == "native-macos-signing"
+    assert shared["jobs"]["macos-slices"]["concurrency"]["group"] == (
+        "native-macos-slices-${{ github.ref }}-${{ inputs.debug && 'debug' || 'release' }}"
+    )
+    assert shared["jobs"]["macos-universal"]["concurrency"] == {
+        "group": "native-macos-signing",
+        "cancel-in-progress": "false",
+    }
 
 
 def test_macos_checks_packaged_device_capabilities_without_accessing_hardware() -> None:

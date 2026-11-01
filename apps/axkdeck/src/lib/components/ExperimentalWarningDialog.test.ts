@@ -9,6 +9,7 @@ describe('ExperimentalWarningDialog', () => {
         render(ExperimentalWarningDialog, { props: { onacknowledge } });
 
         const dialog = screen.getByRole('dialog', { name: 'Experimental software' });
+        const title = screen.getByRole('heading', { name: 'Experimental software' });
         const acknowledge = screen.getByRole('button', { name: 'I understand' });
         const displayedText = dialog.textContent?.replace(/\s+/g, ' ') ?? '';
 
@@ -16,7 +17,16 @@ describe('ExperimentalWarningDialog', () => {
         expect(displayedText).toContain('Back up disk images before making changes');
         expect(displayedText).toContain('not responsible for data loss');
         expect(screen.queryByRole('button', { name: 'Close' })).toBeNull();
-        await waitFor(() => expect(document.activeElement).toBe(acknowledge));
+        await waitFor(() => expect(document.activeElement).toBe(title));
+        expect(title.tabIndex).toBe(-1);
+        expect(acknowledge.hasAttribute('data-dialog-initial-focus')).toBe(false);
+
+        await fireEvent.keyDown(title, { key: 'Enter' });
+        await fireEvent.keyDown(title, { key: ' ' });
+        expect(onacknowledge).not.toHaveBeenCalled();
+
+        await fireEvent.keyDown(title, { key: 'Tab', shiftKey: true });
+        expect(document.activeElement).toBe(acknowledge);
 
         await fireEvent.keyDown(dialog, { key: 'Escape' });
         await fireEvent.click(dialog.parentElement!);

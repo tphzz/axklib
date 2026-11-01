@@ -18,9 +18,8 @@ on:
 permissions:
   contents: read
 
-# A manual dispatch should have one authoritative run per branch and release
-# mode. The platform lanes below serialize each host's workloads within that
-# run; this prevents overlapping workflow runs from making them appear parallel.
+# Keep one authoritative full run per branch and configuration. Dependencies
+# below sequence its platform lanes; standalone builds have independent queues.
 concurrency:
   group: native-workflow-${{ github.ref }}-${{ inputs.debug && 'debug' || 'release' }}
   cancel-in-progress: true
@@ -35,10 +34,6 @@ jobs:
   native-linux-x64:
     name: Linux x64
     needs: checks
-    concurrency:
-      group: native-x64-host
-      cancel-in-progress: false
-      queue: max
     uses: ./.github/workflows/native-platform.yml
     with:
       debug: ${{ inputs.debug }}
@@ -54,10 +49,6 @@ jobs:
   native-windows-x64:
     name: Windows x64
     needs: native-linux-x64
-    concurrency:
-      group: native-x64-host
-      cancel-in-progress: false
-      queue: max
     uses: ./.github/workflows/native-platform.yml
     with:
       debug: ${{ inputs.debug }}
@@ -74,10 +65,6 @@ jobs:
 
   native-linux-arm64:
     name: Linux ARM64
-    concurrency:
-      group: native-apple-silicon-host
-      cancel-in-progress: false
-      queue: max
     needs: checks
     uses: ./.github/workflows/native-platform.yml
     with:
@@ -93,10 +80,6 @@ jobs:
 
   native-windows-arm64:
     name: Windows ARM64
-    concurrency:
-      group: native-apple-silicon-host
-      cancel-in-progress: false
-      queue: max
     needs: native-linux-arm64
     uses: ./.github/workflows/native-platform.yml
     with:
@@ -115,10 +98,6 @@ jobs:
   macos:
     name: macOS
     needs: native-windows-arm64
-    concurrency:
-      group: native-apple-silicon-host
-      cancel-in-progress: false
-      queue: max
     uses: ./.github/workflows/native-macos-platform.yml
     with:
       debug: ${{ inputs.debug }}

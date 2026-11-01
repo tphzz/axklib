@@ -23,7 +23,7 @@
                 <span class="experimental-warning-icon" aria-hidden="true">
                     <Icon name="triangle-alert" size={17} />
                 </span>
-                <h2 id="experimental-warning-title">Experimental software</h2>
+                <h2 id="experimental-warning-title" tabindex="-1" data-dialog-initial-focus>Experimental software</h2>
             </div>
         </header>
 
@@ -39,9 +39,7 @@
         </div>
 
         <footer class="dialog-footer">
-            <button class="primary-button" type="button" data-dialog-initial-focus onclick={onacknowledge}>
-                I understand
-            </button>
+            <button class="primary-button" type="button" onclick={onacknowledge}> I understand </button>
         </footer>
     </div>
 </div>
@@ -49,6 +47,10 @@
 <style>
     .experimental-warning-dialog {
         width: min(480px, calc(100vw - 40px));
+    }
+
+    .experimental-warning-dialog h2 {
+        outline: none;
     }
 
     .experimental-warning-icon {

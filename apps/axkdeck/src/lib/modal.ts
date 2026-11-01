@@ -124,12 +124,18 @@ export function modal(node: HTMLElement, initialOptions: ModalOptions = {}) {
             node.focus();
             return;
         }
-        const first = focusable[0];
+        const first = focusable[0]!;
         const last = focusable.at(-1)!;
-        if (event.shiftKey && (document.activeElement === first || !node.contains(document.activeElement))) {
+        const focused = document.activeElement;
+        const beforeFirst =
+            focused === node ||
+            (focused instanceof HTMLElement &&
+                node.contains(focused) &&
+                (focused.compareDocumentPosition(first) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0);
+        if (event.shiftKey && (focused === first || beforeFirst || !node.contains(focused))) {
             event.preventDefault();
             last.focus();
-        } else if (!event.shiftKey && document.activeElement === last) {
+        } else if (!event.shiftKey && focused === last) {
             event.preventDefault();
             first.focus();
         }

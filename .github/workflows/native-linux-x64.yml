@@ -27,10 +27,6 @@ jobs:
   native:
     name: Linux x64
     needs: checks
-    concurrency:
-      group: native-x64-host
-      cancel-in-progress: false
-      queue: max
     uses: ./.github/workflows/native-platform.yml
     with:
       debug: ${{ inputs.debug }}

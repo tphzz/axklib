@@ -12,6 +12,63 @@ import { modal } from './modal';
 const appStyles = readFileSync(resolve(process.cwd(), 'src/app.css'), 'utf8');
 
 describe('modal', () => {
+    it('wraps reverse Tab from a non-tabbable initial title before the first control', async () => {
+        const dialog = document.createElement('div');
+        const title = document.createElement('h2');
+        title.tabIndex = -1;
+        title.dataset.dialogInitialFocus = '';
+        const first = document.createElement('button');
+        const last = document.createElement('button');
+        dialog.append(title, first, last);
+        document.body.append(dialog);
+        const action = modal(dialog);
+        try {
+            await Promise.resolve();
+            expect(document.activeElement).toBe(title);
+            const reverse = new KeyboardEvent('keydown', {
+                key: 'Tab',
+                shiftKey: true,
+                bubbles: true,
+                cancelable: true,
+            });
+            title.dispatchEvent(reverse);
+            expect(reverse.defaultPrevented).toBe(true);
+            expect(document.activeElement).toBe(last);
+            last.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }));
+            expect(document.activeElement).toBe(first);
+        } finally {
+            action.destroy();
+            dialog.remove();
+        }
+    });
+
+    it('does not wrap reverse Tab from a static reading anchor after the first control', async () => {
+        const dialog = document.createElement('div');
+        const first = document.createElement('button');
+        const readingAnchor = document.createElement('p');
+        readingAnchor.tabIndex = -1;
+        readingAnchor.dataset.dialogInitialFocus = '';
+        const last = document.createElement('button');
+        dialog.append(first, readingAnchor, last);
+        document.body.append(dialog);
+        const action = modal(dialog);
+        try {
+            await Promise.resolve();
+            const reverse = new KeyboardEvent('keydown', {
+                key: 'Tab',
+                shiftKey: true,
+                bubbles: true,
+                cancelable: true,
+            });
+            readingAnchor.dispatchEvent(reverse);
+            expect(reverse.defaultPrevented).toBe(false);
+            expect(document.activeElement).toBe(readingAnchor);
+        } finally {
+            action.destroy();
+            dialog.remove();
+        }
+    });
+
     it('does not let a synchronously closed nested Escape dismiss its parent as well', async () => {
         const parent = document.createElement('div');
         const child = document.createElement('div');
