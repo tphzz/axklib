@@ -10,6 +10,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(0);
 
+#[path = "identity_tests.rs"]
+mod identity_tests;
+
 #[test]
 fn missing_severity_is_a_logging_contract_error_with_bounded_original_text() {
     let text = "1790575200000 [stderr] plain output [INFO] filename";

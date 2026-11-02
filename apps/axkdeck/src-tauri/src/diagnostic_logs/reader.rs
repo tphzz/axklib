@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::SystemTime;
 
-use super::files::{Identity, ScanError, scan};
+use super::files::{Identity, ScanError, identity, scan};
 use super::records::{Entry, Filter, Source, parse_entry, starts_record};
 
 const MAX_FILE_BYTES: u64 = 8 * 1024 * 1024;
@@ -249,12 +249,32 @@ impl LogReader {
                 .map(|item| (item.path.clone(), item.identity))
                 .collect();
             if identities != current {
+                self.revalidate_open_identities(&opened)?;
                 continue;
             }
             *self = candidate;
             return Ok(());
         }
         Err("Log files rotated repeatedly during reading. Retry to load a consistent view.".into())
+    }
+
+    fn revalidate_open_identities(
+        &mut self,
+        opened: &[super::files::OpenedLog],
+    ) -> Result<(), String> {
+        for item in opened {
+            if let Some(cached) = self
+                .files
+                .iter_mut()
+                .find(|file| file.identity == item.identity)
+            {
+                // The live handle proves continuity. Keep only this identity update on failure,
+                // so later retries cannot reimport the same cached records under fresh IDs.
+                cached.identity = identity(&item.file)
+                    .map_err(|e| format!("Revalidate retained log identity: {e}"))?;
+            }
+        }
+        Ok(())
     }
 
     fn read_files(&mut self, opened: &mut [super::files::OpenedLog]) -> Result<(), String> {

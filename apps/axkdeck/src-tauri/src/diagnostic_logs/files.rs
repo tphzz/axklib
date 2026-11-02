@@ -9,14 +9,14 @@ use super::records::Source;
 pub struct Identity(u64, u128, u64);
 
 #[cfg(unix)]
-fn identity(file: &File) -> std::io::Result<Identity> {
+pub(super) fn identity(file: &File) -> std::io::Result<Identity> {
     use std::os::unix::fs::MetadataExt;
     let metadata = file.metadata()?;
     Ok(Identity(metadata.dev(), u128::from(metadata.ino()), 0))
 }
 
 #[cfg(windows)]
-fn identity(file: &File) -> std::io::Result<Identity> {
+pub(super) fn identity(file: &File) -> std::io::Result<Identity> {
     use std::os::windows::fs::MetadataExt;
     use std::os::windows::io::AsRawHandle;
     use windows_sys::Win32::Storage::FileSystem::{
