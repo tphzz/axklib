@@ -106,6 +106,27 @@ def test_full_release_gate_remains_transitive_over_all_targets() -> None:
     assert jobs["draft-release"]["if"] == "${{ github.event_name == 'workflow_dispatch' && !inputs.debug }}"
 
 
+def test_release_secret_is_step_scoped_and_artifact_filenames_are_not_merged() -> None:
+    native = workflow("native.yml")
+    job = native["jobs"]["draft-release"]
+    assert job["permissions"] == {"contents": "read", "actions": "read"}
+    assert "env" not in native and "env" not in job
+    release_steps = [step for step in job["steps"] if "prepare_release.py" in step.get("run", "")]
+    assert len(release_steps) == 1
+    assert release_steps[0]["env"]["GH_TOKEN"] == "${{ secrets.GH_TOKEN }}"
+    download = next(step for step in job["steps"] if step.get("name") == "Download release deliverables")
+    assert download["with"]["merge-multiple"] == "false"
+    for path in (ROOT / ".github/workflows").glob("*.yml"):
+        value = workflow(path.name)
+        for job_name, candidate in value["jobs"].items():
+            text = str(candidate)
+            if path.name != "native.yml" or job_name != "draft-release":
+                assert "GH_TOKEN" not in text and "prepare_release.py" not in text
+        source = path.read_text(encoding="utf-8")
+        assert "gh release" not in source and "git push" not in source
+        assert "${{ github.token }}" not in source
+
+
 def test_all_extended_queues_use_valid_non_cancelling_concurrency() -> None:
     for path in (ROOT / ".github/workflows").glob("native*.yml"):
         value = workflow(path.name)

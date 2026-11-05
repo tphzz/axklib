@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
+import shutil
 import subprocess
 import tarfile
 import zipfile
@@ -10,6 +12,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
 
 import version_metadata
+from release_package_validation import native_archive_entries, verify_desktop_package
 
 PLATFORMS = (
     "linux-x64",
@@ -55,9 +58,18 @@ class ArtifactMetadata:
 class DraftReleaseTarget:
     tag_name: str
     title: str
-    cleanup_tag: bool
-    verify_tag: bool
     prerelease: bool
+
+
+@dataclass(frozen=True)
+class ReleaseAsset:
+    path: Path
+    name: str
+    size: int
+    sha256: str
+
+    def inventory_entry(self) -> dict[str, str | int]:
+        return {"name": self.name, "size": self.size, "sha256": self.sha256}
 
 
 @dataclass(frozen=True)
@@ -130,39 +142,19 @@ def draft_release_target(
     if not ref_name or "\n" in ref_name or "\r" in ref_name:
         raise ValueError("GitHub ref name must be a non-empty single line")
     if ref_type == "branch":
-        tag_name = f"{ref_name}-preview"
-        return DraftReleaseTarget(tag_name, tag_name, True, False, True)
+        tag_name = f"snapshot/{ref_name}"
+        return DraftReleaseTarget(tag_name, tag_name, True)
     if ref_type == "tag":
         if not version.is_release or ref_name != version.release_tag:
             raise ValueError(
                 f"release tag must be {version.release_tag or '<none>'}, found {ref_name}"
             )
-        return DraftReleaseTarget(ref_name, ref_name, False, True, version.is_prerelease)
+        return DraftReleaseTarget(ref_name, ref_name, version.is_prerelease)
     raise ValueError(f"unsupported GitHub ref type: {ref_type or '<empty>'}")
 
 
-def _native_archive_entries(path: Path) -> set[str]:
-    if path.name.endswith(".zip"):
-        with zipfile.ZipFile(path) as archive:
-            names = {name.rstrip("/") for name in archive.namelist() if not name.endswith("/")}
-    elif path.name.endswith(".tar.gz"):
-        with tarfile.open(path, "r:gz") as archive:
-            names = {
-                member.name.removeprefix("./").rstrip("/")
-                for member in archive.getmembers()
-                if member.isfile() or member.issym()
-            }
-    else:
-        raise ValueError(f"unsupported native release archive: {path.name}")
-    if any(
-        PurePosixPath(name).is_absolute() or ".." in PurePosixPath(name).parts for name in names
-    ):
-        raise ValueError(f"native release archive contains an unsafe path: {path.name}")
-    return names
-
-
 def _verify_native_archive(path: Path, component: str) -> None:
-    names = _native_archive_entries(path)
+    names = native_archive_entries(path)
     if "LICENSE" not in names:
         raise ValueError(f"native release archive is missing LICENSE: {path.name}")
     if not any(name.startswith("licenses/") for name in names):
@@ -175,6 +167,10 @@ def _verify_native_archive(path: Path, component: str) -> None:
         raise ValueError(f"CLI archive is missing the axklib executable: {path.name}")
     elif any(name in {"bin/axklib-server", "bin/axklib-server.exe"} for name in names):
         raise ValueError(f"CLI archive contains the server: {path.name}")
+    windows = bool(re.search(r"-windows-(x64|arm64)(?:-debug)?\.zip$", path.name))
+    expected_binary = "bin/axklib.exe" if windows else "bin/axklib"
+    if expected_binary not in names:
+        raise ValueError(f"CLI archive has the wrong platform executable: {path.name}")
 
 
 def _component_archive_files(source_directory: Path, component: str) -> list[tuple[Path, str]]:
@@ -235,11 +231,14 @@ def package_native_component(
     return output
 
 
-def verify_release_assets(directory: Path) -> list[Path]:
+def verify_release_assets(directory: Path, *, allow_checksums: bool = False) -> list[Path]:
     if not directory.is_dir():
         raise ValueError(f"release asset directory does not exist: {directory}")
 
-    files = sorted(path for path in directory.iterdir() if path.is_file())
+    entries = sorted(directory.iterdir())
+    if any(path.is_symlink() or not path.is_file() for path in entries):
+        raise ValueError("every release asset must be a regular file")
+    files = [path for path in entries if not (allow_checksums and path.name == "SHA256SUMS")]
     expected: set[Path] = set()
     native_identities: set[str] = set()
     for platform, extension in RELEASE_ASSET_EXTENSIONS.items():
@@ -282,6 +281,7 @@ def verify_release_assets(directory: Path) -> list[Path]:
         package = packages[0]
         if package.stat().st_size == 0:
             raise ValueError(f"desktop release package is empty: {package.name}")
+        verify_desktop_package(package)
         identity = package.name[len(prefix) : -len(suffix)]
         if not re.fullmatch(r"[A-Za-z0-9.+_-]+(?:-[A-Za-z0-9.+_-]+)*", identity):
             raise ValueError(f"desktop release package has an invalid identity: {package.name}")
@@ -301,6 +301,75 @@ def verify_release_assets(directory: Path) -> list[Path]:
     if unexpected:
         raise ValueError(f"unexpected release assets: {unexpected}")
     return sorted(expected)
+
+
+def collect_release_artifacts(directory: Path, output_directory: Path) -> list[Path]:
+    if not directory.is_dir() or directory.is_symlink():
+        raise ValueError(f"release artifact directory does not exist: {directory}")
+    files: dict[str, Path] = {}
+    for bundle in sorted(directory.iterdir()):
+        if bundle.is_symlink() or not bundle.is_dir() or not bundle.name.startswith("release-"):
+            raise ValueError(f"unexpected release artifact bundle: {bundle.name}")
+        for path in sorted(bundle.iterdir()):
+            if path.name in files:
+                raise ValueError(f"duplicate release artifact filename: {path.name}")
+            if path.is_symlink() or not path.is_file():
+                raise ValueError(f"release artifact must be a regular file: {path}")
+            if path.name == "SHA256SUMS":
+                raise ValueError(
+                    "unexpected producer checksum file; checksums are generated after validation"
+                )
+            files[path.name] = path
+    if not files:
+        raise ValueError("no release artifacts were downloaded")
+    if output_directory.exists() and any(output_directory.iterdir()):
+        raise ValueError(f"release staging directory must be empty: {output_directory}")
+    output_directory.mkdir(parents=True, exist_ok=True)
+    for name, source in files.items():
+        shutil.copyfile(source, output_directory / name)
+    return sorted(output_directory / name for name in files)
+
+
+def describe_asset(path: Path) -> ReleaseAsset:
+    with path.open("rb") as stream:
+        digest = hashlib.file_digest(stream, "sha256").hexdigest()
+    return ReleaseAsset(path, path.name, path.stat().st_size, digest)
+
+
+def prepare_release_assets(
+    directory: Path,
+    *,
+    version: version_metadata.VersionMetadata,
+    ref_type: str,
+    ref_name: str,
+    commit: str,
+) -> list[ReleaseAsset]:
+    if not re.fullmatch(r"[0-9a-f]{40}", commit):
+        raise ValueError("release target must be a full built commit SHA")
+    draft_release_target(ref_type, ref_name, version)
+    paths = verify_release_assets(directory, allow_checksums=True)
+    cli = next(path for path in paths if path.name.endswith("-linux-x64.tar.gz"))
+    identity = cli.name.removeprefix("axklib-cli-").removesuffix("-linux-x64.tar.gz")
+    if ref_type == "tag":
+        valid = identity == version.semantic_version
+    else:
+        prefix = version.semantic_version if version.is_prerelease else sanitize_ref(ref_name)
+        abbreviation = identity.removeprefix(prefix + "-")
+        valid = (
+            identity.startswith(prefix + "-")
+            and bool(re.fullmatch(r"[0-9a-f]{7,40}", abbreviation))
+            and commit.startswith(abbreviation)
+        )
+    if not valid:
+        raise ValueError(f"release asset identity does not match the selected build: {identity}")
+    assets = [describe_asset(path) for path in paths]
+    checksum = directory / "SHA256SUMS"
+    checksum.write_text(
+        "".join(f"{asset.sha256}  {asset.name}\n" for asset in assets),
+        encoding="utf-8",
+        newline="\n",
+    )
+    return sorted([*assets, describe_asset(checksum)], key=lambda asset: asset.name)
 
 
 def parse_version_report(text: str) -> VersionReport:
@@ -373,8 +442,6 @@ def write_release_github_outputs(path: Path, target: DraftReleaseTarget) -> None
     with path.open("a", encoding="utf-8", newline="\n") as output:
         output.write(f"tag_name={target.tag_name}\n")
         output.write(f"title={target.title}\n")
-        output.write(f"cleanup_tag={str(target.cleanup_tag).lower()}\n")
-        output.write(f"verify_tag={str(target.verify_tag).lower()}\n")
         output.write(f"prerelease={str(target.prerelease).lower()}\n")
 
 

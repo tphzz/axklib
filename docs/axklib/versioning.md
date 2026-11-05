@@ -232,15 +232,104 @@ macOS DMG. `axklib-server` is shipped in those desktop installers rather than as
 a standalone release asset. The C++ library is distributed as source rather
 than as a prebuilt SDK archive. The Windows installers are currently unsigned;
 the full-platform workflow does not accept or retain exportable PFX signing
-credentials. GitHub displays the digest for each asset, so the workflow does
-not attach checksum or release-manifest sidecars. Branch
-`features/packages` targets the prerelease draft and generated tag
-`features/packages-preview`; a semantic-version tag build targets an
-unpublished release with that exact tag. Semantic-version prereleases are
-marked as GitHub prereleases. A matching draft is replaced by the next
-successful run. A matching published release is never deleted automatically
-and causes the workflow to fail. Debug builds remain available only as
-workflow artifacts.
+credentials. Before a release write, the helper validates all twelve packages,
+their shared build identity, archive contents and installer container headers.
+Native installer execution, dependency and signing checks remain in the
+platform jobs. It generates `SHA256SUMS` with one entry per package, excluding
+the checksum file itself. A complete new or refreshed draft has thirteen
+assets; no release-manifest sidecar is uploaded.
+
+A branch uses one replaceable prerelease draft with pending tag
+`snapshot/<exact-branch-name>` and the full built commit as its target.
+For example, branch `v0.6.0` uses `snapshot/v0.6.0`, while package filenames
+remain `axklib-cli-0.6.0-pre-<short-id>-<platform>.<extension>` and
+`axkdeck-0.6.0-pre-<short-id>-<platform>.<extension>`. Slashes and other branch
+characters remain unchanged in the pending tag; filename sanitization is
+separate. A Git tag build uses that exact tag spelling and its complete
+semantic version. Semantic-version prereleases are marked as GitHub
+prereleases. An existing release for that tag, whether draft or published,
+is preserved without changing its assets, notes or metadata. In particular,
+older published releases do not acquire a checksum file automatically.
+
+Preparation neither publishes a release nor creates, moves or deletes Git
+refs. A snapshot name is a pending release tag, not a generated Git tag.
+Published snapshots, conflicting snapshot Git refs, duplicate matching
+releases and unmigrated branch previews stop preparation for explicit manual
+reconciliation. Authentication and network errors are failures, never evidence
+that a release is absent. Release and asset lookup includes every API page.
+The workflow reports `created`, `refreshed` or `preserved` and the actual
+GitHub release URL. Debug builds remain available only as workflow artifacts.
+
+### Release Token
+
+The repository secret `GH_TOKEN` is required only on the release preparation
+step, as `GH_TOKEN: ${{ secrets.GH_TOKEN }}`. It must allow repository Contents
+write access. When the built commit differs from the default branch in
+`.github/workflows/`, GitHub also requires Workflows write access (or the
+`workflow` scope for a classic token). This applies to the current `v0.6.0`
+branch. The job's built-in token remains Contents read and Actions read;
+workflow `permissions:` does not grant privileges to the secret. The helper
+does not fall back to `github.token` or `GITHUB_TOKEN`, print token values or
+manage secrets. See [GitHub's release permissions](https://docs.github.com/en/rest/releases/releases#create-a-release).
+
+### Interrupted Preparation
+
+Branch refreshes keep the same draft ID and preserve human notes outside the
+managed preparation section. The section is marked **INCOMPLETE** before any
+asset upload. Incoming files use temporary names incorporating their digest;
+all incoming bytes are verified before a conflicting final filename can be
+removed. The helper promotes the checksum last, removes obsolete files, then
+checks every final filename, uploaded state, size and SHA-256 digest before
+marking the draft **COMPLETE**. The final inventory must contain exactly the
+twelve packages and `SHA256SUMS`.
+
+If a branch refresh fails or is cancelled, retry the full workflow. The helper
+repairs partial uploads, promotions and cleanup even when the commit is
+unchanged. It does not delete the branch draft. If someone published the
+snapshot or created a conflicting Git ref, resolve that conflict explicitly
+before retrying; preparation will not revert publication or change the ref.
+
+If initial tag preparation fails, cleanup may remove only the draft created
+by that invocation, verified by ID and its managed ownership marker. The Git
+tag is retained. A cancellation or failed cleanup may leave an incomplete
+draft. An ordinary tag rerun preserves that draft, so manual recovery is
+required:
+
+1. Use the failure summary's release URL and numeric ID. Inspect the release
+   and its managed `operation`, run, ref and commit fields; verify it is still
+   the failed invocation's unpublished draft.
+2. If that verification succeeds, delete only that release object by ID.
+   Never delete a pre-existing or published release, and retain its Git tag.
+3. Retry the full workflow for the original Git tag.
+
+For example, replace `NEW_DRAFT_ID` with the verified numeric ID:
+
+```bash
+gh api repos/tphzz/axklib/releases/NEW_DRAFT_ID
+# Only after verifying ownership and draft=true:
+gh api --method DELETE repos/tphzz/axklib/releases/NEW_DRAFT_ID
+```
+
+Do not use tag-cleanup flags or Git-ref deletion commands. If creation's outcome
+is unknown, inspect releases for the reported pending tag and operation marker
+before deciding which object, if any, belongs to the failed invocation.
+
+### One-Time Preview Migration
+
+This is a separate manual rollout action; implementing the helper does not
+modify existing GitHub releases. Before the next full branch build, inspect
+draft `431006702` (`v0.6.0-preview`). Confirm it remains unpublished, targets
+`8c783a71369a41768ae848830e06cc92c873fb3f`, and that no `snapshot/v0.6.0`
+release or conflicting Git ref exists. Edit that same draft's pending tag and
+title to `snapshot/v0.6.0`, retaining its ID, assets, notes, target and flags.
+Do not publish it. Leave historical `v0.5.1-preview` and all published releases
+and Git tags unchanged. If the observed state differs, reconcile it manually
+instead of creating another branch draft.
+
+The policy applies to refs containing these updated workflows and helpers.
+Existing Git tags retain their historical workflow definitions; their direct
+workflow reruns retain the old behavior. No historical-tag orchestration input
+is provided, and tags must not be moved to roll out this policy.
 
 For faster iterations, **10 Build - Windows x64**, **11 Build - Windows ARM64**,
 **13 Build - Linux x64** and **14 Build - Linux ARM64** each build one target,
@@ -249,7 +338,7 @@ Each first runs the shared architecture, release-tool and desktop-static checks.
 Select the source branch in **Run workflow** and leave **Debug** off for Release
 artifacts. These runs upload
 installers and CLI archives without creating or replacing a draft release.
-**00 Full - All Platforms** remains the only draft-release publisher.
+**00 Full - All Platforms** remains the only draft-release preparer.
 Windows device reconnection has a separate
 [read-only validation checklist](../windows-device-validation.md).
 

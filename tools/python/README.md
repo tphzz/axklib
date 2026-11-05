@@ -58,8 +58,34 @@ checking, and benchmark comparison are used by release workflows.
 `axk-release-metadata` validates generated Git source metadata, resolves the
 source-derived archive name for a platform and build configuration, and checks
 that a staged native CLI reports the expected commit and ref. It also resolves
-branch-preview and version-tag draft release targets and verifies the complete
-release asset set against its SHA-256 checksum files.
+`snapshot/<exact-branch-name>` and exact version-tag draft release targets.
+Release validation requires five CLI archives and seven axkdeck installers for
+one build identity, checks archive integrity and installer container headers,
+and generates `SHA256SUMS` for those twelve packages without including itself.
+
+`prepare_release.py` is the only GitHub release writer, invoked by the final
+job of **00 Full - All Platforms**. It uses `gh api` with the release step's
+`GH_TOKEN` from `secrets.GH_TOKEN`; neither the shared platform helpers nor
+standalone builds receive this secret. New tag releases are drafts; existing
+tag releases are preserved. Branch drafts keep their ID and full built commit
+target while uploads, promotion and obsolete-file cleanup run under a durable
+incomplete marker. Final inventory and SHA-256 verification must succeed before
+the marker becomes complete. Lookup is paginated and errors never mean absence.
+No Git refs are written and no release is published automatically.
+
+The CLI takes `--repository`, `--ref-type`, `--ref-name`, `--commit`,
+`--version-metadata-file`, `--artifacts-directory`, `--notes-file`, `--run-id`
+and `--run-attempt`. Its JSON result contains `status`, `release_id`,
+`tag_name`, `target_commit` and `html_url`; `--github-output` and
+`--github-step-summary` write the corresponding workflow report. Artifacts
+must be downloaded into separate `release-*` subdirectories in a fresh staging
+root so duplicate filenames cannot be silently overwritten. The helper checks
+the checkout matches the supplied full commit before release preparation.
+
+See [release token permissions, interruption recovery and manual preview
+migration](../../docs/axklib/versioning.md#release-token). A failed branch refresh
+is repaired by retry; an incomplete initial tag draft is preserved on rerun
+and may require ownership-checked deletion of only that draft by release ID.
 
 `native_configure.py` runs CI CMake configuration and permits one narrowly
 scoped retry when vcpkg reports a stale auxiliary-tool extraction directory.

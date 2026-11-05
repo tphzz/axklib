@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
 import re
 import shlex
@@ -11,6 +12,7 @@ import zipfile
 from pathlib import Path
 
 import pytest
+from test_release_assets import installer_bytes
 
 import generate_sbom
 import inspect_package
@@ -505,13 +507,11 @@ def test_release_metadata_shortens_only_exact_project_tag(tag: str) -> None:
 
 
 @pytest.mark.parametrize("tag_name", ["2.0.0", "v2.0.0"])
-def test_release_target_uses_preview_for_branches_and_preserves_tags(tag_name: str) -> None:
+def test_release_target_uses_snapshots_for_branches_and_preserves_tags(tag_name: str) -> None:
     branch = release_metadata.draft_release_target("branch", "features/packages", metadata())
     assert branch == release_metadata.DraftReleaseTarget(
-        tag_name="features/packages-preview",
-        title="features/packages-preview",
-        cleanup_tag=True,
-        verify_tag=False,
+        tag_name="snapshot/features/packages",
+        title="snapshot/features/packages",
         prerelease=True,
     )
     stable = metadata("2.0.0", "2.0.0", tag_name)
@@ -519,8 +519,6 @@ def test_release_target_uses_preview_for_branches_and_preserves_tags(tag_name: s
     assert tag == release_metadata.DraftReleaseTarget(
         tag_name=tag_name,
         title=tag_name,
-        cleanup_tag=False,
-        verify_tag=True,
         prerelease=False,
     )
     prerelease = metadata("2.1.0-beta.1", "2.1.0", "v2.1.0-beta.1", is_prerelease=True)
@@ -535,7 +533,7 @@ def write_native_archive(path: Path) -> None:
     files = {
         "LICENSE": b"project license",
         "licenses/dependency/copyright": b"dependency license",
-        "bin/axklib": b"executable",
+        "bin/axklib.exe" if "-windows-" in path.name else "bin/axklib": b"executable",
     }
 
     if path.suffix == ".zip":
@@ -543,17 +541,15 @@ def write_native_archive(path: Path) -> None:
             for name, contents in files.items():
                 archive.writestr(name, contents)
     else:
-        source = path.parent / f"{path.name}.contents"
-        for name, contents in files.items():
-            target = source / name
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(contents)
         with tarfile.open(path, "w:gz") as archive:
-            for item in sorted(source.rglob("*")):
-                archive.add(item, arcname=item.relative_to(source))
+            for name, contents in files.items():
+                entry = tarfile.TarInfo(name)
+                entry.size = len(contents)
+                archive.addfile(entry, io.BytesIO(contents))
 
 
-def test_cli_archive_is_compact_and_sdk_packaging_is_rejected(tmp_path: Path) -> None:
+@pytest.mark.parametrize("debug_suffix", ["", "-debug"])
+def test_cli_archive_is_compact_and_sdk_packaging_is_rejected(tmp_path: Path, debug_suffix: str) -> None:
     source = tmp_path / "install"
     (source / "bin").mkdir(parents=True)
     (source / "share/licenses/axklib").mkdir(parents=True)
@@ -567,7 +563,7 @@ def test_cli_archive_is_compact_and_sdk_packaging_is_rejected(tmp_path: Path) ->
     archive = release_metadata.package_native_component(
         source_directory=source,
         output_directory=tmp_path / "output",
-        artifact_stem="axklib-cli-main-a1b2c3d-windows-x64",
+        artifact_stem=f"axklib-cli-main-a1b2c3d-windows-x64{debug_suffix}",
         component="cli",
         archive_format="zip",
     )
@@ -600,7 +596,7 @@ def test_release_assets_require_exact_native_and_desktop_deliverables(tmp_path: 
 
     for platform, architecture, extension in release_metadata.DESKTOP_RELEASE_TARGETS:
         package = tmp_path / f"axkdeck-main-a1b2c3d-{platform}-{architecture}{extension}"
-        package.write_bytes(f"{platform}-{architecture}".encode())
+        package.write_bytes(installer_bytes(extension))
         assets.append(package)
 
     assert len(assets) == 12
@@ -619,7 +615,7 @@ def write_complete_release_asset_set(directory: Path) -> list[Path]:
     packages: list[Path] = []
     for platform, architecture, extension in release_metadata.DESKTOP_RELEASE_TARGETS:
         package = directory / f"axkdeck-main-a1b2c3d-{platform}-{architecture}{extension}"
-        package.write_bytes(b"installer")
+        package.write_bytes(installer_bytes(extension))
         packages.append(package)
     return packages
 
@@ -697,8 +693,8 @@ def test_native_workflow_is_manual_and_creates_only_release_drafts() -> None:
         assert f"  {job}:" in workflow
     assert workflow.count("uses: ./.github/workflows/native-platform.yml") == 4
     assert action_reference_count(workflow, "actions/download-artifact", "v8") == 3
-    assert "gh release create" in workflow
-    assert "--draft" in workflow
+    assert "python tools/python/prepare_release.py" in workflow
+    assert "GH_TOKEN: ${{ secrets.GH_TOKEN }}" in workflow
     assert "version_metadata.json" in workflow
     assert "axklib-sdk" not in workflow_with_platform
     assert "component sdk" not in workflow_with_platform
@@ -873,7 +869,7 @@ def test_native_workflow_builds_monorepo_desktop_packages_from_tested_servers() 
     assert "-DAXK_BUILD_SHARED_SDK=OFF" in native_platform
     assert "-DAXK_BUILD_SHARED_SDK=OFF" in macos_helper
     assert "pattern: release-*" in workflow
-    assert "SHA256SUMS" not in workflow
+    assert "SHA256SUMS" in workflow
     assert "combined Linux or Windows distribution" not in workflow
     assert "pnpm desktop:build -- --target universal-apple-darwin" in workflow
     for architecture in ("x86_64", "arm64"):
