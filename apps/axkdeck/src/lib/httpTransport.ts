@@ -26,6 +26,7 @@ import type {
     ImageSessionPackageExportDestination,
     ImageSessionVolumePackageExportDestination,
     ImageSessionVolumePackageExportInspection,
+    ImageSessionVolumePackageExportTarget,
     ImageSessionVolumeFloppyExportDestination,
     ImageSessionVolumeFloppyExportInspection,
     ImageSessionExportRoot,
@@ -277,10 +278,10 @@ export class HttpImageTransport extends HttpPackageTransport implements ImageTra
     }
     startImageVolumePackageExport(
         sessionId: number,
-        scopeId: string,
+        target: ImageSessionVolumePackageExportTarget,
         destination: ImageSessionVolumePackageExportDestination,
     ): Promise<JobState> {
-        return this.packages.startVolumePackageExport(sessionId, scopeId, destination);
+        return this.packages.startVolumePackageExport(sessionId, target, destination);
     }
     inspectImageVolumeFloppyExport(
         sessionId: number,

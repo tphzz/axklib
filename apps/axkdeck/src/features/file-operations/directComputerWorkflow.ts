@@ -122,8 +122,7 @@ export class DirectComputerWorkflow {
             return;
         }
         await this.run('volume-package-export', async () => {
-            await workflow.open(target);
-            if (workflow.request?.inspection) await workflow.toComputer(true);
+            await workflow.openToComputer(target);
         });
     }
 

@@ -140,6 +140,11 @@ export class ImageSessionWorkflow {
         this.status = status;
     }
 
+    get documentSnapshot(): Pick<OpenedImage, 'sessionId' | 'documentId' | 'revision'> | null {
+        if (this.sessionId === null) return null;
+        return { sessionId: this.sessionId, documentId: this.documentId, revision: this.revision };
+    }
+
     get activeLocation(): ImageLocation | null {
         const member = this.sources.find((source) => source.id === this.activeSourceMemberId);
         if (!member) return null;

@@ -159,6 +159,16 @@
         return directChoiceVisible('audio-export', Boolean(request.error));
     }
 
+    function volumePackageDialogVisible(): boolean {
+        const request = volumePackages.request;
+        if (!request || request.busy || request.picking || pickerRequest?.parentDialog === 'volume-package-export')
+            return false;
+        if (request.destinationFlow === 'DIRECT_COMPUTER') {
+            return request.loading || Boolean(request.error) || request.inspection?.exportableCount === 0;
+        }
+        return directChoiceVisible('volume-package-export', Boolean(request.error));
+    }
+
     const exportProgressVisibility = new DelayedExportProgressVisibility();
 
     function busyExportOperation(): ExportProgressOperation | null {
@@ -369,15 +379,18 @@
         oncancel={() => exports.closePackage()}
     />
 {/if}
-{#if volumePackages.request && !volumePackages.request.busy && pickerRequest?.parentDialog !== 'volume-package-export' && directChoiceVisible('volume-package-export', Boolean(volumePackages.request.error))}
+{#if volumePackages.request && volumePackageDialogVisible()}
     <VolumePackageExportDialog
         scopeName={volumePackages.request.scope.name}
         inspection={volumePackages.request.inspection}
         desktop={isDesktop}
+        destinationFlow={volumePackages.request.destinationFlow}
         loading={volumePackages.request.loading}
+        picking={volumePackages.request.picking}
         error={volumePackages.request.error}
         onworkspace={() => void volumePackages.toWorkspace()}
         onlocal={() => void volumePackages.toComputer()}
+        onretry={() => void volumePackages.retryToComputer()}
         oncancel={() => volumePackages.cancel()}
     />
 {/if}

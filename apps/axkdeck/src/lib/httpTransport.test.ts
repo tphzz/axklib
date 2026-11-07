@@ -3674,10 +3674,16 @@ describe('HttpImageTransport', () => {
             transport.inspectImageVolumePackageExport(opened.sessionId, 'content-partition-0'),
         ).resolves.toMatchObject({ exportableCount: 1, defaultDirectoryName: 'Partition 0 packages' });
         await expect(
-            transport.startImageVolumePackageExport(opened.sessionId, 'content-partition-0', {
-                kind: 'DOWNLOAD',
-                directoryName: 'Partition 0 packages',
-            }),
+            transport.startImageVolumePackageExport(
+                opened.sessionId,
+                {
+                    imageId: 'image-package',
+                    documentId: 'document-a-series-source-1',
+                    scopeId: 'content-partition-0',
+                    expectedRevision: 7,
+                },
+                { kind: 'DOWNLOAD', directoryName: 'Partition 0 packages' },
+            ),
         ).resolves.toMatchObject({ kind: 'images.volume_package_export', status: 'queued' });
         await expect(
             transport.inspectImageVolumeFloppyExport(opened.sessionId, 'content-partition-0'),

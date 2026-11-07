@@ -16,6 +16,7 @@ import type {
     ImageSessionPackageExportDestination,
     ImageSessionVolumePackageExportDestination,
     ImageSessionVolumePackageExportInspection,
+    ImageSessionVolumePackageExportTarget,
     ImageSessionVolumeFloppyExportDestination,
     ImageSessionVolumeFloppyExportInspection,
     ImageSessionExportRoot,
@@ -698,10 +699,10 @@ export class InMemoryImageTransport implements ImageTransport {
 
     startImageVolumePackageExport(
         sessionId: number,
-        scopeId: string,
+        target: ImageSessionVolumePackageExportTarget,
         destination: ImageSessionVolumePackageExportDestination,
     ): Promise<JobState> {
-        return this.invoke('startImageVolumePackageExport', [sessionId, scopeId, destination]);
+        return this.invoke('startImageVolumePackageExport', [sessionId, target, destination]);
     }
 
     inspectImageVolumeFloppyExport(

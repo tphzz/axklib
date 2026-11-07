@@ -345,6 +345,12 @@ export type ImageSessionVolumePackageExportDestination =
 export type ImageSessionVolumePackageExportInspection =
     components['schemas']['ImageSessionVolumePackageExportInspection'];
 export type ImageSessionVolumePackageExportResult = components['schemas']['ImageSessionVolumePackageExportResult'];
+export interface ImageSessionVolumePackageExportTarget {
+    readonly imageId: string;
+    readonly documentId: string;
+    readonly scopeId: string;
+    readonly expectedRevision: number;
+}
 export type ImageSessionAudioExportDestination = components['schemas']['ImageSessionAudioExportDestination'];
 export type ImageSessionAudioExportInspection = components['schemas']['ImageSessionAudioExportInspection'];
 export type ImageSessionAudioExportResult = components['schemas']['ImageSessionAudioExportResult'];
@@ -598,7 +604,7 @@ export interface ImageTransport
     ): Promise<ImageSessionVolumePackageExportInspection>;
     startImageVolumePackageExport(
         sessionId: number,
-        scopeId: string,
+        target: ImageSessionVolumePackageExportTarget,
         destination: ImageSessionVolumePackageExportDestination,
     ): Promise<JobState>;
     inspectImageVolumeFloppyExport(

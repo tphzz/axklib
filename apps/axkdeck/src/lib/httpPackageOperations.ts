@@ -1,4 +1,4 @@
-import { documentTarget } from './httpNativeDocuments';
+import { assertNativeDocumentCurrent, documentTarget } from './httpNativeDocuments';
 import type { components } from './generated/axklibApiV1';
 import type { CapacityPolicy } from './importCapacity';
 import type { FloppyPlanRequest, FloppyInputLocation } from './floppyImport';
@@ -15,6 +15,7 @@ import type {
     ImageSessionPackageExportDestination,
     ImageSessionVolumePackageExportDestination,
     ImageSessionVolumePackageExportInspection,
+    ImageSessionVolumePackageExportTarget,
     ImageSessionVolumeFloppyExportDestination,
     ImageSessionVolumeFloppyExportInspection,
     ImageSessionPackageImportPlan,
@@ -176,11 +177,12 @@ export class HttpPackageOperations {
         sessionId: number,
         scopeId: string,
     ): Promise<ImageSessionVolumePackageExportInspection> {
-        const session = this.imageSessions.get(sessionId);
+        const session = { ...this.imageSessions.get(sessionId) };
         const result = await this.client.invoke<ImageSessionVolumePackageExportInspection>(
             'images.volume_package_export.inspect',
             { ...documentTarget(session), expectedRevision: session.revision, scopeId },
         );
+        assertNativeDocumentCurrent(this.imageSessions.get(sessionId), session);
         if (this.jobs.isJob(result)) {
             throw new Error('images.volume_package_export.inspect unexpectedly returned a job');
         }
@@ -189,13 +191,20 @@ export class HttpPackageOperations {
 
     async startVolumePackageExport(
         sessionId: number,
-        scopeId: string,
+        target: ImageSessionVolumePackageExportTarget,
         destination: ImageSessionVolumePackageExportDestination,
     ): Promise<JobState> {
         const session = this.imageSessions.get(sessionId);
+        if (
+            session.remoteId !== target.imageId ||
+            session.documentId !== target.documentId ||
+            session.revision !== target.expectedRevision
+        ) {
+            throw new Error('The export source changed. Retry to inspect it again.');
+        }
         const job = await this.client.invoke<never>(
             'images.volume_package_export',
-            { ...documentTarget(session), expectedRevision: session.revision, scopeId, destination },
+            { ...target, destination },
             { idempotencyKey: randomIdempotencyKey() },
         );
         if (!this.jobs.isJob(job)) throw new Error('images.volume_package_export did not return a job');

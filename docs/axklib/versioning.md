@@ -255,7 +255,7 @@ Preparation neither publishes a release nor creates, moves or deletes Git
 refs. A snapshot name is a pending release tag, not a generated Git tag.
 Published snapshots, conflicting snapshot Git refs, duplicate matching
 releases and unmigrated branch previews stop preparation for explicit manual
-reconciliation. Authentication and network errors are failures, never evidence
+reconciliation. Authentication and network errors are failures; they do not mean
 that a release is absent. Release and asset lookup includes every API page.
 The workflow reports `created`, `refreshed` or `preserved` and the actual
 GitHub release URL. Debug builds remain available only as workflow artifacts.

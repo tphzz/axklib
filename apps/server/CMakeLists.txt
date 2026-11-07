@@ -128,6 +128,7 @@ add_library(
   src/server_transfer_responses.cpp
   src/server_workspace_responses.cpp
   src/state_lease.cpp
+  src/state_storage_paths.cpp
   src/telemetry.cpp
   src/transport.cpp
   src/workspaces.cpp

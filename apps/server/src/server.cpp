@@ -10,6 +10,7 @@
 #include "axklib/server/state_lease.hpp"
 #include "axklib/server/workspaces.hpp"
 #include "server_application.hpp"
+#include "state_storage_paths.hpp"
 
 axk::app::Result<int> axk::server::run(const Config &config, app::OperationRegistry registry) {
     try {
@@ -33,6 +34,8 @@ axk::app::Result<int> axk::server::run(const Config &config, app::OperationRegis
         if (path_error)
             return std::unexpected(app::Error{"server_state_unavailable", "state directory path is invalid"});
 
+        if (const auto paths = detail::validate_download_cache_paths(resolved_config); !paths)
+            return std::unexpected(paths.error());
         auto state_lease = StateNamespaceLease::acquire(
             {resolved_config.state_directory / ".axklib-server-owner.lock",
              resolved_config.workspace_store.parent_path() /

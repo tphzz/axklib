@@ -7,6 +7,7 @@
 #include <fstream>
 #include <span>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -88,6 +89,27 @@ TEST_F(DownloadArchiveStoreTest, CancellationDoesNotPublishOrReserveAnArchive) {
 
     const auto created = store.create("owner", *sandbox_, {"workspace", "exports"});
     ASSERT_TRUE(created) << created.error().message;
+}
+
+TEST_F(DownloadArchiveStoreTest, RemovesOrdinaryPrivateCacheDebrisAndExportsAfterRestart) {
+    const auto staging = root_ / "restart-cache";
+    {
+        axk::app::DownloadArchiveStore initialized{staging, 8192U, 8192U, 16U, std::chrono::seconds{30}};
+        ASSERT_TRUE(initialized.storage_ready());
+    }
+    for (const auto name : std::array<std::string_view, 3U>{"owner.lock", "unused.receipt", "unrecognized-cache-file"})
+        std::ofstream{staging / std::filesystem::path{name}} << "obsolete disposable cache data";
+
+    for (std::size_t restart = 0U; restart < 2U; ++restart) {
+        axk::app::DownloadArchiveStore store{staging, 8192U, 8192U, 16U, std::chrono::seconds{30}};
+        ASSERT_TRUE(store.storage_ready());
+        EXPECT_TRUE(std::filesystem::is_empty(staging));
+        const auto created = store.create("owner", *sandbox_, {"workspace", "exports"});
+        ASSERT_TRUE(created) << created.error().message;
+        EXPECT_EQ(created->entry_count, 3U);
+        EXPECT_TRUE(store.open(created->reference, "owner"));
+    }
+    EXPECT_TRUE(std::filesystem::exists(root_ / "exports/alpha.txt"));
 }
 
 TEST_F(DownloadArchiveStoreTest, ArchivesOnlyPrivateServerOwnedDirectoriesWithAnExplicitFilename) {
@@ -192,6 +214,10 @@ TEST_F(DownloadArchiveStoreTest, EnforcesEntryByteAndRetentionLimitsWithoutLeavi
 
 TEST_F(DownloadArchiveStoreTest, FailsClosedWhenAStartupLeftoverCannotBeRemoved) {
     const auto staging = root_ / "startup-leftover";
+    {
+        axk::app::DownloadArchiveStore initialized{staging, 4096U, 4096U, 4U, std::chrono::seconds{5}};
+        ASSERT_TRUE(initialized.storage_ready());
+    }
     std::filesystem::create_directories(staging / "stale.tar");
     std::ofstream{staging / "stale.tar/payload"} << "data";
 
@@ -201,7 +227,55 @@ TEST_F(DownloadArchiveStoreTest, FailsClosedWhenAStartupLeftoverCannotBeRemoved)
     const auto created = store.create("owner", *sandbox_, {"workspace", "exports"});
     ASSERT_FALSE(created);
     EXPECT_EQ(created.error().code, "archive_storage_unavailable");
+    EXPECT_NE(created.error().message.find("non-regular"), std::string::npos);
+    EXPECT_TRUE(std::filesystem::exists(staging / "stale.tar/payload"));
 }
+
+#if !defined(_WIN32)
+TEST_F(DownloadArchiveStoreTest, RejectsCacheSymlinksWithoutTouchingTheirTargets) {
+    const auto staging = root_ / "symlink-cache";
+    {
+        axk::app::DownloadArchiveStore initialized{staging, 8192U, 8192U, 16U, std::chrono::seconds{30}};
+        ASSERT_TRUE(initialized.storage_ready());
+    }
+    const auto outside = root_ / "outside.txt";
+    std::ofstream{outside} << "keep";
+    std::filesystem::create_symlink(outside, staging / "linked.tar");
+    axk::app::DownloadArchiveStore rejected{staging, 8192U, 8192U, 16U, std::chrono::seconds{30}};
+    EXPECT_FALSE(rejected.storage_ready());
+    EXPECT_EQ(std::filesystem::file_size(outside), 4U);
+    EXPECT_TRUE(std::filesystem::is_symlink(staging / "linked.tar"));
+}
+
+TEST_F(DownloadArchiveStoreTest, DoesNotRepairOrCleanAnOverPermissiveCache) {
+    const auto staging = root_ / "public-cache";
+    std::filesystem::create_directory(staging);
+    const auto mode = std::filesystem::perms::owner_all | std::filesystem::perms::group_read;
+    std::filesystem::permissions(staging, mode, std::filesystem::perm_options::replace);
+    std::ofstream{staging / "keep"} << "keep";
+    axk::app::DownloadArchiveStore rejected{staging, 8192U, 8192U, 16U, std::chrono::seconds{30}};
+    EXPECT_FALSE(rejected.storage_ready());
+    EXPECT_EQ(std::filesystem::status(staging).permissions() & std::filesystem::perms::all, mode);
+    EXPECT_TRUE(std::filesystem::exists(staging / "keep"));
+}
+#else
+TEST_F(DownloadArchiveStoreTest, ReportsCacheRemovalFailureWithoutDeclaringStorageReady) {
+    const auto staging = root_ / "readonly-cache";
+    {
+        axk::app::DownloadArchiveStore initialized{staging, 8192U, 8192U, 16U, std::chrono::seconds{30}};
+        ASSERT_TRUE(initialized.storage_ready());
+    }
+    const auto retained = staging / "locked.download";
+    std::ofstream{retained} << "keep";
+    std::filesystem::permissions(retained, std::filesystem::perms::owner_read);
+    axk::app::DownloadArchiveStore rejected{staging, 8192U, 8192U, 16U, std::chrono::seconds{30}};
+    const auto result = rejected.retain("owner", "test.bin", "application/octet-stream", {});
+    std::filesystem::permissions(retained, std::filesystem::perms::owner_all);
+    EXPECT_FALSE(rejected.storage_ready());
+    ASSERT_FALSE(result);
+    EXPECT_NE(result.error().message.find("cannot be removed"), std::string::npos);
+}
+#endif
 
 TEST_F(DownloadArchiveStoreTest, RetainsExpiredArchiveAndQuotaWhenRemovalFails) {
     auto now = std::chrono::steady_clock::now();

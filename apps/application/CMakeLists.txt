@@ -7,7 +7,7 @@ find_package(OpenSSL REQUIRED COMPONENTS Crypto)
 find_package(unofficial-hash-library CONFIG REQUIRED)
 find_package(ICU REQUIRED COMPONENTS i18n uc)
 
-add_library(axk_application STATIC src/alteration_journal.cpp src/alteration_journal_io.cpp src/application_operations.cpp src/audio_export_layout.cpp src/audio_operations.cpp src/audition_operations.cpp src/content_digest.cpp src/content_id.cpp src/corpus_audit_operations.cpp src/directory_archive_operations.cpp src/download_archives.cpp
+add_library(axk_application STATIC src/alteration_journal.cpp src/alteration_journal_io.cpp src/application_operations.cpp src/audio_export_layout.cpp src/audio_operations.cpp src/audition_operations.cpp src/content_digest.cpp src/content_id.cpp src/corpus_audit_operations.cpp src/directory_archive_operations.cpp src/download_archives.cpp src/download_archive_storage.cpp
                                    src/extraction_operations.cpp src/extraction_selection.cpp
                                    src/file_coverage_operations.cpp src/file_coverage_support.cpp
                                    src/file_info_operations.cpp src/file_inventory_operations.cpp
@@ -114,7 +114,7 @@ target_link_libraries(
   PRIVATE axklib::profile_tx16w_to_a_series OpenSSL::Crypto unofficial::hash-library ICU::i18n ICU::uc
 )
 if(WIN32)
-  target_compile_definitions(axk_application PRIVATE _WIN32_WINNT=0x0A00)
+  target_compile_definitions(axk_application PRIVATE NOMINMAX _WIN32_WINNT=0x0A00)
   target_link_libraries(axk_application PRIVATE advapi32 bcrypt ntdll)
 endif()
 axk_set_project_warnings(axk_application)

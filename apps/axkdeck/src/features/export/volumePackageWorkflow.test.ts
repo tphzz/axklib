@@ -55,7 +55,7 @@ describe('VolumePackageExportWorkflow', () => {
             jobs: { run } as never,
             picker: { chooseLocation } as never,
             isDesktop: false,
-            sessionId: () => 12,
+            session: () => ({ sessionId: 12, documentId: 'document-one', revision: 4 }),
             setStatus,
         });
         const scope = {
@@ -77,10 +77,11 @@ describe('VolumePackageExportWorkflow', () => {
             'Partition 1 packages',
             expect.objectContaining({ parentDialog: 'volume-package-export', requireWritableDirectory: true }),
         );
-        expect(start).toHaveBeenCalledWith(12, 'partition-one', {
-            kind: 'WORKSPACE',
-            output: { rootId: 'workspace', relativePath: 'exports/Partition 1 packages' },
-        });
+        expect(start).toHaveBeenCalledWith(
+            12,
+            { imageId: 'image-one', documentId: 'document-one', scopeId: 'partition-one', expectedRevision: 4 },
+            { kind: 'WORKSPACE', output: { rootId: 'workspace', relativePath: 'exports/Partition 1 packages' } },
+        );
         expect(setStatus).toHaveBeenLastCalledWith('Exported 1 volume package; 1 recorded in the report');
         expect(workflow.request).toBeNull();
     });

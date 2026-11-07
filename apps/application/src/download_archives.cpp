@@ -14,6 +14,7 @@
 
 #include "axklib/application/secure_random.hpp"
 #include "axklib/utf8.hpp"
+#include "download_archive_storage.hpp"
 #include "private_storage.hpp"
 
 namespace {
@@ -140,6 +141,7 @@ struct axk::app::DownloadArchiveStore::Implementation {
     Clock clock;
     std::uint64_t reserved_bytes{};
     bool storage_ready{};
+    std::string storage_error;
     std::mutex mutex;
     std::unordered_map<std::string, Entry> entries;
 
@@ -199,29 +201,10 @@ axk::app::DownloadArchiveStore::DownloadArchiveStore(std::filesystem::path stagi
                                                      Clock clock)
     : implementation_(
           std::make_shared<Implementation>(std::move(staging_directory), limits, retention, std::move(clock))) {
-    std::error_code error;
-    const auto prepared = detail::prepare_private_directory(implementation_->staging_directory);
+    const auto prepared = detail::prepare_download_archive_storage(implementation_->staging_directory);
     implementation_->storage_ready = prepared.has_value();
-    if (prepared) {
-        for (const auto &entry : std::filesystem::directory_iterator{implementation_->staging_directory, error}) {
-            if (error)
-                break;
-            const auto extension = entry.path().extension();
-            const auto recognized = extension == ".tar" || extension == ".download" || extension == ".part";
-            if (!recognized || !entry.is_regular_file(error)) {
-                implementation_->storage_ready = false;
-                break;
-            }
-            if (!std::filesystem::remove(entry.path(), error) || error) {
-                implementation_->storage_ready = false;
-                break;
-            }
-            if (error)
-                break;
-        }
-    }
-    if (error)
-        implementation_->storage_ready = false;
+    if (!prepared)
+        implementation_->storage_error = prepared.error().message;
 }
 
 axk::app::DownloadArchiveStore::~DownloadArchiveStore() = default;
@@ -238,8 +221,7 @@ axk::app::DownloadArchiveStore::create(std::string owner_id, const Sandbox &sand
     if (owner_id.empty())
         return std::unexpected(archive_error("invalid_archive_request", "download archive owner is required"));
     if (!implementation_->storage_ready)
-        return std::unexpected(
-            archive_error("archive_storage_unavailable", "download archive staging directory is not private"));
+        return std::unexpected(archive_error("archive_storage_unavailable", implementation_->storage_error));
     std::vector<SourceEntry> entries;
     std::uint64_t archive_size = tar_block_size * 2U;
     auto tree = sandbox.open_tree(source,
@@ -457,8 +439,7 @@ axk::app::DownloadArchiveStore::retain(std::string owner_id, std::string filenam
     if (owner_id.empty() || filename.empty() || media_type.empty())
         return std::unexpected(archive_error("invalid_archive_request", "retained download metadata is required"));
     if (!implementation_->storage_ready)
-        return std::unexpected(
-            archive_error("archive_storage_unavailable", "download archive staging directory is not private"));
+        return std::unexpected(archive_error("archive_storage_unavailable", implementation_->storage_error));
     if (content.size() > implementation_->maximum_archive_bytes)
         return std::unexpected(
             archive_error("download_archive_too_large", "retained download exceeds the configured limit"));
@@ -532,8 +513,7 @@ axk::app::DownloadArchiveStore::retain_owned_file(std::string owner_id, const st
         return std::unexpected(archive_error("invalid_archive_request", "retained download metadata is invalid"));
     }
     if (!implementation_->storage_ready)
-        return std::unexpected(
-            archive_error("archive_storage_unavailable", "download archive staging directory is not private"));
+        return std::unexpected(archive_error("archive_storage_unavailable", implementation_->storage_error));
 
     std::error_code status_error;
     const auto source_status = std::filesystem::symlink_status(source, status_error);

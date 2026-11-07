@@ -6,9 +6,8 @@ fn cancellation_reaches_pending_and_active_saves_without_affecting_other_candida
     store.insert("first".into(), PathBuf::from("first"));
     store.insert("second".into(), PathBuf::from("second"));
     store.cancel("first");
-    let (path, first) = store.begin("first").unwrap();
-    assert_eq!(path, PathBuf::from("first"));
-    assert_eq!(first.check().unwrap_err(), "Directory export cancelled");
+    assert!(!store.values.contains_key("first"));
+    assert!(store.begin("first").is_err());
     let (_, second) = store.begin("second").unwrap();
     assert!(second.check().is_ok());
     assert!(store.begin("second").is_err());

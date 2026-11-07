@@ -127,7 +127,7 @@
         jobs: jobController,
         picker: pickerController,
         isDesktop,
-        sessionId: () => imageSessionWorkflow.sessionId,
+        session: () => imageSessionWorkflow.documentSnapshot,
         setStatus: (status) => imageSessionWorkflow.setStatus(status),
     });
     const volumeFloppyExportWorkflow = new VolumeFloppyExportWorkflow({

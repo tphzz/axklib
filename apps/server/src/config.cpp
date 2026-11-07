@@ -17,6 +17,7 @@
 #include "axklib/application/secure_random.hpp"
 #include "axklib/writer.hpp"
 #include "environment.hpp"
+#include "state_storage_paths.hpp"
 
 namespace {
 
@@ -602,5 +603,5 @@ axk::app::Result<void> axk::server::validate_config(const Config &config) {
     }
     if (!config.workspace_store.empty() && !config.workspace_store.is_absolute())
         return std::unexpected(argument_error("workspace store path must be absolute"));
-    return {};
+    return detail::validate_download_cache_paths(config);
 }

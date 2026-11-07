@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
@@ -470,5 +471,79 @@ TEST(ServerConfig, RejectsInsecureRemoteOverrideInSidecarMode) {
     ASSERT_FALSE(parsed);
     EXPECT_NE(parsed.error().message.find("--allow-insecure-remote-http"), std::string::npos);
 }
+
+TEST(ServerConfig, RejectsPersistentMetadataInsideDisposableDownloadCache) {
+    axk::server::Config config;
+    config.bearer_token = "0123456789abcdef";
+    config.state_directory = std::filesystem::temp_directory_path() / "axklib-cache-overlap-test";
+    config.workspace_store = config.state_directory / "download-archives/workspaces.json";
+
+    const auto rejected = axk::server::validate_config(config);
+    ASSERT_FALSE(rejected);
+    EXPECT_NE(rejected.error().message.find("download cache"), std::string::npos);
+}
+
+TEST(ServerConfig, RejectsConnectionMetadataInsideDisposableDownloadCache) {
+    axk::server::Config config;
+    config.bearer_token = "0123456789abcdef";
+    config.state_directory = std::filesystem::temp_directory_path() / "axklib-cache-overlap-test";
+    config.connection_file = config.state_directory / "download-archives/connection.json";
+
+    const auto rejected = axk::server::validate_config(config);
+    ASSERT_FALSE(rejected);
+    EXPECT_NE(rejected.error().message.find("download cache"), std::string::npos);
+}
+
+class DownloadCacheConfigTest : public testing::Test {
+  protected:
+    void SetUp() override {
+        root_ = std::filesystem::temp_directory_path() /
+                ("axklib-cache-paths-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        std::filesystem::create_directories(root_ / "state/download-archives");
+        config_.bearer_token = "0123456789abcdef";
+        config_.state_directory = root_ / "state";
+    }
+    void TearDown() override { std::filesystem::remove_all(root_); }
+    std::filesystem::path root_;
+    axk::server::Config config_;
+};
+
+TEST_F(DownloadCacheConfigTest, AllowsSiblingMetadataWithoutChangingIt) {
+    config_.workspace_store = root_ / "state/download-archives-sibling.json";
+    std::ofstream{config_.workspace_store} << "keep";
+    ASSERT_TRUE(axk::server::validate_config(config_));
+    EXPECT_EQ(std::filesystem::file_size(config_.workspace_store), 4U);
+}
+
+#if !defined(_WIN32)
+TEST_F(DownloadCacheConfigTest, RejectsMetadataReachedThroughACacheAlias) {
+    const auto cache = root_ / "state/download-archives";
+    std::ofstream{cache / "metadata.json"} << "keep";
+    std::filesystem::create_directory_symlink(cache, root_ / "alias");
+    config_.workspace_store = root_ / "alias/metadata.json";
+    const auto rejected = axk::server::validate_config(config_);
+    ASSERT_FALSE(rejected);
+    EXPECT_NE(rejected.error().message.find("download cache"), std::string::npos);
+    EXPECT_EQ(std::filesystem::file_size(cache / "metadata.json"), 4U);
+    EXPECT_FALSE(std::filesystem::exists(cache / ".metadata.json.owner.lock"));
+}
+
+TEST_F(DownloadCacheConfigTest, RejectsDerivedConnectionControlAliasesInsideTheCache) {
+    const auto sentinel = root_ / "state/download-archives/control";
+    std::ofstream{sentinel} << "keep";
+    config_.connection_file = root_ / "connection.json";
+    std::filesystem::create_symlink(sentinel, root_ / "connection.shutdown");
+    EXPECT_FALSE(axk::server::validate_config(config_));
+    EXPECT_EQ(std::filesystem::file_size(sentinel), 4U);
+}
+
+TEST_F(DownloadCacheConfigTest, RejectsUnresolvableMetadataWithoutLexicalFallback) {
+    std::filesystem::create_symlink(root_ / "loop", root_ / "loop");
+    config_.workspace_store = root_ / "loop/metadata.json";
+    const auto rejected = axk::server::validate_config(config_);
+    ASSERT_FALSE(rejected);
+    EXPECT_NE(rejected.error().message.find("cannot be resolved"), std::string::npos);
+}
+#endif
 
 } // namespace

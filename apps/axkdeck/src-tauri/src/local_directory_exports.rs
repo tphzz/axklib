@@ -58,9 +58,12 @@ impl DirectorySaveCandidateStore {
         Ok((destination, candidate.control.clone()))
     }
 
-    fn cancel(&self, id: &str) {
+    fn cancel(&mut self, id: &str) {
         if let Some(candidate) = self.values.get(id) {
             candidate.control.cancelled.store(true, Ordering::Relaxed);
+            if candidate.destination.is_some() {
+                self.values.remove(id);
+            }
         }
     }
 
