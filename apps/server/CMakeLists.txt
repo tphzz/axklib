@@ -288,6 +288,12 @@ if(BUILD_TESTING)
             --fixture "${AXK_REPOSITORY_ROOT}/tests/fixtures/images/sampler-authored/HD00_512_single_sbnk_authored.hds"
   )
   axk_configure_server_process_test(Server.SampleEditIntegration 45 server)
+  add_test(
+    NAME Server.PackageImportIntegration
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/server_package_import_test.py"
+            --server "$<TARGET_FILE:axklib_server>" --cli "$<TARGET_FILE:axklib_cli>"
+  )
+  axk_configure_server_process_test(Server.PackageImportIntegration 45 server)
   add_test(NAME Server.ConversionIntegration
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/server_conversion_test.py"
             --server "$<TARGET_FILE:axklib_server>"

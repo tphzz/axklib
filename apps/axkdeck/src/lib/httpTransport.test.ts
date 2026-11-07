@@ -3503,6 +3503,8 @@ describe('HttpImageTransport', () => {
                     return json({
                         schemaVersion: '1.0',
                         imageId: 'image-package',
+                        documentId: 'document-a-series-source-1',
+                        sourceMemberId: 'source-1',
                         revision: 7,
                         planToken: 'session-plan',
                         expiresInSeconds: 600,

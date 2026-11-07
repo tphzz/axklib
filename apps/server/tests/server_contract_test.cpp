@@ -728,6 +728,47 @@ TEST(ServerContract, ProgramAssignmentAdjustmentsValidateForPlansAndImportResult
     EXPECT_EQ(wire_plan.at("warnings").at(0).at("origin"), "TARGET");
     EXPECT_EQ(wire_plan.at("opaqueSequences").at(0).at("action"), "PRESERVE_UNCHANGED");
 
+    auto session_plan = application_plan;
+    session_plan["imageId"] = "image-1";
+    session_plan["documentId"] = "document-a-series-source-1";
+    session_plan["sourceMemberId"] = "source-1";
+    session_plan["revision"] = 1U;
+    session_plan["packages"] = nlohmann::json::array({{
+        {"packageIndex", 0U},
+        {"packageId", "package-1"},
+        {"sourceVolumeName", "Original"},
+        {"destinationVolumeName", "Imported"},
+        {"objectCount", 1U},
+        {"payloadBytes", 912U},
+        {"objectCounts", {{"programs", 1U}, {"sampleBanks", 0U}, {"samples", 0U}, {"waveData", 0U}, {"sequences", 0U}}},
+    }});
+    const axk::server::OracleOpenApiValidator oracle{document};
+    for (const bool valid : {true, false}) {
+        SCOPED_TRACE(valid);
+        session_plan["valid"] = valid;
+        const auto wire = validator.wire_value("ImageSessionPackageImportPlan", session_plan);
+        EXPECT_TRUE(validator.validate("ImageSessionPackageImportPlan", wire)) << wire.dump();
+        EXPECT_TRUE(oracle.validate("ImageSessionPackageImportPlan", wire)) << wire.dump();
+        EXPECT_EQ(wire.at("documentId"), session_plan.at("documentId"));
+        EXPECT_EQ(wire.at("sourceMemberId"), session_plan.at("sourceMemberId"));
+        for (const auto *field : {"documentId", "sourceMemberId"}) {
+            auto missing = wire;
+            missing.erase(field);
+            EXPECT_FALSE(validator.validate("ImageSessionPackageImportPlan", missing));
+            EXPECT_FALSE(oracle.validate("ImageSessionPackageImportPlan", missing));
+            for (const auto &value : {nlohmann::json(""), nlohmann::json(nullptr), nlohmann::json(3)}) {
+                auto invalid = wire;
+                invalid[field] = value;
+                EXPECT_FALSE(validator.validate("ImageSessionPackageImportPlan", invalid));
+                EXPECT_FALSE(oracle.validate("ImageSessionPackageImportPlan", invalid));
+            }
+        }
+        auto unknown = wire;
+        unknown["unexpected"] = true;
+        EXPECT_FALSE(validator.validate("ImageSessionPackageImportPlan", unknown));
+        EXPECT_FALSE(oracle.validate("ImageSessionPackageImportPlan", unknown));
+    }
+
     const auto application_result = nlohmann::json{
         {"schemaVersion", "1.0"},
         {"planId", "plan-1"},

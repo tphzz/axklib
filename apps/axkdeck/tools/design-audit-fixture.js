@@ -290,6 +290,8 @@ if (mode === 'completion') {
         capacity,
         schemaVersion: '1.0',
         imageId: 'audit',
+        documentId: 'document-a-series-source-1',
+        sourceMemberId: 'source-1',
         revision: 1,
         planToken: 'audit-plan',
         planId: 'audit-plan',

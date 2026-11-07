@@ -47,6 +47,8 @@ function programPlan(
     return {
         schemaVersion: '1.0',
         imageId: 'image-1',
+        documentId: 'document-a-series-source-1',
+        sourceMemberId: 'source-1',
         revision: 1,
         planToken,
         capacity: fitsCapacity,

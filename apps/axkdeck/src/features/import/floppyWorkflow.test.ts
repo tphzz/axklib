@@ -67,6 +67,8 @@ const plan: ImageSessionPackageImportPlan = {
     capacity: fitsCapacity,
     schemaVersion: '1.0',
     imageId: 'image',
+    documentId: 'document-a-series-source-1',
+    sourceMemberId: 'source-1',
     revision: 1,
     planToken: 'plan',
     expiresInSeconds: 900,

@@ -10608,6 +10608,10 @@
             },
             "type": "array"
           },
+          "documentId": {
+            "minLength": 1,
+            "type": "string"
+          },
           "expiresInSeconds": {
             "minimum": 1,
             "type": "integer"
@@ -10663,6 +10667,10 @@
             },
             "type": "array"
           },
+          "sourceMemberId": {
+            "minLength": 1,
+            "type": "string"
+          },
           "targetKind": {
             "enum": [
               "SFS",
@@ -10706,6 +10714,8 @@
           "allocation",
           "sfsIndexCapacity",
           "imageId",
+          "documentId",
+          "sourceMemberId",
           "revision",
           "packages",
           "capacity"
@@ -33384,6 +33394,7 @@
                           "target": "A3000"
                         },
                         "conflicts": [],
+                        "documentId": "x",
                         "expiresInSeconds": 1,
                         "imageId": "x",
                         "opaqueSequences": [],
@@ -33411,6 +33422,7 @@
                         "revision": 1,
                         "schemaVersion": "1.0",
                         "sfsIndexCapacity": [],
+                        "sourceMemberId": "x",
                         "targetKind": "SFS",
                         "targetSnapshotId": "x",
                         "valid": false,
@@ -33432,6 +33444,7 @@
                           "target": "A3000"
                         },
                         "conflicts": [],
+                        "documentId": "x",
                         "expiresInSeconds": 1,
                         "imageId": "x",
                         "opaqueSequences": [],
@@ -33459,6 +33472,7 @@
                         "revision": 1,
                         "schemaVersion": "1.0",
                         "sfsIndexCapacity": [],
+                        "sourceMemberId": "x",
                         "targetKind": "SFS",
                         "targetSnapshotId": "x",
                         "valid": false,
@@ -41222,6 +41236,7 @@
                           "target": "A3000"
                         },
                         "conflicts": [],
+                        "documentId": "x",
                         "expiresInSeconds": 1,
                         "imageId": "x",
                         "opaqueSequences": [],
@@ -41249,6 +41264,7 @@
                         "revision": 1,
                         "schemaVersion": "1.0",
                         "sfsIndexCapacity": [],
+                        "sourceMemberId": "x",
                         "targetKind": "SFS",
                         "targetSnapshotId": "x",
                         "valid": false,
@@ -41270,6 +41286,7 @@
                           "target": "A3000"
                         },
                         "conflicts": [],
+                        "documentId": "x",
                         "expiresInSeconds": 1,
                         "imageId": "x",
                         "opaqueSequences": [],
@@ -41297,6 +41314,7 @@
                         "revision": 1,
                         "schemaVersion": "1.0",
                         "sfsIndexCapacity": [],
+                        "sourceMemberId": "x",
                         "targetKind": "SFS",
                         "targetSnapshotId": "x",
                         "valid": false,

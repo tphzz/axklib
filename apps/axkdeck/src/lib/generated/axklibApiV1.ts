@@ -4622,6 +4622,7 @@ export interface components {
             allocation: components['schemas']['PackageAllocationEstimate'][];
             capacity: components['schemas']['VolumeCapacityAdmission'];
             conflicts: components['schemas']['PackageImportConflict'][];
+            documentId: string;
             expiresInSeconds: number;
             imageId: string;
             opaqueSequences: components['schemas']['PackageOpaqueSequenceChoice'][];
@@ -4634,6 +4635,7 @@ export interface components {
             /** @constant */
             schemaVersion: '1.0';
             sfsIndexCapacity: components['schemas']['SfsIndexCapacityEstimate'][];
+            sourceMemberId: string;
             /** @enum {unknown} */
             targetKind: 'SFS' | 'FAT12_FLOPPY' | 'ISO9660';
             targetSnapshotId: string;

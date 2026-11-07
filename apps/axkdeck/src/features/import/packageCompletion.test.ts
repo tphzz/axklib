@@ -12,6 +12,8 @@ import { packageImportResult } from '../../test/packageImportResultFixture';
 const source = serverFileLocation({ rootId: 'workspace', relativePath: 'One.axkvol' }, 'One.axkvol');
 const plan = {
     valid: true,
+    documentId: 'document-a-series-source-1',
+    sourceMemberId: 'source-1',
     planToken: 'plan-1',
     packages: [{ destinationVolumeName: 'One' }],
     capacity: fitsCapacity,

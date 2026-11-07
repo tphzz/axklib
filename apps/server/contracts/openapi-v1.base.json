@@ -11912,6 +11912,8 @@
           "allocation",
           "sfsIndexCapacity",
           "imageId",
+          "documentId",
+          "sourceMemberId",
           "revision",
           "packages",
           "capacity"
@@ -12003,6 +12005,14 @@
             }
           },
           "imageId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "documentId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "sourceMemberId": {
             "type": "string",
             "minLength": 1
           },
