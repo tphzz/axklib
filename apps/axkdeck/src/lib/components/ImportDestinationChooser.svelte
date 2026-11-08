@@ -20,6 +20,7 @@
         onpartition: (partitionIndex: number) => void;
         onname: (name: string) => void;
         unavailableModes?: Partial<Record<ImportDestinationMode, string>>;
+        compact?: boolean;
     }
 
     let {
@@ -34,6 +35,7 @@
         onpartition,
         onname,
         unavailableModes = {},
+        compact = false,
     }: Props = $props();
 
     let query = $state('');
@@ -154,9 +156,14 @@
     }
 </script>
 
-<section class="import-destination" aria-label="Import destination">
+<section class="import-destination" class:compact aria-label="Import destination">
     <strong class="destination-label">Destination volume</strong>
-    <div class="destination-mode dialog-segmented-control" role="group" aria-label="Destination volume type">
+    <div
+        class="destination-mode dialog-segmented-control"
+        class:dialog-segmented-control--compact={compact}
+        role="group"
+        aria-label="Destination volume type"
+    >
         <button
             type="button"
             aria-pressed={mode === 'existing'}
@@ -291,6 +298,39 @@
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
+    .import-destination.compact {
+        flex: 1 1 518px;
+        min-width: 0;
+        grid-template-columns: 104px 112px 140px minmax(150px, 1fr);
+        gap: 4px;
+        padding: 0;
+        border: 0;
+        background: none;
+    }
+    .compact .destination-label {
+        color: var(--color-text);
+    }
+    @container audio-import (min-width: 1252px) {
+        .import-destination.compact {
+            flex: 0 0 518px;
+        }
+    }
+    @container audio-import (max-width: 545px) {
+        .import-destination.compact {
+            grid-template-columns: minmax(0, 1fr) 112px;
+        }
+        .compact > :global(.destination-partition),
+        .compact .volume-combobox,
+        .compact .new-volume-name {
+            grid-column: 1 / -1;
+        }
+    }
+    @container audio-import (max-width: 365px) {
+        .import-destination.compact {
+            grid-template-columns: minmax(0, 1fr);
+        }
+    }
+
     .new-volume-name {
         min-width: 0;
         width: 100%;
@@ -314,9 +354,9 @@
             grid-template-columns: minmax(0, 1fr) max-content;
         }
 
-        .import-destination > :global(.destination-partition),
-        .volume-combobox,
-        .new-volume-name {
+        .import-destination:not(.compact) > :global(.destination-partition),
+        .import-destination:not(.compact) .volume-combobox,
+        .import-destination:not(.compact) .new-volume-name {
             grid-column: 1 / -1;
         }
     }

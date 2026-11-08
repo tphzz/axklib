@@ -43,6 +43,14 @@ function props(overrides: Record<string, unknown> = {}) {
 }
 
 describe('ImportDestinationChooser', () => {
+    it('scopes the compact segmented geometry to the audio-import context', async () => {
+        const result = render(ImportDestinationChooser, { props: props() });
+        const group = screen.getByRole('group', { name: 'Destination volume type' });
+        expect(group.classList).not.toContain('dialog-segmented-control--compact');
+        await result.rerender({ ...props(), compact: true });
+        expect(group.classList).toContain('dialog-segmented-control--compact');
+        expect(screen.getByRole('combobox', { name: 'Destination volume' })).toBeTruthy();
+    });
     it('keeps unsupported destination modes visible and disabled', async () => {
         const onmode = vi.fn();
         render(ImportDestinationChooser, {

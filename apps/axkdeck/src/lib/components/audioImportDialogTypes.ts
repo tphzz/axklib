@@ -2,6 +2,13 @@ import type { ClientUploadSource } from '../clientUploadSource';
 import type { ClientUploadLocation, FileLocation, InputFileLocation } from '../storageLocations';
 import type { AudioSourceInfo } from '../transport';
 
+export interface AudioImportValidation {
+    message: string;
+    field?: 'sampleName' | 'waveformNames' | 'rootKey' | 'fineTuneCents' | 'keyRange' | 'velocityRange' | 'loop';
+    waveformIndex?: number;
+    conflict?: boolean;
+}
+
 export interface AudioImportRow {
     id: number;
     candidate: ClientUploadSource | FileLocation;

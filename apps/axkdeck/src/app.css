@@ -1440,6 +1440,18 @@ input:focus-visible {
   opacity: 0.45;
 }
 
+.dialog-segmented-control--compact {
+  width: 112px;
+  height: 28px;
+  flex: none;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.dialog-segmented-control--compact > button {
+  min-height: 26px;
+  padding: 0 4px;
+}
+
 .package-dialog {
   width: min(820px, calc(100vw - 40px));
 }

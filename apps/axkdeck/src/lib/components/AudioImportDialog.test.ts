@@ -128,8 +128,8 @@ describe('AudioImportDialog', () => {
         });
         await screen.findByDisplayValue('Tone');
         const formats = screen.getByRole('group', { name: 'Sample format' });
-        expect(within(formats).getByRole('button', { name: 'a3k' }).getAttribute('aria-pressed')).toBe('true');
-        await fireEvent.click(within(formats).getByRole('button', { name: 'a4k/a5k' }));
+        expect(within(formats).getByRole('button', { name: 'A3K' }).getAttribute('aria-pressed')).toBe('true');
+        await fireEvent.click(within(formats).getByRole('button', { name: 'A4K/A5K' }));
         await fireEvent.click(screen.getByRole('button', { name: 'Import' }));
         expect(oncommit).toHaveBeenCalledWith(
             [expect.objectContaining({ sampleName: 'Tone', rootKey: 60 })],
@@ -167,7 +167,7 @@ describe('AudioImportDialog', () => {
         expect(oncommit.mock.calls[0]?.[1]).toEqual({ sampleFormat: 'A3000_188', grouping: { kind: 'SAMPLES' } });
         finish(false);
         await waitFor(() =>
-            expect(within(group).getByRole<HTMLButtonElement>('button', { name: 'a4k/a5k' }).disabled).toBe(false),
+            expect(within(group).getByRole<HTMLButtonElement>('button', { name: 'A4K/A5K' }).disabled).toBe(false),
         );
     });
 
@@ -312,8 +312,9 @@ describe('AudioImportDialog', () => {
         expect(refresh).toHaveBeenCalledTimes(2);
     });
 
-    it('owns the compact spacing around the reusable destination chooser', () => {
-        expect(audioImportDialogSource).toMatch(/\.audio-import-body\s*\{[^}]*gap:\s*10px;/s);
+    it('groups the promoted compact target controls inside one outlined band', () => {
+        expect(audioImportDialogSource).toContain('<AudioImportControls');
+        expect(audioImportDialogSource).toMatch(/\.audio-import-body\s*\{[^}]*gap:\s*4px;/s);
     });
 
     it('keeps batch format and grouping in compact responsive shared controls', async () => {
@@ -334,34 +335,25 @@ describe('AudioImportDialog', () => {
         expect(mode.classList).toContain('select-control');
         await selectValue(mode, 'SAMPLE_BANK');
         expect(screen.getByRole('textbox', { name: 'Sample Bank name' }).classList).toContain('dialog-field-control');
-        expect(targetSettingsSource).toMatch(
-            /\.import-target-settings\s*\{[^}]*grid-template-columns:\s*max-content minmax\(0, 360px\) max-content max-content;[^}]*align-items:\s*center;/s,
-        );
-        expect(targetSettingsSource).toMatch(
-            /@media \(max-width: 760px\)\s*\{[^}]*\.import-target-settings\s*\{[^}]*grid-template-columns:\s*max-content minmax\(0, 1fr\);/s,
-        );
+        expect(targetSettingsSource).toContain('class="import-mode-setting"');
+        expect(targetSettingsSource).toContain('class="sample-format-setting"');
         expect(screen.getByRole('group', { name: 'Sample format' }).classList).toContain('dialog-segmented-control');
     });
 
-    it('left-packs sampler fields independently from the identity columns', () => {
-        expect(audioSamplerSettingsSource).toMatch(
-            /\.settings-fields\s*\{[^}]*display:\s*flex;[^}]*flex-wrap:\s*wrap;[^}]*justify-content:\s*flex-start;/s,
-        );
-        expect(audioSamplerSettingsSource).toMatch(/\.settings-fields\s*>\s*label\s*\{[^}]*flex:\s*0 0 auto;/s);
-        expect(audioSamplerSettingsSource).not.toContain('grid-template-columns: repeat(7');
+    it('aligns sampler groups with the same columns as the identity fields', () => {
+        expect(audioSamplerSettingsSource).toContain('class="sampler-pitch"');
+        expect(audioSamplerSettingsSource).toContain('var(--audio-import-parameter-columns)');
+        expect(audioImportRowsSource).toContain('--audio-import-row-columns');
+        expect(audioImportRowsSource).toContain('class="audio-import-column-headings"');
         expect(audioImportRowsSource).toContain('padding-right: 12px;');
         expect(audioImportRowsSource).toContain('scrollbar-gutter: stable;');
     });
 
     it('keeps each audio file compact while allowing its source details to wrap', () => {
-        expect(audioImportRowsSource).toContain('<small class="audio-import-file-metadata">');
-        expect(audioImportRowsSource).toMatch(
-            /\.audio-import-file-heading\s*\{[^}]*display:\s*flex;[^}]*flex-wrap:\s*wrap;/,
-        );
-        expect(audioImportRowsSource).toMatch(/\.audio-import-rows\s*\{[^}]*gap:\s*6px;/);
-        expect(audioImportRowsSource).toMatch(/\.audio-import-card\s*\{[^}]*gap:\s*6px;[^}]*padding:\s*8px 10px;/);
-        expect(audioImportRowsSource).toMatch(/\.identity-fields\s*\{[^}]*gap:\s*6px 10px;/);
-        expect(audioSamplerSettingsSource).toMatch(/\.settings-fields\s*\{[^}]*gap:\s*6px 10px;/);
+        expect(audioImportRowsSource).toContain('class="audio-import-file-metadata"');
+        expect(audioImportRowsSource).toMatch(/\.audio-import-rows\s*\{[^}]*gap:\s*4px;/);
+        expect(audioImportRowsSource).toMatch(/\.audio-import-card\s*\{[^}]*gap:\s*4px;[^}]*padding:\s*6px;/);
+        expect(audioSamplerSettingsSource).toContain('width: 28px;');
     });
 
     it('imports inspected Samples into a newly named Sample Bank', async () => {
@@ -652,7 +644,8 @@ describe('AudioImportDialog', () => {
         expect(await screen.findByDisplayValue('Stereo piano')).toBeTruthy();
         expect(screen.getByDisplayValue('Stereo piano-L')).toBeTruthy();
         expect(screen.getByDisplayValue('Stereo piano-R')).toBeTruthy();
-        expect(screen.getByText('FLAC PCM_24 · Stereo · 48,000 Hz · 24 → 16-bit TPDF · 2.00 s')).toBeTruthy();
+        expect(screen.getByText('FLAC PCM_24 · Stereo')).toBeTruthy();
+        expect(screen.getByText('48,000 Hz · 24 → 16-bit TPDF · 2.00 s')).toBeTruthy();
 
         await fireEvent.input(screen.getByLabelText('Root key for Stereo piano.flac'), {
             target: { value: '69' },
@@ -915,7 +908,8 @@ describe('AudioImportDialog', () => {
                     .value,
             ).toBe('22050'),
         );
-        expect(screen.getByText('WAV PCM_16 · Mono · 96,000 Hz · 16-bit · resampled TPDF · 1.00 s')).toBeTruthy();
+        expect(screen.getByText('WAV PCM_16 · Mono')).toBeTruthy();
+        expect(screen.getByText('96,000 Hz · 16-bit · resampled TPDF · 1.00 s')).toBeTruthy();
 
         await fireEvent.click(screen.getByRole('button', { name: 'Import' }));
         await waitFor(() =>

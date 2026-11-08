@@ -194,7 +194,7 @@ describe('App panel layout', () => {
                 expect(
                     (
                         within(within(dialog).getByRole('group', { name: 'Sample format' })).getByRole('button', {
-                            name: 'a3k',
+                            name: 'A3K',
                         }) as HTMLButtonElement
                     ).disabled,
                 ).toBe(false),
@@ -204,18 +204,18 @@ describe('App panel layout', () => {
         let dialog = await openImport();
         expect(
             within(within(dialog).getByRole('group', { name: 'Sample format' }))
-                .getByRole('button', { name: 'a4k/a5k' })
+                .getByRole('button', { name: 'A4K/A5K' })
                 .getAttribute('aria-pressed'),
         ).toBe('true');
         await fireEvent.click(
-            within(within(dialog).getByRole('group', { name: 'Sample format' })).getByRole('button', { name: 'a3k' }),
+            within(within(dialog).getByRole('group', { name: 'Sample format' })).getByRole('button', { name: 'A3K' }),
         );
         await cancelDialog(dialog);
         expect(preferences.generation).toBe('A4000_A5000');
         dialog = await openImport();
         expect(
             within(within(dialog).getByRole('group', { name: 'Sample format' }))
-                .getByRole('button', { name: 'a4k/a5k' })
+                .getByRole('button', { name: 'A4K/A5K' })
                 .getAttribute('aria-pressed'),
         ).toBe('true');
         await cancelDialog(dialog);
@@ -239,7 +239,7 @@ describe('App panel layout', () => {
         dialog = await openImport();
         expect(
             within(within(dialog).getByRole('group', { name: 'Sample format' }))
-                .getByRole('button', { name: 'a3k' })
+                .getByRole('button', { name: 'A3K' })
                 .getAttribute('aria-pressed'),
         ).toBe('true');
         await cancelDialog(dialog);

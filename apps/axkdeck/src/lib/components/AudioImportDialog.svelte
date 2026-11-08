@@ -21,11 +21,10 @@
         ImageTransport,
     } from '../transport';
     import AudioImportRows from './AudioImportRows.svelte';
-    import AudioImportTargetSettings from './AudioImportTargetSettings.svelte';
-    import type { AudioImportRow } from './audioImportDialogTypes';
+    import AudioImportControls from './AudioImportControls.svelte';
+    import AudioImportSummary from './AudioImportSummary.svelte';
+    import type { AudioImportRow, AudioImportValidation } from './audioImportDialogTypes';
     import Icon from './Icon.svelte';
-    import ImportDestinationChooser from './ImportDestinationChooser.svelte';
-    import ImportCapacityControl from './ImportCapacityControl.svelte';
     import ImportSourceChoice from './ImportSourceChoice.svelte';
 
     interface Props {
@@ -97,7 +96,9 @@
     const abortController = new AbortController();
     const auditionController = new AudioImportAuditionController((state) => (auditionState = state));
     const validationLocked = $derived(committing || completion.locked);
-    const validationErrors = $derived.by(() => (validationLocked ? rows.map(() => '') : validateRows(rows)));
+    const validationErrors = $derived.by(() =>
+        validationLocked ? rows.map(() => ({ message: '' })) : validateRows(rows),
+    );
     const sampleBankError = $derived.by(() => (validationLocked ? '' : validateSampleBank()));
     const completionStatus = $derived(
         completion.phase === 'warnings' || completion.phase === 'completed'
@@ -113,7 +114,7 @@
         rows.length > 0 &&
             target !== null &&
             rows.every((row) => row.status === 'ready') &&
-            validationErrors.every((error) => error === '') &&
+            validationErrors.every((error) => error.message === '') &&
             sampleBankError === '',
     );
 
@@ -255,51 +256,67 @@
         batchStaging = false;
     }
 
-    function validateRows(items: AudioImportRow[]): string[] {
-        const errors = items.map(() => '');
+    function validateRows(items: AudioImportRow[]): AudioImportValidation[] {
+        const errors: AudioImportValidation[] = items.map(() => ({ message: '' }));
         const samples = new Set(existingSampleNames.map((name) => name.toLocaleLowerCase()));
         const waveforms = new Set(existingWaveformNames.map((name) => name.toLocaleLowerCase()));
         items.forEach((row, index) => {
             if (row.status === 'failed') {
-                errors[index] = row.error;
+                errors[index] = { message: row.error };
                 return;
             }
             if (row.status !== 'ready' || !row.inspection) return;
             const admissionIssue = row.inspection.issues.find((issue) => issue.fatal !== false);
             if (!row.inspection.valid || admissionIssue) {
-                errors[index] = admissionIssue?.message ?? 'This audio file cannot be imported.';
+                errors[index] = { message: admissionIssue?.message ?? 'This audio file cannot be imported.' };
                 return;
             }
             if (!validSamplerName(row.sampleName)) {
-                errors[index] = 'Sample names must be 1-16 printable ASCII characters.';
+                errors[index] = {
+                    message: 'Sample names must be 1-16 printable ASCII characters.',
+                    field: 'sampleName',
+                };
                 return;
             }
             if (samples.has(row.sampleName.toLocaleLowerCase())) {
-                errors[index] = `Sample name already exists: ${row.sampleName}`;
+                errors[index] = {
+                    message: `Sample name already exists: ${row.sampleName}`,
+                    field: 'sampleName',
+                    conflict: true,
+                };
                 return;
             }
             samples.add(row.sampleName.toLocaleLowerCase());
             if (row.waveformNames.length !== row.inspection.channels) {
-                errors[index] = 'Wave data channel names are incomplete.';
+                errors[index] = { message: 'Wave data channel names are incomplete.', field: 'waveformNames' };
                 return;
             }
-            for (const name of row.waveformNames) {
+            for (const [waveformIndex, name] of row.waveformNames.entries()) {
                 if (!validSamplerName(name)) {
-                    errors[index] = 'Wave data names must be 1-16 printable ASCII characters.';
+                    errors[index] = {
+                        message: 'Wave data names must be 1-16 printable ASCII characters.',
+                        field: 'waveformNames',
+                        waveformIndex,
+                    };
                     return;
                 }
                 if (waveforms.has(name.toLocaleLowerCase())) {
-                    errors[index] = `Wave data name already exists: ${name}`;
+                    errors[index] = {
+                        message: `Wave data name already exists: ${name}`,
+                        field: 'waveformNames',
+                        waveformIndex,
+                        conflict: true,
+                    };
                     return;
                 }
                 waveforms.add(name.toLocaleLowerCase());
             }
             if (!Number.isInteger(row.rootKey) || row.rootKey < 0 || row.rootKey > 127) {
-                errors[index] = 'Root key must be between 0 and 127.';
+                errors[index] = { message: 'Root key must be between 0 and 127.', field: 'rootKey' };
                 return;
             }
             if (!Number.isInteger(row.fineTuneCents) || row.fineTuneCents < -63 || row.fineTuneCents > 63) {
-                errors[index] = 'Fine tune must be between -63 and 63 cents.';
+                errors[index] = { message: 'Fine tune must be between -63 and 63 cents.', field: 'fineTuneCents' };
                 return;
             }
             if (
@@ -309,7 +326,7 @@
                 row.keyHigh > 127 ||
                 row.keyLow > row.keyHigh
             ) {
-                errors[index] = 'Key range must be an ordered range from 0 to 127.';
+                errors[index] = { message: 'Key range must be an ordered range from 0 to 127.', field: 'keyRange' };
                 return;
             }
             if (
@@ -319,15 +336,18 @@
                 row.velocityHigh > 127 ||
                 row.velocityLow > row.velocityHigh
             ) {
-                errors[index] = 'Velocity range must be an ordered range from 0 to 127.';
+                errors[index] = {
+                    message: 'Velocity range must be an ordered range from 0 to 127.',
+                    field: 'velocityRange',
+                };
                 return;
             }
             if (![1, 4].includes(row.loopMode)) {
-                errors[index] = 'Loop mode must be forward loop or one-shot.';
+                errors[index] = { message: 'Loop mode must be forward loop or one-shot.', field: 'loop' };
                 return;
             }
             if (row.loopMode === 4 && (row.loopStartFrame !== 0 || row.loopLengthFrames !== 0)) {
-                errors[index] = 'One-shot imports cannot contain an active loop range.';
+                errors[index] = { message: 'One-shot imports cannot contain an active loop range.', field: 'loop' };
                 return;
             }
             if (
@@ -338,7 +358,10 @@
                     row.loopLengthFrames <= 0 ||
                     row.loopStartFrame + row.loopLengthFrames > row.inspection.projectedOutputFrameCount)
             ) {
-                errors[index] = 'Forward loop must be non-empty and contained within the converted audio.';
+                errors[index] = {
+                    message: 'Forward loop must be non-empty and contained within the converted audio.',
+                    field: 'loop',
+                };
             }
         });
         return errors;
@@ -502,19 +525,25 @@
             </button>
         </header>
         <div class="audio-import-body">
-            <ImportCapacityControl review={completion.capacity} disabled={busy} />
-            <ImportDestinationChooser
-                mode={destinationMode}
+            <AudioImportControls
+                bind:mode={importMode}
+                bind:sampleBankName
+                bind:sampleFormat
+                error={sampleBankError}
+                disabled={busy}
+                hasFiles={files.length > 0}
+                capacity={completion.capacity}
+                {destinationMode}
                 partitionIndex={destinationPartitionIndex}
                 volumeName={destinationVolumeName}
                 partitions={partitionOptions}
                 volumes={volumeOptions}
-                disabled={busy}
                 onmode={ondestinationmode}
                 onvolume={ondestinationvolume}
                 onpartition={ondestinationpartition}
                 onname={ondestinationname}
             />
+            <AudioImportSummary {rows} capacity={completion.capacity} />
             {#if files.length === 0}
                 <ImportSourceChoice
                     label="Audio source"
@@ -527,13 +556,6 @@
                     onchooselocal={() => onchooselocal?.()}
                 />
             {:else}
-                <AudioImportTargetSettings
-                    bind:mode={importMode}
-                    bind:sampleBankName
-                    bind:sampleFormat
-                    error={sampleBankError}
-                    disabled={busy}
-                />
                 {#if stagingError}
                     <p class="dialog-error" role="alert">{stagingError}</p>
                 {:else}
@@ -551,7 +573,6 @@
                         {busy}
                         committing={validationLocked}
                         {completionStatus}
-                        grouped={importMode === 'SAMPLE_BANK'}
                         audition={auditionState}
                         onchangeTargetSampleRate={(row, rate) => void changeTargetSampleRate(row, rate)}
                         onupdate={updateRow}
@@ -615,17 +636,18 @@
         margin: 0 0 4px;
     }
     .audio-import-dialog {
-        width: min(1280px, calc(100vw - 32px));
+        width: min(1280px, calc(100% - 32px));
         max-width: none;
-        max-height: min(720px, calc(100vh - 48px));
+        max-height: min(720px, calc(100% - 48px));
     }
     .audio-import-body {
+        container: audio-import / inline-size;
         min-height: 0;
         overflow: hidden;
         display: flex;
         flex-direction: column;
         padding: 12px;
-        gap: 10px;
+        gap: 4px;
     }
     .inspection-progress {
         display: grid;
@@ -640,7 +662,7 @@
     }
     @media (max-width: 900px) {
         .audio-import-dialog {
-            width: calc(100vw - 24px);
+            width: calc(100% - 24px);
         }
     }
 </style>
