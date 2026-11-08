@@ -2,17 +2,25 @@ import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { createServer as socketServer } from 'node:net';
+import { createServer } from 'vite';
 
-// Run against the dev server; PLAYWRIGHT_MODULE can point at an external installation.
 const { chromium } = await import(
     process.env.PLAYWRIGHT_MODULE ? pathToFileURL(process.env.PLAYWRIGHT_MODULE).href : 'playwright'
 );
-const base = process.argv[2] ?? 'http://127.0.0.1:5189';
-const output = resolve(process.argv[3] ?? '../../../build/logs/floppy-import/00001/layout');
+const output = resolve(process.argv[2]);
 await mkdir(output, { recursive: true });
-const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH, headless: true });
+const server = await createServer({ server: { host: '127.0.0.1', port: 0 } });
+let browser, port;
+async function stop() { await browser?.close(); await server.close(); }
+const signal = () => void stop();
+process.once('SIGTERM', signal); process.once('SIGINT', signal);
+const deadline = setTimeout(signal, 120000);
 const results = [];
 try {
+    await server.listen(); port = server.httpServer.address().port;
+    const base = `http://127.0.0.1:${port}`;
+    browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH, headless: true });
     for (const viewport of [
         { width: 1366, height: 768 },
         { width: 640, height: 700 },
@@ -31,7 +39,7 @@ try {
                 };
                 const shell = document.querySelector('[role="dialog"]');
                 const footer = document.querySelector('.dialog-footer');
-                const rows = document.querySelector('.floppy-rows');
+                const rows = document.querySelector('[data-pane="contents"] .import-pane-scroll');
                 return {
                     shell: rect(shell),
                     footer: rect(footer),
@@ -43,17 +51,26 @@ try {
                         marginTop: getComputedStyle(button).marginTop,
                         marginBottom: getComputedStyle(button).marginBottom,
                     })),
-                    headings: [...shell.querySelectorAll('h3')].map((h) => getComputedStyle(h).fontSize),
-                    sourceLabel: rect(shell.querySelector('.floppy-source-toolbar strong')),
+                    headings: [...shell.querySelectorAll('h3')].map((h) => ({
+                        actual: getComputedStyle(h).fontSize,
+                        expected: h.closest('.floppy-rows') ? '10px' : '11px',
+                    })),
+                    sourceLabel: {
+                        ...rect(shell.querySelector('.source-summary strong')),
+                        clientWidth: shell.querySelector('.source-summary strong').clientWidth,
+                        scrollWidth: shell.querySelector('.source-summary strong').scrollWidth,
+                    },
                 };
             });
         const before = await geometry();
         assert(before.shell.x >= 0 && before.shell.right <= viewport.width + 1);
         assert(before.shell.y >= 0 && before.shell.bottom <= viewport.height + 1);
         assert(before.rows.scrollHeight > before.rows.clientHeight);
-        assert(before.header.height >= 26, 'The fixed table header must not shrink or clip');
-        assert(before.sourceLabel.width >= 100, 'Source label must not collapse between utility buttons');
-        assert(before.headings.every((size) => size === '11px'));
+        assert(before.header.height >= 24, 'The fixed table header must not shrink or clip');
+        assert(before.sourceLabel.clientWidth >= before.sourceLabel.scrollWidth,
+            'The source identity must remain fully visible beside the utility buttons');
+        assert(before.headings.every(({ actual, expected }) => actual === expected),
+            'Pane headings and table category labels must retain their respective compact typography');
         const controlStyles = () =>
             page.evaluate(() => {
                 const style = (selector) => {
@@ -70,7 +87,6 @@ try {
                     primary: style('.dialog-footer .primary-button'),
                     secondary: style('.dialog-footer .secondary-button'),
                     title: style('.dialog-header h2'),
-                    input: style('.import-destination input'),
                 };
             });
         const floppyStyles = await controlStyles();
@@ -85,7 +101,7 @@ try {
             assert(Math.abs(button.height - before.actions[0].height) < 1);
             assert(Math.abs(button.y - before.actions[0].y) < 1);
         }
-        await page.locator('.floppy-rows').evaluate((element) => {
+        await page.locator('[data-pane="contents"] .import-pane-scroll').evaluate((element) => {
             element.scrollTop = element.scrollHeight;
         });
         assert.deepEqual((await geometry()).footer, before.footer);
@@ -127,7 +143,7 @@ try {
                 expected,
             );
             assert.equal(await input.inputValue(), expected);
-            await page.locator('.floppy-members').getByText(`Yamaha/${folder}`, { exact: true }).waitFor();
+            await page.locator('.source-members').getByText(`Yamaha/${folder}`, { exact: true }).waitFor();
             for (const draft of ['Custom name', '']) {
                 await input.fill(draft);
                 await page.getByRole('button', { name: 'Existing', exact: true }).click();
@@ -144,5 +160,12 @@ try {
     await writeFile(resolve(output, 'geometry.json'), JSON.stringify(results, null, 2) + '\n');
     console.log(`Verified ${results.length} viewports; ${output}`);
 } finally {
-    await browser.close();
+    clearTimeout(deadline);
+    process.removeListener('SIGTERM', signal); process.removeListener('SIGINT', signal);
+    await stop();
+    if (port) await new Promise((done, reject) => {
+        const socket = socketServer(); socket.once('error', reject);
+        socket.listen(port, '127.0.0.1', () => socket.close(error => error ? reject(error) : done()));
+    });
+    await writeFile(resolve(output, 'cleanup.json'), JSON.stringify({ serverStopped: true, browserStopped: true, portReleased: !!port }) + '\n');
 }

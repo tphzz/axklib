@@ -10,6 +10,10 @@
     import ImportCapacityControl from './ImportCapacityControl.svelte';
     import ImportPlanReview from './ImportPlanReview.svelte';
     import ImportSourceChoice from './ImportSourceChoice.svelte';
+    import ImportSourceHeader from './ImportSourceHeader.svelte';
+    import DiskImportSettings from './DiskImportSettings.svelte';
+    import ImportReviewLayout from './ImportReviewLayout.svelte';
+    import ImportCapacityDetails from './ImportCapacityDetails.svelte';
     let { workflow }: { workflow: FloppyImportWorkflow } = $props();
     let input = $state<HTMLInputElement>();
     const r = $derived(workflow.request);
@@ -74,22 +78,30 @@
     const recovery = $derived(
         ['unconfirmed', 'checking', 'refresh-failed', 'refreshing'].includes(workflow.completion.phase),
     );
-    const showResults = $derived(
-        Boolean(
-            r?.error ||
-            r?.inspection?.issues.length ||
-            workflow.completion.warnings.length ||
-            r?.plan?.conflicts.length ||
-            r?.plan?.allocation.length ||
-            r?.plan?.programSlotPlacements.length ||
-            r?.plan?.opaqueSequences.length,
-        ),
-    );
+    let active = $state<'contents' | 'review'>('contents');
     let results = $state<HTMLDivElement>();
+    $effect(() => {
+        void workflow.completion.warnings.join('\n');
+        if (['warnings', 'refresh-failed', 'unconfirmed'].includes(workflow.completion.phase) || r?.error) {
+            active = 'review';
+            void tick().then(() => {
+                const scroller = results?.closest('.import-pane-scroll');
+                if (scroller) scroller.scrollTop = 0;
+            });
+        }
+    });
+    const issueCount = $derived(
+        (r?.plan?.conflicts.length ?? 0) +
+            (r?.inspection?.issues.length ?? 0) +
+            workflow.completion.warnings.length +
+            (r?.error ? 1 : 0),
+    );
     async function review() {
         await workflow.review();
+        active = 'review';
         await tick();
-        if (results) results.scrollTop = 0;
+        const scroller = results?.closest('.import-pane-scroll');
+        if (scroller) scroller.scrollTop = 0;
     }
 </script>
 
@@ -127,9 +139,14 @@
                 />
                 {#if !r.members.length}
                     {#if workflow.directSource}
-                        <button class="secondary-button" onclick={() => void workflow.chooseWorkspace(true)}
-                            ><Icon name="folder" size={13} />Choose floppy source</button
-                        >
+                        <ImportSourceHeader label="No disks added" summary="">
+                            {#snippet actions()}<button
+                                    class="secondary-button"
+                                    disabled={controlsDisabled}
+                                    onclick={() => void workflow.chooseWorkspace(true)}
+                                    ><Icon name="folder" size={13} />Add disks...</button
+                                >{/snippet}
+                        </ImportSourceHeader>
                     {:else}<ImportSourceChoice
                             label="Floppy sources"
                             heading="Choose floppy source"
@@ -142,63 +159,53 @@
                         />{/if}
                     {#if r.error}<p class="dialog-error" role="alert">{r.error}</p>{/if}
                 {:else}
-                    <div class="floppy-source-toolbar">
-                        <div class="floppy-summary">
-                            <strong>{r.inspection?.label || r.members[0]?.name || 'Floppy source'}</strong>
-                            <small
-                                >{selection.included.size} selected · {supported.length} available · {excludedCount} excluded
-                                · {r.inspection?.members.length || r.members.length}
-                                {(r.inspection?.members.length || r.members.length) === 1 ? 'disk' : 'disks'} · {formatStoredSize(
-                                    bytes,
-                                )}</small
-                            >
-                        </div>
-                        <button
-                            class="secondary-button"
-                            disabled={controlsDisabled}
-                            title="Add floppy images or unpacked disk folders from a storage location"
-                            onclick={() => void workflow.chooseWorkspace()}
-                            ><Icon name="folder" size={13} />{workflow.directSource
-                                ? 'Add disks...'
-                                : 'Workspace'}</button
-                        >
-                        {#if !workflow.directSource}<button
+                    <ImportSourceHeader
+                        label={r.inspection?.label || r.members[0]?.name || 'Floppy source'}
+                        summary={`${selection.included.size} selected · ${supported.length} available · ${excludedCount} excluded · ${r.inspection?.members.length || r.members.length} ${(r.inspection?.members.length || r.members.length) === 1 ? 'disk' : 'disks'} · ${formatStoredSize(bytes)}`}
+                        members={r.members}
+                        disabled={controlsDisabled}
+                        onremove={(id) => void workflow.remove(id)}
+                    >
+                        {#snippet actions()}
+                            <button
                                 class="secondary-button"
                                 disabled={controlsDisabled}
-                                title="Add floppy images from this computer"
-                                onclick={() => input?.click()}><Icon name="upload" size={13} />Computer</button
-                            >{/if}
-                    </div>
-                    <div class="floppy-members" aria-label="Source disks">
-                        {#each r.members as member (member.id)}<div>
-                                <span title={member.name}>{member.name}</span><button
-                                    class="icon-button"
-                                    aria-label={`Remove ${member.name}`}
-                                    title={`Remove ${member.name}`}
+                                title="Add floppy images or unpacked disk folders from a storage location"
+                                onclick={() => void workflow.chooseWorkspace()}
+                                ><Icon name="folder" size={13} />{workflow.directSource
+                                    ? 'Add disks...'
+                                    : 'Workspace'}</button
+                            >
+                            {#if !workflow.directSource}<button
+                                    class="secondary-button"
                                     disabled={controlsDisabled}
-                                    onclick={() => void workflow.remove(member.id)}
-                                    ><Icon name="close" size={12} /></button
-                                >
-                            </div>{/each}
-                    </div>
-                    <ImportCapacityControl
-                        review={workflow.completion.capacity}
-                        admission={r.plan?.capacity}
-                        disabled={controlsDisabled}
-                        onchange={() => void workflow.review()}
-                    />
-                    <ImportDestinationChooser
-                        mode={r.mode}
-                        partitionIndex={r.partitionIndex}
-                        volumeName={r.volumeName}
-                        partitions={destinations.partitions}
-                        volumes={destinations.volumes}
-                        disabled={controlsDisabled}
-                        onmode={(mode) => workflow.setMode(mode)}
-                        onvolume={(index, name) => workflow.setDestination('existing', index, name)}
-                        onpartition={(index) => workflow.setPartition(index)}
-                        onname={(name) => workflow.setDestination(r.mode, r.partitionIndex, name)}
-                    />
+                                    title="Add floppy images from this computer"
+                                    onclick={() => input?.click()}><Icon name="upload" size={13} />Computer</button
+                                >{/if}
+                        {/snippet}
+                    </ImportSourceHeader>
+                    <DiskImportSettings>
+                        <ImportDestinationChooser
+                            compact
+                            mode={r.mode}
+                            partitionIndex={r.partitionIndex}
+                            volumeName={r.volumeName}
+                            partitions={destinations.partitions}
+                            volumes={destinations.volumes}
+                            disabled={controlsDisabled}
+                            onmode={(mode) => workflow.setMode(mode)}
+                            onvolume={(index, name) => workflow.setDestination('existing', index, name)}
+                            onpartition={(index) => workflow.setPartition(index)}
+                            onname={(name) => workflow.setDestination(r.mode, r.partitionIndex, name)}
+                        />
+                        <ImportCapacityControl
+                            compact
+                            showSummary={false}
+                            review={workflow.completion.capacity}
+                            disabled={controlsDisabled}
+                            onchange={() => void workflow.review()}
+                        />
+                    </DiskImportSettings>
                     {#if r.inspection?.requiresAcknowledgement}
                         <label class="floppy-source-acknowledgement">
                             <input
@@ -211,8 +218,15 @@
                             Import available objects despite source issues
                         </label>
                     {/if}
-                    <div class="floppy-review">
-                        <section class="floppy-object-section" aria-label="Floppy contents">
+                    <ImportReviewLayout
+                        bind:active
+                        contentsSummary={`${selection.included.size} selected / ${supported.length}`}
+                        reviewSummary={issueCount
+                            ? `${issueCount} ${issueCount === 1 ? 'issue' : 'issues'}`
+                            : `Import into ${r.volumeName || 'new volume'}`}
+                        reviewNotice={issueCount ? `${issueCount} ${issueCount === 1 ? 'issue' : 'issues'}` : ''}
+                    >
+                        {#snippet columns()}
                             <div class="floppy-table-heading">
                                 <label
                                     ><input
@@ -224,13 +238,15 @@
                                         indeterminate={selection.included.size > 0 &&
                                             selection.included.size < supported.length}
                                         onchange={(event) => workflow.selectAll(event.currentTarget.checked)}
-                                    />Name</label
+                                    />Object</label
                                 ><span>Size</span>
                             </div>
+                        {/snippet}
+                        {#snippet contents()}
                             <div class="floppy-rows">
                                 {#each groups as [type, label]}
                                     {@const objects = r.inspection?.objects.filter((o) => o.objectType === type) ?? []}
-                                    {#if objects.length}<h3>{label}</h3>{/if}
+                                    {#if objects.length}<h3>{label}<span>{objects.length}</span></h3>{/if}
                                     {#each objects as object (object.objectKey)}
                                         <label
                                             class="floppy-row"
@@ -273,12 +289,19 @@
                                         ><small>{formatStoredSize(file.sizeBytes)}</small>
                                     </div>{/each}
                             </div>
-                        </section>
-                        {#if showResults}<div class="floppy-results" aria-label="Import results" bind:this={results}>
+                        {/snippet}
+                        {#snippet review()}
+                            <div class="floppy-results" bind:this={results}>
+                                {#each workflow.completion.warnings as warning}<p class="package-warning">
+                                        {warning}
+                                    </p>{/each}
+                                {#if r.error}<p class="dialog-error" role="alert">{r.error}</p>{/if}
                                 <ImportPlanReview
                                     partitions={destinations.partitions}
                                     plan={r.plan}
-                                    busy={r.status === 'planning'}
+                                    busy={controlsDisabled}
+                                    compact
+                                    stale={r.dirty}
                                     targetName={r.volumeName || 'new volume'}
                                     renames={r.renames}
                                     programSlots={r.programSlots}
@@ -287,16 +310,19 @@
                                     onprogramslot={(id, slot) => workflow.programSlot(id, slot)}
                                     onprogramstart={(id, slot) => workflow.programStart(id, slot)}
                                     onopaquesequenceaction={(id, action) => workflow.opaqueSequenceAction(id, action)}
-                                />
+                                >
+                                    {#snippet capacity()}<ImportCapacityDetails
+                                            review={workflow.completion.capacity}
+                                            admission={r.plan?.capacity}
+                                            pending={r.dirty || r.status === 'planning'}
+                                        />{/snippet}
+                                </ImportPlanReview>
                                 {#each r.inspection?.issues ?? [] as issue}<p class="package-warning">
                                         {issue.message}
                                     </p>{/each}
-                                {#each workflow.completion.warnings as warning}<p class="package-warning">
-                                        {warning}
-                                    </p>{/each}
-                                {#if r.error}<p class="dialog-error" role="alert">{r.error}</p>{/if}
-                            </div>{/if}
-                    </div>
+                            </div>
+                        {/snippet}
+                    </ImportReviewLayout>
                 {/if}
             </div>
             <footer class="dialog-footer">
@@ -318,7 +344,7 @@
                                 ? 'Check status'
                                 : 'Refresh'}</button
                         >
-                    {:else if r.members.length && !['warnings', 'completed'].includes(workflow.completion.phase)}<button
+                    {:else if !['warnings', 'completed'].includes(workflow.completion.phase)}<button
                             class="secondary-button"
                             disabled={!canReview}
                             onclick={() => void review()}>Review</button
@@ -335,143 +361,91 @@
 {/if}
 
 <style>
-    .floppy-source-acknowledgement {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        font-size: var(--dialog-body-font-size);
+    .dialog-backdrop {
+        grid-template: minmax(0, 1fr) / minmax(0, 1fr);
     }
     .floppy-dialog {
-        width: min(820px, calc(100vw - 40px));
-        height: min(650px, calc(100dvh - 48px));
+        width: min(1120px, calc(100% - 32px));
+        height: min(650px, calc(100% - 32px));
+        max-width: none;
+        max-height: none;
+        container: disk-import / size;
     }
     .floppy-content {
         flex: 1;
         min-height: 0;
         display: flex;
         flex-direction: column;
-        gap: 8px;
-        padding: 10px 12px;
-    }
-    .floppy-source-toolbar {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        min-width: 0;
-    }
-    .floppy-source-toolbar strong {
-        min-width: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-    .floppy-summary {
-        display: grid;
         gap: 4px;
-        flex: 1;
-        min-width: 0;
+        padding: 12px;
     }
-    .floppy-summary small {
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-    .floppy-members {
-        max-height: 66px;
-        overflow-y: auto;
-        scrollbar-gutter: stable;
-    }
-    .floppy-members div {
+    .floppy-source-acknowledgement {
         display: flex;
         align-items: center;
-        gap: 8px;
-    }
-    .floppy-members span {
-        flex: 1;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-    .floppy-review {
-        flex: 1;
-        min-height: 0;
-        display: grid;
-        grid-template-rows: minmax(100px, 1fr) auto;
-        gap: 8px;
-    }
-    .floppy-object-section {
-        min-height: 0;
-        display: flex;
-        flex-direction: column;
-        overflow: hidden;
-        border: 1px solid var(--color-border);
-        border-radius: 6px;
+        gap: 6px;
+        min-height: 28px;
+        font-size: var(--dialog-body-font-size);
     }
     .floppy-table-heading {
         display: flex;
-        flex: 0 0 auto;
         align-items: center;
         justify-content: space-between;
-        padding: 6px calc(8px + var(--overlay-scrollbar-clearance)) 6px 10px;
-        overflow-y: auto;
-        scrollbar-gutter: stable;
-        color: var(--color-text-muted);
-        background: var(--color-panel-raised);
-        border-bottom: 1px solid var(--color-border);
+        gap: 8px;
+        height: 24px;
+        padding: 0 6px;
+        font-size: var(--dialog-label-font-size);
     }
     .floppy-table-heading label {
         display: flex;
         align-items: center;
-        gap: 8px;
-    }
-    .floppy-rows,
-    .floppy-results {
-        min-height: 0;
-        overflow-y: auto;
-        scrollbar-gutter: stable;
-        padding-right: calc(8px + var(--overlay-scrollbar-clearance));
-    }
-    .floppy-rows {
-        padding-left: 10px;
+        gap: 12px;
     }
     .floppy-rows h3 {
-        margin: 10px 0 4px;
-    }
-    .floppy-results {
-        max-height: min(220px, 30vh);
-        border-top: 1px solid var(--color-border);
-        padding-top: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        height: 22px;
+        margin: 0;
+        padding: 0 6px;
+        background: var(--color-panel-raised);
+        color: var(--color-text);
+        font-size: var(--dialog-label-font-size);
+        font-weight: 400;
     }
     .floppy-row {
         display: grid;
         grid-template-columns: 14px minmax(0, 1fr) auto;
-        gap: 8px;
+        gap: 12px;
         align-items: start;
-        padding: 6px 0;
-        border-bottom: 1px solid var(--color-border);
+        min-height: 40px;
+        padding: 6px;
     }
     .floppy-row span {
         min-width: 0;
     }
     .floppy-row strong {
         display: block;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
+        font-size: var(--dialog-body-font-size);
+        overflow-wrap: anywhere;
     }
     .floppy-row small {
         display: block;
+        font-size: var(--dialog-metadata-font-size);
+        line-height: 14px;
+        color: var(--color-text-muted);
     }
-    .excluded {
-        opacity: 0.65;
+    .excluded strong {
+        color: var(--color-text-muted);
     }
-    @media (max-width: 640px) {
-        .floppy-source-toolbar {
-            display: grid;
-            grid-template-columns: repeat(2, minmax(0, 1fr));
+    .floppy-results {
+        min-width: 0;
+    }
+    @container disk-import (max-width: 600px) {
+        .floppy-content {
+            overflow-y: auto;
         }
-        .floppy-summary {
-            grid-column: 1 / -1;
+        .floppy-content :global(.import-review-layout) {
+            flex: 1 0 240px;
         }
     }
 </style>

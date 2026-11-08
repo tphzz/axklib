@@ -3,6 +3,7 @@
     import { floppyDialogFixture } from './floppyDialogFixture';
     import PackageComparisonHarness from './PackageComparisonHarness.svelte';
     import { capacityConflict } from './importCapacityFixture';
+    import { configureFloppyLayout } from './diskImportLayoutFixture';
     const query = new URLSearchParams(window.location.search);
     const workflow = floppyDialogFixture(250, query.has('direct'), query.get('folder') ?? undefined);
     const comparison = new URLSearchParams(window.location.search).has('packages');
@@ -32,6 +33,7 @@
             capacityConflict(0, `Wave ${index}`),
         );
     }
+    if (query.has('layout')) configureFloppyLayout(workflow, query.get('scenario') ?? 'normal');
 </script>
 
 {#if comparison}<PackageComparisonHarness />{:else if workflow.request}<FloppyImportDialog {workflow} />{:else}<p>

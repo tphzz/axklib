@@ -6,9 +6,12 @@
     import type { ConversionPlan } from '../lib/conversions';
     import { serverFileLocation } from '../lib/storageLocations';
     import { fitsCapacity } from './samplerCapacityFixture';
+    import { diskLayoutCapacity, diskLayoutCompletion } from './diskImportLayoutFixture';
 
     const target = { partitionIndex: 0, volumeName: 'Samples' };
-    const native = new URLSearchParams(location.search).has('native');
+    const query = new URLSearchParams(location.search);
+    const native = query.has('native') || query.get('scenario') === 'native-long';
+    const scenario = query.get('scenario') ?? 'normal';
     const plan: ConversionPlan = {
         planId: 'conversion-layout',
         state: 'READY',
@@ -70,7 +73,11 @@
         documentSource: native
             ? { kind: 'DOCUMENT', sessionId: 1, documentId: 'tx16w', expectedRevision: 1 }
             : undefined,
-        destinationName: native ? 'Target image.hds' : undefined,
+        destinationName: native
+            ? query.get('scenario') === 'native-long'
+                ? `${'LongDestinationImageName'.repeat(9)}.hds`
+                : 'Target image.hds'
+            : undefined,
         members: native
             ? []
             : Array.from({ length: 24 }, (_, index) => ({
@@ -89,6 +96,39 @@
         cancelJob: async () => undefined,
     };
     const completion = new ImportCompletion(jobs, new JobController(jobs));
+    if (query.has('layout')) {
+        diskLayoutCompletion(completion, scenario);
+        plan.report!.capacity = diskLayoutCapacity();
+        if (scenario === 'empty') {
+            request.members = [];
+            request.plan = null;
+            request.status = 'waiting-target';
+        }
+        if (scenario === 'planning') {
+            request.plan = null;
+            request.status = 'inspecting';
+        }
+        if (scenario === 'expired') {
+            request.plan = null;
+            request.status = 'ready';
+            request.error = 'Conversion plan expired. Prepare again.';
+        }
+        if (scenario === 'missing') {
+            request.plan!.report!.executable = false;
+            request.plan!.report!.issues.push({
+                id: 'missing',
+                code: 'MISSING_WAVE',
+                impact: 'BLOCKER',
+                message: 'Wave file PFD1 is missing. Add the companion disk.',
+                sourceObject: 'PFD1',
+                sourceParameter: '',
+                targetObject: '',
+                targetParameter: '',
+            });
+            request.plan!.report!.issueCount++;
+        }
+        if (scenario === 'strict') fidelity('STRICT');
+    }
     function fidelity(value: 'BEST' | 'STRICT') {
         request.fidelity = value;
         request.acknowledgedIssueIds = [];

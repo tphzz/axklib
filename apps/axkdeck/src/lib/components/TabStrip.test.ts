@@ -15,6 +15,13 @@ function deferred() {
 }
 
 describe('TabStrip', () => {
+    it('opts into equal-width distribution without changing the default or selection semantics', async () => {
+        const view = render(TabStrip, { tabs, active: 'first', label: 'Sections', onselect: vi.fn() });
+        expect(view.getByRole('tablist').classList.contains('fill')).toBe(false);
+        await view.rerender({ fill: true });
+        expect(view.getByRole('tablist').classList.contains('fill')).toBe(true);
+        expect(view.getByRole('tab', { name: 'First' }).getAttribute('aria-selected')).toBe('true');
+    });
     it.each(['tablist', 'navigation'] as const)(
         'preserves %s semantics and skips disabled choices',
         async (semantics) => {

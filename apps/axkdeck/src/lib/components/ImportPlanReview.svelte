@@ -1,4 +1,6 @@
 <script lang="ts">
+    import type { Snippet } from 'svelte';
+    import SelectControl from './SelectControl.svelte';
     import { formatStoredSize } from '../formatBytes';
     import type { ImageSessionPackageImportPlan, PackageOpaqueSequenceDecision } from '../transport';
     import type { ImportPartitionOption } from '../../features/import/packageDestinations';
@@ -6,6 +8,9 @@
     import ImportCapacityIssues from './ImportCapacityIssues.svelte';
     let {
         plan,
+        compact = false,
+        stale = false,
+        capacity,
         partitions = [],
         busy,
         targetName,
@@ -18,6 +23,9 @@
         onopaquesequenceaction,
     }: {
         plan: ImageSessionPackageImportPlan | null;
+        compact?: boolean;
+        stale?: boolean;
+        capacity?: Snippet;
         partitions?: ImportPartitionOption[];
         busy: boolean;
         targetName: string;
@@ -150,14 +158,10 @@
     }
 </script>
 
-<section class="package-plan-section" aria-label="Import plan">
-    <div class="package-section-heading">
-        <h3>Import into {targetName}</h3>
-        {#if busy}<small>Checking…</small>{/if}
-    </div>
+{#snippet summary()}
     {#if plan}
         <ImportCapacityIssues groups={capacityGroups} />
-        {#if !capacityGroups.length}
+        {#if !capacityGroups.length && (!compact || (!stale && plan?.capacity.allowed))}
             <dl class="package-plan-summary">
                 <div>
                     <dt>Insert</dt>
@@ -175,48 +179,84 @@
                 {/if}
             </dl>
         {/if}
+    {/if}
+{/snippet}
+
+{#snippet opaque()}
+    {#if plan}
         {#if plan.opaqueSequences.length > 0}
             <div class="opaque-sequence-choices" aria-label="Undecodable Sequences">
                 {#each plan.opaqueSequences as sequence (`${sequence.packageIndex}:${sequence.nodeId}`)}
-                    <fieldset>
-                        <legend>Sequence “{sequence.name || 'Unnamed'}” could not be decoded</legend>
-                        <p>
-                            Its event data may be malformed or use an unsupported encoding. Choose how this Sequence
-                            should be handled.
-                        </p>
-                        <label>
-                            <input
-                                type="radio"
-                                name={`opaque-sequence-${sequence.nodeId}`}
-                                value="PRESERVE_UNCHANGED"
-                                checked={(opaqueSequenceActions[sequence.nodeId] ?? sequence.action) ===
-                                    'PRESERVE_UNCHANGED'}
+                    {#if compact}
+                        <div class="compact-sequence">
+                            <strong>Sequence "{sequence.name || 'Unnamed'}" could not be decoded.</strong>
+                            <SelectControl
+                                label={`Action for Sequence ${sequence.name || 'Unnamed'}`}
+                                value={opaqueSequenceActions[sequence.nodeId] ?? sequence.action ?? undefined}
+                                placeholder="Choose action"
                                 disabled={busy}
-                                onchange={() => onopaquesequenceaction(sequence.nodeId, 'PRESERVE_UNCHANGED')}
+                                options={[
+                                    { value: 'PRESERVE_UNCHANGED', label: 'Preserve unchanged' },
+                                    { value: 'SKIP', label: 'Skip Sequence' },
+                                ]}
+                                onchange={(action) =>
+                                    onopaquesequenceaction(
+                                        sequence.nodeId,
+                                        action as PackageOpaqueSequenceDecision['action'],
+                                    )}
                             />
-                            <span>
-                                <strong>Preserve unchanged</strong>
-                                <small>Import its original event bytes. Playback and editing cannot be verified.</small>
-                            </span>
-                        </label>
-                        <label>
-                            <input
-                                type="radio"
-                                name={`opaque-sequence-${sequence.nodeId}`}
-                                value="SKIP"
-                                checked={(opaqueSequenceActions[sequence.nodeId] ?? sequence.action) === 'SKIP'}
-                                disabled={busy}
-                                onchange={() => onopaquesequenceaction(sequence.nodeId, 'SKIP')}
-                            />
-                            <span>
-                                <strong>Skip Sequence</strong>
-                                <small>Do not import this Sequence. Other package objects are unaffected.</small>
-                            </span>
-                        </label>
-                    </fieldset>
+                            <small
+                                >Its event data may be malformed or use an unsupported encoding. Preserve unchanged
+                                imports the original bytes; playback and editing cannot be verified. Skip Sequence
+                                leaves other objects unaffected.</small
+                            >
+                        </div>
+                    {:else}<fieldset>
+                            <legend>Sequence “{sequence.name || 'Unnamed'}” could not be decoded</legend>
+                            <p>
+                                Its event data may be malformed or use an unsupported encoding. Choose how this Sequence
+                                should be handled.
+                            </p>
+                            <label>
+                                <input
+                                    type="radio"
+                                    name={`opaque-sequence-${sequence.nodeId}`}
+                                    value="PRESERVE_UNCHANGED"
+                                    checked={(opaqueSequenceActions[sequence.nodeId] ?? sequence.action) ===
+                                        'PRESERVE_UNCHANGED'}
+                                    disabled={busy}
+                                    onchange={() => onopaquesequenceaction(sequence.nodeId, 'PRESERVE_UNCHANGED')}
+                                />
+                                <span>
+                                    <strong>Preserve unchanged</strong>
+                                    <small
+                                        >Import its original event bytes. Playback and editing cannot be verified.</small
+                                    >
+                                </span>
+                            </label>
+                            <label>
+                                <input
+                                    type="radio"
+                                    name={`opaque-sequence-${sequence.nodeId}`}
+                                    value="SKIP"
+                                    checked={(opaqueSequenceActions[sequence.nodeId] ?? sequence.action) === 'SKIP'}
+                                    disabled={busy}
+                                    onchange={() => onopaquesequenceaction(sequence.nodeId, 'SKIP')}
+                                />
+                                <span>
+                                    <strong>Skip Sequence</strong>
+                                    <small>Do not import this Sequence. Other package objects are unaffected.</small>
+                                </span>
+                            </label>
+                        </fieldset>{/if}
                 {/each}
             </div>
         {/if}
+    {/if}
+{/snippet}
+
+{#snippet placements()}
+    {#if plan}
         {#if plan.programSlotPlacements.length > 0}
             <div class="program-slot-placements" aria-label="Program slot placement">
                 {#each plan.programSlotPlacements as placement (placement.placementId)}
@@ -227,7 +267,7 @@
                             <strong>Program slots</strong>
                             {#if placement.mode === 'UNAVAILABLE'}
                                 <small>Not enough free slots</small>
-                            {:else if placementHasChanges(placement)}
+                            {:else if stale || placementHasChanges(placement)}
                                 <small>Needs check</small>
                             {:else if placement.applied}
                                 <small>Checked</small>
@@ -289,6 +329,11 @@
                 {/each}
             </div>
         {/if}
+    {/if}
+{/snippet}
+
+{#snippet conflicts()}
+    {#if plan}
         {#if visibleConflictCount > 0}
             <div class="package-conflicts" role="alert">
                 <strong
@@ -312,6 +357,11 @@
                 {/each}
             </div>
         {/if}
+    {/if}
+{/snippet}
+
+{#snippet warnings()}
+    {#if plan}
         {#if plan.programAssignmentAdjustments.length > 0}
             <div class="package-adjustments" aria-label="Program assignment adjustments">
                 <strong
@@ -340,4 +390,89 @@
             </p>
         {/each}
     {/if}
+{/snippet}
+
+<section class="package-plan-section" class:compact aria-label="Import plan">
+    {#if compact}
+        {@render conflicts()}
+        {@render opaque()}
+        {@render capacity?.()}
+        <div class="package-section-heading">
+            <h3>Import actions</h3>
+            {#if stale}<small>Needs check</small>{/if}
+        </div>
+        {#if stale || (plan && !plan.capacity.allowed)}<p class="package-warning">
+                Allocation totals unavailable until a valid plan is prepared.
+            </p>{/if}
+        {@render summary()}
+        {@render placements()}
+    {:else}
+        <div class="package-section-heading">
+            <h3>Import into {targetName}</h3>
+            {#if busy}<small>Checking…</small>{/if}
+        </div>
+        {@render summary()}
+        {@render opaque()}
+        {@render placements()}
+        {@render conflicts()}
+    {/if}
+    {#if !plan}<p class="package-warning">Review selection and destination.</p>{/if}
+    {@render warnings()}
 </section>
+
+<style>
+    .compact :global(h3) {
+        font-weight: 600;
+    }
+    .compact :global(.package-section-heading) {
+        min-height: 28px;
+        margin: 0;
+    }
+    .compact :global(.package-plan-summary > div) {
+        min-height: 24px;
+        padding: 3px 0;
+        border: 0;
+    }
+    .compact :global(.package-plan-summary dd) {
+        font-size: var(--dialog-body-font-size);
+    }
+    .compact :global(.program-slot-placements) {
+        gap: 4px;
+        margin-top: 4px;
+    }
+    .compact :global(.program-slot-placements section) {
+        border: 0;
+        background: none;
+        padding: 0;
+        gap: 4px;
+    }
+    .compact :global(.program-slot-placements dl > div) {
+        grid-template-columns: minmax(0, 1fr) auto;
+        min-height: 24px;
+    }
+    .compact :global(.program-slot-placements dd) {
+        text-align: right;
+        font-size: var(--dialog-body-font-size);
+    }
+    .compact :global(.opaque-sequence-choices) {
+        margin-top: 4px;
+    }
+    .compact :global(.package-conflicts) {
+        margin: 0;
+        padding: 0;
+        border: 0;
+        background: none;
+    }
+    .compact-sequence {
+        display: grid;
+        gap: 4px;
+        margin-bottom: 4px;
+    }
+    .compact-sequence strong {
+        font-size: var(--dialog-body-font-size);
+    }
+    .compact-sequence small {
+        color: var(--color-text-muted);
+        font-size: var(--dialog-metadata-font-size);
+    }
+</style>

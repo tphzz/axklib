@@ -1,5 +1,5 @@
 <script lang="ts">
-    import { untrack } from 'svelte';
+    import { tick, untrack } from 'svelte';
     import type { Tx16wImportRequest, Tx16wVolumeOption } from '../../features/import/tx16wWorkflow.svelte';
     import { browserUploadSource } from '../clientUploadSource';
     import type { Tx16wImportMode } from '../transport';
@@ -9,6 +9,10 @@
     import ImportDestinationChooser from './ImportDestinationChooser.svelte';
     import ImportCapacityControl from './ImportCapacityControl.svelte';
     import ConversionReport from './ConversionReport.svelte';
+    import ImportSourceHeader from './ImportSourceHeader.svelte';
+    import DiskImportSettings from './DiskImportSettings.svelte';
+    import ImportCapacityDetails from './ImportCapacityDetails.svelte';
+    import ImportReviewLayout from './ImportReviewLayout.svelte';
     import type { ImportCompletion } from '../../features/import/importCompletion.svelte';
 
     let {
@@ -40,6 +44,18 @@
     } = $props();
     let partitionIndex = $state<number | null>(untrack(() => request.target?.partitionIndex ?? null));
     let targetSelected = $state(true);
+    let active = $state<'contents' | 'review'>('contents');
+    let shell: HTMLDivElement;
+    $effect(() => {
+        void completion.warnings.join('\n');
+        if (['warnings', 'refresh-failed', 'unconfirmed'].includes(completion.phase) || request.error) {
+            active = 'review';
+            void tick().then(() => {
+                const scroller = shell?.querySelector('.import-pane[data-pane="review"] .import-pane-scroll');
+                if (scroller) scroller.scrollTop = 0;
+            });
+        }
+    });
     const busy = $derived(completion.locked || ['uploading', 'inspecting', 'importing'].includes(request.status));
     const report = $derived(request.plan?.report);
     const canConfirm = $derived(
@@ -88,10 +104,11 @@
 
 <div class="dialog-backdrop dialog-backdrop-raised" role="presentation">
     <div
-        class="dialog-shell dialog-shell-wide tx16w-import-dialog"
+        class="dialog-shell dialog-shell-wide dialog-popovers-visible tx16w-import-dialog"
         role="dialog"
         aria-modal="true"
         aria-label="Import TX16W disk set"
+        bind:this={shell}
         use:modal={{
             onescape: () => {
                 if (canDismiss) oncancel();
@@ -104,101 +121,136 @@
                 ><Icon name="close" size={15} /></button
             >
         </header>
-        <div class="conversion-controls">
-            {#if request.destinationName}<div class="target-name" title={request.destinationName}>
-                    {request.destinationName}
-                </div>{/if}
-            <ImportCapacityControl
-                review={completion.capacity}
-                admission={report?.capacity}
+        <div class="disk-import-body">
+            <ImportSourceHeader
+                label={request.documentSource ? 'Open TX16W document' : 'TX16W disk set'}
+                truncateSummary={!!request.documentSource}
+                summary={request.documentSource
+                    ? request.destinationName
+                        ? `Destination image: ${request.destinationName}`
+                        : 'TX16W document'
+                    : `${request.members.length} ${request.members.length === 1 ? 'disk' : 'disks'}${report ? ` · ${report.actionCount} planned objects` : ''}`}
+                members={request.documentSource
+                    ? []
+                    : request.members.map((member) => ({ id: member.id, name: member.sourceName }))}
                 disabled={busy}
-                onchange={onprepare}
-            />
-            <ImportDestinationChooser
-                mode="existing"
-                {partitionIndex}
-                volumeName={request.target?.volumeName ?? ''}
-                {partitions}
-                {volumes}
-                disabled={busy}
-                unavailableModes={{ create: 'TX16W conversion requires an existing volume' }}
-                onmode={() => undefined}
-                onname={() => undefined}
-                onvolume={selectTarget}
-                onpartition={(index) => selectTarget(index, '')}
-            />
+                onremove={request.documentSource ? undefined : onremove}
+            >
+                {#snippet actions()}
+                    {#if !request.documentSource}
+                        <label class="secondary-button add-disks" aria-disabled={busy}
+                            ><Icon name="file-plus" size={14} />Add disks
+                            <input
+                                type="file"
+                                accept=".img,.ima"
+                                multiple
+                                disabled={busy}
+                                onchange={(event) => addFiles(event.currentTarget)}
+                            />
+                        </label>
+                    {/if}
+                {/snippet}
+            </ImportSourceHeader>
+            <DiskImportSettings>
+                <ImportDestinationChooser
+                    compact
+                    explainUnavailable
+                    mode="existing"
+                    {partitionIndex}
+                    volumeName={request.target?.volumeName ?? ''}
+                    {partitions}
+                    {volumes}
+                    disabled={busy}
+                    unavailableModes={{ create: 'TX16W conversion requires an existing volume' }}
+                    onmode={() => undefined}
+                    onname={() => undefined}
+                    onvolume={selectTarget}
+                    onpartition={(index) => selectTarget(index, '')}
+                />
+                <ImportCapacityControl
+                    compact
+                    showSummary={false}
+                    review={completion.capacity}
+                    disabled={busy}
+                    onchange={onprepare}
+                />
+            </DiskImportSettings>
             <div class="mode-controls">
-                <div class="dialog-segmented-control" role="group" aria-label="Import content">
-                    <button
-                        disabled={busy}
-                        aria-pressed={request.importMode === 'HIERARCHY'}
-                        onclick={() => onmode('HIERARCHY')}>Programs and samples</button
+                <div class="mode-option">
+                    <span class="mode-label">Import mode</span>
+                    <div
+                        class="dialog-segmented-control dialog-segmented-control--compact conversion-mode"
+                        role="group"
+                        aria-label="Import content"
                     >
-                    <button
-                        disabled={busy}
-                        aria-pressed={request.importMode === 'WAVE_DATA_ONLY'}
-                        onclick={() => onmode('WAVE_DATA_ONLY')}>Wave Data only</button
-                    >
+                        <button
+                            disabled={busy}
+                            aria-pressed={request.importMode === 'HIERARCHY'}
+                            onclick={() => onmode('HIERARCHY')}>Programs and samples</button
+                        >
+                        <button
+                            disabled={busy}
+                            aria-pressed={request.importMode === 'WAVE_DATA_ONLY'}
+                            onclick={() => onmode('WAVE_DATA_ONLY')}>Wave Data only</button
+                        >
+                    </div>
                 </div>
-                <div class="dialog-segmented-control" role="group" aria-label="Conversion fidelity">
-                    <button
-                        disabled={busy}
-                        aria-pressed={request.fidelity === 'BEST'}
-                        onclick={() => onfidelity('BEST')}>Best</button
+                <div class="mode-option">
+                    <span class="mode-label fidelity-label">Fidelity</span>
+                    <div
+                        class="dialog-segmented-control dialog-segmented-control--compact"
+                        role="group"
+                        aria-label="Conversion fidelity"
                     >
-                    <button
-                        disabled={busy}
-                        aria-pressed={request.fidelity === 'STRICT'}
-                        onclick={() => onfidelity('STRICT')}>Strict</button
-                    >
+                        <button
+                            disabled={busy}
+                            aria-pressed={request.fidelity === 'BEST'}
+                            onclick={() => onfidelity('BEST')}>Best</button
+                        >
+                        <button
+                            disabled={busy}
+                            aria-pressed={request.fidelity === 'STRICT'}
+                            onclick={() => onfidelity('STRICT')}>Strict</button
+                        >
+                    </div>
                 </div>
             </div>
+            {#snippet capacity()}<ImportCapacityDetails
+                    review={completion.capacity}
+                    admission={report?.capacity}
+                    pending={['uploading', 'inspecting'].includes(request.status)}
+                />{/snippet}
+            {#snippet feedback()}
+                {#if request.error}<p class="dialog-error" role="alert">{request.error}</p>{/if}
+                {#each completion.warnings as warning}<p class="package-warning">{warning}</p>{/each}
+            {/snippet}
+            {#if report}
+                <ConversionReport
+                    {report}
+                    bind:active
+                    bind:acknowledged={request.acknowledgedIssueIds}
+                    disabled={busy}
+                    {capacity}
+                    {feedback}
+                    feedbackNotice={completion.warnings.length
+                        ? `${completion.warnings.length} ${completion.warnings.length === 1 ? 'warning' : 'warnings'}`
+                        : request.error
+                          ? '1 issue'
+                          : ''}
+                />
+            {:else}
+                <ImportReviewLayout bind:active reviewNotice={request.error ? '1 issue' : ''}>
+                    {#snippet contents()}<p class="empty-report">
+                            {request.status === 'uploading'
+                                ? 'Uploading disk images'
+                                : request.status === 'inspecting'
+                                  ? 'Preparing conversion'
+                                  : 'No prepared conversion'}
+                        </p>{/snippet}
+                    {#snippet review()}{@render feedback()}{@render capacity()}{/snippet}
+                </ImportReviewLayout>
+            {/if}
         </div>
-        <div class="conversion-body">
-            <section class="disk-set" aria-label="Disk set">
-                <header>
-                    <strong>Source</strong><span
-                        >{request.documentSource ? 'TX16W document' : `${request.members.length} images`}</span
-                    >
-                </header>
-                {#if !request.documentSource}
-                    <label class="secondary-button" aria-disabled={busy}
-                        ><Icon name="file-plus" size={14} />Add disks
-                        <input
-                            type="file"
-                            accept=".img,.ima"
-                            multiple
-                            disabled={busy}
-                            onchange={(event) => addFiles(event.currentTarget)}
-                        /></label
-                    >
-                {/if}
-                <div class="members">
-                    {#each request.members as member (member.id)}
-                        <div>
-                            <span>{member.sourceName}</span><button
-                                class="icon-button"
-                                aria-label={`Remove ${member.sourceName}`}
-                                disabled={busy}
-                                onclick={() => onremove(member.id)}><Icon name="trash" size={14} /></button
-                            >
-                        </div>
-                    {/each}
-                </div>
-            </section>
-            {#if report}<ConversionReport {report} bind:acknowledged={request.acknowledgedIssueIds} disabled={busy} />
-            {:else}<div class="empty-report" aria-live="polite">
-                    {request.status === 'uploading'
-                        ? 'Uploading disk images'
-                        : request.status === 'inspecting'
-                          ? 'Preparing conversion'
-                          : 'No prepared conversion'}
-                </div>{/if}
-        </div>
-        {#if request.error || completion.warnings.length}<div class="dialog-results dialog-error" role="alert">
-                {request.error}
-                {#each completion.warnings as warning}<p>{warning}</p>{/each}
-            </div>{/if}
         <footer class="dialog-footer">
             <span class="dialog-footer-status" role="status"
                 >{completion.message ||
@@ -242,53 +294,58 @@
 </div>
 
 <style>
+    .dialog-backdrop {
+        grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+    }
     .tx16w-import-dialog {
-        width: min(1000px, calc(100vw - 32px));
-        height: min(720px, calc(100vh - 32px));
+        width: min(1120px, calc(100% - 32px));
+        height: min(650px, calc(100% - 32px));
+        max-width: none;
+        max-height: none;
+        container: disk-import / size;
     }
-    .conversion-controls {
-        padding: 0 12px 10px;
-        flex-shrink: 0;
-        border-bottom: 1px solid var(--color-border);
-    }
-    .target-name {
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        padding-top: 8px;
+    .disk-import-body {
+        display: flex;
+        flex: 1;
+        flex-direction: column;
+        gap: 4px;
+        min-height: 0;
+        padding: 12px;
     }
     .mode-controls {
         display: flex;
         flex-wrap: wrap;
-        gap: 12px;
-        margin-top: 8px;
-        justify-content: space-between;
-    }
-    .conversion-body {
-        display: flex;
-        gap: 16px;
-        flex: 1;
-        min-height: 0;
-        padding: 0 12px;
-    }
-    .disk-set {
-        flex: 0 0 180px;
-        display: flex;
-        flex-direction: column;
-        min-height: 0;
-    }
-    .disk-set header {
-        display: flex;
         align-items: center;
-        gap: 8px;
-        height: 32px;
-        flex-shrink: 0;
+        gap: 4px;
+        flex: none;
+        min-height: 28px;
     }
-    .disk-set header span {
+    .mode-label {
         color: var(--color-text-muted);
-        font-size: var(--dialog-metadata-font-size);
+        font-size: var(--dialog-label-font-size);
+        width: 70px;
     }
-    .disk-set label {
+    .mode-option {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 4px;
+        min-width: 0;
+        max-width: 100%;
+    }
+    .fidelity-label {
+        width: auto;
+        margin: 0 8px;
+    }
+    .conversion-mode {
+        width: 282px;
+        max-width: 100%;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .conversion-mode button {
+        width: auto;
+    }
+    .add-disks {
         position: relative;
         overflow: hidden;
     }
@@ -299,37 +356,29 @@
         cursor: pointer;
         width: 100%;
     }
-    .members {
-        flex: 1;
-        min-height: 0;
-        overflow: auto;
-    }
-    .members > div {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        padding: 5px 0;
-    }
-    .members span {
-        flex: 1;
-        min-width: 0;
-        overflow-wrap: anywhere;
+    .add-disks:focus-within {
+        outline: 1px solid var(--state-focus);
+        outline-offset: 2px;
     }
     .empty-report {
-        flex: 1;
-        padding: 12px 0;
+        color: var(--color-text-muted);
+        margin: 6px 0;
     }
-    .dialog-results {
-        max-height: 80px;
-        overflow: auto;
-        margin: 8px 12px;
-    }
-    @media (max-width: 600px) {
-        .disk-set {
-            flex-basis: 115px;
+    @container disk-import (max-width: 420px) {
+        .mode-label {
+            width: 100%;
         }
-        .conversion-body {
-            gap: 8px;
+        .fidelity-label {
+            width: auto;
+            margin: 0;
+        }
+    }
+    @container disk-import (max-width: 600px) {
+        .disk-import-body {
+            overflow-y: auto;
+        }
+        .disk-import-body :global(.import-review-layout) {
+            flex: 1 0 240px;
         }
     }
 </style>

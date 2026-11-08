@@ -24,6 +24,7 @@ try {
         await page.goto(`http://127.0.0.1:${port}/tools/layout-fixtures/floppy-import.html?recovery`);
         const dialog = page.getByRole('dialog', { name: 'Import floppy', exact: true });
         await dialog.waitFor();
+        if (await dialog.getByRole('tab', { name: /^Review/ }).count()) await dialog.getByRole('tab', { name: /^Review/ }).click();
         const acknowledgement = dialog.getByRole('checkbox', { name: 'Import available objects despite source issues' });
         const review = dialog.getByRole('button', { name: 'Review', exact: true });
         const apply = dialog.getByRole('button', { name: 'Import', exact: true });
@@ -33,7 +34,7 @@ try {
         const geometry = await dialog.evaluate(node => {
             const shell = node.getBoundingClientRect();
             const footer = node.querySelector('footer').getBoundingClientRect();
-            const rows = node.querySelector('.floppy-rows');
+            const rows = node.querySelector('[data-pane="contents"] .import-pane-scroll');
             return {
                 shell: { x: shell.x, y: shell.y, right: shell.right, bottom: shell.bottom },
                 footerTop: footer.top,
@@ -62,7 +63,8 @@ try {
         await page.screenshot({ path: resolve(output, `acknowledged-${width}.png`) });
         await acknowledgement.uncheck();
         assert.equal(await apply.isDisabled(), true);
-        await dialog.locator('.floppy-rows').evaluate(node => { node.scrollTop = node.scrollHeight; });
+        if (await dialog.getByRole('tab', { name: 'Contents', exact: true }).count()) await dialog.getByRole('tab', { name: 'Contents', exact: true }).click();
+        await dialog.locator('[data-pane="contents"] .import-pane-scroll').evaluate(node => { node.scrollTop = node.scrollHeight; });
         assert.equal(await dialog.locator('footer').evaluate(node => node.getBoundingClientRect().top), geometry.footerTop);
         await page.screenshot({ path: resolve(output, `excluded-${width}.png`) });
         await page.keyboard.press('Escape'); await dialog.waitFor({ state: 'detached' });

@@ -124,6 +124,8 @@ describe('Tx16wImportDialog', () => {
         expect(fileInput.disabled).toBe(false);
         expect(fileInput.closest('label')?.getAttribute('aria-disabled')).toBe('false');
         expect((screen.getByRole('button', { name: 'New' }) as HTMLButtonElement).disabled).toBe(true);
+        await fireEvent.focus(screen.getByRole('button', { name: 'Destination availability' }));
+        expect(screen.getByRole('tooltip').textContent).toBe('TX16W conversion requires an existing volume');
         expect(screen.queryByRole('button', { name: 'Review' })).toBeNull();
         expect((importButton as HTMLButtonElement).disabled).toBe(false);
 

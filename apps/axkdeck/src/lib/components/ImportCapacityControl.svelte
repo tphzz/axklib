@@ -96,4 +96,9 @@
             flex-wrap: wrap;
         }
     }
+    @container disk-import (max-width: 365px) {
+        .compact .capacity-control {
+            flex-wrap: wrap;
+        }
+    }
 </style>

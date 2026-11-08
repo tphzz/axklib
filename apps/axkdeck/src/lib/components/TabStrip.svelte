@@ -12,6 +12,7 @@
         disabled = false,
         idPrefix,
         panelId,
+        fill = false,
     }: {
         tabs: readonly {
             id: T;
@@ -31,6 +32,7 @@
         disabled?: boolean;
         idPrefix?: string;
         panelId?: string;
+        fill?: boolean;
     } = $props();
     let strip: HTMLElement;
     let request = 0;
@@ -145,6 +147,7 @@
 
 <nav
     class="tab-strip"
+    class:fill
     data-appearance={appearance}
     role={semantics === 'tablist' ? 'tablist' : undefined}
     aria-label={label}
@@ -216,6 +219,10 @@
         background: var(--state-active-border);
         content: '';
         opacity: 0;
+    }
+    .fill button {
+        flex: 1 0 0;
+        min-width: max-content;
     }
     button:hover:not(:disabled),
     button.active {

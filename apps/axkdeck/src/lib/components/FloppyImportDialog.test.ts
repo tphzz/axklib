@@ -6,6 +6,38 @@ import { floppyDialogFixture } from '../../test/floppyDialogFixture';
 import { capacityConflict } from '../../test/importCapacityFixture';
 
 describe('Floppy import dialog', () => {
+    it('puts retained warnings before a locked plan without suggesting another review', async () => {
+        const workflow = floppyDialogFixture(5);
+        const view = render(FloppyImportDialog, { workflow });
+        const review = view.getByRole('region', { name: 'Import review' });
+        review.scrollTop = 300;
+        workflow.completion.phase = 'warnings';
+        workflow.completion.warnings = ['Retain recovery data.'];
+        await tick();
+        await tick();
+        expect(review.scrollTop).toBe(0);
+        expect(review.querySelector('.floppy-results')?.firstElementChild?.textContent?.trim()).toBe(
+            'Retain recovery data.',
+        );
+        expect(view.queryByText('Needs check')).toBeNull();
+        expect(view.queryByRole('button', { name: 'Import' })).toBeNull();
+        expect(view.getByRole('button', { name: 'Done' }).hasAttribute('disabled')).toBe(false);
+    });
+
+    it('withholds stale totals and keeps compact opaque Sequence choices locked during a write', async () => {
+        const workflow = floppyDialogFixture(5);
+        const r = workflow.request!;
+        r.plan!.opaqueSequences = [{ packageIndex: 0, nodeId: 'sequence-1', name: 'DEMO', action: null }];
+        r.dirty = true;
+        const view = render(FloppyImportDialog, { workflow });
+        expect(view.queryByText('Insert')).toBeNull();
+        expect(view.getByText('Needs check')).toBeTruthy();
+        const sequence = view.getByRole('combobox', { name: /Sequence/ });
+        expect(sequence.hasAttribute('disabled')).toBe(false);
+        workflow.completion.phase = 'importing';
+        await tick();
+        expect(sequence.hasAttribute('disabled')).toBe(true);
+    });
     it('shows source exclusions and requires an unchecked acknowledgement before review', async () => {
         const workflow = floppyDialogFixture(5);
         const r = workflow.request!;
@@ -85,7 +117,7 @@ describe('Floppy import dialog', () => {
         expect(view.queryByText('Storage location')).toBeNull();
         expect(view.queryByText('This computer')).toBeNull();
         expect(view.getByRole('alert').textContent).toBe('Picker failed');
-        await fireEvent.click(view.getByRole('button', { name: 'Choose floppy source' }));
+        await fireEvent.click(view.getByRole('button', { name: 'Add disks...' }));
         expect(choose).toHaveBeenCalledWith(true);
     });
     it('offers one direct companion action after source selection', async () => {
@@ -122,7 +154,8 @@ describe('Floppy import dialog', () => {
             true,
         );
         expect(view.container.querySelector('.floppy-rows .floppy-table-heading')).toBeNull();
-        expect(view.container.querySelector('.floppy-results')).toBeNull();
+        expect(view.getByRole('region', { name: 'Review' })).toBeTruthy();
+        expect(view.container.querySelector('.disk-import-settings .import-capacity.compact')).toBeTruthy();
         await fireEvent.click(view.getByRole('checkbox', { name: 'Select all objects' }));
         expect(workflow.request?.selected).toEqual([]);
         expect(view.getByRole('button', { name: /^Import$/ }).hasAttribute('disabled')).toBe(true);
@@ -138,7 +171,7 @@ describe('Floppy import dialog', () => {
         expect(view.container.querySelector('.import-source-choice')).toBeTruthy();
         expect(view.getByRole('button', { name: /Storage location/ })).toBeTruthy();
         expect(view.getByRole('button', { name: /This computer/ })).toBeTruthy();
-        expect(view.queryByRole('button', { name: 'Review' })).toBeNull();
+        expect(view.getByRole('button', { name: 'Review' }).hasAttribute('disabled')).toBe(true);
         expect(view.queryByRole('button', { name: 'Existing' })).toBeNull();
     });
 });

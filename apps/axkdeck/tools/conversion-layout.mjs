@@ -42,13 +42,14 @@ try {
             style.forEach((item) => assert.deepEqual(item, style[0]));
             assert.equal(style[0].marginTop, '0px');
             assert.equal(style[0].marginBottom, '0px');
-            const report = dialog.locator('.report-scroll');
+            const report = dialog.locator('[data-pane="contents"] .import-pane-scroll');
             assert(await report.evaluate((node) => node.scrollHeight > node.clientHeight));
-            await dialog.getByRole('button', { name: 'Next report page' }).click();
-            await dialog.getByRole('cell', { name: /^Concert-Piano-100/ }).waitFor();
+            await dialog.getByRole('button', { name: 'Next objects page' }).click();
+            await dialog.getByText('Concert-Piano-100', { exact: true }).waitFor();
             assert.deepEqual(await footer.boundingBox(), footerBounds);
-            await dialog.getByRole('button', { name: 'Previous report page' }).click();
-            const checks = dialog.locator('.report-scroll input[type=checkbox]');
+            await dialog.getByRole('button', { name: 'Previous objects page' }).click();
+            if (await dialog.getByRole('tab', { name: /^Review/ }).count()) await dialog.getByRole('tab', { name: /^Review/ }).click();
+            const checks = dialog.locator('[data-pane="review"] input[type=checkbox]');
             for (let index = 0; index < 2; ++index) {
                 await checks.nth(index).focus();
                 await page.keyboard.press('Space');
@@ -62,10 +63,11 @@ try {
             for (let index = 0; index < 2; ++index) await checks.nth(index).check();
             assert(await primary.isEnabled());
             assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false);
-            const source = await dialog.getByRole('region', { name: 'Disk set' }).boundingBox();
-            const review = await dialog.getByRole('region', { name: 'Conversion report' }).boundingBox();
-            assert(source.x + source.width <= review.x);
-            assert(review.y + review.height <= footerBounds.y + 1);
+            const contents = await dialog.locator('[data-pane="contents"]').boundingBox();
+            const review = await dialog.locator('[data-pane="review"]').boundingBox();
+            if (!await dialog.getByRole('tab').count()) assert(contents.x + contents.width <= review.x);
+            assert((await dialog.locator('.disk-import-body').boundingBox()).y < footerBounds.y);
+            assert.equal(await dialog.getByRole('region', { name: 'Source disks' }).count(), native ? 0 : 1);
             await report.evaluate((node) => { node.scrollTop = 0; });
             await page.screenshot({ path: resolve(output, `${native ? 'native' : 'import'}-${width}.png`) });
             await primary.click();

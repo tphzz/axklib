@@ -114,8 +114,8 @@ describe('dialog visual contract', () => {
         expect(programs).toMatch(
             /\.program-generation-header\s*\{[^}]*font-size:\s*var\(--dialog-table-header-font-size\)/s,
         );
-        expect(conversion).toMatch(/th\s*\{[^}]*font-size:\s*var\(--dialog-label-font-size\)/s);
-        expect(conversion).toMatch(/\.conversion-report\s*\{[^}]*font-size:\s*var\(--dialog-body-font-size\)/s);
+        expect(conversion).toMatch(/\.object-columns\s*\{[^}]*font-size:\s*var\(--dialog-label-font-size\)/s);
+        expect(conversion).toMatch(/\.object-row\s*\{[^}]*font-size:\s*var\(--dialog-body-font-size\)/s);
         expect(companions).toMatch(
             /\.companion-disk-content h3\s*\{[^}]*font-size:\s*var\(--dialog-section-font-size\)/s,
         );
