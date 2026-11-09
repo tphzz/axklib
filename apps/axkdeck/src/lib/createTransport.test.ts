@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { createTransport } from './createTransport';
+import { serverFileLocation } from './storageLocations';
 
 const tauriWindow = window as Window & { __TAURI_INTERNALS__?: unknown };
 
@@ -10,6 +11,16 @@ afterEach(() => {
 });
 
 describe('createTransport', () => {
+    it('rejects companion discovery when no server is connected', async () => {
+        const transport = createTransport();
+
+        await expect(
+            transport.resolveCompanionSources({
+                sources: [serverFileLocation({ rootId: 'source', relativePath: 'disk.img' })],
+            }),
+        ).rejects.toThrow('axklib-server is unavailable');
+    });
+
     it('does not fall back to an in-process domain transport in a Tauri window', async () => {
         tauriWindow.__TAURI_INTERNALS__ = {};
 

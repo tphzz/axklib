@@ -91,6 +91,27 @@ TEST(ServerContract, RequiresExactDeviceTargetMetadataAndRejectsMalformedScsiIde
     EXPECT_TRUE(validator.validate("DeviceTarget", target));
 }
 
+TEST(ServerContract, CompanionResolutionHasOneBoundedReadOnlyContract) {
+    const axk::server::OpenApiValidator validator;
+    const nlohmann::json source{{"kind", "FILE"}, {"file", file_ref("disk.img")}};
+    nlohmann::json request{{"sources", nlohmann::json::array({source})}, {"searchNearby", true}};
+    EXPECT_TRUE(validator.validate("CompanionSourceResolutionRequest", request));
+    request["path"] = "/host/path";
+    EXPECT_FALSE(validator.validate("CompanionSourceResolutionRequest", request));
+    request.erase("path");
+    request["sources"] = nlohmann::json::array();
+    EXPECT_FALSE(validator.validate("CompanionSourceResolutionRequest", request));
+    const nlohmann::json result{
+        {"members", nlohmann::json::array({{{"source", source}, {"name", "disk.img"}, {"origin", "SELECTED"}}})},
+        {"requirements", nlohmann::json::array({{{"name", "TONE.W01"}, {"state", "AMBIGUOUS"}}})}};
+    EXPECT_TRUE(validator.validate("CompanionSourceResolution", result));
+    const auto registry = axk::app::make_operation_registry();
+    const auto *operation = registry.find("images.companionSources.resolve");
+    ASSERT_NE(operation, nullptr);
+    EXPECT_EQ(operation->operation_class, axk::app::OperationClass::read);
+    EXPECT_EQ(operation->mode, axk::app::ExecutionMode::job);
+}
+
 TEST(ServerContract, EmbedsValidOpenApi31WithSandboxReferences) {
     const auto document = nlohmann::json::parse(axk::server::embedded_openapi());
     EXPECT_EQ(document.at("openapi"), "3.1.0");
@@ -366,7 +387,7 @@ TEST(ServerContract, SystemProgramContextsArePartitionScopedAndIndependentlyAvai
 TEST(ServerContract, RegistryIsTheOnlyDomainOperationRouteInventory) {
     const auto registry = axk::app::make_operation_registry();
     const auto entries = registry.entries();
-    EXPECT_EQ(entries.size(), 91U);
+    EXPECT_EQ(entries.size(), 92U);
     EXPECT_EQ(entries.front().descriptor.id, "system.version");
     EXPECT_EQ(entries.front().descriptor.route, "/api/v1/system/version");
 }

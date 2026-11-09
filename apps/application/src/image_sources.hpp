@@ -1,7 +1,9 @@
 #pragma once
 
+#include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -47,6 +49,7 @@ struct AdmittedImageSources {
 admit_image_sources(const Sandbox &sandbox, PathReservationCoordinator *reservations, DeviceSessionManager *devices,
                     std::span<const ImageSourceRef> references, std::string_view owner_id,
                     const CancellationToken &cancellation = {}, ProgressSink *progress = nullptr,
-                    diagnostic_sink *diagnostics = nullptr);
+                    diagnostic_sink *diagnostics = nullptr,
+                    std::uint64_t maximum_source_bytes = std::numeric_limits<std::uint64_t>::max());
 
 } // namespace axk::app

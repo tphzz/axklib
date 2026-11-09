@@ -75,6 +75,42 @@ const input: ConversionInput = {
 };
 
 describe('retained conversion transport', () => {
+    it('resolves workspace companions as a cancellable read job without exposing client paths', async () => {
+        const { client, jobs, transport } = fixture();
+        const result = {
+            members: [
+                {
+                    source: { kind: 'FILE', file: { rootId: 'root', relativePath: 'disk.ima' } },
+                    name: 'disk.ima',
+                    origin: 'SELECTED',
+                },
+                {
+                    source: { kind: 'UPLOAD', upload: { uploadId: 'second' } },
+                    name: 'disk2.ima',
+                    origin: 'AUTO_ADDED',
+                },
+            ],
+            requirements: [],
+        };
+        jobs.wait.mockResolvedValue({ status: 'completed', result });
+        const signal = new AbortController().signal;
+        expect(
+            await transport.resolveCompanionSources(
+                {
+                    sources: [serverFileLocation({ rootId: 'root', relativePath: 'disk.ima' })],
+                    candidates: [clientUploadLocation({ uploadId: 'second' }, 'DISK_IMAGE', 'disk2.ima')],
+                    exclusions: [serverFileLocation({ rootId: 'root', relativePath: 'removed.ima' })],
+                },
+                signal,
+            ),
+        ).toEqual(result);
+        expect(client.invoke).toHaveBeenCalledWith('images.companionSources.resolve', {
+            sources: [{ kind: 'FILE', file: { rootId: 'root', relativePath: 'disk.ima' } }],
+            candidates: [{ kind: 'UPLOAD', upload: { uploadId: 'second' } }],
+            exclusions: [{ kind: 'FILE', file: { rootId: 'root', relativePath: 'removed.ima' } }],
+        });
+        expect(jobs.wait).toHaveBeenCalledWith('prepare', expect.any(Function), signal);
+    });
     it('binds both document identities and revisions and retrieves every report page', async () => {
         const { client, transport } = fixture();
         client.request.mockResolvedValue(plan(200));

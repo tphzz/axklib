@@ -88,6 +88,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    '/companion-source-resolutions': {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations['images.companionSources.resolve'];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     '/conversion-plans': {
         parameters: {
             query?: never;
@@ -2687,6 +2703,37 @@ export interface components {
                   /** @constant */
                   kind: 'IMMEDIATE_SIBLINGS';
               };
+        CompanionSourceReference:
+            | {
+                  file: components['schemas']['FileRef'];
+                  /** @constant */
+                  kind: 'FILE';
+              }
+            | {
+                  /** @constant */
+                  kind: 'UPLOAD';
+                  upload: components['schemas']['UploadRef'];
+              };
+        CompanionSourceResolution: {
+            members: {
+                name: string;
+                /** @enum {unknown} */
+                origin: 'SELECTED' | 'AUTO_ADDED';
+                source: components['schemas']['CompanionSourceReference'];
+            }[];
+            requirements: {
+                name: string;
+                /** @enum {unknown} */
+                state: 'MISSING' | 'AMBIGUOUS' | 'UNSUPPORTED' | 'INVALID';
+            }[];
+        };
+        CompanionSourceResolutionRequest: {
+            candidates?: components['schemas']['CompanionSourceReference'][];
+            exclusions?: components['schemas']['CompanionSourceReference'][];
+            /** @default true */
+            searchNearby: boolean;
+            sources: components['schemas']['CompanionSourceReference'][];
+        };
         ConversionAction: {
             action: string;
             details: {
@@ -6612,6 +6659,121 @@ export interface operations {
             };
             /** @description Request could not be completed */
             default: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+        };
+    };
+    'images.companionSources.resolve': {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                'application/json': components['schemas']['CompanionSourceResolutionRequest'];
+            };
+        };
+        responses: {
+            /** @description Job accepted */
+            202: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['JobResponse'];
+                };
+            };
+            /** @description Malformed or schema-invalid request */
+            400: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Authentication is required */
+            401: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Authenticated caller is not authorized */
+            403: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Referenced resource does not exist */
+            404: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Request conflicts with current state */
+            409: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Configured request limit exceeded */
+            413: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Unsupported or invalid domain request */
+            422: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Transient server capacity exhausted */
+            429: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Contained internal failure */
+            500: {
                 headers: {
                     'X-Request-Id': components['headers']['XRequestId'];
                     [name: string]: unknown;

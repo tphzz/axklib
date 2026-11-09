@@ -80,15 +80,12 @@ import {
 } from './storageLocations';
 import type { ClientUploadSource } from './clientUploadSource';
 import { downloadServerFile, readDirectoryArchive } from './httpDownloads';
-import { HttpPackageTransport } from './httpPackageTransport';
+import { HttpConversionTransport } from './httpConversionTransport';
 import { HttpImageSessions } from './httpImageSessions';
 import { HttpImportOperations } from './httpImportOperations';
-import { HttpConversions } from './httpConversions';
-import type { ConversionTransport } from './conversions';
 import { HttpCapacityGate, type CapacityReviewHandler } from './httpCapacityGate';
 import { HttpJobController } from './httpJobController';
 import { createHttpDeviceConnection, type HttpDevices } from './httpDevices';
-import { HttpPackageOperations } from './httpPackageOperations';
 import type { ApiAlterationInspection, ApiWritePlan } from './httpTransportModels';
 import { planSummary } from './httpTransportModels';
 import {
@@ -102,7 +99,7 @@ import {
     volumeMutationOperation,
 } from './httpTransportWire';
 type HttpImageTransportConnection = AxklibApiConnection & { mode: Exclude<ConnectionMode, 'unavailable'> };
-export class HttpImageTransport extends HttpPackageTransport implements ImageTransport {
+export class HttpImageTransport extends HttpConversionTransport implements ImageTransport {
     inspectImportCapacity(
         sessionId: number,
         request: import('./importCapacity').CapacityImport,
@@ -117,28 +114,16 @@ export class HttpImageTransport extends HttpPackageTransport implements ImageTra
     private readonly client: AxklibHttpApiClient;
     private readonly jobs: HttpJobController;
     private readonly imports: HttpImportOperations;
-    private readonly conversions: HttpConversions;
-    conversionProfiles: ConversionTransport['conversionProfiles'] = () => this.conversions.conversionProfiles();
-    prepareConversion: ConversionTransport['prepareConversion'] = (...args) =>
-        this.conversions.prepareConversion(...args);
-    conversionPlan: ConversionTransport['conversionPlan'] = (...args) => this.conversions.conversionPlan(...args);
-    releaseConversion: ConversionTransport['releaseConversion'] = (...args) =>
-        this.conversions.releaseConversion(...args);
-    executeConversion: ConversionTransport['executeConversion'] = (...args) =>
-        this.conversions.executeConversion(...args);
-    conversionExecution: ConversionTransport['conversionExecution'] = (...args) =>
-        this.conversions.conversionExecution(...args);
     private readonly createPlans = new Map<string, ApiWritePlan>();
     programEditorCatalog = () => loadProgramEditorCatalog(this.client);
 
     constructor(connection: HttpImageTransportConnection, capacityReviewer?: CapacityReviewHandler) {
         const { client, jobs, devices } = createHttpDeviceConnection(connection);
         const imageSessions = new HttpImageSessions(client, jobs, new HttpCapacityGate(client, jobs, capacityReviewer));
-        super(imageSessions, new HttpPackageOperations(client, jobs, imageSessions));
+        super(client, jobs, imageSessions);
         this.client = client;
         this.jobs = jobs;
         this.imports = new HttpImportOperations(this.client, this.jobs, this.imageSessions);
-        this.conversions = new HttpConversions(client, jobs, imageSessions);
         this.connectionMode = connection.mode;
         this.devices = devices;
     }

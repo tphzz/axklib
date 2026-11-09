@@ -3,27 +3,18 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <memory>
 #include <numeric>
+#include <span>
+#include <string>
 #include <utility>
 #include <variant>
+#include <vector>
 
 namespace axk::tx16w::detail {
 
-Result<std::vector<std::shared_ptr<const native::Document>>>
-open_documents(std::shared_ptr<const native::SourceSet> sources, const CancellationToken &cancellation) {
-    std::vector<std::shared_ptr<const Document>> documents;
-    const auto members = sources->members();
-    for (const auto &member : sources->members()) {
-        auto opened = Document::open(sources, cancellation, std::array{member.id});
-        if (!opened) {
-            if (opened.error().code == ErrorCode::container_unrecognized) {
-                documents.push_back(nullptr);
-                continue;
-            }
-            return std::unexpected(opened.error());
-        }
-        documents.push_back(std::move(*opened));
-    }
+std::vector<CompanionGroup> group_companions(std::span<const native::SourceMember> members,
+                                             std::span<const std::shared_ptr<const Document>> documents) {
     const auto has_setup = [](const Document &document) {
         return std::ranges::any_of(document.native_objects(), [](const auto &object) {
             return std::holds_alternative<NativeSetup>(object.value);
@@ -74,7 +65,7 @@ open_documents(std::shared_ptr<const native::SourceSet> sources, const Cancellat
         }
     }
     owners = std::move(unique_owners);
-    std::vector<std::shared_ptr<const native::Document>> result;
+    std::vector<CompanionGroup> result;
     for (std::size_t owner = 0U; owner < documents.size(); ++owner) {
         if (owners[owner] != owner || !documents[owner])
             continue;
@@ -82,11 +73,35 @@ open_documents(std::shared_ptr<const native::SourceSet> sources, const Cancellat
         for (std::size_t index = 0U; index < owners.size(); ++index)
             if (owners[index] == owner)
                 group.push_back(members[index].id);
-        if (group.size() == 1U && ambiguities[owner].empty()) {
-            result.push_back(documents[owner]);
+        result.push_back({std::move(group), std::move(ambiguities[owner])});
+    }
+    return result;
+}
+
+Result<std::vector<std::shared_ptr<const native::Document>>>
+open_documents(std::shared_ptr<const native::SourceSet> sources, const CancellationToken &cancellation) {
+    std::vector<std::shared_ptr<const Document>> documents;
+    for (const auto &member : sources->members()) {
+        auto opened = Document::open(sources, cancellation, std::array{member.id});
+        if (!opened) {
+            if (opened.error().code == ErrorCode::container_unrecognized) {
+                documents.push_back(nullptr);
+                continue;
+            }
+            return std::unexpected(opened.error());
+        }
+        documents.push_back(std::move(*opened));
+    }
+    std::vector<std::shared_ptr<const native::Document>> result;
+    for (const auto &group : group_companions(sources->members(), documents)) {
+        if (group.member_ids.size() == 1U && group.ambiguous_requirements.empty()) {
+            const auto member =
+                std::ranges::find(sources->members(), group.member_ids.front(), &native::SourceMember::id);
+            const auto index = static_cast<std::size_t>(member - sources->members().begin());
+            result.push_back(documents[index]);
             continue;
         }
-        auto opened = Document::open(sources, cancellation, group, ambiguities[owner]);
+        auto opened = Document::open(sources, cancellation, group.member_ids, group.ambiguous_requirements);
         if (!opened)
             return std::unexpected(opened.error());
         result.push_back(std::move(*opened));

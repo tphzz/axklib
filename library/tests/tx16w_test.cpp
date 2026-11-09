@@ -53,6 +53,37 @@ TEST(Tx16wWave, DecodesNativeHeaderAndPackedSignedPcm) {
     EXPECT_EQ(wave->pcm, (std::vector<std::int16_t>{32752, -32768, 16, -16}));
 }
 
+TEST(Tx16wSetup, RetainsReferencedUnnamedTimbresWithoutInventingUnusedSlots) {
+    auto bytes = tx_file(8704U);
+    put_text(bytes, 16U + 0x86U, "Vibes", 10U);
+    for (std::size_t region = 0U; region < 32U; ++region)
+        bytes[16U + region * 4U + 1U] = std::byte{0xff};
+    for (const auto slot : {61U, 62U, 63U}) {
+        const auto base = 0x1250U + slot * 56U;
+        put_text(bytes, base + 46U, "", 10U);
+        if (slot != 63U)
+            bytes[base + 1U] = static_cast<std::byte>(slot);
+    }
+    // The third region references an empty table entry, not a populated Timbre.
+    for (std::size_t region = 0U; region < 3U; ++region) {
+        bytes[16U + region * 4U] = static_cast<std::byte>(61U + region);
+        bytes[16U + region * 4U + 1U] = std::byte{12U};
+        bytes[16U + region * 4U + 2U] = std::byte{142U};
+    }
+    bytes[0x1250U + 60U * 56U + 1U] = std::byte{60U};
+    const auto decoded = axk::tx16w::decode_voice_file(bytes, "DISK-1&2.V01");
+    ASSERT_TRUE(decoded) << decoded.error().message;
+    ASSERT_EQ(decoded->timbres.size(), 2U);
+    EXPECT_EQ(decoded->timbres[0].slot, 61U);
+    EXPECT_EQ(decoded->timbres[1].slot, 62U);
+    EXPECT_TRUE(decoded->timbres[0].name.empty());
+    EXPECT_TRUE(decoded->timbres[1].name.empty());
+    EXPECT_EQ(decoded->timbres[0].root_key_number, 61U);
+    EXPECT_EQ(decoded->timbres[1].root_key_number, 62U);
+    bytes[0x1250U + 61U * 56U] = std::byte{64U};
+    EXPECT_FALSE(axk::tx16w::decode_voice_file(bytes, "DISK-1&2.V01"));
+}
+
 TEST(Tx16wWave, UsesLogicalFrameLengthAndIgnoresFatAllocationSlack) {
     auto bytes = tx_file(163U);
     bytes[22] = std::byte{0xc9};

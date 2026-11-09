@@ -14,7 +14,8 @@ namespace axk::app::conversion_internal {
 
 Result<NativeDocumentSnapshot> open_source(const nlohmann::json &input, const native::FormatRegistry &formats,
                                            std::string_view format_id, const Sandbox &sandbox, UploadStore &uploads,
-                                           ImageSessionManager &images, const OperationContext &context) {
+                                           ImageSessionManager &images, const OperationContext &context,
+                                           std::uint64_t maximum_source_bytes) {
     try {
         const auto kind = input.at("kind").get<std::string>();
         if (kind == "DOCUMENT") {
@@ -64,6 +65,8 @@ Result<NativeDocumentSnapshot> open_source(const nlohmann::json &input, const na
             if (!file)
                 return std::unexpected(file.error());
             const auto reader = file->reader;
+            if (reader->size() > maximum_source_bytes)
+                return std::unexpected(Error{"source_byte_limit", "Source exceeds its admission byte limit"});
             const auto fingerprint = detail::reader_sha256(*reader, context.cancellation);
             if (!fingerprint)
                 return std::unexpected(fingerprint.error());
@@ -102,7 +105,7 @@ Result<NativeDocumentSnapshot> open_source(const nlohmann::json &input, const na
         }
         if (!files.empty()) {
             auto admitted = admit_image_sources(sandbox, nullptr, nullptr, files, context.owner_id,
-                                                context.cancellation, context.progress);
+                                                context.cancellation, context.progress, nullptr, maximum_source_bytes);
             if (!admitted)
                 return std::unexpected(admitted.error());
             for (const auto &member : admitted->native_sources->members())

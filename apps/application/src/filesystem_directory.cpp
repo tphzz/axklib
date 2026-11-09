@@ -36,6 +36,24 @@ axk::app::Result<axk::app::EntryMetadata> axk::app::Sandbox::metadata(std::strin
 axk::app::Result<axk::app::DirectoryListing>
 axk::app::Sandbox::list_directory(const DirectoryRef &reference, std::size_t limit,
                                   std::optional<std::string_view> cursor) const {
+    return list_directory_limited(reference, limit, cursor, std::numeric_limits<std::size_t>::max(), {});
+}
+
+axk::app::Result<std::vector<axk::app::DirectoryEntry>>
+axk::app::Sandbox::scan_directory(const DirectoryRef &reference, std::size_t maximum_entries,
+                                  const CancellationToken &cancellation) const {
+    if (const auto active = cancellation.check(); !active)
+        return std::unexpected(Error{"operation_cancelled", "Directory scan cancelled"});
+    auto listed = list_directory_limited(reference, maximum_entries, {}, maximum_entries, cancellation);
+    if (!listed)
+        return std::unexpected(listed.error());
+    return std::move(listed->entries);
+}
+
+axk::app::Result<axk::app::DirectoryListing>
+axk::app::Sandbox::list_directory_limited(const DirectoryRef &reference, std::size_t limit,
+                                          std::optional<std::string_view> cursor, std::size_t maximum_entries,
+                                          const CancellationToken &cancellation) const {
     if (limit == 0U || limit > 5000U)
         return std::unexpected(
             reference_error("directory listing limit must be between 1 and 5000", reference.relative_path));
@@ -99,9 +117,9 @@ axk::app::Sandbox::list_directory(const DirectoryRef &reference, std::size_t lim
         return true;
     };
 #if defined(_WIN32)
-    auto visited = visit_directory(directory->get(), reference.relative_path, collect);
+    auto visited = visit_directory(directory->get(), reference.relative_path, collect, maximum_entries, cancellation);
 #else
-    auto visited = visit_directory(**directory, reference.relative_path, collect);
+    auto visited = visit_directory(**directory, reference.relative_path, collect, maximum_entries, cancellation);
 #endif
     if (!visited)
         return std::unexpected(visited.error());

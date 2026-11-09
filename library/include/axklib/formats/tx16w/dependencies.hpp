@@ -15,6 +15,12 @@ std::vector<native::SourceRequirement> source_requirements(std::span<const Nativ
                                                            std::span<const NativeFile> files);
 bool supplies_requirement(const Document &target, const Document &candidate);
 bool supplies_requirement(const native::SourceRequirement &requirement, const native::SourceMember &candidate);
+struct CompanionGroup {
+    std::vector<std::string> member_ids;
+    std::vector<std::string> ambiguous_requirements;
+};
+std::vector<CompanionGroup> group_companions(std::span<const native::SourceMember> members,
+                                             std::span<const std::shared_ptr<const Document>> documents);
 Result<std::vector<std::shared_ptr<const native::Document>>>
 open_documents(std::shared_ptr<const native::SourceSet> sources, const CancellationToken &cancellation);
 

@@ -97,6 +97,19 @@ class ConversionOperations : public testing::Test {
                 {"options", {{"mode", "WAVE_DATA_ONLY"}}},
                 {"fidelity", "BEST"}};
     }
+    void native_file(std::string_view name, std::size_t size, bool setup = false) {
+        std::vector<char> bytes(size);
+        std::ranges::copy(std::string_view{"LM8953"}, bytes.begin());
+        if (setup)
+            std::ranges::copy(std::string_view{"TONE"}, bytes.begin() + 0xf7);
+        std::filesystem::create_directories((root / name).parent_path());
+        std::ofstream out{root / name, std::ios::binary};
+        out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+        ASSERT_TRUE(out);
+    }
+    static Json source(std::string_view path) {
+        return {{"kind", "FILE"}, {"file", {{"rootId", "root"}, {"relativePath", path}}}};
+    }
     JobSnapshot wait(const std::string &id) {
         for (std::size_t count = 0U; count < 5000U; ++count) {
             auto current = jobs->status(id, "owner");
@@ -219,3 +232,109 @@ TEST_F(ReadOnlyConversionOperations, RejectsReadOnlyDestinationBeforeOfferingAnE
 }
 
 } // namespace
+
+TEST_F(ConversionOperations, ResolvesOnlyUniqueCompanionsBesideTheFirstWorkspaceFile) {
+    native_file("SET.S01", 1536U, true);
+    native_file("SET.V01", 8704U);
+    const auto resolved =
+        registry.invoke("images.companionSources.resolve", {{"sources", Json::array({source("SET.S01")})}}, context);
+    ASSERT_TRUE(resolved) << resolved.error().message;
+    ASSERT_EQ(resolved->at("members").size(), 3U);
+    EXPECT_EQ(resolved->at("members").front().at("origin"), "SELECTED");
+    EXPECT_EQ(resolved->at("members").at(1).at("origin"), "AUTO_ADDED");
+    EXPECT_TRUE(resolved->at("requirements").empty());
+    EXPECT_EQ(images->inspect(workspace.image_id, "owner")->revision, workspace.revision);
+}
+
+TEST_F(ConversionOperations, ResolvingCompanionsPreservesExplicitOrderAndExclusions) {
+    native_file("SET.S01", 1536U, true);
+    native_file("SET.V01", 8704U);
+    const auto resolved =
+        registry.invoke("images.companionSources.resolve",
+                        {{"sources", Json::array({source("TONE.W01"), source("SET.S01"), source("SET.V01")})},
+                         {"exclusions", Json::array({source("TONE.W01")})}},
+                        context);
+    ASSERT_TRUE(resolved) << resolved.error().message;
+    ASSERT_EQ(resolved->at("members").size(), 3U);
+    EXPECT_EQ(resolved->at("members").front().at("source"), source("TONE.W01"));
+    const auto removed = registry.invoke(
+        "images.companionSources.resolve",
+        {{"sources", Json::array({source("SET.S01")})}, {"exclusions", Json::array({source("TONE.W01")})}}, context);
+    ASSERT_TRUE(removed) << removed.error().message;
+    EXPECT_EQ(removed->at("members").size(), 2U);
+    EXPECT_FALSE(removed->at("requirements").empty());
+}
+
+TEST_F(ConversionOperations, DoesNotChooseAmongAmbiguousCompanionsOrSearchOtherFolders) {
+    native_file("SET.S01", 1536U, true);
+    native_file("SET.V01", 8704U);
+    std::filesystem::create_directory(root / "duplicate");
+    std::filesystem::copy_file(root / "TONE.W01", root / "duplicate/TONE.W01");
+    const auto resolved = registry.invoke(
+        "images.companionSources.resolve",
+        {{"sources", Json::array({source("SET.S01")})},
+         {"searchNearby", false},
+         {"candidates", Json::array({source("SET.V01"), source("TONE.W01"), source("duplicate/TONE.W01")})}},
+        context);
+    ASSERT_TRUE(resolved) << resolved.error().message;
+    EXPECT_EQ(resolved->at("members").size(), 2U);
+    EXPECT_TRUE(std::ranges::any_of(resolved->at("requirements"),
+                                    [](const auto &item) { return item.at("state") == "AMBIGUOUS"; }));
+    const auto outside = registry.invoke("images.companionSources.resolve",
+                                         {{"sources", Json::array({source("../outside.img")})}}, context);
+    EXPECT_FALSE(outside);
+}
+
+TEST_F(ConversionOperations, CompanionResolutionDeduplicatesFilesystemIdentitiesNotBasenames) {
+    native_file("SET.S01", 1536U, true);
+    native_file("SET.V01", 8704U);
+    std::filesystem::create_hard_link(root / "TONE.W01", root / "ALIAS.W01");
+    const auto resolved = registry.invoke(
+        "images.companionSources.resolve",
+        {{"sources", Json::array({source("TONE.W01"), source("ALIAS.W01"), source("SET.S01"), source("SET.V01")})},
+         {"searchNearby", false}},
+        context);
+    ASSERT_TRUE(resolved) << resolved.error().message;
+    EXPECT_EQ(resolved->at("members").size(), 3U);
+}
+
+TEST_F(ConversionOperations, CompleteExplicitSetsDoNotRediscoverAmbiguousSiblingSuppliers) {
+    native_file("SET.S01", 1536U, true);
+    native_file("SET.V01", 8704U);
+    std::filesystem::create_directories(root / "duplicate");
+    std::filesystem::copy_file(root / "TONE.W01", root / "duplicate/TONE.W01");
+    const auto resolved =
+        registry.invoke("images.companionSources.resolve",
+                        {{"sources", Json::array({source("SET.S01"), source("SET.V01"), source("TONE.W01")})},
+                         {"candidates", Json::array({source("duplicate/TONE.W01")})}},
+                        context);
+    ASSERT_TRUE(resolved) << resolved.error().message;
+    EXPECT_EQ(resolved->at("members").size(), 3U);
+    EXPECT_TRUE(resolved->at("requirements").empty());
+}
+
+TEST_F(ConversionOperations, CompanionResolutionRejectsCancellationForeignUploadsAndUnboundedDiscovery) {
+    const auto upload =
+        uploads->create({"other-owner", "disk.img", UploadKind::disk_image, "application/octet-stream", 1U, {}});
+    ASSERT_TRUE(upload) << upload.error().message;
+    const Json request{
+        {"sources", Json::array({{{"kind", "UPLOAD"}, {"upload", {{"uploadId", upload->reference.upload_id}}}}})}};
+    EXPECT_FALSE(registry.invoke("images.companionSources.resolve", request, context));
+    axk::CancellationSource cancellation;
+    cancellation.cancel();
+    auto cancelled_context = context;
+    cancelled_context.cancellation = cancellation.token();
+    const auto cancelled = registry.invoke("images.companionSources.resolve", request, cancelled_context);
+    ASSERT_FALSE(cancelled);
+    EXPECT_EQ(cancelled.error().code, "operation_cancelled");
+    native_file("SET.S01", 1536U, true);
+    for (std::size_t index = 0U; index < 17U; ++index) {
+        const auto path = root / ("candidate-" + std::to_string(index) + ".img");
+        std::ofstream(path).close();
+        std::filesystem::resize_file(path, 4U * 1024U * 1024U);
+    }
+    const auto limited =
+        registry.invoke("images.companionSources.resolve", {{"sources", Json::array({source("SET.S01")})}}, context);
+    ASSERT_FALSE(limited);
+    EXPECT_EQ(limited.error().code, "companion_discovery_limit");
+}

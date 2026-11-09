@@ -300,6 +300,7 @@ Result<VoiceFile> decode_voice_file(std::span<const std::byte> voice_bytes, std:
         !required)
         return std::unexpected(required.error());
     VoiceFile result;
+    std::array<bool, timbre_count> referenced_timbres{};
     for (std::size_t slot = 0U; slot < voice_count; ++slot) {
         const auto base = record_header_size + slot * voice_stride;
         auto name = fixed_text(voice_bytes, base + 0x86U, 10U, "TX16W Voice name");
@@ -323,6 +324,7 @@ Result<VoiceFile> decode_voice_file(std::span<const std::byte> voice_bytes, std:
             voice.regions.push_back({timbre_slot, low_key_number, high_key_number,
                                      std::to_integer<std::uint8_t>(voice_bytes[offset + 3U]),
                                      static_cast<std::uint8_t>(native_timbre_selector & 0xc0U)});
+            referenced_timbres[timbre_slot] = true;
         }
         result.voices.push_back(std::move(voice));
     }
@@ -331,7 +333,11 @@ Result<VoiceFile> decode_voice_file(std::span<const std::byte> voice_bytes, std:
         auto name = fixed_text(voice_bytes, base + 46U, 10U, "TX16W Timbre name");
         if (!name)
             return std::unexpected{name.error()};
-        if (name->empty())
+        // Native Voices can reference populated Timbres whose display names are blank.
+        // Empty table entries must still remain unresolved rather than becoming objects.
+        const auto populated =
+            std::ranges::any_of(voice_bytes.subspan(base, 46U), [](std::byte value) { return value != std::byte{}; });
+        if (name->empty() && (!referenced_timbres[slot] || !populated))
             continue;
         const auto wave_slot = std::to_integer<std::uint8_t>(voice_bytes[base]);
         const auto root_key_number = std::to_integer<std::uint8_t>(voice_bytes[base + 1U]);

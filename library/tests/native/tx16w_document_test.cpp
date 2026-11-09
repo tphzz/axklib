@@ -83,6 +83,18 @@ TEST(Tx16wDocument, BrowsesWaveHeadersWithoutReadingPcmAndKeepsDuplicateOccurren
     EXPECT_FALSE((*opened)->read_wave("missing"));
 }
 
+TEST(Tx16wDocument, SingleMemberDiscoveryDoesNotRepeatNativeHeaderReads) {
+    auto counted = std::make_shared<CountingReader>(wave());
+    const auto sources = axk::native::SourceSet::create({member("one", {{"wave", "TONE.W01", false, 0U, counted}})});
+    ASSERT_TRUE(sources);
+    axk::native::FormatRegistry registry;
+    ASSERT_TRUE(registry.add(axk::tx16w::provider()));
+    const auto opened = registry.open(*sources);
+    ASSERT_TRUE(opened) << opened.error().message;
+    ASSERT_EQ(opened->documents.size(), 1U);
+    EXPECT_EQ(counted->bytes_read, 38U);
+}
+
 TEST(Tx16wDocument, WaveDisplayNamesExcludePathsWithoutChangingSourceLocationsOrLazyReads) {
     for (const auto *path : {"Tone.W01", "/Tone.W01", "/Folder/Tone.W01", "Folder\\Tone.W01"}) {
         SCOPED_TRACE(path);
@@ -212,6 +224,50 @@ TEST(Tx16wDocument, DoesNotTreatAnEmptyVoiceCompanionAsAMissingFile) {
     const auto opened = axk::tx16w::Document::open(*sources);
     ASSERT_TRUE(opened);
     EXPECT_EQ((*opened)->summary().completeness, axk::native::Completeness::complete);
+}
+
+TEST(Tx16wDocument, UnnamedReferencedTimbresKeepTheirRawNamesLocationsAndFileLocalIdentity) {
+    auto voices = file(8704U);
+    text(voices, 16U + 0x86U, "Voice");
+    for (std::size_t region = 0U; region < 32U; ++region)
+        voices[16U + region * 4U + 1U] = std::byte{0xff};
+    voices[16U] = std::byte{61U};
+    voices[17U] = std::byte{12U};
+    voices[18U] = std::byte{142U};
+    auto empty_timbre = voices;
+    constexpr auto offset = 0x1250U + 61U * 56U;
+    voices[offset + 1U] = std::byte{62U};
+    text(voices, offset + 46U, "          ");
+    const auto sources = axk::native::SourceSet::create(
+        {member("one", {entry("FIRST.V01", std::move(voices)), entry("SECOND.V01", std::move(empty_timbre))})});
+    ASSERT_TRUE(sources);
+    const auto opened = axk::tx16w::Document::open(*sources);
+    ASSERT_TRUE(opened) << opened.error().message;
+    const auto objects = (*opened)->native_objects();
+    const auto timbre = std::ranges::find_if(
+        objects, [](const auto &object) { return std::holds_alternative<axk::tx16w::Timbre>(object.value); });
+    ASSERT_NE(timbre, objects.end());
+    EXPECT_TRUE(std::get<axk::tx16w::Timbre>(timbre->value).name.empty());
+    EXPECT_EQ(std::get<axk::tx16w::Timbre>(timbre->value).slot, 61U);
+    EXPECT_EQ(timbre->location.entry_id, "FIRST.V01");
+    EXPECT_EQ(timbre->location.offset, offset);
+    EXPECT_EQ(timbre->location.length, 56U);
+    const auto &catalog = (*opened)->catalog();
+    const auto summary = std::ranges::find(catalog.objects, timbre->id, &axk::native::ObjectSummary::id);
+    ASSERT_NE(summary, catalog.objects.end());
+    EXPECT_EQ(summary->name, "Timbre 62");
+    EXPECT_EQ(std::ranges::count_if(catalog.relationships,
+                                    [](const auto &link) {
+                                        return link.type == "region-timbre" &&
+                                               link.resolution == axk::native::Resolution::resolved;
+                                    }),
+              1);
+    EXPECT_EQ(std::ranges::count_if(catalog.relationships,
+                                    [](const auto &link) {
+                                        return link.type == "region-timbre" &&
+                                               link.resolution == axk::native::Resolution::missing;
+                                    }),
+              1);
 }
 
 TEST(Tx16wDocument, WarningsAndInternalReferencesDoNotImplyMissingMedia) {

@@ -1,6 +1,16 @@
 #include "filesystem_internal.hpp"
 
 namespace axk::app::filesystem_internal {
+namespace {
+Result<void> scan_step(std::size_t &visited, std::size_t maximum, const CancellationToken &cancellation) {
+    if (const auto active = cancellation.check(); !active)
+        return std::unexpected(Error{"operation_cancelled", "Directory scan cancelled"});
+    if (visited == maximum)
+        return std::unexpected(Error{"directory_scan_limit", "Directory scan exceeds its entry limit"});
+    ++visited;
+    return {};
+}
+} // namespace
 
 #if defined(_WIN32)
 
@@ -83,8 +93,10 @@ axk::app::Result<NativeHandle> open_parent(HANDLE root, const std::filesystem::p
 }
 
 axk::app::Result<void> visit_directory(HANDLE directory, std::string_view relative_path,
-                                       const DirectoryVisitor &visitor) {
+                                       const DirectoryVisitor &visitor, std::size_t maximum_entries,
+                                       const CancellationToken &cancellation) {
     alignas(FILE_ID_BOTH_DIR_INFO) std::array<std::byte, 64U * 1024U> buffer{};
+    std::size_t visited{};
     for (;;) {
         if (GetFileInformationByHandleEx(directory, FileIdBothDirectoryInfo, buffer.data(),
                                          static_cast<DWORD>(buffer.size())) == 0) {
@@ -95,6 +107,9 @@ axk::app::Result<void> visit_directory(HANDLE directory, std::string_view relati
         auto *entry = reinterpret_cast<FILE_ID_BOTH_DIR_INFO *>(buffer.data());
         for (;;) {
             const std::wstring_view native_name{entry->FileName, entry->FileNameLength / sizeof(wchar_t)};
+            if (native_name != L"." && native_name != L"..")
+                if (const auto active = scan_step(visited, maximum_entries, cancellation); !active)
+                    return active;
             if (native_name != L"." && native_name != L".." &&
                 (entry->FileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) == 0U) {
                 const std::filesystem::path name{native_name};
@@ -167,7 +182,8 @@ axk::app::Result<NativeHandle> open_parent(int root, const std::filesystem::path
     return current;
 }
 
-axk::app::Result<void> visit_directory(int directory, std::string_view relative_path, const DirectoryVisitor &visitor) {
+axk::app::Result<void> visit_directory(int directory, std::string_view relative_path, const DirectoryVisitor &visitor,
+                                       std::size_t maximum_entries, const CancellationToken &cancellation) {
     const auto enumeration_descriptor = ::openat(directory, ".", O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW);
     if (enumeration_descriptor < 0)
         return std::unexpected(reference_error("sandbox directory cannot be reopened", relative_path));
@@ -177,10 +193,15 @@ axk::app::Result<void> visit_directory(int directory, std::string_view relative_
         return std::unexpected(reference_error("sandbox directory cannot be enumerated safely", relative_path));
     }
     errno = 0;
+    std::size_t visited{};
     while (const auto *entry = ::readdir(stream)) {
         const std::string_view native_name{entry->d_name};
         if (native_name == "." || native_name == "..")
             continue;
+        if (const auto active = scan_step(visited, maximum_entries, cancellation); !active) {
+            ::closedir(stream);
+            return active;
+        }
         auto name = entry_name_from_utf8(native_name);
         if (!name)
             continue;

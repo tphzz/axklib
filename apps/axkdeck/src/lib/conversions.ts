@@ -7,6 +7,13 @@ export type ConversionPlan = components['schemas']['ConversionPlan'];
 export type ConversionProfile = components['schemas']['ConversionProfile'];
 export type ConversionReport = components['schemas']['ConversionReport'];
 export type ConversionFidelity = ConversionReport['fidelity'];
+export type CompanionSourceResolution = components['schemas']['CompanionSourceResolution'];
+export interface CompanionSourceInput {
+    sources: InputFileLocation[];
+    candidates?: InputFileLocation[];
+    exclusions?: InputFileLocation[];
+    searchNearby?: boolean;
+}
 export type ConversionSource =
     | { kind: 'DOCUMENT'; sessionId: number; documentId: string; expectedRevision: number }
     | { kind: 'SOURCES'; sources: (InputFileLocation | DirectoryLocation)[] };
@@ -20,6 +27,7 @@ export interface ConversionInput {
     capacityPolicy: CapacityPolicy;
 }
 export interface ConversionTransport {
+    resolveCompanionSources(input: CompanionSourceInput, signal?: AbortSignal): Promise<CompanionSourceResolution>;
     conversionProfiles(): Promise<ConversionProfile[]>;
     prepareConversion(input: ConversionInput, signal?: AbortSignal): Promise<ConversionPlan>;
     conversionPlan(planId: string, offset?: number): Promise<ConversionPlan>;

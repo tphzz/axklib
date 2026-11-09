@@ -2,7 +2,15 @@ import type { ApiJobSnapshot, AxklibHttpApiClient } from './httpApiClient';
 import { AxklibApiError } from './httpErrors';
 import type { HttpImageSessions } from './httpImageSessions';
 import type { HttpJobController } from './httpJobController';
-import type { ConversionInput, ConversionPlan, ConversionProfile, ConversionTransport } from './conversions';
+import type {
+    CompanionSourceInput,
+    CompanionSourceResolution,
+    ConversionInput,
+    ConversionPlan,
+    ConversionProfile,
+    ConversionTransport,
+} from './conversions';
+import type { InputFileLocation } from './storageLocations';
 import { documentTarget } from './httpNativeDocuments';
 
 export class HttpConversions implements ConversionTransport {
@@ -11,6 +19,33 @@ export class HttpConversions implements ConversionTransport {
         private readonly jobs: HttpJobController,
         private readonly sessions: HttpImageSessions,
     ) {}
+
+    async resolveCompanionSources(
+        input: CompanionSourceInput,
+        signal?: AbortSignal,
+    ): Promise<CompanionSourceResolution> {
+        signal?.throwIfAborted();
+        const wire = (source: InputFileLocation) =>
+            source.kind === 'client-upload'
+                ? { kind: 'UPLOAD', upload: source.reference }
+                : { kind: 'FILE', file: source.reference };
+        const submitted = await this.client.invoke<never>('images.companionSources.resolve', {
+            sources: input.sources.map(wire),
+            ...(input.candidates ? { candidates: input.candidates.map(wire) } : {}),
+            ...(input.exclusions ? { exclusions: input.exclusions.map(wire) } : {}),
+            ...(input.searchNearby !== undefined ? { searchNearby: input.searchNearby } : {}),
+        });
+        if (!this.jobs.isJob(submitted)) throw new Error('Companion resolution did not return a job');
+        const completed = await this.jobs.wait(this.jobs.map(submitted).jobId, () => undefined, signal);
+        signal?.throwIfAborted();
+        if (completed.status !== 'completed' || !completed.result)
+            throw new AxklibApiError(
+                completed.errorCode ?? 'companion_resolution_failed',
+                completed.error ?? 'Companion resolution failed',
+                422,
+            );
+        return completed.result as CompanionSourceResolution;
+    }
 
     async conversionProfiles(): Promise<ConversionProfile[]> {
         return (await this.client.request<{ profiles: ConversionProfile[] }>('GET', '/conversion-profiles')).profiles;

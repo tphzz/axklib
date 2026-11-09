@@ -146,6 +146,7 @@ class UnavailableTransport implements ImageTransport {
     inspectMidi(): Promise<never> {
         return this.unavailable();
     }
+    resolveCompanionSources = (): Promise<never> => this.unavailable();
     conversionProfiles = (): Promise<never> => this.unavailable();
     prepareConversion = (): Promise<never> => this.unavailable();
     conversionPlan = (): Promise<never> => this.unavailable();

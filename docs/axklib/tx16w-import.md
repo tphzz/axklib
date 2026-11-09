@@ -19,6 +19,24 @@ mixing alternate editions that happen to have similar names. Adding or removing
 a member reruns inspection and the destination plan for the complete selected
 set.
 
+The server also provides the read-only
+`POST /api/v1/companion-source-resolutions` job
+(`images.companionSources.resolve`). It resolves selected FILE or UPLOAD sources
+and returns actual members with their `SELECTED` or `AUTO_ADDED` origin and
+remaining missing, ambiguous, unsupported or invalid requirements. A complete
+explicit selection is authoritative and does not trigger discovery. Otherwise,
+workspace FILE sources may search only the immediate parent of the first
+selected file, including on remote servers. Discovery uses native references,
+not numbered-filename guesses, and adds only uniquely matching suppliers.
+Overlapping suppliers remain ambiguous rather than being selected by order.
+
+Discovery is bounded to 1,024 directory entries, 4 MiB per source and 64 MiB of
+candidate input, with at most 32 accepted members. It does not recurse or follow
+links. Limits and cancellation fail explicitly. Exclusions suppress automatic
+rediscovery; explicit re-addition takes precedence. UPLOAD references never
+trigger a search of the server's staging directory. The current desktop dialog
+does not yet invoke this resolution job automatically.
+
 The import uses the shared [directional conversion plan](conversion.md) contract.
 Alternatively, open a TX16W document first and use **Convert** to select an
 A-series destination image on the same server. Both paths prepare one immutable
@@ -45,14 +63,19 @@ Wave files in a FAT12 disk image:
 | `*.Unn` | Performance definitions and Voice assignments |
 
 A native set requires matching Setup and Voice files. Both the legacy Setup
-layout and the `0200` layout are recognized, and several independent native
-Setup groups may be combined in one selected disk set. A Performance file is
+layout and the `0200` layout are recognized. Independent native Setup groups
+remain separate rather than being merged by shared Wave names. A Performance file is
 optional; when it is absent, the adapter can create audition Programs for the
 decoded Voices. Companion `P`, `O`, `C`, `R`, and `X` files are recognized as
 auxiliary data but are not decoded by this profile. In particular, `.Cnn` Wave
 payloads are not silently treated as absent `.Wnn` files. Compressed Wave data
 is outside the current Yamaha-native profile and remains visibly unsupported
 rather than being guessed.
+
+A Voice may reference a populated Timbre whose native name is blank. The reader
+keeps that record and its exact file-local slot; it does not create objects for
+unused blank slots or resolve references to empty records. A fallback display
+label does not change the native name.
 
 The parser is bounded and rejects malformed headers and truncated logical data.
 Wave decoding uses the attack-plus-repeat frame count declared by the TX16W

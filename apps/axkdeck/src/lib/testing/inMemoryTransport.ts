@@ -560,6 +560,8 @@ export class InMemoryImageTransport implements ImageTransport {
         return this.invoke('inspectMidi', [source]);
     }
 
+    resolveCompanionSources: ImageTransport['resolveCompanionSources'] = (...args) =>
+        this.invoke('resolveCompanionSources', args);
     conversionProfiles: ImageTransport['conversionProfiles'] = (...args) => this.invoke('conversionProfiles', args);
     prepareConversion: ImageTransport['prepareConversion'] = (...args) => this.invoke('prepareConversion', args);
     conversionPlan: ImageTransport['conversionPlan'] = (...args) => this.invoke('conversionPlan', args);

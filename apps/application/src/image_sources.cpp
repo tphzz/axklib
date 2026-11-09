@@ -191,7 +191,7 @@ Result<AdmittedImageSources> admit_image_sources(const Sandbox &sandbox, PathRes
                                                  DeviceSessionManager *devices,
                                                  std::span<const ImageSourceRef> references, std::string_view owner_id,
                                                  const CancellationToken &cancellation, ProgressSink *progress,
-                                                 diagnostic_sink *diagnostics) {
+                                                 diagnostic_sink *diagnostics, std::uint64_t maximum_source_bytes) {
     if (references.empty() || references.size() > native::SourceSet::maximum_members || owner_id.empty())
         return std::unexpected(Error{"invalid_image_sources", "Select between one and 32 explicit sources"});
     if (references.size() != 1U && std::ranges::any_of(references, [](const auto &reference) {
@@ -250,6 +250,8 @@ Result<AdmittedImageSources> admit_image_sources(const Sandbox &sandbox, PathRes
             };
             member->verify_location = [verify = member->verify_unchanged](
                                           const auto &, const CancellationToken &token) { return verify(token); };
+            if (member->reader->size() > maximum_source_bytes)
+                return std::unexpected(Error{"source_byte_limit", "Source exceeds its admission byte limit"});
             auto media = open_media(member->reader, member->canonical_path, cancellation, progress, diagnostics);
             if (media) {
                 member->format = media_kind_name(media->kind());

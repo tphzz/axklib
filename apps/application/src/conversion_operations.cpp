@@ -17,6 +17,7 @@
 #include "axklib/application/volume_capacity.hpp"
 #include "axklib/conversion/tx16w_to_a_series/profile.hpp"
 #include "axklib/formats/tx16w/document.hpp"
+#include "companion_source_resolution.hpp"
 #include "conversion_plan_store.hpp"
 #include "conversion_sources.hpp"
 #include "prepared_session_commit.hpp"
@@ -300,6 +301,13 @@ ConversionService::~ConversionService() {
 }
 
 Result<void> ConversionService::bind(OperationRegistry &registry) {
+    if (auto bound = registry.bind("images.companionSources.resolve",
+                                   [impl = implementation_](const Json &input, const OperationContext &context) {
+                                       return resolve_companion_sources(input, impl->formats, impl->sandbox,
+                                                                        impl->uploads, impl->images, context);
+                                   });
+        !bound)
+        return bound;
     if (auto bound = registry.bind("conversions.prepare",
                                    [impl = implementation_](const Json &input, const OperationContext &context) {
                                        return impl->prepare(input, context);

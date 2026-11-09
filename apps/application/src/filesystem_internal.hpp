@@ -90,7 +90,9 @@ Result<NativeHandle> open_relative(HANDLE parent, const std::filesystem::path &n
                                    ULONG disposition, ULONG options, std::string_view relative_path);
 Result<NativeHandle> reopen_directory(HANDLE directory, std::string_view relative_path);
 Result<NativeHandle> open_parent(HANDLE root, const std::filesystem::path &relative, std::string_view relative_path);
-Result<void> visit_directory(HANDLE directory, std::string_view relative_path, const DirectoryVisitor &visitor);
+Result<void> visit_directory(HANDLE directory, std::string_view relative_path, const DirectoryVisitor &visitor,
+                             std::size_t maximum_entries = std::numeric_limits<std::size_t>::max(),
+                             const CancellationToken &cancellation = {});
 Result<std::vector<std::byte>> read_prefix(HANDLE directory, const NativeDirectoryEntry &entry,
                                            std::size_t maximum_bytes, std::string_view relative_path);
 #else
@@ -106,7 +108,9 @@ using NativeHandle = std::unique_ptr<int, DescriptorCloser>;
 
 NativeHandle descriptor_handle(int descriptor);
 Result<NativeHandle> open_parent(int root, const std::filesystem::path &relative, std::string_view relative_path);
-Result<void> visit_directory(int directory, std::string_view relative_path, const DirectoryVisitor &visitor);
+Result<void> visit_directory(int directory, std::string_view relative_path, const DirectoryVisitor &visitor,
+                             std::size_t maximum_entries = std::numeric_limits<std::size_t>::max(),
+                             const CancellationToken &cancellation = {});
 Result<std::vector<std::byte>> read_prefix(int directory, const NativeDirectoryEntry &entry, std::size_t maximum_bytes,
                                            std::string_view relative_path);
 int rename_no_replace(int source_parent, const char *source_name, int destination_parent, const char *destination_name);

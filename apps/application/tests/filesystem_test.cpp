@@ -104,6 +104,35 @@ TEST_F(SandboxTest, DiscoversRootsAndListsBoundedRelativeEntries) {
     EXPECT_EQ(*file, std::filesystem::canonical(root_ / "images" / "disk.hds"));
 }
 
+TEST_F(SandboxTest, DiscoveryScansBoundRawEntriesIncludingSkippedLinksAndHonorCancellation) {
+    std::filesystem::create_directory(root_ / "scan");
+    std::ofstream(root_ / "scan" / "one.img") << "one";
+    std::ofstream(root_ / "scan" / "two.img") << "two";
+    const auto created = axk::app::Sandbox::create({{"workspace", "Workspace", root_, false}});
+    ASSERT_TRUE(created);
+    const auto complete = created->scan_directory({"workspace", "scan"}, 2U);
+    ASSERT_TRUE(complete) << complete.error().message;
+    EXPECT_EQ(complete->size(), 2U);
+    const auto limited = created->scan_directory({"workspace", "scan"}, 1U);
+    ASSERT_FALSE(limited);
+    EXPECT_EQ(limited.error().code, "directory_scan_limit");
+    std::error_code error;
+    std::filesystem::create_symlink(root_ / "scan" / "one.img", root_ / "scan" / "link.img", error);
+    if (!error) {
+        const auto links_count = created->scan_directory({"workspace", "scan"}, 2U);
+        ASSERT_FALSE(links_count);
+        EXPECT_EQ(links_count.error().code, "directory_scan_limit");
+        const auto links_skipped = created->scan_directory({"workspace", "scan"}, 3U);
+        ASSERT_TRUE(links_skipped);
+        EXPECT_EQ(links_skipped->size(), 2U);
+    }
+    axk::CancellationSource cancelled;
+    cancelled.cancel();
+    const auto stopped = created->scan_directory({"workspace", "missing"}, 3U, cancelled.token());
+    ASSERT_FALSE(stopped);
+    EXPECT_EQ(stopped.error().code, "operation_cancelled");
+}
+
 TEST_F(SandboxTest, ReenteringAWorkspaceRootRestartsDirectoryEnumeration) {
     const auto value = sandbox();
     const auto first_root = value.list_directory({"workspace", ""}, 20U);

@@ -2,9 +2,11 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdint>
 #include <set>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include "axklib/formats/tx16w/dependencies.hpp"
 #include "axklib/utf8.hpp"
@@ -17,23 +19,13 @@ namespace {
 Result<std::vector<ImageSourceRef>> nearby(const Sandbox &sandbox, const ImageSourceRef &source,
                                            const axk::tx16w::Document &document, std::string_view owner_id,
                                            const CancellationToken &cancellation) {
-    auto path = text::path_from_utf8(source.relative_path);
-    if (!path)
-        return std::unexpected(Error{"invalid_companion_sources", "Source path is invalid"});
-    auto listing = image_sessions_internal::list_bounded_directory(
-        sandbox, {source.root_id, text::path_to_utf8(path->parent_path())}, 1024U);
-    if (!listing)
-        return std::unexpected(listing.error());
+    const auto candidates = nearby_candidates(sandbox, source, cancellation);
+    if (!candidates)
+        return std::unexpected(candidates.error());
     std::vector<ImageSourceRef> result;
-    for (const auto &entry : *listing) {
+    for (const auto &candidate : *candidates) {
         if (auto active = cancellation.check(); !active)
             return std::unexpected(Error{"cancelled", "Companion discovery cancelled"});
-        if (entry.kind != DirectoryEntryKind::file || entry.relative_path == source.relative_path)
-            continue;
-        // Nearby discovery is limited to floppy-sized files; admission still validates the container.
-        if (!entry.size || *entry.size > 4U * 1024U * 1024U)
-            continue;
-        const ImageSourceRef candidate{source.root_id, entry.relative_path, ImageSourceKind::file};
         const auto admitted =
             admit_image_sources(sandbox, nullptr, nullptr, std::array{candidate}, owner_id, cancellation);
         if (!admitted)
@@ -54,6 +46,31 @@ Result<std::vector<ImageSourceRef>> nearby(const Sandbox &sandbox, const ImageSo
 }
 
 } // namespace
+
+Result<std::vector<ImageSourceRef>> nearby_candidates(const Sandbox &sandbox, const ImageSourceRef &source,
+                                                      const CancellationToken &cancellation) {
+    auto path = text::path_from_utf8(source.relative_path);
+    if (!path)
+        return std::unexpected(Error{"invalid_companion_sources", "Source path is invalid"});
+    auto listing =
+        sandbox.scan_directory({source.root_id, text::path_to_utf8(path->parent_path())}, 1024U, cancellation);
+    if (!listing)
+        return std::unexpected(listing.error());
+    std::vector<ImageSourceRef> result;
+    std::uint64_t total_bytes{};
+    for (const auto &entry : *listing) {
+        if (const auto active = cancellation.check(); !active)
+            return std::unexpected(Error{"operation_cancelled", "Companion discovery cancelled"});
+        if (entry.kind != DirectoryEntryKind::file || entry.relative_path == source.relative_path || !entry.size ||
+            *entry.size > 4U * 1024U * 1024U)
+            continue;
+        if (*entry.size > 64U * 1024U * 1024U - total_bytes)
+            return std::unexpected(Error{"companion_discovery_limit", "Companion discovery exceeds 64 MiB"});
+        total_bytes += *entry.size;
+        result.push_back({source.root_id, entry.relative_path, ImageSourceKind::file});
+    }
+    return result;
+}
 
 NativeDocumentAdmission admit_document(std::shared_ptr<const axk::tx16w::Document> document,
                                        const AdmittedImageSources &sources) {

@@ -198,7 +198,7 @@ Result<std::shared_ptr<const Document>> Document::open(std::shared_ptr<const nat
                     for (auto &timbre : voices->timbres) {
                         const auto range = record_location(
                             *location, 0x1250U + static_cast<std::uint64_t>(timbre.slot) * 0x38U, 0x38U);
-                        auto name = timbre.name;
+                        auto name = timbre.name.empty() ? "Timbre " + std::to_string(timbre.slot + 1U) : timbre.name;
                         add(range, *identity, std::move(timbre), "timbre", std::move(name));
                     }
                     result->files_.back().decoded = true;

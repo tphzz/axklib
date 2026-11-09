@@ -167,6 +167,9 @@ class Sandbox {
     [[nodiscard]] Result<EntryMetadata> metadata(std::string_view root_id, std::string_view relative_path) const;
     [[nodiscard]] Result<DirectoryListing> list_directory(const DirectoryRef &reference, std::size_t limit,
                                                           std::optional<std::string_view> cursor = std::nullopt) const;
+    [[nodiscard]] Result<std::vector<DirectoryEntry>> scan_directory(const DirectoryRef &reference,
+                                                                     std::size_t maximum_entries,
+                                                                     const CancellationToken &cancellation = {}) const;
     [[nodiscard]] Result<MediaSourceInspection> inspect_media_source(const DirectoryRef &reference) const;
     [[nodiscard]] Result<EntryMetadata> create_directory(const DirectoryRef &parent, std::string_view name) const;
     [[nodiscard]] Result<EntryMetadata> rename_entry(const FileRef &reference, std::string_view name) const;
@@ -199,6 +202,10 @@ class Sandbox {
     [[nodiscard]] static Result<std::vector<Root>>
     validate_roots(std::vector<RootDefinition> roots, std::span<const std::filesystem::path> protected_paths);
     [[nodiscard]] std::optional<Root> find_root(std::string_view root_id) const;
+    [[nodiscard]] Result<DirectoryListing> list_directory_limited(const DirectoryRef &reference, std::size_t limit,
+                                                                  std::optional<std::string_view> cursor,
+                                                                  std::size_t maximum_entries,
+                                                                  const CancellationToken &cancellation) const;
     [[nodiscard]] Result<std::filesystem::path> resolve_existing(std::string_view root_id,
                                                                  std::string_view relative_path) const;
 
