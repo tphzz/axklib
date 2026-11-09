@@ -6,6 +6,7 @@ import { audioExtensions, audioMediaType } from './audioImport';
 import type { ClientUploadSource } from './clientUploadSource';
 import { midiExtensions, midiMediaType } from './midiImport';
 import { nativeExtension, nativeFileSource } from './nativeFileSource';
+import { nativeDiskSource } from './nativeDiskSources';
 import { packageImportExtensions } from './packageImportMedia';
 import { tx16wDiskExtensions, tx16wDiskMediaType } from './tx16wImport';
 
@@ -47,7 +48,9 @@ async function admittedFiles(paths: readonly string[]): Promise<ClientUploadSour
     const result: ClientUploadSource[] = [];
     let aggregateBytes = 0;
     for (const path of paths.filter(supported)) {
-        const file = await nativeFileSource(path, supportedExtensions, mediaType(path));
+        const file = tx16wDiskExtensions.has(nativeExtension(path))
+            ? await nativeDiskSource(path)
+            : await nativeFileSource(path, supportedExtensions, mediaType(path));
         if (file.size > maximumNativeDropFileBytes) {
             throw new Error(`Dropped file exceeds the native admission limit: ${file.name}`);
         }

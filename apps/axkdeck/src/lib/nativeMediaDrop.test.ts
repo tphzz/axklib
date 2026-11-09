@@ -5,7 +5,15 @@ const mocks = vi.hoisted(() => ({
     lstat: vi.fn(),
     open: vi.fn(),
     unlisten: vi.fn(),
-    invoke: vi.fn(async () => true),
+    invoke: vi.fn(
+        async (
+            command: string,
+            args?: { path: string },
+        ): Promise<boolean | { path: string; identity: string; size: number }> =>
+            command === 'inspect_native_disk_source'
+                ? { path: args!.path, identity: `native:${args!.path}`, size: 3 }
+                : true,
+    ),
 }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: mocks.invoke }));
 

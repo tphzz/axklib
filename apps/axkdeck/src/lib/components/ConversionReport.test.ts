@@ -38,6 +38,44 @@ function report(): Report {
 }
 
 describe('Conversion report panes', () => {
+    it('accepts losses across every page and clears only losses without changing uncertainty consent', async () => {
+        const data = report();
+        data.issues.push({ ...data.issues[0], id: 'uncertainty', impact: 'UNCERTAINTY', message: 'Uncertain pitch' });
+        data.issueCount++;
+        const view = render(ConversionReport, {
+            report: data,
+            lossConsent: true,
+            acknowledged: ['uncertainty', 'loss-0'],
+        });
+        const all = view.getByRole('checkbox', { name: 'Accept all losses' }) as HTMLInputElement;
+        expect(all.indeterminate).toBe(true);
+        expect(all.closest('.import-pane-scroll')).toBeNull();
+        await fireEvent.click(all);
+        expect(all.checked).toBe(true);
+        expect(all.indeterminate).toBe(false);
+        await fireEvent.click(view.getByRole('button', { name: 'Next mapping details page' }));
+        expect((view.getByRole('checkbox', { name: /Mapping loss 100\b/ }) as HTMLInputElement).checked).toBe(true);
+        expect((view.getByRole('checkbox', { name: /Uncertain pitch/ }) as HTMLInputElement).checked).toBe(true);
+        await fireEvent.click(all);
+        expect((view.getByRole('checkbox', { name: /Mapping loss 100\b/ }) as HTMLInputElement).checked).toBe(false);
+        expect((view.getByRole('checkbox', { name: /Uncertain pitch/ }) as HTMLInputElement).checked).toBe(true);
+    });
+
+    it('disables bulk loss consent with no eligible losses, Strict fidelity or a write lock', async () => {
+        const data = report();
+        const view = render(ConversionReport, { report: data, lossConsent: true, disabled: true });
+        const all = () => view.getByRole('checkbox', { name: 'Accept all losses' }) as HTMLInputElement;
+        expect(all().disabled).toBe(true);
+        expect(view.getByText('Controls locked')).toBeTruthy();
+        await view.rerender({ lossConsentPreparing: true });
+        expect(view.getByText('Preparing... / controls locked')).toBeTruthy();
+        await view.rerender({ report: { ...data, fidelity: 'STRICT' }, disabled: false, lossConsentPreparing: false });
+        expect(all().disabled).toBe(true);
+        expect(view.getByText('101 losses / Strict')).toBeTruthy();
+        await view.rerender({ report: { ...data, issues: [], issueCount: 0 } });
+        expect(all().disabled).toBe(true);
+    });
+
     it('pages objects and mapping details independently and retains per-issue consent', async () => {
         const view = render(ConversionReport, { report: report() });
         const contents = within(view.getByRole('region', { name: 'Contents' }));

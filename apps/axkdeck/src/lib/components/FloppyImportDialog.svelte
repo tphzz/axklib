@@ -164,7 +164,7 @@
                         summary={`${selection.included.size} selected · ${supported.length} available · ${excludedCount} excluded · ${r.inspection?.members.length || r.members.length} ${(r.inspection?.members.length || r.members.length) === 1 ? 'disk' : 'disks'} · ${formatStoredSize(bytes)}`}
                         members={r.members}
                         disabled={controlsDisabled}
-                        onremove={(id) => void workflow.remove(id)}
+                        onremove={(id) => workflow.remove(id)}
                     >
                         {#snippet actions()}
                             <button

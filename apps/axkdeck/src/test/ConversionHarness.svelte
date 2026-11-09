@@ -7,6 +7,7 @@
     import { serverFileLocation } from '../lib/storageLocations';
     import { fitsCapacity } from './samplerCapacityFixture';
     import { diskLayoutCapacity, diskLayoutCompletion } from './diskImportLayoutFixture';
+    import { idleCompanionSearch } from '../features/import/tx16wCompanions';
 
     const target = { partitionIndex: 0, volumeName: 'Samples' };
     const query = new URLSearchParams(location.search);
@@ -67,6 +68,7 @@
         plan,
         fidelity: 'BEST',
         acknowledgedIssueIds: [],
+        discovery: idleCompanionSearch(),
         status: 'ready',
         progress: 1,
         error: '',
@@ -89,6 +91,8 @@
                   sourceName: `TX16W-Concert-Library-Disk-${index}.ima`,
                   resolvedSource: null,
                   upload: null,
+                  origin: index === 1 ? ('AUTO_ADDED' as const) : ('SELECTED' as const),
+                  sourceIdentity: `fixture:${index}`,
               })),
     });
     const jobs = {
@@ -128,6 +132,48 @@
             request.plan!.report!.issueCount++;
         }
         if (scenario === 'strict') fidelity('STRICT');
+        if (
+            ['companion-found', 'searching', 'search-error', 'mixed-losses', 'all-losses', 'long-chips'].includes(
+                scenario,
+            )
+        ) {
+            request.members = request.members.slice(0, 2);
+            request.members[0].sourceName =
+                scenario === 'long-chips' ? `${'Long original library disk filename '.repeat(12)}.img` : 'sd001ye.img';
+            request.members[1].sourceName = 'sd002ye.img';
+        }
+        if (scenario === 'searching') {
+            request.plan = null;
+            request.status = 'discovering';
+            request.discovery = {
+                state: 'searching',
+                message: 'Looking for companion disks...',
+                error: '',
+                requirements: [],
+            };
+        }
+        if (scenario === 'search-error') {
+            request.discovery = {
+                state: 'error',
+                message: 'Companion search incomplete. Retry or add disks explicitly.',
+                error: 'Directory scan exceeds 1024 candidates',
+                requirements: [],
+            };
+        }
+        if (['mixed-losses', 'all-losses'].includes(scenario)) {
+            plan.report!.issues = [
+                ...Array.from({ length: 101 }, (_, index) => ({
+                    ...plan.report!.issues[0],
+                    id: `loss-${index}`,
+                    message: `Wave Data ${index} resampled to 48000 Hz`,
+                })),
+                plan.report!.issues[1],
+            ];
+            plan.report!.issueCount = 102;
+            request.acknowledgedIssueIds = plan
+                .report!.issues.slice(0, scenario === 'all-losses' ? 101 : 50)
+                .map((issue) => issue.id);
+        }
     }
     function fidelity(value: 'BEST' | 'STRICT') {
         request.fidelity = value;
@@ -152,7 +198,11 @@
             request.importMode = value;
         }}
         onfidelity={fidelity}
-        onprepare={() => fidelity(request.fidelity)}
+        onprepare={() => {
+            request.discovery = idleCompanionSearch();
+            request.error = '';
+            fidelity(request.fidelity);
+        }}
         onadd={() => undefined}
         onremove={(id) => {
             request.members = request.members.filter((item) => item.id !== id);

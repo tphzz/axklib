@@ -7,6 +7,7 @@
         columns,
         contentsFooter,
         reviewFooter,
+        reviewToolbar,
         contentsSummary = '',
         reviewSummary = '',
         reviewNotice = '',
@@ -17,6 +18,7 @@
         columns?: Snippet;
         contentsFooter?: Snippet;
         reviewFooter?: Snippet;
+        reviewToolbar?: Snippet;
         contentsSummary?: string;
         reviewSummary?: string;
         reviewNotice?: string;
@@ -76,6 +78,7 @@
                     <span>{pane === 'contents' ? contentsSummary : reviewSummary}</span>
                 </header>
                 {#if pane === 'contents' && columns}<div class="pane-columns">{@render columns()}</div>{/if}
+                {#if pane === 'review' && reviewToolbar}<div class="pane-toolbar">{@render reviewToolbar()}</div>{/if}
                 <!-- svelte-ignore a11y_no_noninteractive_tabindex (Both bounded panes support keyboard scrolling.) -->
                 <div
                     class="import-pane-scroll"
@@ -156,7 +159,8 @@
         outline: 1px solid var(--state-focus);
         outline-offset: -1px;
     }
-    .pane-footer {
+    .pane-footer,
+    .pane-toolbar {
         flex: none;
         min-height: 28px;
     }

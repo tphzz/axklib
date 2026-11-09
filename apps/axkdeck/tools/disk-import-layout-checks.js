@@ -14,6 +14,23 @@ window.runDiskImportLayoutChecks = async () => {
     check(bounds.x >= -1 && bounds.right <= innerWidth + 1, 'Dialog exceeds viewport horizontally');
     check(bounds.y >= -1 && bounds.bottom <= innerHeight + 1, 'Dialog exceeds viewport vertically');
     check(document.documentElement.scrollWidth <= innerWidth + 1, 'Page has horizontal overflow');
+    const sources = shell.querySelector('.source-members');
+    if (sources) {
+        check(box(sources).height / zoom <= 56.5, 'Source chips exceed their bounded two-row area');
+        check(sources.scrollWidth <= sources.clientWidth + 1, 'Source chips overflow horizontally');
+        for (const chip of sources.querySelectorAll('.source-member')) {
+            const c = box(chip), style = getComputedStyle(chip);
+            check(Math.abs(c.height / zoom - 26) <= 1, 'Source chip height is unstable');
+            check(['Top', 'Right', 'Bottom', 'Left'].every(side => parseFloat(style[`border${side}Width`]) > 0 && style[`border${side}Style`] !== 'none'), 'Source chip border is incomplete');
+            const name = chip.querySelector('.member-name'), remove = chip.querySelector('[data-remove-member]');
+            if (remove) {
+                const r = box(remove), text = box(chip.querySelector('.member-origin') ?? name);
+                check(r.right <= c.right + 1 && r.x >= c.x && r.y >= c.y && r.bottom <= c.bottom + 1, 'Source chip remove button is clipped');
+                check(r.x - text.right <= 5 * zoom, 'Source chip X is detached from the filename/origin');
+            }
+            if (sources.clientWidth > 500 && name.scrollWidth < 160) check(c.width < box(sources).width / 2, 'Short source chips stretch across the row');
+        }
+    }
     const panes = [...shell.querySelectorAll('.import-pane')];
     const narrow = shell.querySelector('.import-review-layout')?.classList.contains('narrow');
     const visiblePanes = panes.filter(visible);
@@ -24,6 +41,13 @@ window.runDiskImportLayoutChecks = async () => {
         check(scroll.clientHeight >= 70, 'List has less than 70px of usable vertical space');
         check(scroll.scrollWidth <= scroll.clientWidth + 1, 'Pane has horizontal overflow');
         check(scroll.tabIndex === 0, 'Pane cannot be scrolled by keyboard');
+        const toolbar = pane.querySelector('.loss-consent-toolbar');
+        if (toolbar) {
+            check(!scroll.contains(toolbar), 'Bulk loss consent scrolls away with review items');
+            check(box(toolbar).bottom <= box(scroll).y + 1, 'Bulk loss consent overlaps the review list');
+            check(toolbar.scrollWidth <= toolbar.clientWidth + 1, 'Bulk loss consent overflows horizontally');
+            check(getComputedStyle(toolbar.querySelector('label')).fontSize === '11px', 'Safety consent label is not 11px');
+        }
     }
     if (panes.length && !narrow) check(box(panes[0]).right <= box(panes[1]).x - 10 * zoom, 'Panes overlap');
     if (narrow) {

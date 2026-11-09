@@ -1,5 +1,6 @@
 <script lang="ts">
     import type { Snippet } from 'svelte';
+    import { tick } from 'svelte';
     import AttributeHelp from './AttributeHelp.svelte';
     import Icon from './Icon.svelte';
     let {
@@ -14,14 +15,40 @@
         label: string;
         summary: string;
         truncateSummary?: boolean;
-        members?: { id: number; name: string }[];
+        members?: { id: number; name: string; autoAdded?: boolean }[];
         actions?: Snippet;
         disabled?: boolean;
-        onremove?: (id: number) => void;
+        onremove?: (id: number) => void | Promise<void>;
     } = $props();
+    let root: HTMLDivElement;
+    async function remove(id: number, button: HTMLButtonElement) {
+        const restoreFocus = document.activeElement === button;
+        const dialog = root.closest('[role="dialog"]') ?? root;
+        const index = members.findIndex((member) => member.id === id);
+        const next = members[index + 1]?.id;
+        const previous = members[index - 1]?.id;
+        await onremove?.(id);
+        await tick();
+        if (
+            !restoreFocus ||
+            !dialog.isConnected ||
+            (document.activeElement !== button && document.activeElement !== document.body)
+        )
+            return;
+        const target = [id, next, previous].find(
+            (key) => key !== undefined && dialog.querySelector(`[data-remove-member="${key}"]:not([disabled])`),
+        );
+        const control =
+            target !== undefined
+                ? dialog.querySelector<HTMLElement>(`[data-remove-member="${target}"]`)
+                : dialog.querySelector<HTMLElement>(
+                      '.source-actions button:not([disabled]), .source-actions input:not([disabled]), .import-source-choice button:not([disabled])',
+                  );
+        control?.focus();
+    }
 </script>
 
-<div class="import-source-header">
+<div class="import-source-header" bind:this={root}>
     <div class="source-summary">
         <strong title={label}>{label}</strong><small class:truncate={truncateSummary}
             >{#if truncateSummary}<AttributeHelp label={summary} description={summary} />{:else}{summary}{/if}</small
@@ -30,22 +57,19 @@
     </div>
     {#if members.length}
         <!-- svelte-ignore a11y_no_noninteractive_tabindex (The bounded disk list supports keyboard scrolling.) -->
-        <div
-            class="source-members"
-            class:multiple={members.length > 1}
-            role="region"
-            aria-label="Source disks"
-            tabindex="0"
-        >
+        <div class="source-members" role="region" aria-label="Source disks" tabindex="0">
             {#each members as member (member.id)}
                 <div class="source-member">
                     <span class="member-name"><AttributeHelp label={member.name} description={member.name} /></span>
+                    {#if member.autoAdded}<span class="member-origin">Auto-added</span>{/if}
                     {#if onremove}<button
                             class="icon-button"
                             aria-label={`Remove ${member.name}`}
                             title={`Remove ${member.name}`}
                             {disabled}
-                            onclick={() => onremove?.(member.id)}><Icon name="close" size={12} /></button
+                            data-remove-member={member.id}
+                            onclick={(event) => remove(member.id, event.currentTarget)}
+                            ><Icon name="close" size={14} /></button
                         >{/if}
                 </div>
             {/each}
@@ -55,6 +79,9 @@
 
 <style>
     .import-source-header {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
         flex: none;
         min-width: 0;
     }
@@ -92,29 +119,47 @@
         text-overflow: ellipsis;
     }
     .source-members {
-        display: grid;
-        max-height: 52px;
+        display: flex;
+        flex-wrap: wrap;
+        align-content: flex-start;
+        gap: 4px;
+        max-height: 56px;
         overflow-y: auto;
-        scrollbar-gutter: stable;
-    }
-    .source-members.multiple {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        column-gap: 12px;
+        padding-right: var(--overlay-scrollbar-clearance);
     }
     .source-member {
         display: flex;
-        gap: 8px;
+        flex: 0 1 auto;
+        gap: 4px;
         align-items: center;
         min-width: 0;
+        max-width: 100%;
         height: 26px;
+        box-sizing: border-box;
+        padding-left: 6px;
+        border: 1px solid var(--color-border);
+        border-radius: 3px;
+        background: var(--color-bg-deep);
     }
     .member-name {
         min-width: 0;
         font-size: var(--dialog-metadata-font-size);
         color: var(--color-text-muted);
     }
-    .multiple .member-name {
-        flex: 1;
+    .member-origin {
+        flex: none;
+        white-space: nowrap;
+        color: var(--color-text-muted);
+        font-size: var(--dialog-metadata-font-size);
+    }
+    .source-member .icon-button {
+        flex: none;
+        width: 26px;
+        height: 24px;
+        min-height: 24px;
+    }
+    .source-member :global(button:focus-visible) {
+        outline-offset: -2px;
     }
     .member-name :global(button) {
         display: block;
@@ -135,9 +180,6 @@
         small {
             order: 3;
             flex-basis: 100%;
-        }
-        .source-members.multiple {
-            grid-template-columns: minmax(0, 1fr);
         }
     }
 </style>

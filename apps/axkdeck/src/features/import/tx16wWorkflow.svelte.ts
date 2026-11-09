@@ -14,6 +14,12 @@ import { tx16wDiskMediaType } from '../../lib/tx16wImport';
 import type { JobController } from '../jobs/actions';
 import { ImportCompletion } from './importCompletion.svelte';
 import { AxklibApiError } from '../../lib/httpErrors';
+import {
+    idleCompanionSearch,
+    Tx16wCompanionDiscovery,
+    tx16wSourceKey,
+    type Tx16wCompanionSearch,
+} from './tx16wCompanions';
 
 export interface Tx16wVolumeOption {
     key: string;
@@ -28,6 +34,8 @@ export interface Tx16wImportMember {
     sourceName: string;
     resolvedSource: InputFileLocation | null;
     upload: ClientUploadLocation | null;
+    origin: 'SELECTED' | 'AUTO_ADDED';
+    sourceIdentity: string | object;
 }
 
 export interface Tx16wImportRequest {
@@ -39,7 +47,8 @@ export interface Tx16wImportRequest {
     acknowledgedIssueIds: string[];
     documentSource?: Extract<ConversionSource, { kind: 'DOCUMENT' }>;
     destinationName?: string;
-    status: 'waiting-target' | 'uploading' | 'inspecting' | 'ready' | 'importing';
+    discovery: Tx16wCompanionSearch;
+    status: 'waiting-target' | 'uploading' | 'discovering' | 'inspecting' | 'ready' | 'importing';
     progress: number;
     error: string;
 }
@@ -68,11 +77,18 @@ export class Tx16wImportWorkflow {
     private openingTarget = false;
     private targetGeneration = 0;
     private disposed = false;
+    private readonly companions: Tx16wCompanionDiscovery;
+    private readonly releasingMembers = new WeakMap<Tx16wImportMember, Promise<void>>();
 
     readonly completion: ImportCompletion;
 
     constructor(private readonly dependencies: Tx16wImportDependencies) {
         this.completion = new ImportCompletion(dependencies.transport, dependencies.jobs);
+        this.companions = new Tx16wCompanionDiscovery(
+            dependencies.transport,
+            (source) => this.member(source),
+            (message) => dependencies.setStatus(message),
+        );
     }
 
     dropAvailable(): boolean {
@@ -131,6 +147,7 @@ export class Tx16wImportWorkflow {
                 error: '',
                 documentSource: { kind: 'DOCUMENT', sessionId, documentId, expectedRevision },
                 destinationName: location.displayName,
+                discovery: idleCompanionSearch(),
             };
         } catch (error) {
             this.dependencies.setStatus(userFacingMessage(error));
@@ -146,12 +163,22 @@ export class Tx16wImportWorkflow {
     ): Promise<void> {
         if (this.openingTarget || this.disposed || this.completion.locked) return;
         const admitted = admittedSources(files);
-        if (admitted.length !== files.length || admitted.length === 0) {
+        if (files.some((source) => tx16wDiskMediaType(sourceName(source)) === null) || admitted.length === 0) {
             this.dependencies.setStatus('Drop one or more TX16W .img or .ima disk images');
             return;
         }
         if (admitted.length > 32) {
             this.dependencies.setStatus('A TX16W disk set can contain at most 32 images');
+            return;
+        }
+        if (
+            admitted.some(
+                (source) =>
+                    !isFileLocation(source) &&
+                    (!Number.isSafeInteger(source.size) || source.size < 0 || source.size > 4 * 1024 * 1024),
+            )
+        ) {
+            this.dependencies.setStatus('Each TX16W disk image must be at most 4 MiB');
             return;
         }
         if (!this.dropAvailable()) {
@@ -168,6 +195,7 @@ export class Tx16wImportWorkflow {
             plan: null,
             fidelity: 'BEST',
             acknowledgedIssueIds: [],
+            discovery: idleCompanionSearch(),
             status: target ? 'inspecting' : 'waiting-target',
             progress: 0,
             error: '',
@@ -179,15 +207,32 @@ export class Tx16wImportWorkflow {
         const request = this.request;
         if (!request || this.completion.locked || request.documentSource) return;
         const admitted = admittedSources(files);
-        if (admitted.length !== files.length || admitted.length === 0) {
+        if (files.some((source) => tx16wDiskMediaType(sourceName(source)) === null) || admitted.length === 0) {
             request.error = 'Choose one or more TX16W .img or .ima disk images';
             return;
         }
-        if (request.members.length + admitted.length > 32) {
+        if (
+            admitted.some(
+                (source) =>
+                    !isFileLocation(source) &&
+                    (!Number.isSafeInteger(source.size) || source.size < 0 || source.size > 4 * 1024 * 1024),
+            )
+        ) {
+            request.error = 'Each TX16W disk image must be at most 4 MiB';
+            return;
+        }
+        const existing = new Map(request.members.map((member) => [member.sourceIdentity, member]));
+        const additions = admitted.filter((source) => !existing.has(tx16wSourceKey(source)));
+        if (request.members.length + additions.length > 32) {
             request.error = 'A TX16W disk set can contain at most 32 images';
             return;
         }
-        request.members.push(...admitted.map((source) => this.member(source)));
+        for (const source of admitted) {
+            this.companions.include(source);
+            const old = existing.get(tx16wSourceKey(source));
+            if (old) old.origin = 'SELECTED';
+        }
+        request.members.push(...additions.map((source) => this.member(source)));
         request.error = '';
         if (request.target) await this.inspect();
     }
@@ -199,20 +244,26 @@ export class Tx16wImportWorkflow {
         const index = request.members.findIndex((member) => member.id === memberId);
         if (index < 0) return;
         const removed = request.members[index];
-        if (removed.upload) {
-            try {
-                await this.dependencies.transport.releaseClientUpload(removed.upload);
-            } catch (error) {
-                request.error = userFacingMessage(error);
-                return;
-            }
-        }
-        request.members.splice(index, 1);
+        const generation = this.targetGeneration;
+        request.status = 'inspecting';
         request.error = '';
-        if (request.members.length === 0) {
-            await this.close();
-        } else if (request.target) {
-            await this.inspect();
+        try {
+            await this.discardPlan(request);
+            if (this.request !== request || generation !== this.targetGeneration) return;
+            await this.releaseMemberUpload(removed);
+            if (this.request !== request || generation !== this.targetGeneration) return;
+            this.companions.exclude(removed);
+            request.members.splice(index, 1);
+            if (request.members.length === 0) {
+                request.discovery = idleCompanionSearch();
+                request.status = request.target ? 'ready' : 'waiting-target';
+            } else if (request.target) {
+                await this.inspect();
+            } else request.status = 'waiting-target';
+        } catch (error) {
+            if (this.request !== request || generation !== this.targetGeneration) return;
+            request.status = request.target ? 'ready' : 'waiting-target';
+            request.error = userFacingMessage(error);
         }
     }
 
@@ -243,6 +294,10 @@ export class Tx16wImportWorkflow {
         const sessionId = this.ownedTarget?.sessionId ?? this.dependencies.sessionId();
         if (
             !request?.plan?.report?.executable ||
+            request.status !== 'ready' ||
+            (!request.documentSource && request.members.length === 0) ||
+            request.error ||
+            request.discovery.error ||
             requiredConversionIssues(request.plan).some((id) => !request.acknowledgedIssueIds.includes(id)) ||
             !request.target ||
             sessionId === null
@@ -303,11 +358,12 @@ export class Tx16wImportWorkflow {
     }
 
     async reprepare(): Promise<void> {
-        if (!this.completion.locked) await this.inspect();
+        if (!this.completion.locked) await this.inspect(this.request?.discovery.state === 'error');
     }
 
     private async discardPlan(request: Tx16wImportRequest): Promise<void> {
         const plan = request.plan;
+        request.acknowledgedIssueIds = [];
         if (plan?.state === 'READY') {
             try {
                 await this.dependencies.transport.releaseConversion(plan.planId);
@@ -351,16 +407,39 @@ export class Tx16wImportWorkflow {
         const request = this.request;
         if (request?.plan?.state === 'READY' && !this.completion.locked) await this.discardPlan(request);
         for (const member of request?.members ?? []) {
-            if (!member.upload) continue;
-            await this.dependencies.transport.releaseClientUpload(member.upload);
-            member.upload = null;
-            member.resolvedSource = null;
+            await this.releaseMemberUpload(member);
         }
+        await this.companions.releaseDebt();
         if (this.ownedTarget) {
             await this.dependencies.transport.closeImage(this.ownedTarget.sessionId);
             this.ownedTarget = null;
         }
-        if (this.request === request) this.request = null;
+        if (this.request === request) {
+            this.request = null;
+            this.companions.reset();
+        }
+    }
+
+    private async releaseMemberUpload(member: Tx16wImportMember): Promise<void> {
+        const pending = this.releasingMembers.get(member);
+        if (pending) return pending;
+        const upload = member.upload;
+        if (!upload) return;
+        const release = (async () => {
+            try {
+                await this.dependencies.transport.releaseClientUpload(upload);
+            } catch (error) {
+                if (!(error instanceof AxklibApiError && error.status === 404)) throw error;
+            }
+            member.upload = null;
+            member.resolvedSource = null;
+        })();
+        this.releasingMembers.set(member, release);
+        try {
+            await release;
+        } finally {
+            this.releasingMembers.delete(member);
+        }
     }
 
     private member(source: ClientUploadSource | FileLocation): Tx16wImportMember {
@@ -370,10 +449,12 @@ export class Tx16wImportWorkflow {
             sourceName: sourceName(source),
             resolvedSource: isFileLocation(source) ? source : null,
             upload: null,
+            origin: 'SELECTED',
+            sourceIdentity: tx16wSourceKey(source),
         };
     }
 
-    private async inspect(): Promise<void> {
+    private async inspect(forceDiscovery = false): Promise<void> {
         const request = this.request;
         const sessionId = this.ownedTarget?.sessionId ?? this.dependencies.sessionId();
         if (!request?.target || (!request.documentSource && request.members.length === 0) || sessionId === null) return;
@@ -384,6 +465,7 @@ export class Tx16wImportWorkflow {
         request.status = 'inspecting';
         try {
             await this.discardPlan(request);
+            if (controller.signal.aborted || this.request !== request) return;
             for (const [index, member] of request.members.entries()) {
                 if (member.resolvedSource) continue;
                 request.status = 'uploading';
@@ -404,6 +486,9 @@ export class Tx16wImportWorkflow {
                 member.upload = upload;
                 member.resolvedSource = upload;
             }
+            if (controller.signal.aborted || this.request !== request) return;
+            request.status = 'discovering';
+            await this.companions.resolve(request, controller.signal, forceDiscovery);
             if (controller.signal.aborted || this.request !== request) return;
             request.status = 'inspecting';
             request.progress = 1;
@@ -461,7 +546,12 @@ export function collectTx16wVolumeOptions(items: readonly DiskTreeItem[]): Tx16w
 }
 
 function admittedSources(files: (ClientUploadSource | FileLocation)[]): (ClientUploadSource | FileLocation)[] {
-    return files.filter((source) => tx16wDiskMediaType(sourceName(source)) !== null);
+    const seen = new Set<string | object>();
+    return files.filter((source) => {
+        if (tx16wDiskMediaType(sourceName(source)) === null || seen.has(tx16wSourceKey(source))) return false;
+        seen.add(tx16wSourceKey(source));
+        return true;
+    });
 }
 
 function isFileLocation(source: ClientUploadSource | FileLocation): source is FileLocation {

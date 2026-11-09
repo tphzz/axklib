@@ -6,18 +6,31 @@ not a claim that TX16W objects are A-series objects or that a TX16W disk is an
 A-series floppy.
 
 Axkdeck accepts one or more `.ima` or `.img` TX16W disks through drag and drop.
-The selected files form one explicit logical disk set. When a writable SFS
+The selected files form one logical disk set. When a writable SFS
 volume is selected, that volume is the initial destination. When no volume is
 selected, the import dialog requires a destination from the open hard-disk
 image. FAT12 floppy, ISO9660, archive, and read-only sessions are not valid
 destinations because the operation currently authors A-series objects only in
 SFS volumes.
 
-The dialog does not guess companion filenames or scan the containing directory.
-Select all members together, or use **Add disks** before importing. This avoids
-mixing alternate editions that happen to have similar names. Adding or removing
-a member reruns inspection and the destination plan for the complete selected
-set.
+The dialog checks native references for missing companion data before preparing
+the conversion. A complete explicit selection is authoritative. Otherwise, a
+workspace FILE source can search its immediate containing directory on either
+a local or remote server. A local desktop file can search authorized sibling
+disk images when using the local server. Only uniquely matching suppliers are
+added, marked **Auto-added**; overlapping alternatives remain ambiguous. There
+is no numbered-filename guess. Use **Add disks** to choose an ambiguous or
+missing companion explicitly. Browser files and desktop files uploaded to a
+remote server require explicit selection of all members: they do not expose a
+server-side source directory.
+
+Source chips retain complete names in hover/focus help and have an adjacent
+remove action. Removing a member prevents its automatic rediscovery until it
+is explicitly added again. Adding or removing a member invalidates the reviewed
+plan and consent immediately, then prepares the complete current set again.
+Discovery failures remain visible with Retry; cancellation discards late results
+and releases unused candidate uploads. Local path access stays within the
+desktop's authorized per-file scope, not a recursive directory grant.
 
 The server also provides the read-only
 `POST /api/v1/companion-source-resolutions` job
@@ -34,8 +47,9 @@ Discovery is bounded to 1,024 directory entries, 4 MiB per source and 64 MiB of
 candidate input, with at most 32 accepted members. It does not recurse or follow
 links. Limits and cancellation fail explicitly. Exclusions suppress automatic
 rediscovery; explicit re-addition takes precedence. UPLOAD references never
-trigger a search of the server's staging directory. The current desktop dialog
-does not yet invoke this resolution job automatically.
+trigger a search of the server's staging directory. The dialog invokes this
+resolution job automatically and reuses completed membership when only the
+destination or fidelity changes.
 
 The import uses the shared [directional conversion plan](conversion.md) contract.
 Alternatively, open a TX16W document first and use **Convert** to select an
@@ -127,6 +141,13 @@ The preview classifies every non-trivial mapping:
 both, while allowing exact and representation-only changes. Unsupported or
 ambiguous relationships cannot be acknowledged away.
 
+In Best mode, the fixed **Accept all losses** control covers LOSS items across
+every report page. It does not accept UNCERTAINTY items; those require individual
+review. A mixed checkbox accepts all losses, and a checked checkbox clears only
+loss consent. The control is disabled during preparation or a write/recovery
+lock, for Strict fidelity, and when the report has no losses. Preparing a new
+plan clears previous consent.
+
 Current parameter behavior is:
 
 | TX16W parameter | A-series behavior |
@@ -153,8 +174,8 @@ to the A-series adapter, not to the neutral TX16W parser.
 Use the import dialog as a plan review:
 
 1. Drop the selected `.ima` or `.img` files onto axkdeck. For a multi-floppy
-   source, select every known member together or add the remaining members in
-   the dialog.
+   source, review automatically found companions or select known members
+   together. Add missing or ambiguous members in the dialog.
 2. Select a writable SFS volume if no destination was already selected.
 3. Choose **Programs and samples** for a complete hierarchy. Use **Wave Data
    only** deliberately when recovering decodable Waves from an incomplete or
@@ -162,7 +183,8 @@ Use the import dialog as a plan review:
 4. Review the paged action table: final names, slots, assignments, key ranges,
    sample rates and loop boundaries.
 5. Select Best or Strict and review the mapping issues. In Best mode, explicitly
-   acknowledge each loss or uncertainty before continuing.
+   acknowledge losses individually or with **Accept all losses**; acknowledge
+   each uncertainty individually before continuing.
 6. Import only when the retained plan reports that it is ready. Changes to inputs
    or destination require preparation again; expired or consumed plans cannot be
    executed. Use Refresh after a saved import whose cleanup or refresh failed,

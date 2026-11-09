@@ -137,6 +137,68 @@ function setup(value = inspection, isDesktop = false, connectionMode: ImageTrans
     return { workflow, transport, refresh, otherFormat, picker };
 }
 describe('floppy import', () => {
+    it('ignores late removal after Cancel without changing the next request', async () => {
+        const { workflow, transport } = setup();
+        await workflow.requestDroppedFiles([{ name: 'disk.img', type: '', size: 100, readChunk: vi.fn() }], volume);
+        const old = workflow.request!;
+        let finish!: () => void;
+        transport.releaseClientUpload.mockImplementationOnce(
+            () =>
+                new Promise<void>((resolve) => {
+                    finish = resolve;
+                }),
+        );
+        const removing = workflow.remove(old.members[0].id);
+        const closing = workflow.close();
+        await vi.waitFor(() => expect(workflow.request).toBeNull());
+        await workflow.requestDroppedFiles(
+            [serverFileLocation({ rootId: 'workspace', relativePath: 'new.img' })],
+            volume,
+        );
+        finish();
+        await Promise.all([removing, closing]);
+        expect(old.members).toHaveLength(1);
+        expect(workflow.request!.members[0].name).toBe('new.img');
+        expect(transport.releaseClientUpload).toHaveBeenCalledOnce();
+        expect(transport.startFloppyInspection).toHaveBeenCalledTimes(2);
+        await workflow.close();
+    });
+
+    it('invalidates a ready plan before awaiting source removal cleanup', async () => {
+        const { workflow, transport } = setup();
+        await workflow.requestDroppedFiles([{ name: 'disk.img', type: '', size: 100, readChunk: vi.fn() }], volume);
+        await workflow.review();
+        let finish!: () => void;
+        transport.releaseClientUpload.mockImplementationOnce(
+            () =>
+                new Promise<void>((resolve) => {
+                    finish = resolve;
+                }),
+        );
+        const removing = workflow.remove(workflow.request!.members[0].id);
+        expect(workflow.busy).toBe(true);
+        expect(workflow.request!.plan).toBeNull();
+        await workflow.apply();
+        expect(transport.startFloppyImport).not.toHaveBeenCalled();
+        finish();
+        await removing;
+        expect(workflow.request!.status).toBe('choosing');
+    });
+
+    it('retains a failed source cleanup for retry without allowing the old plan', async () => {
+        const { workflow, transport } = setup();
+        await workflow.requestDroppedFiles([{ name: 'disk.img', type: '', size: 100, readChunk: vi.fn() }], volume);
+        await workflow.review();
+        transport.releaseClientUpload.mockRejectedValueOnce(new Error('Cleanup failed'));
+        await workflow.remove(workflow.request!.members[0].id);
+        expect(workflow.request!.members).toHaveLength(1);
+        expect(workflow.request!.error).toBe('Cleanup failed');
+        await workflow.apply();
+        expect(transport.startFloppyImport).not.toHaveBeenCalled();
+        await workflow.remove(workflow.request!.members[0].id);
+        expect(workflow.request!.members).toHaveLength(0);
+    });
+
     it('requires acknowledgement for recoverable sources and resets it when sources change', async () => {
         const { workflow, transport } = setup({
             ...inspection,

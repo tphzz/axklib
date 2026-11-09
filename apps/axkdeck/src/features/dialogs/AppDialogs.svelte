@@ -607,7 +607,7 @@
         onfidelity={(fidelity) => void tx16wImport.selectFidelity(fidelity)}
         onprepare={() => void tx16wImport.reprepare()}
         onadd={(files) => void tx16wImport.addFiles(files)}
-        onremove={(memberId) => void tx16wImport.removeMember(memberId)}
+        onremove={(memberId) => tx16wImport.removeMember(memberId)}
         onconfirm={() => void tx16wImport.commit()}
         oncancel={() => void tx16wImport.close()}
     />

@@ -1,7 +1,7 @@
 <script lang="ts">
     import { tick, untrack } from 'svelte';
     import type { Tx16wImportRequest, Tx16wVolumeOption } from '../../features/import/tx16wWorkflow.svelte';
-    import { browserUploadSource } from '../clientUploadSource';
+    import type { ClientUploadSource } from '../clientUploadSource';
     import type { Tx16wImportMode } from '../transport';
     import { requiredConversionIssues, type ConversionFidelity } from '../conversions';
     import { modal } from '../modal';
@@ -10,6 +10,7 @@
     import ImportCapacityControl from './ImportCapacityControl.svelte';
     import ConversionReport from './ConversionReport.svelte';
     import ImportSourceHeader from './ImportSourceHeader.svelte';
+    import DiskSourcePicker from './DiskSourcePicker.svelte';
     import DiskImportSettings from './DiskImportSettings.svelte';
     import ImportCapacityDetails from './ImportCapacityDetails.svelte';
     import ImportReviewLayout from './ImportReviewLayout.svelte';
@@ -37,8 +38,8 @@
         onmode: (mode: Tx16wImportMode) => void;
         onfidelity: (fidelity: ConversionFidelity) => void;
         onprepare: () => void;
-        onadd: (files: ReturnType<typeof browserUploadSource>[]) => void;
-        onremove: (id: number) => void;
+        onadd: (files: ClientUploadSource[]) => void;
+        onremove: (id: number) => void | Promise<void>;
         onconfirm: () => void;
         oncancel: () => void;
     } = $props();
@@ -48,7 +49,11 @@
     let shell: HTMLDivElement;
     $effect(() => {
         void completion.warnings.join('\n');
-        if (['warnings', 'refresh-failed', 'unconfirmed'].includes(completion.phase) || request.error) {
+        if (
+            ['warnings', 'refresh-failed', 'unconfirmed'].includes(completion.phase) ||
+            request.error ||
+            request.discovery.error
+        ) {
             active = 'review';
             void tick().then(() => {
                 const scroller = shell?.querySelector('.import-pane[data-pane="review"] .import-pane-scroll');
@@ -56,11 +61,16 @@
             });
         }
     });
-    const busy = $derived(completion.locked || ['uploading', 'inspecting', 'importing'].includes(request.status));
+    const busy = $derived(
+        completion.locked || ['uploading', 'discovering', 'inspecting', 'importing'].includes(request.status),
+    );
     const report = $derived(request.plan?.report);
     const canConfirm = $derived(
         targetSelected &&
+            (!!request.documentSource || request.members.length > 0) &&
             !busy &&
+            !request.error &&
+            !request.discovery.error &&
             request.status === 'ready' &&
             !!report?.executable &&
             !!request.plan &&
@@ -85,7 +95,8 @@
         volumeOptions.map((option) => ({ ...option.target, name: option.partitionName, label: option.label })),
     );
     const canDismiss = $derived(
-        completion.canDismiss && (!busy || ['refresh-failed', 'warnings'].includes(completion.phase)),
+        completion.canDismiss &&
+            (request.status !== 'importing' || ['warnings', 'refresh-failed'].includes(completion.phase)),
     );
     function selectTarget(index: number | null, name: string) {
         partitionIndex = index;
@@ -94,11 +105,6 @@
         );
         targetSelected = !!option;
         ontarget(option?.target ?? null);
-    }
-    function addFiles(input: HTMLInputElement) {
-        const files = Array.from(input.files ?? []).map(browserUploadSource);
-        input.value = '';
-        if (files.length) onadd(files);
     }
 </script>
 
@@ -132,22 +138,23 @@
                     : `${request.members.length} ${request.members.length === 1 ? 'disk' : 'disks'}${report ? ` · ${report.actionCount} planned objects` : ''}`}
                 members={request.documentSource
                     ? []
-                    : request.members.map((member) => ({ id: member.id, name: member.sourceName }))}
+                    : request.members.map((member) => ({
+                          id: member.id,
+                          name: member.sourceName,
+                          autoAdded: member.origin === 'AUTO_ADDED',
+                      }))}
                 disabled={busy}
                 onremove={request.documentSource ? undefined : onremove}
             >
                 {#snippet actions()}
                     {#if !request.documentSource}
-                        <label class="secondary-button add-disks" aria-disabled={busy}
-                            ><Icon name="file-plus" size={14} />Add disks
-                            <input
-                                type="file"
-                                accept=".img,.ima"
-                                multiple
-                                disabled={busy}
-                                onchange={(event) => addFiles(event.currentTarget)}
-                            />
-                        </label>
+                        <DiskSourcePicker
+                            disabled={busy}
+                            {onadd}
+                            onerror={(message) => {
+                                request.error = message;
+                            }}
+                        />
                     {/if}
                 {/snippet}
             </ImportSourceHeader>
@@ -218,14 +225,20 @@
             {#snippet capacity()}<ImportCapacityDetails
                     review={completion.capacity}
                     admission={report?.capacity}
-                    pending={['uploading', 'inspecting'].includes(request.status)}
+                    pending={['uploading', 'discovering', 'inspecting'].includes(request.status)}
                 />{/snippet}
             {#snippet feedback()}
+                {#if request.discovery.error}<div class="discovery-recovery">
+                        <p class="dialog-error" role="alert">{request.discovery.message} {request.discovery.error}</p>
+                        <button class="secondary-button" disabled={busy} onclick={onprepare}>Retry</button>
+                    </div>{/if}
                 {#if request.error}<p class="dialog-error" role="alert">{request.error}</p>{/if}
                 {#each completion.warnings as warning}<p class="package-warning">{warning}</p>{/each}
             {/snippet}
             {#if report}
                 <ConversionReport
+                    lossConsent
+                    lossConsentPreparing={['uploading', 'discovering', 'inspecting'].includes(request.status)}
                     {report}
                     bind:active
                     bind:acknowledged={request.acknowledgedIssueIds}
@@ -234,18 +247,23 @@
                     {feedback}
                     feedbackNotice={completion.warnings.length
                         ? `${completion.warnings.length} ${completion.warnings.length === 1 ? 'warning' : 'warnings'}`
-                        : request.error
+                        : request.error || request.discovery.error
                           ? '1 issue'
                           : ''}
                 />
             {:else}
-                <ImportReviewLayout bind:active reviewNotice={request.error ? '1 issue' : ''}>
+                <ImportReviewLayout
+                    bind:active
+                    reviewNotice={request.error || request.discovery.error ? '1 issue' : ''}
+                >
                     {#snippet contents()}<p class="empty-report">
                             {request.status === 'uploading'
                                 ? 'Uploading disk images'
-                                : request.status === 'inspecting'
-                                  ? 'Preparing conversion'
-                                  : 'No prepared conversion'}
+                                : request.status === 'discovering'
+                                  ? 'Looking for companion disks...'
+                                  : request.status === 'inspecting'
+                                    ? 'Preparing conversion'
+                                    : 'No prepared conversion'}
                         </p>{/snippet}
                     {#snippet review()}{@render feedback()}{@render capacity()}{/snippet}
                 </ImportReviewLayout>
@@ -255,6 +273,9 @@
             <span class="dialog-footer-status" role="status"
                 >{completion.message ||
                     request.error ||
+                    (request.status === 'discovering' || request.discovery.error || !report?.executable
+                        ? request.discovery.message
+                        : '') ||
                     (busy
                         ? 'Preparing conversion'
                         : report
@@ -263,7 +284,9 @@
                                   ? 'Ready to import'
                                   : 'Review mapping losses'
                               : 'Conversion blocked'
-                          : 'Choose a destination')}</span
+                          : request.target && !request.members.length && !request.documentSource
+                            ? 'Add disks to continue'
+                            : 'Choose a destination')}</span
             >
             <div class="dialog-footer-actions">
                 <button class="secondary-button" disabled={!canDismiss} onclick={oncancel}
@@ -281,7 +304,7 @@
                         >{['unconfirmed', 'checking'].includes(completion.phase) ? 'Check status' : 'Refresh'}</button
                     >
                 {:else if completion.phase !== 'warnings'}
-                    {#if !request.plan && request.status === 'ready'}<button
+                    {#if !request.plan && request.status === 'ready' && !request.discovery.error && (request.members.length || request.documentSource)}<button
                             class="secondary-button"
                             disabled={busy}
                             onclick={onprepare}>Prepare again</button
@@ -345,20 +368,18 @@
     .conversion-mode button {
         width: auto;
     }
-    .add-disks {
-        position: relative;
-        overflow: hidden;
+    .discovery-recovery {
+        display: flex;
+        align-items: start;
+        gap: 8px;
+        padding-block: 6px;
     }
-    input[type='file'] {
-        position: absolute;
-        inset: 0;
-        opacity: 0;
-        cursor: pointer;
-        width: 100%;
+    .discovery-recovery p {
+        flex: 1;
+        margin: 0;
     }
-    .add-disks:focus-within {
-        outline: 1px solid var(--state-focus);
-        outline-offset: 2px;
+    .discovery-recovery button {
+        flex: none;
     }
     .empty-report {
         color: var(--color-text-muted);

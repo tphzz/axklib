@@ -10,7 +10,8 @@ const { chromium } = await import(process.env.PLAYWRIGHT_MODULE ? pathToFileURL(
 const output = resolve(process.argv[2]);
 await mkdir(output, { recursive: true });
 const checks = await readFile(new URL('./disk-import-layout-checks.js', import.meta.url), 'utf8');
-const server = await createServer({ server: { host: '127.0.0.1', port: 0 } });
+const freePort = await new Promise((done, reject) => { const socket = socketServer(); socket.once('error', reject); socket.listen(0, '127.0.0.1', () => { const port = socket.address().port; socket.close(error => error ? reject(error) : done(port)); }); });
+const server = await createServer({ server: { host: '127.0.0.1', port: freePort, strictPort: true } });
 let browser, child, childExit, port, stopping, interrupted = false;
 const results = [];
 function stop() {
@@ -33,7 +34,12 @@ for (const kind of ['floppy', 'tx16w']) {
     for (const scenario of ['warnings', 'refresh-failed', 'unconfirmed']) cases.push({ kind, width: 732, height: 680, zoom: 1, scenario });
 }
 cases.push({ kind: 'tx16w', width: 732, height: 680, zoom: 1.5, scenario: 'native-long' });
+for (const scenario of ['companion-found', 'searching', 'search-error', 'mixed-losses', 'all-losses', 'long-chips']) {
+    for (const width of [1152, 732]) cases.push({ kind: 'tx16w', width, height: 820, zoom: 1, scenario });
+}
+cases.push({ kind: 'tx16w', width: 390, height: 820, zoom: 1.5, scenario: 'long-chips' });
 if (process.env.DISK_IMPORT_QUICK === '1') cases.splice(0, cases.length, ...cases.filter(c => [1152, 732].includes(c.width) && [1, 1.5].includes(c.zoom) && c.scenario === 'normal'));
+if (process.env.DISK_IMPORT_SCENARIOS) cases.splice(0, cases.length, ...cases.filter(c => process.env.DISK_IMPORT_SCENARIOS.split(',').includes(c.scenario)));
 try {
     await server.listen(); port = server.httpServer.address().port;
     const base = `http://127.0.0.1:${port}`;
@@ -78,7 +84,11 @@ try {
                     assert.equal(await contents.evaluate(node => node.scrollTop), 0, 'New objects page must start at top');
                     if (geometry.narrow) await dialog.getByRole('tab', { name: /^Review/ }).click();
                     const ack = dialog.locator('[data-pane="review"] input[type=checkbox]');
-                    for (let i = 0; i < 2; i++) { await ack.nth(i).focus(); await page.keyboard.press('Space'); }
+                    const allLosses = dialog.getByRole('checkbox', { name: 'Accept all losses', exact: true });
+                    await allLosses.focus(); await page.keyboard.press('Space');
+                    assert(await dialog.getByRole('button', { name: 'Import', exact: true }).isDisabled(), 'Bulk losses must leave uncertainty consent unchanged');
+                    const uncertainty = dialog.getByRole('checkbox', { name: /Uncertainty.*Destination controls/ });
+                    await uncertainty.focus(); await page.keyboard.press('Space');
                     assert(await dialog.getByRole('button', { name: 'Import', exact: true }).isEnabled());
                     await dialog.getByRole('button', { name: 'Strict', exact: true }).click();
                     assert(await dialog.getByRole('button', { name: 'Import', exact: true }).isDisabled());
@@ -99,7 +109,7 @@ try {
                     await page.emulateMedia({ forcedColors: 'none' });
                     const fileName = dialog.locator('.member-name button').first();
                     await fileName.focus();
-                    const expected = await fileName.getAttribute('aria-label');
+                    const expected = await fileName.textContent();
                     await page.getByRole('tooltip').filter({ hasText: expected }).waitFor();
                     await page.keyboard.press('Escape');
                 }
@@ -124,7 +134,41 @@ try {
                     await page.screenshot({ path: resolve(output, `${entry.kind}-warning-transition.png`) });
                 }
             }
-            if (['empty', 'planning', 'importing', 'capacity', 'missing', 'strict', 'conflicts', 'recovery', 'expired'].includes(entry.scenario)) assert(await dialog.getByRole('button', { name: 'Import', exact: true }).isDisabled());
+            if (['empty', 'planning', 'importing', 'capacity', 'missing', 'strict', 'conflicts', 'recovery', 'expired', 'searching', 'search-error'].includes(entry.scenario)) assert(await dialog.getByRole('button', { name: 'Import', exact: true }).isDisabled());
+            if (entry.scenario === 'searching') assert(await dialog.getByRole('button', { name: 'Cancel', exact: true }).isEnabled());
+            if (entry.scenario === 'companion-found') {
+                assert.equal(await dialog.locator('.source-member').count(), 2);
+                assert.equal(await dialog.getByText('Auto-added', { exact: true }).count(), 1);
+            }
+            if (entry.scenario === 'search-error') {
+                await dialog.getByRole('button', { name: 'Retry', exact: true }).click();
+                assert.equal(await dialog.getByRole('button', { name: 'Retry', exact: true }).count(), 0);
+            }
+            if (['mixed-losses', 'all-losses'].includes(entry.scenario)) {
+                if (geometry.narrow) {
+                    await dialog.getByRole('tab', { name: /^Review/ }).focus();
+                    await page.keyboard.press('Enter');
+                    await page.screenshot({ path: resolve(output, `${name}-review.png`) });
+                }
+                const all = dialog.getByRole('checkbox', { name: 'Accept all losses', exact: true });
+                assert.equal(await all.evaluate(node => node.indeterminate), entry.scenario === 'mixed-losses');
+                if (entry.scenario === 'mixed-losses') await all.click();
+                assert(await all.isChecked());
+                await dialog.getByRole('button', { name: 'Next mapping details page' }).click();
+                const loss = dialog.getByRole('checkbox', { name: /Loss.*Wave Data 100 resampled/ });
+                assert(await loss.isChecked(), 'Bulk loss acceptance must include subsequent pages');
+                assert(await dialog.getByRole('button', { name: 'Import', exact: true }).isDisabled(), 'Uncertainty must remain individually unaccepted');
+                await all.click();
+                assert.equal(await loss.isChecked(), false);
+            }
+            if (entry.scenario === 'long-chips') {
+                const fileName = dialog.locator('.member-name button').first();
+                await fileName.focus();
+                await page.getByRole('tooltip').filter({ hasText: await fileName.textContent() }).waitFor();
+                await page.screenshot({ path: resolve(output, `${name}-name-help.png`) });
+                await page.keyboard.press('Escape');
+                assert.equal(await page.getByRole('dialog').count(), 1);
+            }
             if (['unconfirmed', 'refresh-failed', 'warnings'].includes(entry.scenario)) {
                 assert.equal(await dialog.getByRole('button', { name: 'Import', exact: true }).count(), 0);
                 const action = entry.scenario === 'unconfirmed' ? 'Check status' : entry.scenario === 'refresh-failed' ? 'Refresh' : 'Done';

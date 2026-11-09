@@ -3,10 +3,13 @@
     import type { ConversionReport } from '../conversions';
     import ImportReviewLayout from './ImportReviewLayout.svelte';
     import ImportReportPagination from './ImportReportPagination.svelte';
+    import ConversionLossConsent from './ConversionLossConsent.svelte';
     let {
         report,
         acknowledged = $bindable<string[]>([]),
         disabled = false,
+        lossConsent = false,
+        lossConsentPreparing = false,
         capacity,
         feedback,
         feedbackNotice = '',
@@ -15,6 +18,8 @@
         report: ConversionReport;
         acknowledged?: string[];
         disabled?: boolean;
+        lossConsent?: boolean;
+        lossConsentPreparing?: boolean;
         capacity?: Snippet;
         feedback?: Snippet;
         feedbackNotice?: string;
@@ -104,11 +109,19 @@
     </ul>
 {/snippet}
 
+{#snippet lossToolbar()}<ConversionLossConsent
+        {report}
+        bind:acknowledged
+        {disabled}
+        preparing={lossConsentPreparing}
+    />{/snippet}
+
 <ImportReviewLayout
     bind:active
     contentsSummary={`${report.actionCount} planned objects`}
     reviewSummary={`${report.issueCount} mapping details`}
     {reviewNotice}
+    reviewToolbar={lossConsent ? lossToolbar : undefined}
 >
     {#snippet columns()}<div class="object-columns">
             <span>Object</span><span>Type</span><span>Action</span>

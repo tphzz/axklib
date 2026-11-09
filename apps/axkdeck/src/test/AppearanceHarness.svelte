@@ -10,6 +10,7 @@
     import { ImportCompletion } from '../features/import/importCompletion.svelte';
     import { JobController } from '../features/jobs/actions';
     import '../features/object-editor/editor.css';
+    import { idleCompanionSearch } from '../features/import/tx16wCompanions';
 
     const params = new URLSearchParams(location.search);
     const stage = params.get('stage');
@@ -31,6 +32,7 @@
         plan: null,
         fidelity: 'BEST',
         acknowledgedIssueIds: [],
+        discovery: idleCompanionSearch(),
         status: stage === 'tx16w-busy' ? 'inspecting' : 'ready',
         progress: 0,
         error: '',

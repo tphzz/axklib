@@ -7,6 +7,7 @@ import { fitsCapacity } from '../../test/samplerCapacityFixture';
 import Tx16wImportDialog from './Tx16wImportDialog.svelte';
 import { ImportCompletion } from '../../features/import/importCompletion.svelte';
 import { JobController } from '../../features/jobs/actions';
+import { idleCompanionSearch } from '../../features/import/tx16wCompanions';
 
 const target = { partitionIndex: 1, volumeName: 'TX16W' };
 const option: Tx16wVolumeOption = {
@@ -51,6 +52,8 @@ function request(): Tx16wImportRequest {
                 sourceName: 'library.ima',
                 resolvedSource: null,
                 upload: null,
+                origin: 'SELECTED',
+                sourceIdentity: 'fixture:library',
             },
         ],
         target,
@@ -58,6 +61,7 @@ function request(): Tx16wImportRequest {
         plan: inspection(),
         fidelity: 'BEST',
         acknowledgedIssueIds: [],
+        discovery: idleCompanionSearch(),
         status: 'ready',
         progress: 1,
         error: '',
@@ -65,6 +69,64 @@ function request(): Tx16wImportRequest {
 }
 
 describe('Tx16wImportDialog', () => {
+    it.each(['discovering', 'inspecting', 'uploading'] as const)('keeps Cancel available while %s', async (status) => {
+        const current = request();
+        current.status = status;
+        const oncancel = vi.fn();
+        render(Tx16wImportDialog, {
+            request: current,
+            completion: new ImportCompletion(
+                { waitForJob: vi.fn() },
+                new JobController({ waitForJob: vi.fn(), cancelJob: vi.fn() }),
+            ),
+            volumeOptions: [option],
+            oncancel,
+            onrecover: vi.fn(),
+            ontarget: vi.fn(),
+            onmode: vi.fn(),
+            onfidelity: vi.fn(),
+            onprepare: vi.fn(),
+            onadd: vi.fn(),
+            onremove: vi.fn(),
+            onconfirm: vi.fn(),
+        });
+        expect((screen.getByRole('button', { name: 'Import' }) as HTMLButtonElement).disabled).toBe(true);
+        await fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+        expect(oncancel).toHaveBeenCalledOnce();
+    });
+
+    it('exposes search failure Retry and blocks Import even with a clean conversion report', async () => {
+        const current = request();
+        current.discovery = {
+            state: 'error',
+            error: 'Scan limit exceeded',
+            message: 'Companion search incomplete.',
+            requirements: [],
+        };
+        const onprepare = vi.fn();
+        render(Tx16wImportDialog, {
+            request: current,
+            completion: new ImportCompletion(
+                { waitForJob: vi.fn() },
+                new JobController({ waitForJob: vi.fn(), cancelJob: vi.fn() }),
+            ),
+            volumeOptions: [option],
+            oncancel: vi.fn(),
+            onrecover: vi.fn(),
+            ontarget: vi.fn(),
+            onmode: vi.fn(),
+            onfidelity: vi.fn(),
+            onprepare,
+            onadd: vi.fn(),
+            onremove: vi.fn(),
+            onconfirm: vi.fn(),
+        });
+        expect((screen.getByRole('button', { name: 'Import' }) as HTMLButtonElement).disabled).toBe(true);
+        expect((screen.getByLabelText('Add disks') as HTMLInputElement).disabled).toBe(false);
+        await fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+        expect(onprepare).toHaveBeenCalledOnce();
+    });
+
     it('locks source and destination edits while retaining completion warnings', async () => {
         const completion = new ImportCompletion(
             { waitForJob: vi.fn() },
@@ -76,7 +138,7 @@ describe('Tx16wImportDialog', () => {
         render(Tx16wImportDialog, {
             props: {
                 completion,
-                request: request(),
+                request: { ...request(), status: 'importing' },
                 volumeOptions: [option],
                 oncancel,
                 onrecover: vi.fn(),

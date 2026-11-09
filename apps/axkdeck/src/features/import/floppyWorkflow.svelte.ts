@@ -58,6 +58,7 @@ export class FloppyImportWorkflow {
     private controller: AbortController | null = null;
     private inspectionJob: number | null = null;
     private lastDirectory: DirectoryRef | null = null;
+    private readonly releasingMembers = new WeakMap<Member, Promise<void>>();
     constructor(private readonly dependencies: Dependencies) {
         this.completion = new ImportCompletion(dependencies.transport, dependencies.jobs);
     }
@@ -166,9 +167,20 @@ export class FloppyImportWorkflow {
         const r = this.request;
         if (!r || this.busy || this.completion.locked) return;
         const member = r.members.find((entry) => entry.id === id);
-        r.members = r.members.filter((entry) => entry.id !== id);
-        if (member?.upload) await this.dependencies.transport.releaseClientUpload(member.upload);
-        await this.inspect();
+        if (!member) return;
+        const generation = this.generation;
+        this.invalidate(true);
+        r.status = 'loading';
+        try {
+            await this.releaseMemberUpload(member);
+            if (this.request !== r || generation !== this.generation) return;
+            r.members = r.members.filter((entry) => entry.id !== id);
+            await this.inspect();
+        } catch (error) {
+            if (this.request !== r || generation !== this.generation) return;
+            r.status = 'ready';
+            r.error = userFacingMessage(error);
+        }
     }
     setDestination(mode: ImportDestinationMode, partitionIndex: number | null, volumeName: string): void {
         const r = this.request;
@@ -429,11 +441,22 @@ export class FloppyImportWorkflow {
             await this.dependencies.transport.releaseFloppyInspection(token).catch(() => undefined);
             r.inspection = null;
         }
-        for (const member of r.members)
-            if (member.upload) {
-                await this.dependencies.transport.releaseClientUpload(member.upload).catch(() => undefined);
-                member.upload = null;
-            }
+        for (const member of r.members) await this.releaseMemberUpload(member).catch(() => undefined);
+    }
+    private async releaseMemberUpload(member: Member): Promise<void> {
+        const pending = this.releasingMembers.get(member);
+        if (pending) return pending;
+        if (!member.upload) return;
+        const release = this.dependencies.transport.releaseClientUpload(member.upload).then(() => {
+            member.upload = null;
+            member.input = null;
+        });
+        this.releasingMembers.set(member, release);
+        try {
+            await release;
+        } finally {
+            this.releasingMembers.delete(member);
+        }
     }
     private async inspect(): Promise<void> {
         const r = this.request;

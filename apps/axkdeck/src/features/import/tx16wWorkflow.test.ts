@@ -5,7 +5,8 @@ import type { AudioImportTarget, ImageTransport } from '../../lib/transport';
 import type { DiskTreeItem, WorkspaceView } from '../../lib/types';
 import type { JobController } from '../jobs/actions';
 import { collectTx16wVolumeOptions, Tx16wImportWorkflow } from './tx16wWorkflow.svelte';
-import type { ConversionPlan } from '../../lib/conversions';
+import type { ConversionPlan, CompanionSourceInput, CompanionSourceResolution } from '../../lib/conversions';
+import type { InputFileLocation } from '../../lib/storageLocations';
 import type { PickerController } from '../dialogs/picker';
 import { fitsCapacity, inspectFitsCapacity } from '../../test/samplerCapacityFixture';
 
@@ -16,6 +17,17 @@ const diskSource: ClientUploadSource = {
     size: 1_474_560,
     readChunk: vi.fn(),
 };
+
+function selectedMembers(sources: InputFileLocation[]): CompanionSourceResolution['members'] {
+    return sources.map((source) => ({
+        source:
+            source.kind === 'server-file'
+                ? { kind: 'FILE', file: source.reference }
+                : { kind: 'UPLOAD', upload: source.reference },
+        name: source.displayName.split('/').at(-1) ?? source.displayName,
+        origin: 'SELECTED',
+    }));
+}
 
 function inspection(): ConversionPlan {
     return {
@@ -60,6 +72,394 @@ function sourceTree(): DiskTreeItem[] {
 }
 
 describe('Tx16wImportWorkflow', () => {
+    it.each([1, 2])('locks the old plan immediately while removing from %i sources', async (count) => {
+        let finish!: () => void;
+        const releaseClientUpload = vi.fn(
+            () =>
+                new Promise<void>((resolve) => {
+                    finish = resolve;
+                }),
+        );
+        const executeConversion = vi.fn();
+        const workflow = createWorkflow(
+            {
+                uploadClientFile: vi.fn(async (source: ClientUploadSource) =>
+                    clientUploadLocation({ uploadId: source.name }, 'DISK_IMAGE', source.name),
+                ),
+                releaseClientUpload,
+                executeConversion,
+                prepareConversion: vi.fn().mockResolvedValue(inspection()),
+            },
+            sourceTree()[0].children![0],
+        );
+        await workflow.requestDroppedFiles(
+            Array.from({ length: count }, (_, index) => ({ ...diskSource, name: `disk-${index}.img` })),
+        );
+        const pending = workflow.removeMember(workflow.request!.members[0].id);
+        expect(workflow.request!.status).toBe('inspecting');
+        await workflow.commit();
+        expect(executeConversion).not.toHaveBeenCalled();
+        await vi.waitFor(() => expect(releaseClientUpload).toHaveBeenCalledOnce());
+        finish();
+        await pending;
+        expect(workflow.request!.members).toHaveLength(count - 1);
+    });
+
+    it('keeps failed last-source cleanup visible without retaining an executable plan', async () => {
+        const executeConversion = vi.fn();
+        const workflow = createWorkflow(
+            {
+                uploadClientFile: vi
+                    .fn()
+                    .mockResolvedValue(clientUploadLocation({ uploadId: 'seed' }, 'DISK_IMAGE', diskSource.name)),
+                releaseClientUpload: vi.fn().mockRejectedValue(new Error('Upload cleanup failed')),
+                executeConversion,
+                prepareConversion: vi.fn().mockResolvedValue(inspection()),
+            },
+            sourceTree()[0].children![0],
+        );
+        await workflow.requestDroppedFiles([diskSource]);
+        await workflow.removeMember(workflow.request!.members[0].id);
+        expect(workflow.request!.error).toBe('Upload cleanup failed');
+        expect(workflow.request!.plan).toBeNull();
+        await workflow.commit();
+        expect(executeConversion).not.toHaveBeenCalled();
+    });
+
+    it('joins removal cleanup on Cancel and ignores its late membership result', async () => {
+        let finish!: () => void;
+        const releaseClientUpload = vi
+            .fn()
+            .mockImplementationOnce(
+                () =>
+                    new Promise<void>((resolve) => {
+                        finish = resolve;
+                    }),
+            )
+            .mockResolvedValue(undefined);
+        const prepareConversion = vi.fn().mockResolvedValue(inspection());
+        const workflow = createWorkflow(
+            {
+                uploadClientFile: vi
+                    .fn()
+                    .mockResolvedValue(clientUploadLocation({ uploadId: 'seed' }, 'DISK_IMAGE', diskSource.name)),
+                releaseClientUpload,
+                prepareConversion,
+            },
+            sourceTree()[0].children![0],
+        );
+        await workflow.requestDroppedFiles([diskSource]);
+        const oldRequest = workflow.request!;
+        const removal = workflow.removeMember(oldRequest.members[0].id);
+        await vi.waitFor(() => expect(releaseClientUpload).toHaveBeenCalledOnce());
+        const closing = workflow.close();
+        await Promise.resolve();
+        expect(workflow.request).toBe(oldRequest);
+        finish();
+        await Promise.all([removal, closing]);
+        expect(oldRequest.members).toHaveLength(1);
+        expect(releaseClientUpload).toHaveBeenCalledOnce();
+        await workflow.requestDroppedFiles([serverFileLocation({ rootId: 'root', relativePath: 'new.img' })]);
+        expect(workflow.request!.members[0].sourceName).toBe('new.img');
+        expect(prepareConversion).toHaveBeenCalledTimes(2);
+        await workflow.close();
+    });
+
+    it('keeps removed canonical native members excluded until explicitly re-added', async () => {
+        const companion = { ...diskSource, name: 'second.img', identity: 'native:second' };
+        const seed = { ...diskSource, identity: 'native:first', nearbySources: vi.fn().mockResolvedValue([companion]) };
+        let uploadId = 0;
+        const uploadClientFile = vi.fn(async (source: ClientUploadSource) =>
+            clientUploadLocation({ uploadId: `upload-${++uploadId}` }, 'DISK_IMAGE', source.name),
+        );
+        const releaseClientUpload = vi.fn().mockResolvedValue(undefined);
+        const workflow = createWorkflow(
+            {
+                connectionMode: 'local',
+                uploadClientFile,
+                releaseClientUpload,
+                resolveCompanionSources: vi.fn(
+                    async (input: CompanionSourceInput): Promise<CompanionSourceResolution> => ({
+                        members: [
+                            ...selectedMembers(input.sources),
+                            ...selectedMembers(input.candidates ?? []).map((member) => ({
+                                ...member,
+                                origin: 'AUTO_ADDED' as const,
+                            })),
+                        ],
+                        requirements:
+                            input.sources.length > 1 || input.candidates?.length
+                                ? []
+                                : [{ name: 'Wave.W01', state: 'MISSING' }],
+                    }),
+                ),
+                prepareConversion: vi.fn().mockResolvedValue(inspection()),
+            },
+            sourceTree()[0].children![0],
+        );
+        await workflow.requestDroppedFiles([seed]);
+        const second = workflow.request!.members[1];
+        expect(second.origin).toBe('AUTO_ADDED');
+        await workflow.removeMember(second.id);
+        expect(workflow.request!.members.map((member) => member.sourceName)).toEqual([seed.name]);
+        expect(uploadClientFile).toHaveBeenCalledTimes(2);
+        await workflow.addFiles([{ ...companion, name: 'same-file-readded.img' }]);
+        expect(workflow.request!.members.map((member) => member.origin)).toEqual(['SELECTED', 'SELECTED']);
+        expect(uploadClientFile).toHaveBeenCalledTimes(3);
+        await workflow.close();
+        expect(releaseClientUpload).toHaveBeenCalledTimes(3);
+    });
+
+    it('deduplicates source identity rather than names or read callbacks, including reactive members', async () => {
+        let id = 0;
+        const uploadClientFile = vi.fn(async (source: ClientUploadSource) =>
+            clientUploadLocation({ uploadId: `${++id}` }, 'DISK_IMAGE', source.name),
+        );
+        const workflow = createWorkflow(
+            {
+                uploadClientFile,
+                releaseClientUpload: vi.fn().mockResolvedValue(undefined),
+                prepareConversion: vi.fn().mockResolvedValue(inspection()),
+            },
+            sourceTree()[0].children![0],
+        );
+        await workflow.requestDroppedFiles([diskSource, diskSource]);
+        await workflow.addFiles([diskSource]);
+        expect(uploadClientFile).toHaveBeenCalledOnce();
+        await workflow.addFiles([{ ...diskSource }]);
+        expect(workflow.request!.members).toHaveLength(2);
+        expect(uploadClientFile).toHaveBeenCalledTimes(2);
+        await workflow.close();
+    });
+
+    it('blocks execution after an incomplete native search and retries explicitly', async () => {
+        const nearbySources = vi
+            .fn()
+            .mockRejectedValueOnce(new Error('Directory scan exceeds its limit'))
+            .mockResolvedValueOnce([]);
+        const executeConversion = vi.fn();
+        const workflow = createWorkflow(
+            {
+                connectionMode: 'local',
+                executeConversion,
+                uploadClientFile: vi
+                    .fn()
+                    .mockResolvedValue(clientUploadLocation({ uploadId: 'seed' }, 'DISK_IMAGE', diskSource.name)),
+                releaseClientUpload: vi.fn().mockResolvedValue(undefined),
+                resolveCompanionSources: vi.fn(
+                    async (input: CompanionSourceInput): Promise<CompanionSourceResolution> => ({
+                        members: selectedMembers(input.sources),
+                        requirements: [{ name: 'Wave.W01', state: 'MISSING' }],
+                    }),
+                ),
+                prepareConversion: vi.fn().mockResolvedValue(inspection()),
+            },
+            sourceTree()[0].children![0],
+        );
+        await workflow.requestDroppedFiles([{ ...diskSource, nearbySources }]);
+        expect(workflow.request!.discovery.error).toContain('limit');
+        await workflow.commit();
+        expect(executeConversion).not.toHaveBeenCalled();
+        await workflow.reprepare();
+        expect(nearbySources).toHaveBeenCalledTimes(2);
+        expect(workflow.request!.discovery.error).toBe('');
+        await workflow.close();
+    });
+
+    it('clears consent and blocks execution when releasing an obsolete plan fails', async () => {
+        const prepared = inspection();
+        prepared.report!.issues = [
+            {
+                id: 'loss',
+                impact: 'LOSS',
+                message: 'Resampled',
+                code: 'resample',
+                sourceObject: 'wave',
+                sourceParameter: '',
+                targetObject: '',
+                targetParameter: '',
+            },
+        ];
+        prepared.report!.issueCount = 1;
+        const releaseConversion = vi.fn().mockRejectedValue(new Error('Plan release failed'));
+        const executeConversion = vi.fn();
+        const workflow = createWorkflow(
+            { releaseConversion, executeConversion, prepareConversion: vi.fn().mockResolvedValue(prepared) },
+            sourceTree()[0].children![0],
+        );
+        await workflow.requestDroppedFiles([serverFileLocation({ rootId: 'root', relativePath: 'disk.img' })]);
+        workflow.request!.acknowledgedIssueIds = ['loss'];
+        await workflow.selectFidelity('STRICT');
+        expect(workflow.request!.acknowledgedIssueIds).toEqual([]);
+        expect(workflow.request!.error).toContain('release failed');
+        await workflow.commit();
+        expect(executeConversion).not.toHaveBeenCalled();
+        releaseConversion.mockResolvedValue(undefined);
+        await workflow.close();
+    });
+
+    it('keeps an empty source dialog open and rejects oversized uploads before staging', async () => {
+        const uploadClientFile = vi.fn();
+        const workflow = createWorkflow({ uploadClientFile }, sourceTree()[0]);
+        await workflow.requestDroppedFiles([{ ...diskSource, size: 4 * 1024 * 1024 + 1 }]);
+        expect(workflow.request).toBeNull();
+        expect(uploadClientFile).not.toHaveBeenCalled();
+        await workflow.requestDroppedFiles([serverFileLocation({ rootId: 'root', relativePath: 'disk.img' })], null);
+        await workflow.removeMember(workflow.request!.members[0].id);
+        expect(workflow.request!.members).toEqual([]);
+        expect(workflow.request!.status).toBe('waiting-target');
+        await workflow.close();
+    });
+
+    it('discovers server-workspace companions on remote servers and marks their origin', async () => {
+        const first = serverFileLocation({ rootId: 'remote', relativePath: 'set/first.img' });
+        const second = serverFileLocation({ rootId: 'remote', relativePath: 'set/second.img' }, 'second.img');
+        const resolveCompanionSources = vi.fn().mockResolvedValue({
+            members: [
+                { source: { kind: 'FILE', file: first.reference }, name: 'first.img', origin: 'SELECTED' },
+                { source: { kind: 'FILE', file: second.reference }, name: 'second.img', origin: 'AUTO_ADDED' },
+            ],
+            requirements: [],
+        });
+        const prepareConversion = vi.fn().mockResolvedValue(inspection());
+        const workflow = createWorkflow(
+            { connectionMode: 'remote', resolveCompanionSources, prepareConversion },
+            sourceTree()[0].children![0],
+        );
+        await workflow.requestDroppedFiles([first]);
+        expect(resolveCompanionSources).toHaveBeenCalledWith(
+            expect.objectContaining({ sources: [first], searchNearby: true }),
+            expect.any(AbortSignal),
+        );
+        expect(workflow.request?.members.map((member) => member.sourceName)).toEqual(['first.img', 'second.img']);
+        expect(workflow.request?.members[1].origin).toBe('AUTO_ADDED');
+        expect(prepareConversion).toHaveBeenCalledWith(
+            expect.objectContaining({ source: { kind: 'SOURCES', sources: [first, second] } }),
+            expect.any(AbortSignal),
+        );
+    });
+
+    it('uploads native candidates only locally, releases nonmembers and does not rescan for fidelity changes', async () => {
+        const companion = { ...diskSource, name: 'second.img', identity: 'native:second' };
+        const unrelated = { ...diskSource, name: 'other.img', identity: 'native:other' };
+        const nearbySources = vi.fn().mockResolvedValue([companion, unrelated]);
+        const seed = { ...diskSource, identity: 'native:first', nearbySources };
+        const uploadClientFile = vi.fn(async (source: ClientUploadSource) =>
+            clientUploadLocation({ uploadId: source.name }, 'DISK_IMAGE', source.name),
+        );
+        const releaseClientUpload = vi.fn().mockResolvedValue(undefined);
+        const resolveCompanionSources = vi.fn(
+            async (input: CompanionSourceInput): Promise<CompanionSourceResolution> => ({
+                members: [
+                    ...selectedMembers(input.sources),
+                    ...(input.candidates?.length
+                        ? [
+                              {
+                                  source: { kind: 'UPLOAD' as const, upload: { uploadId: companion.name } },
+                                  name: companion.name,
+                                  origin: 'AUTO_ADDED' as const,
+                              },
+                          ]
+                        : []),
+                ],
+                requirements: input.candidates?.length ? [] : [{ name: 'Wave.W01', state: 'MISSING' }],
+            }),
+        );
+        const workflow = createWorkflow(
+            {
+                connectionMode: 'local',
+                uploadClientFile,
+                releaseClientUpload,
+                resolveCompanionSources,
+                prepareConversion: vi.fn().mockResolvedValue(inspection()),
+            },
+            sourceTree()[0].children![0],
+        );
+        await workflow.requestDroppedFiles([seed]);
+        expect(nearbySources).toHaveBeenCalledOnce();
+        expect(workflow.request?.members.map((member) => member.sourceName)).toEqual([seed.name, companion.name]);
+        expect(releaseClientUpload).toHaveBeenCalledWith(
+            clientUploadLocation({ uploadId: unrelated.name }, 'DISK_IMAGE', unrelated.name),
+        );
+        await workflow.selectFidelity('STRICT');
+        expect(nearbySources).toHaveBeenCalledOnce();
+        expect(resolveCompanionSources).toHaveBeenCalledTimes(2);
+        await workflow.close();
+    });
+
+    it('never scans native local siblings for a desktop-to-remote upload', async () => {
+        const nearbySources = vi.fn();
+        const workflow = createWorkflow(
+            {
+                connectionMode: 'remote',
+                uploadClientFile: vi
+                    .fn()
+                    .mockResolvedValue(clientUploadLocation({ uploadId: 'first' }, 'DISK_IMAGE', diskSource.name)),
+                releaseClientUpload: vi.fn().mockResolvedValue(undefined),
+                resolveCompanionSources: vi.fn().mockResolvedValue({
+                    members: [
+                        {
+                            source: { kind: 'UPLOAD', upload: { uploadId: 'first' } },
+                            name: diskSource.name,
+                            origin: 'SELECTED',
+                        },
+                    ],
+                    requirements: [{ name: 'Wave.W01', state: 'MISSING' }],
+                }),
+                prepareConversion: vi.fn().mockResolvedValue(inspection()),
+            },
+            sourceTree()[0].children![0],
+        );
+        await workflow.requestDroppedFiles([{ ...diskSource, nearbySources }]);
+        expect(nearbySources).not.toHaveBeenCalled();
+        expect(workflow.request?.discovery.state).toBe('manual');
+        await workflow.close();
+    });
+
+    it('releases a candidate upload that finishes after cancellation without publishing membership', async () => {
+        let finishUpload!: (source: ReturnType<typeof clientUploadLocation>) => void;
+        const candidate = { ...diskSource, name: 'second.img', identity: 'native:second' };
+        const releaseClientUpload = vi.fn().mockResolvedValue(undefined);
+        const uploadClientFile = vi
+            .fn()
+            .mockResolvedValueOnce(clientUploadLocation({ uploadId: 'first' }, 'DISK_IMAGE', diskSource.name))
+            .mockImplementationOnce(
+                () =>
+                    new Promise((resolve) => {
+                        finishUpload = resolve;
+                    }),
+            );
+        const workflow = createWorkflow(
+            {
+                connectionMode: 'local',
+                uploadClientFile,
+                releaseClientUpload,
+                resolveCompanionSources: vi.fn().mockResolvedValue({
+                    members: [
+                        {
+                            source: { kind: 'UPLOAD', upload: { uploadId: 'first' } },
+                            name: diskSource.name,
+                            origin: 'SELECTED',
+                        },
+                    ],
+                    requirements: [{ name: 'Wave.W01', state: 'MISSING' }],
+                }),
+                prepareConversion: vi.fn().mockResolvedValue(inspection()),
+            },
+            sourceTree()[0].children![0],
+        );
+        const pending = workflow.requestDroppedFiles([
+            { ...diskSource, identity: 'native:first', nearbySources: vi.fn().mockResolvedValue([candidate]) },
+        ]);
+        await vi.waitFor(() => expect(uploadClientFile).toHaveBeenCalledTimes(2));
+        await workflow.close();
+        const late = clientUploadLocation({ uploadId: 'late' }, 'DISK_IMAGE', candidate.name);
+        finishUpload(late);
+        await pending;
+        expect(releaseClientUpload).toHaveBeenCalledWith(late);
+        expect(workflow.request).toBeNull();
+    });
+
     it('waits for a target when no volume is selected, then uploads and inspects', async () => {
         const upload = clientUploadLocation({ uploadId: 'upload-1' }, 'DISK_IMAGE', 'library.ima');
         const prepareConversion = vi.fn().mockResolvedValue(inspection());
@@ -432,6 +832,11 @@ function createWorkflow(
     } = {},
 ): Tx16wImportWorkflow {
     const transport = {
+        connectionMode: 'local',
+        resolveCompanionSources: vi.fn(async (input: CompanionSourceInput): Promise<CompanionSourceResolution> => ({
+            members: selectedMembers(input.sources),
+            requirements: [],
+        })),
         releaseConversion: vi.fn().mockResolvedValue(undefined),
         inspectImportCapacity: vi.fn(inspectFitsCapacity),
         ...operations,

@@ -13,6 +13,7 @@ mod file_publication;
 mod local_directory_exports;
 mod local_packages;
 mod local_workspaces;
+mod native_companions;
 mod native_directory;
 mod native_drag;
 mod native_drag_cache;
@@ -559,6 +560,9 @@ pub fn run() {
             save_retained_directory_export,
             cancel_retained_directory_export,
             native_directory::read_native_drop_directory,
+            native_companions::inspect_native_disk_source,
+            native_companions::nearby_native_disk_sources,
+            native_companions::select_native_disk_sources,
             native_drag::reserve_native_files_drag,
             native_drag::prepare_native_files_drag,
             native_drag::cancel_native_files_drag,
