@@ -14,6 +14,20 @@ def workflow(name: str) -> dict[str, Any]:
     return value
 
 
+@pytest.mark.parametrize(
+    ("architecture", "runner_architecture", "codename"),
+    [("x64", "X64", "jammy"), ("arm64", "ARM64", "noble")],
+)
+def test_linux_full_and_standalone_callers_select_the_architecture_specific_os(
+    architecture: str, runner_architecture: str, codename: str
+) -> None:
+    full = workflow("native.yml")["jobs"][f"native-linux-{architecture}"]
+    standalone = workflow(f"native-linux-{architecture}.yml")["jobs"]["native"]
+    labels = f'["self-hosted","Linux","{runner_architecture}","{codename}","docker"]'
+    for caller in (full, standalone):
+        assert caller["with"]["runner_labels"] == labels
+
+
 @pytest.mark.parametrize("target", TARGETS)
 def test_standalone_target_builds_the_same_artifacts_after_shared_checks(target: str) -> None:
     standalone = workflow(f"native-{target}.yml")

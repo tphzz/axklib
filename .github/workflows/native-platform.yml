@@ -89,11 +89,20 @@ jobs:
       - name: Verify preinstalled Linux C++23 toolchain
         if: runner.os == 'Linux'
         shell: bash
+        env:
+          AXK_LINUX_ARCHITECTURE: ${{ inputs.desktop_architecture }}
         run: |
           set -euo pipefail
+          case "$AXK_LINUX_ARCHITECTURE" in
+            x64) expected_codename=jammy ;;
+            arm64) expected_codename=noble ;;
+            *) echo "Unsupported Linux architecture: $AXK_LINUX_ARCHITECTURE" >&2; exit 1 ;;
+          esac
           source /etc/os-release
-          test "$ID" = ubuntu
-          test "$VERSION_CODENAME" = jammy
+          if [ "${ID:-}" != ubuntu ] || [ "${VERSION_CODENAME:-}" != "$expected_codename" ]; then
+            echo "Linux $AXK_LINUX_ARCHITECTURE runner requires Ubuntu $expected_codename; detected ${PRETTY_NAME:-${ID:-unknown}} (${VERSION_CODENAME:-unknown})" >&2
+            exit 1
+          fi
           command -v clang-18
           command -v clang++-18
           ninja_path="$(command -v ninja)"

@@ -31,7 +31,7 @@ jobs:
     with:
       debug: ${{ inputs.debug }}
       name: Linux ARM64
-      runner_labels: '["self-hosted","Linux","ARM64","jammy","docker"]'
+      runner_labels: '["self-hosted","Linux","ARM64","noble","docker"]'
       artifact: linux-arm64
       desktop_platform: linux
       desktop_architecture: arm64

@@ -101,6 +101,13 @@ configuration, using `x64-linux-axk` or `arm64-linux-axk` for both the native
 project and target dependencies. This matches Linux CI's compiler major version;
 macOS uses Apple Clang. Local validation does not replace the platform builds.
 
+Linux CI uses Ubuntu 22.04 Jammy for x64 and Ubuntu 24.04 Noble for ARM64.
+Both architectures retain Clang 18, libc++ and the same strict warning policy.
+The full and standalone workflows require the matching `jammy` or `noble`
+self-hosted runner label; labels must be updated separately from an OS upgrade.
+The shared preflight checks the actual Ubuntu codename for the requested
+architecture before probing the compiler, Ninja and C++23 `std::expected`.
+
 Local and workflow Clang builds share the project-target warning policy in
 `library/cmake/AxkWarnings.cmake`, including `-Wshadow` and
 `-Wshadow-uncaptured-local`. These catch variable shadowing, including inside
