@@ -1052,7 +1052,7 @@ def test_workflows_use_only_the_required_self_hosted_runner_labels() -> None:
     assert "runs-on: ${{ fromJSON(inputs.runner_labels) }}" in native_platform
     for labels in (
         '["self-hosted","Linux","X64","jammy","docker"]',
-        '["self-hosted","Linux","ARM64","noble","docker"]',
+        '["self-hosted","Linux","ARM64","jammy","docker"]',
         '["self-hosted","Windows","X64"]',
         '["self-hosted","Windows","ARM64"]',
     ):

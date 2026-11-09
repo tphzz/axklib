@@ -15,15 +15,15 @@ def workflow(name: str) -> dict[str, Any]:
 
 
 @pytest.mark.parametrize(
-    ("architecture", "runner_architecture", "codename"),
-    [("x64", "X64", "jammy"), ("arm64", "ARM64", "noble")],
+    ("architecture", "runner_architecture"),
+    [("x64", "X64"), ("arm64", "ARM64")],
 )
-def test_linux_full_and_standalone_callers_select_the_architecture_specific_os(
-    architecture: str, runner_architecture: str, codename: str
+def test_linux_full_and_standalone_callers_keep_the_registered_pool_labels(
+    architecture: str, runner_architecture: str
 ) -> None:
     full = workflow("native.yml")["jobs"][f"native-linux-{architecture}"]
     standalone = workflow(f"native-linux-{architecture}.yml")["jobs"]["native"]
-    labels = f'["self-hosted","Linux","{runner_architecture}","{codename}","docker"]'
+    labels = f'["self-hosted","Linux","{runner_architecture}","jammy","docker"]'
     for caller in (full, standalone):
         assert caller["with"]["runner_labels"] == labels
 

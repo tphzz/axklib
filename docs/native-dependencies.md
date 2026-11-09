@@ -103,8 +103,9 @@ macOS uses Apple Clang. Local validation does not replace the platform builds.
 
 Linux CI uses Ubuntu 22.04 Jammy for x64 and Ubuntu 24.04 Noble for ARM64.
 Both architectures retain Clang 18, libc++ and the same strict warning policy.
-The full and standalone workflows require the matching `jammy` or `noble`
-self-hosted runner label; labels must be updated separately from an OS upgrade.
+The full and standalone workflows retain the existing `jammy` self-hosted
+runner-pool label on both architectures; no runner relabeling is required.
+This pool label does not determine the actual Ubuntu release.
 The shared preflight checks the actual Ubuntu codename for the requested
 architecture before probing the compiler, Ninja and C++23 `std::expected`.
 
