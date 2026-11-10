@@ -94,6 +94,15 @@ The project linkage boundary is fixed across platforms:
 packages that depend on private axklib or codec libraries beside the executable.
 The native library does not link or invoke a scripting runtime.
 
+## CI Python
+
+CI pins Python 3.13.17 for prerequisite checks, native builds, documentation
+and release assembly. Linux and macOS workflows provision that exact version.
+Windows runners must provide Python 3.13.17 on PATH with a native interpreter:
+AMD64 for x64 jobs and ARM64 for ARM64 jobs. The Windows preflight checks the
+exact patch version and reported machine architecture; update both Windows
+runner images when changing this pin.
+
 ## Local Linux build with Clang 18
 
 The standard `release` preset selects Clang 18 and libc++ on a clean Linux

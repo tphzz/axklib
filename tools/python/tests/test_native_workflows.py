@@ -1,3 +1,6 @@
+import shlex
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +15,62 @@ def workflow(name: str) -> dict[str, Any]:
     value = yaml.load((ROOT / ".github/workflows" / name).read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
     assert isinstance(value, dict)
     return value
+
+
+def test_managed_python_steps_share_the_project_patch_pin() -> None:
+    configured = []
+    for path in (ROOT / ".github/workflows").glob("*.yml"):
+        for job_name, job in workflow(path.name)["jobs"].items():
+            for step in job.get("steps", []):
+                if step.get("uses", "").startswith("actions/setup-python@"):
+                    assert step["with"]["python-version"] == "3.13.17", (path.name, job_name)
+                    configured.append((path.name, job_name))
+    assert configured
+
+
+@pytest.mark.parametrize(
+    ("architecture", "machine", "version", "accepted"),
+    [
+        ("x64", "AMD64", (3, 13, 17), True),
+        ("arm64", "ARM64", (3, 13, 17), True),
+        ("arm64", "AMD64", (3, 13, 17), False),
+        ("x64", "ARM64", (3, 13, 17), False),
+        ("arm64", "ARM64", (3, 13, 14), False),
+        ("x64", "AMD64", (3, 13, 14), False),
+        ("arm64", "ARM64", (3, 13, 18), False),
+        ("x64", "AMD64", (3, 14, 0), False),
+    ],
+)
+def test_windows_python_preflight_keeps_exact_patch_and_native_architecture(
+    architecture: str, machine: str, version: tuple[int, int, int], accepted: bool
+) -> None:
+    step = next(
+        step for step in workflow("native-platform.yml")["jobs"]["native"]["steps"]
+        if step.get("name") == "Verify preinstalled Windows Python"
+    )
+    assert step["if"] == "runner.os == 'Windows'"
+    assert step["shell"] == "powershell"
+    command = shlex.split(step["run"])
+    assert command[:2] == ["python", "-c"]
+    assert len(command) == 3
+    expression = "${{ inputs.desktop_architecture == 'arm64' && 'arm64' || 'amd64' }}"
+    assert command[2].count(expression) == 1
+    expected_machine = "arm64" if architecture == "arm64" else "amd64"
+    script = command[2].replace(expression, expected_machine)
+    program = (
+        "import platform,sys\n"
+        f"sys.version_info = {version!r}\n"
+        f"platform.machine = lambda: {machine!r}\n"
+        + script
+    )
+    result = subprocess.run(
+        [sys.executable, "-c", program], check=False, capture_output=True, text=True, timeout=15
+    )
+    if accepted:
+        assert result.returncode == 0, result.stdout + result.stderr
+    else:
+        assert result.returncode != 0
+        assert "AssertionError" in result.stderr
 
 
 @pytest.mark.parametrize(

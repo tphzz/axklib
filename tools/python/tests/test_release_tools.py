@@ -1137,7 +1137,7 @@ def test_windows_and_macos_self_hosted_preflights_are_explicit() -> None:
     )[0]
 
     assert "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0" in workflow
-    assert 'python-version: "3.13.14"' in workflow
+    assert 'python-version: "3.13.17"' in workflow
     assert "name: Expose Git Bash to subsequent steps" in native_job
     assert "shell: powershell" in native_job
     assert "Get-Command git.exe" in native_job
@@ -1229,7 +1229,7 @@ def test_self_hosted_tool_jobs_do_not_depend_on_runner_node_or_python() -> None:
     setup_uv = "astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990"
     raw_python = "python tools/python/release_metadata.py release-target"
     assert setup_python in release_tools
-    assert 'python-version: "3.13.14"' in release_tools
+    assert 'python-version: "3.13.17"' in release_tools
     assert release_tools.index(setup_python) < release_tools.index(setup_uv)
     assert release_tools.index(setup_python) < release_tools.index(raw_python)
 
@@ -1508,7 +1508,7 @@ def test_docs_workflow_renders_mermaid_and_publishes_one_pages_artifact() -> Non
     assert "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7" in workflow
     assert "runs-on: [self-hosted, Linux, X64, jammy, docker]" in workflow
     assert "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0" in workflow
-    assert 'python-version: "3.13.14"' in workflow
+    assert 'python-version: "3.13.17"' in workflow
     assert 'node-version: "24"' in workflow
     assert "npm ci" in workflow
     assert "name: Verify Mermaid browser runtime" in workflow

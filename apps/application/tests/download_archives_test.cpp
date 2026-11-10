@@ -5,11 +5,18 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
+#include <memory>
 #include <span>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <thread>
 #include <vector>
+
+#if defined(_WIN32)
+#include <windows.h>
+#endif
 
 #include <gtest/gtest.h>
 
@@ -260,20 +267,43 @@ TEST_F(DownloadArchiveStoreTest, DoesNotRepairOrCleanAnOverPermissiveCache) {
 }
 #else
 TEST_F(DownloadArchiveStoreTest, ReportsCacheRemovalFailureWithoutDeclaringStorageReady) {
-    const auto staging = root_ / "readonly-cache";
+    const auto staging = root_ / "locked-cache";
     {
         axk::app::DownloadArchiveStore initialized{staging, 8192U, 8192U, 16U, std::chrono::seconds{30}};
         ASSERT_TRUE(initialized.storage_ready());
     }
     const auto retained = staging / "locked.download";
     std::ofstream{retained} << "keep";
-    std::filesystem::permissions(retained, std::filesystem::perms::owner_read);
-    axk::app::DownloadArchiveStore rejected{staging, 8192U, 8192U, 16U, std::chrono::seconds{30}};
-    const auto result = rejected.retain("owner", "test.bin", "application/octet-stream", {});
-    std::filesystem::permissions(retained, std::filesystem::perms::owner_all);
-    EXPECT_FALSE(rejected.storage_ready());
-    ASSERT_FALSE(result);
-    EXPECT_NE(result.error().message.find("cannot be removed"), std::string::npos);
+    const auto close_handle = [](void *handle) {
+        if (handle != INVALID_HANDLE_VALUE)
+            CloseHandle(handle);
+    };
+    // Deny delete sharing, since the MSVC STL can remove read-only files.
+    std::unique_ptr<void, decltype(close_handle)> lock{CreateFileW(retained.c_str(), GENERIC_READ,
+                                                                   FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+                                                                   OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr),
+                                                       close_handle};
+    ASSERT_NE(lock.get(), INVALID_HANDLE_VALUE) << GetLastError();
+    std::error_code removal_error;
+    EXPECT_FALSE(std::filesystem::remove(retained, removal_error));
+    ASSERT_TRUE(removal_error);
+
+    {
+        axk::app::DownloadArchiveStore rejected{staging, 8192U, 8192U, 16U, std::chrono::seconds{30}};
+        const auto result = rejected.retain("owner", "test.bin", "application/octet-stream", {});
+        EXPECT_FALSE(rejected.storage_ready());
+        ASSERT_FALSE(result);
+        EXPECT_EQ(result.error().code, "archive_storage_unavailable");
+        EXPECT_NE(result.error().message.find("cannot be removed"), std::string::npos);
+        std::ifstream input{retained, std::ios::binary};
+        const std::string contents{std::istreambuf_iterator<char>{input}, std::istreambuf_iterator<char>{}};
+        EXPECT_EQ(contents, "keep");
+    }
+
+    lock.reset();
+    axk::app::DownloadArchiveStore recovered{staging, 8192U, 8192U, 16U, std::chrono::seconds{30}};
+    EXPECT_TRUE(recovered.storage_ready());
+    EXPECT_FALSE(std::filesystem::exists(retained));
 }
 #endif
 

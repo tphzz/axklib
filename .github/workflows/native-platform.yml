@@ -70,14 +70,14 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         if: runner.os != 'Windows'
         with:
-          python-version: "3.13.14"
+          python-version: "3.13.17"
 
       - name: Verify preinstalled Windows Python
         if: runner.os == 'Windows'
         shell: powershell
         run: >-
           python -c "import platform,sys;
-          assert sys.version_info[:3] == (3, 13, 14), sys.version;
+          assert sys.version_info[:3] == (3, 13, 17), sys.version;
           expected='${{ inputs.desktop_architecture == 'arm64' && 'arm64' || 'amd64' }}';
           assert platform.machine().lower() == expected, (platform.machine(), expected)"
 
