@@ -12,7 +12,8 @@ impl Fixture {
             NEXT.fetch_add(1, Ordering::Relaxed)
         ));
         std::fs::create_dir(&path).unwrap();
-        Self(path)
+        // System temporary directories can have symlinked ancestors.
+        Self(path.canonicalize().unwrap())
     }
     fn file(&self, name: &str, size: u64) -> PathBuf {
         let path = self.0.join(name);
@@ -86,6 +87,7 @@ fn rejects_oversized_sources_lost_authority_and_candidate_byte_limits() {
 fn rejects_symlinked_seed_or_parent() {
     let fixture = Fixture::new();
     let seed = fixture.file("seed.img", 1);
+    assert!(disk_source(&seed).is_ok());
     let link = fixture.0.join("seed-link.img");
     std::os::unix::fs::symlink(&seed, &link).unwrap();
     assert!(disk_source(&link).unwrap_err().contains("links"));
