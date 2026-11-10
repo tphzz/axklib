@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -16,98 +17,13 @@ from urllib.parse import urlencode
 
 import release_metadata
 import version_metadata
+from release_github import Asset, GitHub, Release, ReleaseError, object_value, string_value
 
 START = "<!-- axklib-release:start -->"
 END = "<!-- axklib-release:end -->"
 STATE = "<!-- axklib-release-state:"
 STAGING = "axklib-incoming-"
-
-
-class ReleaseError(RuntimeError):
-    pass
-
-
-def object_value(value: object) -> dict[str, Any]:
-    if not isinstance(value, dict) or not all(isinstance(key, str) for key in value):
-        raise ReleaseError("GitHub returned an invalid JSON object")
-    return value
-
-
-def string_value(value: dict[str, Any], key: str) -> str:
-    result = value.get(key)
-    if not isinstance(result, str) or not result or "\r" in result or "\n" in result:
-        raise ReleaseError(f"GitHub returned an invalid {key}")
-    return result
-
-
-def id_value(value: dict[str, Any]) -> int:
-    result = value.get("id")
-    if type(result) is not int or result <= 0:
-        raise ReleaseError("GitHub returned an invalid object ID")
-    return result
-
-
-@dataclass(frozen=True)
-class Release:
-    id: int
-    tag_name: str
-    target_commitish: str
-    draft: bool
-    prerelease: bool
-    body: str
-    html_url: str
-
-    @classmethod
-    def parse(cls, raw: object, repository: str) -> Release:
-        value = object_value(raw)
-        if type(value.get("draft")) is not bool or type(value.get("prerelease")) is not bool:
-            raise ReleaseError("GitHub returned invalid release flags")
-        body = value.get("body")
-        if body is not None and not isinstance(body, str):
-            raise ReleaseError("GitHub returned an invalid release body")
-        url = string_value(value, "html_url")
-        if not url.startswith(f"https://github.com/{repository}/releases/"):
-            raise ReleaseError("GitHub returned an unexpected release URL")
-        return cls(
-            id_value(value),
-            string_value(value, "tag_name"),
-            string_value(value, "target_commitish"),
-            value["draft"],
-            value["prerelease"],
-            body or "",
-            url,
-        )
-
-
-@dataclass(frozen=True)
-class Asset:
-    id: int
-    name: str
-    size: int
-    state: str
-    digest: str | None
-
-    @classmethod
-    def parse(cls, raw: object) -> Asset:
-        value = object_value(raw)
-        size = value.get("size")
-        digest = value.get("digest")
-        if type(size) is not int or size < 0:
-            raise ReleaseError("GitHub returned an invalid asset size")
-        if digest is not None and (
-            not isinstance(digest, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", digest)
-        ):
-            raise ReleaseError("GitHub returned an invalid asset digest")
-        return cls(
-            id_value(value), string_value(value, "name"), size, string_value(value, "state"), digest
-        )
-
-    def matches(self, expected: release_metadata.ReleaseAsset) -> bool:
-        return (
-            self.state == "uploaded"
-            and self.size == expected.size
-            and self.digest == f"sha256:{expected.sha256}"
-        )
+INCOMING_RELEASE = "axklib-incoming/"
 
 
 @dataclass(frozen=True)
@@ -133,90 +49,6 @@ class ReleaseResult:
     html_url: str
 
 
-class GitHub:
-    def __init__(self, repository: str) -> None:
-        if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
-            raise ReleaseError("repository must be OWNER/NAME")
-        if not os.environ.get("GH_TOKEN", "").strip():
-            raise ReleaseError(
-                "GH_TOKEN is required; configure secrets.GH_TOKEN on the release step"
-            )
-        self.repository = repository
-
-    def request(
-        self,
-        method: str,
-        path: str,
-        *,
-        data: dict[str, object] | None = None,
-        file: Path | None = None,
-        paginate: bool = False,
-    ) -> object:
-        endpoint = path if path.startswith("https://") else f"repos/{self.repository}/{path}"
-        command = [
-            "gh",
-            "api",
-            endpoint,
-            "--hostname",
-            "github.com",
-            "--method",
-            method,
-            "-H",
-            "Accept: application/vnd.github+json",
-        ]
-        if paginate:
-            command.extend(["--paginate", "--slurp"])
-        if data is not None:
-            command.extend(["--input", "-"])
-        if file is not None:
-            command.extend(["--input", str(file), "-H", "Content-Type: application/octet-stream"])
-        try:
-            completed = subprocess.run(
-                command,
-                input=json.dumps(data) if data is not None else None,
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=600,
-            )
-        except (OSError, subprocess.TimeoutExpired) as error:
-            raise ReleaseError(f"GitHub {method} {path} failed: {type(error).__name__}") from error
-        if completed.returncode:
-            details = completed.stderr.strip().replace(os.environ["GH_TOKEN"], "<redacted>")
-            raise ReleaseError(f"GitHub {method} {path} failed: {details}")
-        if not completed.stdout.strip():
-            if method == "DELETE":
-                return None
-            raise ReleaseError(f"GitHub {method} {path} returned an empty response")
-        try:
-            result: object = json.loads(completed.stdout)
-        except json.JSONDecodeError as error:
-            raise ReleaseError(f"GitHub {method} {path} returned malformed JSON") from error
-        return result
-
-    def all_objects(self, path: str) -> list[dict[str, Any]]:
-        pages = self.request("GET", path + "?per_page=100", paginate=True)
-        if (
-            not isinstance(pages, list)
-            or not pages
-            or any(not isinstance(page, list) for page in pages)
-        ):
-            raise ReleaseError("GitHub returned invalid paginated results")
-        return [object_value(value) for page in pages for value in page]
-
-    def releases(self) -> list[Release]:
-        return [Release.parse(value, self.repository) for value in self.all_objects("releases")]
-
-    def release(self, release_id: int) -> Release:
-        return Release.parse(self.request("GET", f"releases/{release_id}"), self.repository)
-
-    def assets(self, release_id: int) -> dict[str, Asset]:
-        assets = [Asset.parse(value) for value in self.all_objects(f"releases/{release_id}/assets")]
-        if len({asset.name for asset in assets}) != len(assets):
-            raise ReleaseError("GitHub returned multiple assets with the same filename")
-        return {asset.name: asset for asset in assets}
-
-
 def lookup(releases: list[Release], tag: str) -> Release | None:
     matches = [release for release in releases if release.tag_name == tag]
     if len(matches) > 1:
@@ -227,24 +59,34 @@ def lookup(releases: list[Release], tag: str) -> Release | None:
     return matches[0] if matches else None
 
 
-def verify_refs(client: GitHub, request: ReleaseRequest, tag: str) -> None:
+def verify_refs(client: GitHub, request: ReleaseRequest, tag: str) -> set[str]:
     refs = client.all_objects("git/matching-refs/tags/")
+    tags: set[str] = set()
+    branch_tags = {tag}
+    if request.ref_type == "branch":
+        branch_tags.add(
+            release_metadata.draft_release_target(
+                "branch", request.ref_name, request.version
+            ).tag_name
+        )
     selected: dict[str, Any] | None = None
     for ref in refs:
         name = string_value(ref, "ref")
         if not name.startswith("refs/tags/"):
             raise ReleaseError("GitHub returned an unexpected Git ref")
+        tags.add(name.removeprefix("refs/tags/"))
         reference_object = object_value(ref.get("object"))
         if reference_object.get("type") not in {"commit", "tag"} or not re.fullmatch(
             r"[0-9a-f]{40}", string_value(reference_object, "sha")
         ):
             raise ReleaseError("GitHub returned an invalid Git ref object")
         if request.ref_type == "branch":
-            target = f"refs/tags/{tag}"
-            if name == target or name.startswith(target + "/") or target.startswith(name + "/"):
-                raise ReleaseError(
-                    f"snapshot Git ref {name!r} conflicts with {tag!r}; manual reconciliation required"
-                )
+            for branch_tag in branch_tags:
+                target = f"refs/tags/{branch_tag}"
+                if name == target or name.startswith(target + "/") or target.startswith(name + "/"):
+                    raise ReleaseError(
+                        f"snapshot Git ref {name!r} conflicts with {branch_tag!r}; manual reconciliation required"
+                    )
         elif name == f"refs/tags/{tag}":
             selected = ref
     if request.ref_type == "tag":
@@ -264,6 +106,7 @@ def verify_refs(client: GitHub, request: ReleaseRequest, tag: str) -> None:
             )
         if target_object.get("type") != "commit" or target_object.get("sha") != request.commit:
             raise ReleaseError(f"release tag {tag!r} does not identify the full built commit")
+    return tags
 
 
 def state_body(
@@ -280,6 +123,9 @@ def state_body(
         _, after = remaining.split(END)
     else:
         before, after = body.rstrip() + ("\n\n" if body.strip() else ""), ""
+    # Detect operator edits when an interrupted incoming draft is resumed.
+    prefix = f"{before}{START}\nPreparation: **{phase.upper()}**\n\n{request.notes.rstrip()}\n\n"
+    suffix = f"\n{END}{after}"
     state = {
         "schema_version": 1,
         "ref_type": request.ref_type,
@@ -289,19 +135,35 @@ def state_body(
         "run_id": request.run_id,
         "run_attempt": request.run_attempt,
         "phase": phase,
+        "notes_sha256": hashlib.sha256((prefix + suffix).encode("utf-8")).hexdigest(),
         "inventory": [asset.inventory_entry() for asset in assets],
     }
     encoded = json.dumps(state, sort_keys=True).replace("<", "\\u003c").replace(">", "\\u003e")
-    return f"{before}{START}\nPreparation: **{phase.upper()}**\n\n{request.notes.rstrip()}\n\n{STATE}{encoded} -->\n{END}{after}"
+    return f"{prefix}{STATE}{encoded} -->{suffix}"
 
 
-def owned(release: Release, operation: str, request: ReleaseRequest) -> bool:
+def notes_digest(release: Release) -> str | None:
     match = re.search(re.escape(STATE) + r"(.*?) -->", release.body)
     if match is None:
-        return False
+        return None
+    notes = release.body[: match.start()] + release.body[match.end() :]
+    return hashlib.sha256(notes.encode("utf-8")).hexdigest()
+
+
+def release_state(release: Release) -> dict[str, Any] | None:
+    match = re.search(re.escape(STATE) + r"(.*?) -->", release.body)
+    if match is None:
+        return None
     try:
         state = object_value(json.loads(match.group(1)))
     except (json.JSONDecodeError, ReleaseError):
+        return None
+    return state
+
+
+def owned(release: Release, operation: str, request: ReleaseRequest) -> bool:
+    state = release_state(release)
+    if state is None:
         return False
     return (
         release.draft
@@ -309,15 +171,68 @@ def owned(release: Release, operation: str, request: ReleaseRequest) -> bool:
         and state.get("operation") == operation
         and state.get("commit") == request.commit
         and state.get("ref_name") == request.ref_name
+        and state.get("ref_type") == request.ref_type
+        and state.get("notes_sha256") == notes_digest(release)
     )
 
 
-def require_draft(client: GitHub, release: Release) -> Release:
+def incoming_release(
+    releases: list[Release],
+    request: ReleaseRequest,
+    target: release_metadata.DraftReleaseTarget,
+    tags: set[str],
+) -> Release | None:
+    matches: list[Release] = []
+    for release in releases:
+        if release.tag_name == target.tag_name or release.tag_name in tags:
+            continue
+        state = release_state(release)
+        if release.tag_name.startswith(INCOMING_RELEASE) and (
+            state is None
+            or state.get("ref_type") != "branch"
+            or not isinstance(state.get("ref_name"), str)
+            or not state.get("ref_name")
+        ):
+            raise ReleaseError(
+                f"incoming snapshot has unrecognized ownership; manual recovery required: {release.html_url}"
+            )
+        if (
+            state is None
+            or state.get("ref_type") != "branch"
+            or state.get("ref_name") != request.ref_name
+        ):
+            continue
+        operation = state.get("operation")
+        if (
+            not isinstance(operation, str)
+            or re.fullmatch(r"[0-9a-f]{32}", operation) is None
+            or release.tag_name != INCOMING_RELEASE + operation
+            or type(state.get("schema_version")) is not int
+            or state.get("schema_version") != 1
+            or state.get("phase") not in ("incomplete", "complete")
+            or state.get("commit") != release.target_commitish
+            or not release.draft
+            or release.name != target.title
+            or release.prerelease != target.prerelease
+            or state.get("notes_sha256") != notes_digest(release)
+        ):
+            raise ReleaseError(
+                f"incoming snapshot changed or was published; manual recovery required: {release.html_url}"
+            )
+        matches.append(release)
+    if len(matches) > 1:
+        raise ReleaseError("multiple incoming snapshots for this branch; manual recovery required")
+    return matches[0] if matches else None
+
+
+def require_draft(client: GitHub, release: Release, request: ReleaseRequest) -> Release:
     current = client.release(release.id)
-    if not current.draft or current.tag_name != release.tag_name:
+    if not current.draft or current != release:
         raise ReleaseError(
             f"release changed or was published during preparation; preserving {current.html_url}"
         )
+    if request.ref_type == "branch":
+        verify_refs(client, request, current.tag_name)
     return current
 
 
@@ -330,6 +245,7 @@ def verify_release(
     if (
         not release.draft
         or release.tag_name != target.tag_name
+        or release.name != target.title
         or release.target_commitish != request.commit
         or release.prerelease != target.prerelease
         or release.body != body
@@ -357,7 +273,7 @@ def update_release(
     target: release_metadata.DraftReleaseTarget,
     body: str,
 ) -> Release:
-    require_draft(client, release)
+    require_draft(client, release, request)
     result = Release.parse(
         client.request("PATCH", f"releases/{release.id}", data=release_data(request, target, body)),
         client.repository,
@@ -383,7 +299,10 @@ def verify_inventory(
 
 
 def refresh_assets(
-    client: GitHub, release: Release, assets: list[release_metadata.ReleaseAsset]
+    client: GitHub,
+    release: Release,
+    request: ReleaseRequest,
+    assets: list[release_metadata.ReleaseAsset],
 ) -> None:
     remote = client.assets(release.id)
     for asset in assets:
@@ -391,14 +310,14 @@ def refresh_assets(
             continue
         name = temporary_name(asset)
         if name in remote and not remote[name].matches(asset):
-            require_draft(client, release)
+            require_draft(client, release, request)
             client.request("DELETE", f"releases/assets/{remote[name].id}")
             del remote[name]
         if name not in remote:
-            require_draft(client, release)
             if release_metadata.describe_asset(asset.path) != asset:
                 raise ReleaseError(f"local release asset changed during preparation: {asset.name}")
             endpoint = f"https://uploads.github.com/repos/{client.repository}/releases/{release.id}/assets?{urlencode({'name': name})}"
+            require_draft(client, release, request)
             uploaded = Asset.parse(client.request("POST", endpoint, file=asset.path))
             if uploaded.name != name or not uploaded.matches(asset):
                 raise ReleaseError(f"incoming asset verification failed: {asset.name}")
@@ -420,9 +339,9 @@ def refresh_assets(
             continue
         incoming = remote[temporary_name(asset)]
         if current is not None:
-            require_draft(client, release)
+            require_draft(client, release, request)
             client.request("DELETE", f"releases/assets/{current.id}")
-        require_draft(client, release)
+        require_draft(client, release, request)
         promoted = Asset.parse(
             client.request("PATCH", f"releases/assets/{incoming.id}", data={"name": asset.name})
         )
@@ -436,9 +355,34 @@ def refresh_assets(
     expected = {asset.name for asset in assets}
     for name, remote_asset in remote.items():
         if name not in expected:
-            require_draft(client, release)
+            require_draft(client, release, request)
             client.request("DELETE", f"releases/assets/{remote_asset.id}")
     verify_inventory(client, release, assets)
+
+
+def replace_snapshot(
+    client: GitHub,
+    previous: Release | None,
+    replacement: Release,
+    request: ReleaseRequest,
+    incoming: release_metadata.DraftReleaseTarget,
+    target: release_metadata.DraftReleaseTarget,
+    body: str,
+    assets: list[release_metadata.ReleaseAsset],
+) -> Release:
+    verify_refs(client, request, target.tag_name)
+    verify_release(require_draft(client, replacement, request), request, incoming, body)
+    verify_inventory(client, replacement, assets)
+    current = lookup(client.releases(), target.tag_name)
+    if current != previous:
+        raise ReleaseError(
+            "branch snapshot changed during preparation; manual reconciliation required"
+        )
+    if previous is not None:
+        require_draft(client, previous, request)
+        # The new draft is complete before removing the previous release object.
+        client.request("DELETE", f"releases/{previous.id}")
+    return update_release(client, replacement, request, target, body)
 
 
 def prepare_release(client: GitHub, request: ReleaseRequest) -> ReleaseResult:
@@ -451,7 +395,7 @@ def prepare_release(client: GitHub, request: ReleaseRequest) -> ReleaseResult:
     )
     releases = client.releases()
     existing = lookup(releases, target.tag_name)
-    verify_refs(client, request, target.tag_name)
+    tags = verify_refs(client, request, target.tag_name)
     if request.ref_type == "tag" and existing is not None:
         return ReleaseResult(
             "preserved", existing.id, existing.tag_name, request.commit, existing.html_url
@@ -478,25 +422,44 @@ def prepare_release(client: GitHub, request: ReleaseRequest) -> ReleaseResult:
         ref_name=request.ref_name,
         commit=request.commit,
     )
-    operation = uuid.uuid4().hex
-    body = state_body(
-        existing.body if existing is not None else "", request, assets, operation, "incomplete"
+    release = (
+        incoming_release(releases, request, target, tags) if request.ref_type == "branch" else None
     )
-    release: Release | None = existing
+    operation = (
+        release.tag_name.removeprefix(INCOMING_RELEASE) if release is not None else uuid.uuid4().hex
+    )
+    incoming = (
+        release_metadata.DraftReleaseTarget(INCOMING_RELEASE + operation, target.title, True)
+        if request.ref_type == "branch"
+        else target
+    )
+    if request.ref_type == "branch":
+        verify_refs(client, request, incoming.tag_name)
+    body = state_body(
+        existing.body if existing is not None else release.body if release is not None else "",
+        request,
+        assets,
+        operation,
+        "incomplete",
+    )
     try:
         if release is None:
             release = Release.parse(
-                client.request("POST", "releases", data=release_data(request, target, body)),
+                client.request("POST", "releases", data=release_data(request, incoming, body)),
                 client.repository,
             )
-            verify_release(release, request, target, body)
+            verify_release(release, request, incoming, body)
         else:
-            release = update_release(client, release, request, target, body)
-        refresh_assets(client, release, assets)
+            release = update_release(client, release, request, incoming, body)
+        refresh_assets(client, release, request, assets)
         complete_body = state_body(release.body, request, assets, operation, "complete")
-        release = update_release(client, release, request, target, complete_body)
+        release = update_release(client, release, request, incoming, complete_body)
+        if request.ref_type == "branch":
+            release = replace_snapshot(
+                client, existing, release, request, incoming, target, complete_body, assets
+            )
         return ReleaseResult(
-            "created" if existing is None else "refreshed",
+            "created" if existing is None else "replaced",
             release.id,
             release.tag_name,
             request.commit,
@@ -507,7 +470,7 @@ def prepare_release(client: GitHub, request: ReleaseRequest) -> ReleaseResult:
         # draft; never retry creation blindly or clean up a pre-existing release.
         if release is None:
             try:
-                candidate = lookup(client.releases(), target.tag_name)
+                candidate = lookup(client.releases(), incoming.tag_name)
                 if candidate is not None and owned(candidate, operation, request):
                     release = candidate
             except ReleaseError as discovery_error:
@@ -518,7 +481,7 @@ def prepare_release(client: GitHub, request: ReleaseRequest) -> ReleaseResult:
             recovery = f"Draft {release.id}: {release.html_url}"
             if existing is None and request.ref_type == "tag":
                 try:
-                    current = require_draft(client, release)
+                    current = require_draft(client, release, request)
                     if not owned(current, operation, request):
                         raise ReleaseError("draft ownership changed")
                     client.request("DELETE", f"releases/{release.id}")
@@ -526,7 +489,7 @@ def prepare_release(client: GitHub, request: ReleaseRequest) -> ReleaseResult:
                 except ReleaseError as cleanup_error:
                     recovery += f"; manual recovery required: {cleanup_error}. Delete only this release ID after verifying it is still this invocation's draft; preserve any published release and the Git tag."
             else:
-                recovery += "; if still a draft, retry the full build to repair it; published releases require manual reconciliation"
+                recovery += "; if still a draft, retry the full build to resume preparation and replacement; changed drafts require manual reconciliation and published releases are preserved"
             raise ReleaseError(f"{error}\n{recovery}") from error
         raise ReleaseError(
             f"{error}\nCreation outcome unknown; manual recovery may be required for {target.tag_name!r}, operation {operation}; do not delete any Git ref."

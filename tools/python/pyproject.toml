@@ -37,6 +37,7 @@ py-modules = [
   "native_build_cache",
   "native_configure",
   "prepare_release",
+  "release_github",
   "release_metadata",
   "release_package_validation",
   "version_metadata",

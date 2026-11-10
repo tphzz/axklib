@@ -67,10 +67,14 @@ and generates `SHA256SUMS` for those twelve packages without including itself.
 job of **00 Full - All Platforms**. It uses `gh api` with the release step's
 `GH_TOKEN` from `secrets.GH_TOKEN`; neither the shared platform helpers nor
 standalone builds receive this secret. New tag releases are drafts; existing
-tag releases are preserved. Branch drafts keep their ID and full built commit
-target while uploads, promotion and obsolete-file cleanup run under a durable
-incomplete marker. Final inventory and SHA-256 verification must succeed before
-the marker becomes complete. Lookup is paginated and errors never mean absence.
+tag releases are never replaced, whether draft or published. Branch snapshots
+are replaced by a separate new draft: the previous draft and its assets remain
+unchanged until the candidate has all thirteen verified assets and a complete
+marker. Only then is the old draft deleted and the candidate assigned the branch's
+`snapshot/<exact-branch-name>` pending tag. The replacement has a new release ID.
+Incoming drafts use unique `axklib-incoming/<operation>` pending tags and durable
+state so retries resume interrupted uploads or cutover without losing the new
+verified packages. Lookup is paginated and errors never mean absence.
 No Git refs are written and no release is published automatically.
 
 The CLI takes `--repository`, `--ref-type`, `--ref-name`, `--commit`,
@@ -83,8 +87,8 @@ root so duplicate filenames cannot be silently overwritten. The helper checks
 the checkout matches the supplied full commit before release preparation.
 
 See [release token permissions, interruption recovery and manual preview
-migration](../../docs/axklib/versioning.md#release-token). A failed branch refresh
-is repaired by retry; an incomplete initial tag draft is preserved on rerun
+migration](../../docs/axklib/versioning.md#release-token). A failed branch replacement
+is resumed by retry; an incomplete initial tag draft is preserved on rerun
 and may require ownership-checked deletion of only that draft by release ID.
 
 `native_configure.py` runs CI CMake configuration and permits one narrowly

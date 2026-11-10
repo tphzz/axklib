@@ -236,10 +236,10 @@ credentials. Before a release write, the helper validates all twelve packages,
 their shared build identity, archive contents and installer container headers.
 Native installer execution, dependency and signing checks remain in the
 platform jobs. It generates `SHA256SUMS` with one entry per package, excluding
-the checksum file itself. A complete new or refreshed draft has thirteen
+the checksum file itself. A complete newly prepared draft has thirteen
 assets; no release-manifest sidecar is uploaded.
 
-A branch uses one replaceable prerelease draft with pending tag
+A branch uses one current prerelease draft with pending tag
 `snapshot/<exact-branch-name>` and the full built commit as its target.
 For example, branch `v0.6.0` uses `snapshot/v0.6.0`, while package filenames
 remain `axklib-cli-0.6.0-pre-<short-id>-<platform>.<extension>` and
@@ -251,13 +251,20 @@ prereleases. An existing release for that tag, whether draft or published,
 is preserved without changing its assets, notes or metadata. In particular,
 older published releases do not acquire a checksum file automatically.
 
+Branch snapshots and tag releases have different retention policies. A new
+branch build prepares a separate draft and replaces the previous branch draft
+only after the new draft is complete and verified. Existing tag releases are
+never replaced or refreshed, whether unpublished drafts or published releases.
+A draft associated with an existing Git tag remains a tag release even if it
+originated as a branch snapshot and still carries branch preparation metadata.
+
 Preparation neither publishes a release nor creates, moves or deletes Git
 refs. A snapshot name is a pending release tag, not a generated Git tag.
 Published snapshots, conflicting snapshot Git refs, duplicate matching
 releases and unmigrated branch previews stop preparation for explicit manual
 reconciliation. Authentication and network errors are failures; they do not mean
 that a release is absent. Release and asset lookup includes every API page.
-The workflow reports `created`, `refreshed` or `preserved` and the actual
+The workflow reports `created`, `replaced` or `preserved` and the actual
 GitHub release URL. Debug builds remain available only as workflow artifacts.
 
 ### Release Token
@@ -274,20 +281,37 @@ manage secrets. See [GitHub's release permissions](https://docs.github.com/en/re
 
 ### Interrupted Preparation
 
-Branch refreshes keep the same draft ID and preserve human notes outside the
-managed preparation section. The section is marked **INCOMPLETE** before any
-asset upload. Incoming files use temporary names incorporating their digest;
-all incoming bytes are verified before a conflicting final filename can be
-removed. The helper promotes the checksum last, removes obsolete files, then
-checks every final filename, uploaded state, size and SHA-256 digest before
-marking the draft **COMPLETE**. The final inventory must contain exactly the
-twelve packages and `SHA256SUMS`.
+Branch replacements use a separate incoming draft with a unique
+`axklib-incoming/<operation>` pending tag and the full built commit as target.
+Human notes outside the previous draft's managed section are copied into the
+candidate. The previous branch draft, including its metadata and assets, stays
+unchanged while the candidate is marked **INCOMPLETE** and uploaded. Incoming
+files use temporary names incorporating their digest; the checksum is promoted
+last. Every final filename, uploaded state, size and SHA-256 digest must match
+before the candidate is marked **COMPLETE**. Its final inventory contains exactly
+the twelve packages and `SHA256SUMS`.
 
-If a branch refresh fails or is cancelled, retry the full workflow. The helper
-repairs partial uploads, promotions and cleanup even when the commit is
-unchanged. It does not delete the branch draft. If someone published the
-snapshot or created a conflicting Git ref, resolve that conflict explicitly
-before retrying; preparation will not revert publication or change the ref.
+Only after that complete inventory is reverified does the helper delete the
+previous branch draft and assign the canonical `snapshot/<exact-branch-name>`
+pending tag to the candidate. The new current snapshot has a new release ID.
+Neither operation creates or changes an actual Git ref.
+
+If preparation fails or is cancelled before cutover, the previous snapshot
+remains intact. Retry the full workflow to resume the incoming candidate's
+uploads, verification and cutover, even when the commit is unchanged. If deletion
+succeeded but assigning the pending tag failed, the complete incoming draft still
+retains all new packages; retry resumes from it. Multiple incoming candidates,
+changed incoming metadata, a published canonical snapshot or conflicting Git
+ref require manual reconciliation. Preparation never reverts publication or
+changes a ref. Incoming ownership markers are checked even when an operator has
+renamed the pending tag outside the incoming namespace.
+Incoming notes carry a fingerprint so operator edits made between attempts are
+detected before retry writes; title and prerelease flags are checked as well.
+Before each branch-draft mutation, the helper rechecks both the candidate's
+pending tag and the canonical snapshot name for conflicting Git refs. A tag
+created during preparation stops subsequent mutations; legitimate first-time
+preparation of a new version-tag draft remains supported. These checks and the
+workflow lock do not make separate GitHub API requests atomic with manual edits.
 
 If initial tag preparation fails, cleanup may remove only the draft created
 by that invocation, verified by ID and its managed ownership marker. The Git
@@ -316,15 +340,15 @@ before deciding which object, if any, belongs to the failed invocation.
 
 ### One-Time Preview Migration
 
-This is a separate manual rollout action; implementing the helper does not
-modify existing GitHub releases. Before the next full branch build, inspect
-draft `431006702` (`v0.6.0-preview`). Confirm it remains unpublished, targets
-`8c783a71369a41768ae848830e06cc92c873fb3f`, and that no `snapshot/v0.6.0`
-release or conflicting Git ref exists. Edit that same draft's pending tag and
-title to `snapshot/v0.6.0`, retaining its ID, assets, notes, target and flags.
-Do not publish it. Leave historical `v0.5.1-preview` and all published releases
-and Git tags unchanged. If the observed state differs, reconcile it manually
-instead of creating another branch draft.
+The naming rollout is separate from ordinary snapshot replacement. On
+2026-11-10, draft `431006702` (`v0.6.0-preview`) was explicitly approved for a
+one-time rename of its pending tag and title to `snapshot/v0.6.0`. The rename
+preserved its ID, twelve assets, notes, target
+`8c783a71369a41768ae848830e06cc92c873fb3f` and draft/prerelease flags. No release
+was published and no Git ref changed. Subsequent branch builds follow the
+replacement policy above. Historical `v0.5.1-preview`, published releases and
+Git tags remain unchanged; any other legacy preview requires explicit manual
+reconciliation instead of an automatic naming migration.
 
 The policy applies to refs containing these updated workflows and helpers.
 Existing Git tags retain their historical workflow definitions; their direct

@@ -14,6 +14,8 @@ from test_release_assets import COMMIT, IDENTITY, branch_version, write_assets
 
 import prepare_release
 import version_metadata
+from release_github import GitHub, Release, ReleaseError
+from release_metadata import ReleaseAsset
 
 
 class FakeGitHub:
@@ -124,6 +126,7 @@ class FakeGitHub:
             if self.publish_after_upload:
                 next(item for item in self.releases if item["id"] == release_id)["draft"] = False
         elif method == "POST" and path == "releases":
+            assert not any(item["tag_name"] == payload["tag_name"] for item in self.releases)
             result = self.release(payload["tag_name"])
             result.update(payload)
         elif method == "PATCH" and path.startswith("releases/assets/"):
@@ -139,6 +142,10 @@ class FakeGitHub:
             result.update(payload)
         elif method == "PATCH":
             result = next(item for item in self.releases if item["id"] == int(path.split("/")[1]))
+            assert not any(
+                item["id"] != result["id"] and item["tag_name"] == payload["tag_name"]
+                for item in self.releases
+            )
             result.update(payload)
         elif path.startswith("releases/assets/"):
             asset_id = int(path.rsplit("/", 1)[1])
@@ -170,7 +177,7 @@ class FakeGitHub:
 def github(monkeypatch: pytest.MonkeyPatch) -> FakeGitHub:
     fake = FakeGitHub()
     monkeypatch.setenv("GH_TOKEN", "fake-token-never-send-to-github")
-    monkeypatch.setattr(prepare_release.subprocess, "run", fake.run)
+    monkeypatch.setattr(subprocess, "run", fake.run)
     return fake
 
 
@@ -199,7 +206,7 @@ def test_tag_rerun_preserves_everything_including_notes_and_extra_assets(
     existing["target_commitish"] = "main"
     github.add_asset(existing["id"], "manual-attachment.txt", b"preserve")
     before = copy.deepcopy((github.releases, github.assets, github.refs))
-    result = prepare_release.prepare_release(prepare_release.GitHub(req.repository), req)
+    result = prepare_release.prepare_release(GitHub(req.repository), req)
     assert result.status == "preserved"
     assert result.html_url == existing["html_url"]
     assert (github.releases, github.assets, github.refs) == before
@@ -210,7 +217,7 @@ def test_new_tag_draft_uses_exact_tag_and_full_commit(tmp_path: Path, github: Fa
     req = request(tmp_path, ref_type="tag", name="0.6.0")
     github.tag(req.ref_name, annotated=True)
     refs = copy.deepcopy(github.refs)
-    result = prepare_release.prepare_release(prepare_release.GitHub(req.repository), req)
+    result = prepare_release.prepare_release(GitHub(req.repository), req)
     release = github.releases[0]
     assert result.status == "created"
     assert release["tag_name"] == "0.6.0" and release["target_commitish"] == COMMIT
@@ -220,7 +227,7 @@ def test_new_tag_draft_uses_exact_tag_and_full_commit(tmp_path: Path, github: Fa
     assert "COMPLETE" in release["body"] and "INCOMPLETE" not in release["body"]
 
 
-def test_branch_refresh_preserves_id_and_uploads_before_deleting(
+def test_branch_replacement_uploads_before_deleting_and_preserves_human_notes(
     tmp_path: Path, github: FakeGitHub
 ) -> None:
     req = request(tmp_path)
@@ -228,9 +235,13 @@ def test_branch_refresh_preserves_id_and_uploads_before_deleting(
     github.add_asset(existing["id"], "old-package.zip", b"old")
     github.add_asset(existing["id"], "SHA256SUMS", b"old checksums")
     unrelated = github.release("snapshot/main")
-    result = prepare_release.prepare_release(prepare_release.GitHub(req.repository), req)
-    assert result.status == "refreshed" and result.release_id == existing["id"]
-    assert "Human release notes" in existing["body"]
+    result = prepare_release.prepare_release(GitHub(req.repository), req)
+    assert result.status == "replaced" and result.release_id != existing["id"]
+    assert existing not in github.releases
+    assert (
+        "Human release notes"
+        in next(item for item in github.releases if item["id"] == result.release_id)["body"]
+    )
     assert unrelated["body"] == "Human release notes"
     writes = github.writes
     upload_positions = [
@@ -240,7 +251,7 @@ def test_branch_refresh_preserves_id_and_uploads_before_deleting(
     ]
     delete_positions = [index for index, (method, _) in enumerate(writes) if method == "DELETE"]
     assert max(upload_positions) < min(delete_positions)
-    assert {item["name"] for item in github.assets[existing["id"]]} == {
+    assert {item["name"] for item in github.assets[result.release_id]} == {
         path.name for path in tmp_path.iterdir()
     }
 
@@ -249,14 +260,15 @@ def test_same_commit_rerun_replaces_changed_bytes_without_filename_collisions(
     tmp_path: Path, github: FakeGitHub
 ) -> None:
     req = request(tmp_path)
-    client = prepare_release.GitHub(req.repository)
+    client = GitHub(req.repository)
     first = prepare_release.prepare_release(client, req)
     package = next(tmp_path.glob("*-windows-x64.exe"))
     package.write_bytes(package.read_bytes() + b"changed rebuild")
     second = prepare_release.prepare_release(client, req)
     third = prepare_release.prepare_release(client, req)
-    assert first.release_id == second.release_id == third.release_id
-    assets = github.assets[first.release_id]
+    assert len({first.release_id, second.release_id, third.release_id}) == 3
+    assert len(github.releases) == 1
+    assets = github.assets[third.release_id]
     assert len(assets) == 13
     assert (
         next(item for item in assets if item["name"] == package.name)["digest"]
@@ -280,16 +292,16 @@ def test_branch_conflicts_require_reconciliation_without_writes(
     else:
         github.release("snapshot/v0.6.0")
         github.release("snapshot/v0.6.0")
-    with pytest.raises(prepare_release.ReleaseError, match="reconcil|migration|multiple"):
-        prepare_release.prepare_release(prepare_release.GitHub(req.repository), req)
+    with pytest.raises(ReleaseError, match="reconcil|migration|multiple"):
+        prepare_release.prepare_release(GitHub(req.repository), req)
     assert github.writes == []
 
 
 def test_listing_failure_cannot_become_absent_release(tmp_path: Path, github: FakeGitHub) -> None:
     req = request(tmp_path)
     github.fail_listing = True
-    with pytest.raises(prepare_release.ReleaseError, match="403"):
-        prepare_release.prepare_release(prepare_release.GitHub(req.repository), req)
+    with pytest.raises(ReleaseError, match="403"):
+        prepare_release.prepare_release(GitHub(req.repository), req)
     assert github.writes == []
 
 
@@ -300,7 +312,7 @@ def test_invalid_inventory_cannot_even_mark_existing_draft_incomplete(
     existing = github.release("snapshot/v0.6.0")
     next(tmp_path.glob("*.dmg")).write_bytes(b"garbage")
     with pytest.raises(ValueError, match="invalid desktop"):
-        prepare_release.prepare_release(prepare_release.GitHub(req.repository), req)
+        prepare_release.prepare_release(GitHub(req.repository), req)
     assert existing["body"] == "Human release notes" and github.writes == []
 
 
@@ -313,10 +325,8 @@ def test_failed_initial_tag_cleans_only_its_new_draft_or_reports_manual_recovery
     other = github.release("unrelated")
     github.fail_upload = True
     github.fail_cleanup = cleanup_fails
-    with pytest.raises(
-        prepare_release.ReleaseError, match="manual recovery" if cleanup_fails else "502"
-    ):
-        prepare_release.prepare_release(prepare_release.GitHub(req.repository), req)
+    with pytest.raises(ReleaseError, match="manual recovery" if cleanup_fails else "502"):
+        prepare_release.prepare_release(GitHub(req.repository), req)
     assert other in github.releases
     assert len(github.refs) == 1
     assert len(github.releases) == (2 if cleanup_fails else 1)
@@ -327,26 +337,28 @@ def test_branch_recovers_from_process_death_after_every_server_mutation(
 ) -> None:
     req = request(tmp_path)
     baseline = FakeGitHub()
-    monkeypatch.setattr(prepare_release.subprocess, "run", baseline.run)
+    monkeypatch.setattr(subprocess, "run", baseline.run)
     baseline.release("snapshot/v0.6.0")
     baseline.add_asset(baseline.releases[0]["id"], "SHA256SUMS", b"old")
-    prepare_release.prepare_release(prepare_release.GitHub(req.repository), req)
+    prepare_release.prepare_release(GitHub(req.repository), req)
     mutations = len(baseline.writes)
     for interruption in range(1, mutations + 1):
         fake = FakeGitHub()
-        monkeypatch.setattr(prepare_release.subprocess, "run", fake.run)
+        monkeypatch.setattr(subprocess, "run", fake.run)
         existing = fake.release("snapshot/v0.6.0")
         fake.add_asset(existing["id"], "SHA256SUMS", b"old")
+        before = copy.deepcopy((existing, fake.assets[existing["id"]]))
         fake.interrupt_after = interruption
         with pytest.raises(KeyboardInterrupt):
-            prepare_release.prepare_release(prepare_release.GitHub(req.repository), req)
-        if interruption < mutations:
-            assert "INCOMPLETE" in existing["body"]
+            prepare_release.prepare_release(GitHub(req.repository), req)
+        if existing in fake.releases:
+            assert (existing, fake.assets[existing["id"]]) == before
         fake.interrupt_after = None
-        result = prepare_release.prepare_release(prepare_release.GitHub(req.repository), req)
-        assert result.release_id == existing["id"]
+        result = prepare_release.prepare_release(GitHub(req.repository), req)
+        assert result.release_id != existing["id"]
+        assert len(fake.releases) == 1 and fake.releases[0]["tag_name"] == "snapshot/v0.6.0"
         assert len(fake.assets[result.release_id]) == 13
-        assert "INCOMPLETE" not in existing["body"]
+        assert "Preparation: **COMPLETE**" in fake.releases[0]["body"]
 
 
 @pytest.mark.parametrize("ref_type", ["branch", "tag"])
@@ -360,8 +372,8 @@ def test_accepted_creation_with_lost_response_is_owned_and_recoverable(
     other = github.release("unrelated", draft=False)
     refs = copy.deepcopy(github.refs)
     github.lost_create_response = failure
-    with pytest.raises(prepare_release.ReleaseError):
-        prepare_release.prepare_release(prepare_release.GitHub(req.repository), req)
+    with pytest.raises(ReleaseError):
+        prepare_release.prepare_release(GitHub(req.repository), req)
     assert other in github.releases and github.refs == refs
     assert sum(method == "POST" and path == "releases" for method, path in github.writes) == 1
     github.lost_create_response = None
@@ -370,7 +382,7 @@ def test_accepted_creation_with_lost_response_is_owned_and_recoverable(
     else:
         incomplete = next(item for item in github.releases if item is not other)
         assert "INCOMPLETE" in incomplete["body"]
-        result = prepare_release.prepare_release(prepare_release.GitHub(req.repository), req)
+        result = prepare_release.prepare_release(GitHub(req.repository), req)
         assert result.release_id == incomplete["id"]
         assert len(github.assets[result.release_id]) == 13
 
@@ -381,8 +393,8 @@ def test_unknown_creation_outcome_is_not_retried_or_blindly_deleted(
     req = request(tmp_path, ref_type="tag")
     github.tag(req.ref_name)
     github.lost_create_response = "discovery-failure"
-    with pytest.raises(prepare_release.ReleaseError, match="outcome unknown; manual recovery"):
-        prepare_release.prepare_release(prepare_release.GitHub(req.repository), req)
+    with pytest.raises(ReleaseError, match="outcome unknown; manual recovery"):
+        prepare_release.prepare_release(GitHub(req.repository), req)
     assert len(github.releases) == 1 and len(github.refs) == 1
     assert github.writes == [("POST", "releases")]
 
@@ -397,15 +409,17 @@ def test_bad_incoming_upload_keeps_old_assets_and_retry_repairs_it(
     github.fail_upload = failure == "starter"
     github.leave_starter = failure == "starter"
     github.corrupt_upload = failure == "digest"
-    with pytest.raises(prepare_release.ReleaseError):
-        prepare_release.prepare_release(prepare_release.GitHub(req.repository), req)
+    with pytest.raises(ReleaseError):
+        prepare_release.prepare_release(GitHub(req.repository), req)
     assert old in github.assets[existing["id"]]
     assert not any(method == "DELETE" for method, _ in github.writes)
-    assert "INCOMPLETE" in existing["body"]
+    assert existing["body"] == "Human release notes"
+    assert any("INCOMPLETE" in item["body"] for item in github.releases if item is not existing)
     github.fail_upload = github.corrupt_upload = False
-    result = prepare_release.prepare_release(prepare_release.GitHub(req.repository), req)
+    result = prepare_release.prepare_release(GitHub(req.repository), req)
     assert len(github.assets[result.release_id]) == 13
-    assert "INCOMPLETE" not in existing["body"]
+    assert existing not in github.releases
+    assert "INCOMPLETE" not in github.releases[0]["body"]
 
 
 def test_publication_during_upload_stops_all_further_writes(
@@ -415,11 +429,12 @@ def test_publication_during_upload_stops_all_further_writes(
     existing = github.release("snapshot/v0.6.0")
     old = github.add_asset(existing["id"], "old.zip", b"previous build")
     github.publish_after_upload = True
-    with pytest.raises(prepare_release.ReleaseError, match="published"):
-        prepare_release.prepare_release(prepare_release.GitHub(req.repository), req)
-    assert not existing["draft"]
+    with pytest.raises(ReleaseError, match="published"):
+        prepare_release.prepare_release(GitHub(req.repository), req)
+    assert existing["draft"]
+    assert any(not item["draft"] for item in github.releases if item is not existing)
     assert old in github.assets[existing["id"]]
-    assert len(github.writes) == 2  # incomplete marker, then the accepted upload
+    assert len(github.writes) == 2  # separate new draft, then the accepted upload
 
 
 def test_interrupted_tag_cleanup_is_preserved_on_an_ordinary_rerun(
@@ -428,10 +443,10 @@ def test_interrupted_tag_cleanup_is_preserved_on_an_ordinary_rerun(
     req = request(tmp_path, ref_type="tag")
     github.tag(req.ref_name)
     github.fail_upload = github.fail_cleanup = True
-    with pytest.raises(prepare_release.ReleaseError, match="manual recovery"):
-        prepare_release.prepare_release(prepare_release.GitHub(req.repository), req)
+    with pytest.raises(ReleaseError, match="manual recovery"):
+        prepare_release.prepare_release(GitHub(req.repository), req)
     before = copy.deepcopy((github.releases, github.assets, github.writes))
-    result = prepare_release.prepare_release(prepare_release.GitHub(req.repository), req)
+    result = prepare_release.prepare_release(GitHub(req.repository), req)
     assert result.status == "preserved"
     assert (github.releases, github.assets, github.writes) == before
 
@@ -446,7 +461,7 @@ def test_snapshot_uses_exact_branch_name_and_never_mutates_other_branches(
     )
     other = github.release("snapshot/feature-audio")
     tag = github.release("v0.5.1", draft=False)
-    result = prepare_release.prepare_release(prepare_release.GitHub(req.repository), req)
+    result = prepare_release.prepare_release(GitHub(req.repository), req)
     assert result.tag_name == "snapshot/feature/audio"
     assert other["body"] == tag["body"] == "Human release notes"
 
@@ -456,8 +471,8 @@ def test_missing_token_is_rejected_without_fallback(
 ) -> None:
     monkeypatch.delenv("GH_TOKEN")
     monkeypatch.setenv("GITHUB_TOKEN", "must-not-be-used")
-    with pytest.raises(prepare_release.ReleaseError, match="GH_TOKEN is required"):
-        prepare_release.GitHub("tphzz/axklib")
+    with pytest.raises(ReleaseError, match="GH_TOKEN is required"):
+        GitHub("tphzz/axklib")
     assert not github.calls
 
 
@@ -469,7 +484,7 @@ def test_two_branches_with_identical_sanitized_filenames_remain_isolated(
     req = prepare_release.ReleaseRequest(
         "tphzz/axklib", "branch", "feature/audio", COMMIT, ordinary, tmp_path, "Notes", "234", "1"
     )
-    client = prepare_release.GitHub(req.repository)
+    client = GitHub(req.repository)
     first = prepare_release.prepare_release(client, req)
     first_state = copy.deepcopy((github.releases, github.assets))
     second = prepare_release.prepare_release(client, replace(req, ref_name="feature-audio"))
@@ -490,9 +505,9 @@ def test_final_inventory_failure_leaves_draft_incomplete_until_retry(
     corrupt = True
 
     def verify(
-        client: prepare_release.GitHub,
-        release: prepare_release.Release,
-        assets: list[prepare_release.release_metadata.ReleaseAsset],
+        client: GitHub,
+        release: Release,
+        assets: list[ReleaseAsset],
     ) -> None:
         nonlocal corrupt
         if corrupt:
@@ -506,10 +521,10 @@ def test_final_inventory_failure_leaves_draft_incomplete_until_retry(
         original(client, release, assets)
 
     monkeypatch.setattr(prepare_release, "verify_inventory", verify)
-    with pytest.raises(prepare_release.ReleaseError, match="final release inventory"):
-        prepare_release.prepare_release(prepare_release.GitHub(req.repository), req)
+    with pytest.raises(ReleaseError, match="final release inventory"):
+        prepare_release.prepare_release(GitHub(req.repository), req)
     assert "INCOMPLETE" in github.releases[0]["body"]
-    result = prepare_release.prepare_release(prepare_release.GitHub(req.repository), req)
+    result = prepare_release.prepare_release(GitHub(req.repository), req)
     assert len(github.assets[result.release_id]) == 13
     assert "INCOMPLETE" not in github.releases[0]["body"]
 
@@ -525,7 +540,7 @@ def test_semver_prerelease_and_build_metadata_survive_upload_names(
     req = prepare_release.ReleaseRequest(
         "tphzz/axklib", "tag", version.release_tag, COMMIT, version, tmp_path, "Notes", "234", "1"
     )
-    result = prepare_release.prepare_release(prepare_release.GitHub(req.repository), req)
+    result = prepare_release.prepare_release(GitHub(req.repository), req)
     assert result.tag_name == version.release_tag
     assert github.releases[0]["prerelease"]
     assert any("+build.7" in asset["name"] for asset in github.assets[result.release_id])
@@ -551,7 +566,7 @@ def test_cli_collects_separate_artifacts_and_reports_actual_url(
             return subprocess.CompletedProcess(command, 0, COMMIT + "\n", "")
         return github.run(command, **kwargs)
 
-    monkeypatch.setattr(prepare_release.subprocess, "run", run)
+    monkeypatch.setattr(subprocess, "run", run)
     monkeypatch.setattr(
         "sys.argv",
         [
