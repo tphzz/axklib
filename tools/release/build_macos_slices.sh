@@ -208,12 +208,12 @@ build_slice() {
     ${configure_arguments[@]+"${configure_arguments[@]}"}
   cmake --build "$build_directory" --parallel "${CMAKE_BUILD_PARALLEL_LEVEL:-2}"
 
-  python "$source_directory/tools/python/release_metadata.py" resolve \
+  python3 "$source_directory/tools/python/release_metadata.py" resolve \
     --version-metadata-file "$build_directory/version_metadata.json" \
     --package-basename-file "$build_directory/package_basename.txt" \
     --ref-type "$ref_type" --ref-name "$ref_name" \
     --platform "$platform" --configuration "$configuration"
-  python "$source_directory/tools/python/release_metadata.py" verify-cli \
+  python3 "$source_directory/tools/python/release_metadata.py" verify-cli \
     --version-metadata-file "$build_directory/version_metadata.json" \
     --package-basename-file "$build_directory/package_basename.txt" \
     --cli "$build_directory/apps/cli/axklib" \
@@ -237,14 +237,14 @@ build_slice() {
   for component in cli server; do
     cmake --install "$build_directory" --prefix "$stage" --component "$component"
   done
-  python "$source_directory/tools/python/inspect_package.py" "$stage"
+  python3 "$source_directory/tools/python/inspect_package.py" "$stage"
   for binary in "$stage/bin/axklib" "$server"; do
     verify_thin_architecture "$binary" "$architecture"
     verify_deployment_target "$binary"
   done
   verify_runtime_closure "$stage"
 
-  python "$source_directory/tools/python/device_capability_smoke.py" \
+  python3 "$source_directory/tools/python/device_capability_smoke.py" \
     --server "$server" --architecture "$architecture" \
     --output-directory "$build_directory/device-capability-smoke"
 

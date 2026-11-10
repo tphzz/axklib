@@ -123,10 +123,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.13.17"
-
       - name: Create isolated release staging directory
         id: staging
         shell: bash
@@ -172,7 +168,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
           RELEASE_ROOT: ${{ steps.staging.outputs.root }}
         run: |
-          python tools/python/prepare_release.py \
+          python3 tools/python/prepare_release.py \
             --repository "$GITHUB_REPOSITORY" \
             --ref-type "$GITHUB_REF_TYPE" --ref-name "$GITHUB_REF_NAME" \
             --commit "$GITHUB_SHA" \

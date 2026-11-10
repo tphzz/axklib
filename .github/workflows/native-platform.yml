@@ -46,6 +46,8 @@ jobs:
   native:
     name: ${{ inputs.name }}
     runs-on: ${{ fromJSON(inputs.runner_labels) }}
+    env:
+      AXK_PYTHON: ${{ inputs.desktop_platform == 'windows' && 'python' || 'python3' }}
     concurrency:
       group: native-${{ github.workflow }}-${{ inputs.artifact }}-${{ github.ref }}-${{ inputs.debug && 'debug' || 'release' }}
       cancel-in-progress: true
@@ -66,20 +68,6 @@ jobs:
           $bash = (Get-Item (Join-Path $gitRoot 'bin\bash.exe') -ErrorAction Stop).FullName
           Split-Path $bash -Parent | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
           & $bash --version
-
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        if: runner.os != 'Windows'
-        with:
-          python-version: "3.13.17"
-
-      - name: Verify preinstalled Windows Python
-        if: runner.os == 'Windows'
-        shell: powershell
-        run: >-
-          python -c "import platform,sys;
-          assert sys.version_info[:3] == (3, 13, 17), sys.version;
-          expected='${{ inputs.desktop_architecture == 'arm64' && 'arm64' || 'amd64' }}';
-          assert platform.machine().lower() == expected, (platform.machine(), expected)"
 
       - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
         with:
@@ -224,7 +212,7 @@ jobs:
         id: native-toolchain
         shell: bash
         run: >-
-          python tools/python/native_build_cache.py fingerprint
+          "$AXK_PYTHON" tools/python/native_build_cache.py fingerprint
           --triplet "${{ inputs.triplet }}"
           --github-output "$GITHUB_OUTPUT"
 
@@ -244,7 +232,7 @@ jobs:
         id: native-cache-state
         shell: bash
         run: >-
-          python tools/python/native_build_cache.py prepare
+          "$AXK_PYTHON" tools/python/native_build_cache.py prepare
           --source-root "${{ github.workspace }}"
           --build-directory "${{ github.workspace }}/build/native/${{ inputs.debug && 'debug' || 'release' }}"
           --github-output "$GITHUB_OUTPUT"
@@ -288,7 +276,7 @@ jobs:
               "-DVCPKG_CHAINLOAD_TOOLCHAIN_FILE=$workspace/library/cmake/toolchains/LinuxClang18Libcxx.cmake"
             )
           fi
-          python tools/python/native_configure.py \
+          "$AXK_PYTHON" tools/python/native_configure.py \
             --runner-temp "$RUNNER_TEMP" \
             --downloads-root "$VCPKG_DOWNLOADS" \
             --manifest "$build_root/vcpkg-manifest-install.log" \
@@ -314,7 +302,7 @@ jobs:
         id: finalize-native-cache
         shell: bash
         run: >-
-          python tools/python/native_build_cache.py finalize
+          "$AXK_PYTHON" tools/python/native_build_cache.py finalize
           --source-root "${{ github.workspace }}"
           --build-directory "${{ github.workspace }}/build/native/${{ inputs.debug && 'debug' || 'release' }}"
 
@@ -326,7 +314,7 @@ jobs:
           root="build/native/${{ inputs.debug && 'debug' || 'release' }}"
           sha="$(git rev-parse --short=7 HEAD)"
           test -n "$sha"
-          python tools/python/release_metadata.py resolve \
+          "$AXK_PYTHON" tools/python/release_metadata.py resolve \
             --version-metadata-file "$root/version_metadata.json" \
             --package-basename-file "$root/package_basename.txt" \
             --ref-type "${GITHUB_REF_TYPE}" \
@@ -338,7 +326,7 @@ jobs:
           if [[ "${{ runner.os }}" == "Windows" ]]; then
             cli="${cli}.exe"
           fi
-          python tools/python/release_metadata.py verify-cli \
+          "$AXK_PYTHON" tools/python/release_metadata.py verify-cli \
             --version-metadata-file "$root/version_metadata.json" \
             --package-basename-file "$root/package_basename.txt" \
             --cli "$cli" --git-sha-short "$sha" --ref-name "${GITHUB_REF_NAME}"
@@ -372,8 +360,8 @@ jobs:
           mkdir -p "$scan/cli" "$scan/server"
           cmake --install "$root" --prefix "$scan/cli" --component cli
           cmake --install "$root" --prefix "$scan/server" --component server
-          python tools/python/inspect_package.py "$scan/cli"
-          python tools/python/inspect_package.py "$scan/server"
+          "$AXK_PYTHON" tools/python/inspect_package.py "$scan/cli"
+          "$AXK_PYTHON" tools/python/inspect_package.py "$scan/server"
           test -f "$scan/cli/share/axklib/axklib-cli.spdx.json"
           server_binary="axklib-server"
           if [[ "${{ runner.os }}" == "Windows" ]]; then
@@ -561,7 +549,7 @@ jobs:
           rpm -Kv "$rpm"
           bsdtar -xf "$GITHUB_WORKSPACE/$rpm" -C "$scan/rpm"
           for root in "$scan/deb" "$scan/rpm"; do
-            python tools/python/inspect_package.py "$root"
+            "$AXK_PYTHON" tools/python/inspect_package.py "$root"
             find "$root" -type f -name axkdeck -print -quit | grep .
             find "$root" -type f -name axklib-server -print -quit | grep .
             find "$root" -type f -name axkdeck.spdx.json -print -quit | grep .
@@ -595,7 +583,7 @@ jobs:
         if: runner.os == 'Linux'
         shell: bash
         run: >-
-          python tools/python/desktop_release.py
+          "$AXK_PYTHON" tools/python/desktop_release.py
           --bundle-directory apps/axkdeck/src-tauri/target/release/bundle
           --extension .deb --extension .rpm
           --output-directory build/artifacts/axkdeck-${{ inputs.artifact }}
@@ -610,7 +598,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         run: >-
-          python tools/python/desktop_release.py
+          "$AXK_PYTHON" tools/python/desktop_release.py
           --bundle-directory apps/axkdeck/src-tauri/target/release/bundle/nsis
           --extension .exe
           --output-directory build/artifacts/axkdeck-${{ inputs.artifact }}
@@ -639,7 +627,7 @@ jobs:
           else
             archive_format=tar.gz
           fi
-          python tools/python/release_metadata.py package-native \
+          "$AXK_PYTHON" tools/python/release_metadata.py package-native \
             --source-directory "build/tmp/package-scan-${{ inputs.artifact }}/cli" \
             --output-directory build/artifacts \
             --artifact-stem "$AXK_CLI_ARTIFACT_STEM" \

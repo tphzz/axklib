@@ -693,7 +693,7 @@ def test_native_workflow_is_manual_and_creates_only_release_drafts() -> None:
         assert f"  {job}:" in workflow
     assert workflow.count("uses: ./.github/workflows/native-platform.yml") == 4
     assert action_reference_count(workflow, "actions/download-artifact", "v8") == 3
-    assert "python tools/python/prepare_release.py" in workflow
+    assert "python3 tools/python/prepare_release.py" in workflow
     assert "GH_TOKEN: ${{ secrets.GH_TOKEN }}" in workflow
     assert "version_metadata.json" in workflow
     assert "axklib-sdk" not in workflow_with_platform
@@ -814,7 +814,7 @@ def test_native_workflow_recovers_only_isolated_vcpkg_tool_extraction_state() ->
     configure = native_platform.split("      - name: Configure native build\n", 1)[1].split(
         "      - name: Build native targets\n", 1
     )[0]
-    assert "python tools/python/native_configure.py" in configure
+    assert '"$AXK_PYTHON" tools/python/native_configure.py' in configure
     assert '--runner-temp "$RUNNER_TEMP"' in configure
     assert '--downloads-root "$VCPKG_DOWNLOADS"' in configure
     assert '--manifest "$build_root/vcpkg-manifest-install.log"' in configure
@@ -1136,8 +1136,8 @@ def test_windows_and_macos_self_hosted_preflights_are_explicit() -> None:
         "  macos-universal:\n", 1
     )[0]
 
-    assert "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0" in workflow
-    assert 'python-version: "3.13.17"' in workflow
+    assert "actions/setup-python@" not in workflow
+    assert "python-version:" not in workflow
     assert "name: Expose Git Bash to subsequent steps" in native_job
     assert "shell: powershell" in native_job
     assert "Get-Command git.exe" in native_job
@@ -1146,7 +1146,7 @@ def test_windows_and_macos_self_hosted_preflights_are_explicit() -> None:
     assert "Split-Path $bash -Parent | Out-File" in native_job
     assert "& $bash --version" in native_job
     assert "$bash.Source" not in native_job
-    assert "python -c \"import platform,sys;" in native_job
+    assert "name: Verify preinstalled Windows Python" not in native_job
     assert "name: Verify preinstalled Linux C++23 toolchain" in native_job
     assert "apt.llvm.org" not in native_job
     assert "apt-get" not in native_job
@@ -1206,7 +1206,7 @@ def test_windows_and_macos_self_hosted_preflights_are_explicit() -> None:
     assert "-DVCPKG_OVERLAY_TRIPLETS=${{ github.workspace }}" not in native_job
 
 
-def test_self_hosted_tool_jobs_do_not_depend_on_runner_node_or_python() -> None:
+def test_self_hosted_tool_jobs_provision_node_and_reuse_runner_python() -> None:
     root = Path(__file__).resolve().parents[3]
     workflow = native_workflow_text(root)
     release_tools = workflow.split("  release-tools:\n", 1)[1].split(
@@ -1225,13 +1225,11 @@ def test_self_hosted_tool_jobs_do_not_depend_on_runner_node_or_python() -> None:
         "  draft-release:\n", 1
     )[0]
 
-    setup_python = "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97"
     setup_uv = "astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990"
-    raw_python = "python tools/python/release_metadata.py release-target"
-    assert setup_python in release_tools
-    assert 'python-version: "3.13.17"' in release_tools
-    assert release_tools.index(setup_python) < release_tools.index(setup_uv)
-    assert release_tools.index(setup_python) < release_tools.index(raw_python)
+    raw_python = "python3 tools/python/release_metadata.py release-target"
+    assert "actions/setup-python@" not in release_tools
+    assert "python-version:" not in release_tools
+    assert release_tools.index(setup_uv) < release_tools.index(raw_python)
 
     node_then_pnpm = re.compile(
         r"      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6\n"
@@ -1277,7 +1275,7 @@ def test_macos_signing_uses_persistent_runner_state_without_credential_secrets()
         assert obsolete not in workflow
     assert "$HOME/Library/Keychains/login.keychain-db" in universal_job
     assert "$HOME/.config/developer-id-signing/login-keychain-password" in universal_job
-    assert "python tools/python/macos_signing.py" in universal_job
+    assert "python3 tools/python/macos_signing.py" in universal_job
     assert "exactly one Developer ID Application" in universal_job
     assert "security list-keychains -d user -s" in universal_job
     assert "codesign --force --timestamp --options runtime" in universal_job
@@ -1383,7 +1381,7 @@ def test_native_workflow_builds_tests_and_packages_server_on_every_release_targe
     )
     assert "-DAXK_BUILD_SERVER=ON" in workflow_with_platform
     assert 'cmake --install "$root" --prefix "$scan/server" --component server' in workflow_with_platform
-    assert 'python tools/python/inspect_package.py "$scan/server"' in workflow_with_platform
+    assert '"$AXK_PYTHON" tools/python/inspect_package.py "$scan/server"' in workflow_with_platform
     assert "release_server_smoke.py" not in workflow_with_platform
     assert "release_server_smoke.py" not in macos_helper
     assert "build/tmp/universal/bin/axklib-server" in workflow_with_platform
@@ -1507,8 +1505,8 @@ def test_docs_workflow_renders_mermaid_and_publishes_one_pages_artifact() -> Non
 
     assert "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7" in workflow
     assert "runs-on: [self-hosted, Linux, X64, jammy, docker]" in workflow
-    assert "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0" in workflow
-    assert 'python-version: "3.13.17"' in workflow
+    assert "actions/setup-python@" not in workflow
+    assert "python-version:" not in workflow
     assert 'node-version: "24"' in workflow
     assert "npm ci" in workflow
     assert "name: Verify Mermaid browser runtime" in workflow

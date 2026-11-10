@@ -36,10 +36,6 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.13.17"
-
       - name: Enforce architecture budgets
         run: cmake -DAXK_SOURCE_ROOT="${GITHUB_WORKSPACE}" -P cmake/ArchitectureCheck.cmake
 
@@ -82,7 +78,7 @@ jobs:
             printf 'host_architecture=%s\n' "$(uname -m)"
             "$clang_path" --version
             cmake --version
-            python --version
+            python3 --version
           }
 
       - name: Resolve macOS cache inputs
@@ -233,10 +229,6 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.13.17"
-
       - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
         with:
           version: "0.10.4"
@@ -297,7 +289,7 @@ jobs:
 
           identity_record="$(
             security find-identity -v -p codesigning "$signing_keychain" 2>&1 |
-              python tools/python/macos_signing.py
+              python3 tools/python/macos_signing.py
           )" || {
             echo "expected exactly one Developer ID Application identity." >&2
             security find-identity -v -p codesigning "$signing_keychain" >&2 || true
@@ -402,13 +394,13 @@ jobs:
           sha="$(git rev-parse --short=7 HEAD)"
           package_file="build/tmp/macos-arm64-package-basename.txt"
           version_file="build/tmp/macos-arm64-version-metadata.json"
-          python tools/python/release_metadata.py resolve \
+          python3 tools/python/release_metadata.py resolve \
             --version-metadata-file "$version_file" --package-basename-file "$package_file" \
             --ref-type "${GITHUB_REF_TYPE}" --ref-name "${GITHUB_REF_NAME}" \
             --platform macos-universal \
             --configuration "${{ inputs.debug && 'Debug' || 'Release' }}" \
             --github-output "$GITHUB_OUTPUT"
-          python tools/python/release_metadata.py verify-cli \
+          python3 tools/python/release_metadata.py verify-cli \
             --version-metadata-file "$version_file" --package-basename-file "$package_file" \
             --cli build/tmp/universal/bin/axklib \
             --git-sha-short "$sha" --ref-name "${GITHUB_REF_NAME}"
@@ -514,7 +506,7 @@ jobs:
 
       - name: Stage universal macOS desktop release package
         run: >-
-          python tools/python/desktop_release.py
+          python3 tools/python/desktop_release.py
           --bundle-directory build/tmp/macos-universal-cargo-${{ github.run_id }}-${{ github.run_attempt }}/universal-apple-darwin/release/bundle/dmg
           --extension .dmg
           --output-directory build/artifacts/axkdeck-macos-universal
@@ -531,7 +523,7 @@ jobs:
           AXK_CLI_ARTIFACT_STEM: ${{ steps.package.outputs.cli_artifact_stem }}
         run: |
           set -euo pipefail
-          python tools/python/release_metadata.py package-native \
+          python3 tools/python/release_metadata.py package-native \
             --source-directory build/tmp/universal \
             --output-directory build/artifacts \
             --artifact-stem "$AXK_CLI_ARTIFACT_STEM" \
@@ -612,7 +604,7 @@ jobs:
             done
           done
           for architecture in x86_64 arm64; do
-            python tools/python/device_capability_smoke.py --server "$sidecar" \
+            python3 tools/python/device_capability_smoke.py --server "$sidecar" \
               --architecture "$architecture" \
               --output-directory "build/logs/device-capabilities/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}/$architecture"
           done

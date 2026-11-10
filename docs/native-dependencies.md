@@ -96,12 +96,15 @@ The native library does not link or invoke a scripting runtime.
 
 ## CI Python
 
-CI pins Python 3.13.17 for prerequisite checks, native builds, documentation
-and release assembly. Linux and macOS workflows provision that exact version.
-Windows runners must provide Python 3.13.17 on PATH with a native interpreter:
-AMD64 for x64 jobs and ARM64 for ARM64 jobs. The Windows preflight checks the
-exact patch version and reported machine architecture; update both Windows
-runner images when changing this pin.
+CI uses the Python already installed on each self-hosted runner: `python3` on
+Linux and macOS, and `python` on Windows. Workflows do not install Python or
+check its version or interpreter architecture. Runners do not need matching
+Python releases; Python 3.13 patch releases and Python 3.14 can coexist across
+the platforms.
+
+The development-tool and documentation projects declare their minimum Python
+requirement in `pyproject.toml` (`>=3.13`). Their normal dependency installation
+and tests enforce compatibility; there is no separate workflow version gate.
 
 ## Local Linux build with Clang 18
 
