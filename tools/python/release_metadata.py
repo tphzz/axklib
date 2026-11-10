@@ -331,9 +331,11 @@ def collect_release_artifacts(directory: Path, output_directory: Path) -> list[P
 
 
 def describe_asset(path: Path) -> ReleaseAsset:
+    digest = hashlib.sha256()
     with path.open("rb") as stream:
-        digest = hashlib.file_digest(stream, "sha256").hexdigest()
-    return ReleaseAsset(path, path.name, path.stat().st_size, digest)
+        while chunk := stream.read(1024 * 1024):
+            digest.update(chunk)
+    return ReleaseAsset(path, path.name, path.stat().st_size, digest.hexdigest())
 
 
 def prepare_release_assets(

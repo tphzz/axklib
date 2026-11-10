@@ -92,6 +92,26 @@ def test_branch_target_retains_exact_name_without_ref_cleanup() -> None:
     assert not hasattr(target, "cleanup_tag")
 
 
+@pytest.mark.parametrize(
+    "contents",
+    [b"", b"abc", b"0123456789abcdef" * 131_073],
+    ids=["empty", "short", "multiple-chunks"],
+)
+def test_asset_hashing_does_not_require_file_digest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, contents: bytes
+) -> None:
+    path = tmp_path / "package.zip"
+    path.write_bytes(contents)
+    monkeypatch.delattr(hashlib, "file_digest", raising=False)
+
+    asset = release_metadata.describe_asset(path)
+
+    assert asset.path == path
+    assert asset.name == path.name
+    assert asset.size == len(contents)
+    assert asset.sha256 == hashlib.sha256(contents).hexdigest()
+
+
 def test_checksums_cover_only_the_twelve_verified_packages(tmp_path: Path) -> None:
     paths = write_assets(tmp_path)
     assets = release_metadata.prepare_release_assets(
