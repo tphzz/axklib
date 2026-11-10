@@ -84,7 +84,7 @@ async function geometry(page, zoom) {
             const box = node.getBoundingClientRect();
             return { x: box.x, y: box.y, width: box.width, height: box.height, right: box.right, bottom: box.bottom };
         };
-        const headers = [...editor.querySelectorAll('.editor-header')].map(header => ({
+        const headers = [...editor.querySelectorAll('.tab-bar')].map(header => ({
             ...rect(header),
             tabs: rect(header.querySelector('nav')),
             activeTab: rect(header.querySelector('[aria-selected="true"], [aria-pressed="true"]')),

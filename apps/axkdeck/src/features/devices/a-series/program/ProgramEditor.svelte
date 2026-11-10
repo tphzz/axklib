@@ -4,7 +4,7 @@
     import type { ObjectEditorDocument } from '../../../object-editor/workflow.svelte';
     import type { EditorNavigation } from '../../../object-editor/navigation.svelte';
     import type { InspectorSelection, ProgramSampleSelectRow } from '../../../../lib/types';
-    import EditorHeader from '../../../../lib/components/EditorHeader.svelte';
+    import TabBar from '../../../../lib/components/TabBar.svelte';
     import TabStrip from '../../../../lib/components/TabStrip.svelte';
     import ProgramAssignments from './ProgramAssignments.svelte';
     import EditorChoice from '../../../object-editor/EditorChoice.svelte';
@@ -88,7 +88,7 @@
 </script>
 
 {#if pages.length}
-    <EditorHeader>
+    <TabBar>
         <TabStrip
             semantics="navigation"
             tabs={pages}
@@ -100,7 +100,7 @@
         />
         {#snippet tools()}<span class="editor-meta">{tab.label} · {pages.indexOf(page!) + 1} / {pages.length}</span
             >{/snippet}
-    </EditorHeader>
+    </TabBar>
 {/if}
 <div
     role="tabpanel"

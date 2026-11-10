@@ -3,6 +3,20 @@ import { describe, expect, it, vi } from 'vitest';
 import SourceTabs from './SourceTabs.svelte';
 
 describe('SourceTabs composition', () => {
+    it.each(['open', 'create'])('places %s navigation in the shared full-width dialog tab bar', (id) => {
+        const view = render(SourceTabs, {
+            id,
+            label: 'Source kinds',
+            value: 'Image',
+            available: true,
+            onchange: vi.fn(),
+        });
+        const bar = view.container.querySelector('.source-tabs > .tab-bar');
+        expect(bar).not.toBeNull();
+        expect(bar?.getAttribute('data-context')).toBe('dialog');
+        expect(view.getByRole('tablist').parentElement).toBe(bar);
+    });
+
     it('retains domain IDs, unavailable reasons and native disabling without hiding source kinds', async () => {
         const onchange = vi.fn();
         const view = render(SourceTabs, {

@@ -11,7 +11,7 @@
     import SampleInfo from './SampleInfo.svelte';
     import SampleTransport from './SampleTransport.svelte';
     import ParameterPage from './ParameterPage.svelte';
-    import EditorHeader from '../../../../lib/components/EditorHeader.svelte';
+    import TabBar from '../../../../lib/components/TabBar.svelte';
     import TabStrip from '../../../../lib/components/TabStrip.svelte';
     let {
         document: suppliedDocument,
@@ -51,7 +51,7 @@
 </script>
 
 <div class="sample-pages" role="group" aria-label={`${activeTab.label} pages`}>
-    <EditorHeader>
+    <TabBar>
         <TabStrip
             semantics="navigation"
             tabs={activeTab.pages}
@@ -66,7 +66,7 @@
                 >{activeTab.label} · {activeTab.pages.indexOf(activePage) + 1} / {activeTab.pages.length}</span
             >
         {/snippet}
-    </EditorHeader>
+    </TabBar>
 </div>
 <div
     role="tabpanel"

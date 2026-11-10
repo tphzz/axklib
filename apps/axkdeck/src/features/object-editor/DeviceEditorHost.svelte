@@ -12,7 +12,7 @@
     import { programTabs } from '../devices/a-series/program/fields';
     import TabStrip from '../../lib/components/TabStrip.svelte';
     import Icon from '../../lib/components/Icon.svelte';
-    import EditorHeader from '../../lib/components/EditorHeader.svelte';
+    import TabBar from '../../lib/components/TabBar.svelte';
     import { sampleConversionTitle } from '../../lib/sampleFormatLabels';
     import { userFacingMessage } from '../../lib/userFacingMessage';
     import SampleNavigation from '../devices/a-series/sample/SampleNavigation.svelte';
@@ -145,7 +145,7 @@
             use:inertEditor={inactive}
             aria-hidden={inactive ? 'true' : undefined}
         >
-            <EditorHeader>
+            <TabBar>
                 {#if editing?.profile === 'a-series/program'}
                     <TabStrip
                         tabs={programTabs}
@@ -222,7 +222,7 @@
                         {/if}
                     </div>
                 {/snippet}
-            </EditorHeader>
+            </TabBar>
             {#key document}
                 {#if editing?.profile === 'a-series/program'}
                     <ProgramEditor

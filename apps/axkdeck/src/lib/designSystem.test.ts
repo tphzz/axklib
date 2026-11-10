@@ -73,6 +73,28 @@ describe('design system contract', () => {
             expect(sources.find((source) => source.path === path)?.source, path).toContain('<TabStrip');
     });
 
+    it('shares the Content tab toolbar boundary without duplicating tab navigation', () => {
+        const bar = sources.find(({ path }) => path === 'lib/components/TabBar.svelte');
+        expect(bar).toBeDefined();
+        expect(bar?.declarations).toContainEqual(
+            expect.objectContaining({ property: 'box-shadow', value: 'inset 0 -1px var(--color-border)' }),
+        );
+        expect(sources.some(({ path }) => path.endsWith('/EditorHeader.svelte'))).toBe(false);
+        expect(sources.find(({ path }) => path === 'features/dialogs/SourceTabs.svelte')?.source).toContain(
+            '<TabBar context="dialog">',
+        );
+        for (const path of [
+            'features/devices/a-series/sample/SampleEditor.svelte',
+            'features/devices/a-series/program/ProgramEditor.svelte',
+            'features/object-editor/DeviceEditorHost.svelte',
+            'lib/components/ObjectEditor.svelte',
+        ]) {
+            const source = sources.find((entry) => entry.path === path)?.source;
+            expect(source, path).toContain('<TabBar>');
+            expect(source, path).not.toContain('EditorHeader');
+        }
+    });
+
     it('resolves semantic color and typography names without obsolete aliases', () => {
         const unresolved = sources.flatMap(({ path, declarations }) =>
             declarations.flatMap(({ value }) =>

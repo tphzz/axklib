@@ -7,7 +7,7 @@
     } from '../collectionNavigation';
     import type { InspectorSelection, ProgramSampleSelectRow } from '../types';
     import CollectionToolbar from './CollectionToolbar.svelte';
-    import EditorHeader from './EditorHeader.svelte';
+    import TabBar from './TabBar.svelte';
     import TabStrip from './TabStrip.svelte';
 
     type ProgramEditorTab = 'sample-select' | 'easy-edit' | 'effect-setup' | 'setup' | 'control';
@@ -105,7 +105,7 @@
     {/if}
     {#if selection?.kind === 'program'}
         {#if !embedded}
-            <EditorHeader>
+            <TabBar>
                 <TabStrip
                     tabs={programTabs}
                     active={programTab}
@@ -116,7 +116,7 @@
                     idPrefix="program-tab"
                     panelId={`program-panel-${programTab}`}
                 />
-            </EditorHeader>
+            </TabBar>
         {/if}
         <div
             id={`program-panel-${programTab}`}
@@ -173,7 +173,7 @@
             {/if}
         </div>
     {:else if selection?.kind === 'sample'}
-        <EditorHeader>
+        <TabBar>
             <TabStrip
                 tabs={sampleTabs}
                 active={sampleTab}
@@ -184,7 +184,7 @@
                 idPrefix="sample-tab"
                 panelId={`sample-panel-${sampleTab}`}
             />
-        </EditorHeader>
+        </TabBar>
         <div
             id={`sample-panel-${sampleTab}`}
             class="editor-panel editor-canvas"

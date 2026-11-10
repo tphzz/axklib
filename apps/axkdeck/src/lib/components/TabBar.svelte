@@ -5,21 +5,24 @@
         children,
         status,
         tools,
+        context = 'editor',
     }: {
         children: Snippet;
         status?: Snippet;
         tools?: Snippet;
+        context?: 'editor' | 'dialog';
     } = $props();
+    const single = $derived(context === 'dialog' && !status && !tools);
 </script>
 
-<header class="editor-header">
+<svelte:element this={context === 'dialog' ? 'div' : 'header'} class="tab-bar" class:single data-context={context}>
     {@render children()}
-    <div class="header-status">{@render status?.()}</div>
+    {#if !single}<div class="header-status">{@render status?.()}</div>{/if}
     {#if tools}<div class="header-tools">{@render tools()}</div>{/if}
-</header>
+</svelte:element>
 
 <style>
-    .editor-header {
+    .tab-bar {
         display: grid;
         grid-template-columns: minmax(0, max-content) minmax(0, 1fr) auto;
         align-items: center;
@@ -30,6 +33,13 @@
         padding: 0 8px;
         box-shadow: inset 0 -1px var(--color-border);
         background: var(--color-panel);
+    }
+    .tab-bar[data-context='dialog'] {
+        padding: 0 var(--density-section-gap);
+    }
+    .single {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 0;
     }
     .header-status {
         min-width: 0;

@@ -197,7 +197,8 @@
     ];
     const creation = new CreateWorkflow(service, images);
     let opening = $state(true);
-    const mode = new URLSearchParams(location.search).get('mode');
+    const params = new URLSearchParams(location.search);
+    const mode = params.get('mode');
     onMount(() => {
         if (mode?.startsWith('create-')) void creation.show();
     });
@@ -235,7 +236,9 @@
 {#if creation.visible}<CreateDialog
         workflow={creation}
         {transport}
-        directory={serverDirectoryLocation({ rootId: 'workspace', relativePath: 'images' }, 'Synthetic images')}
+        directory={params.has('missing-location')
+            ? null
+            : serverDirectoryLocation({ rootId: 'workspace', relativePath: 'images' }, 'Synthetic images')}
         onbrowse={() => {}}
         onsuccess={() => {}}
         onrecovery={() => {}}
