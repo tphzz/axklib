@@ -101,6 +101,11 @@ configuration, using `x64-linux-axk` or `arm64-linux-axk` for both the native
 project and target dependencies. This matches Linux CI's compiler major version;
 macOS uses Apple Clang. Local validation does not replace the platform builds.
 
+Maintained native sources use headers rather than named C++ modules. The
+monorepo, standalone library and standalone device builds disable automatic
+module dependency scanning, so `clang-scan-deps` is not required. Ordinary
+compiler-generated header dependencies remain enabled.
+
 Linux CI uses Ubuntu 22.04 Jammy for x64 and Ubuntu 24.04 Noble for ARM64.
 Both architectures retain Clang 18, libc++ and the same strict warning policy.
 The full and standalone workflows retain the existing `jammy` self-hosted

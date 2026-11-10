@@ -9,7 +9,9 @@
 #include <vector>
 
 #if defined(_WIN32)
+#ifndef NOMINMAX
 #define NOMINMAX
+#endif
 // bcrypt.h depends on Windows SDK types declared by windows.h.
 // clang-format off
 #include <windows.h>

@@ -3,6 +3,9 @@ cmake_minimum_required(VERSION 3.22.1...3.28)
 set(AXK_SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}")
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/ArchitectureCheck.cmake")
 
+# These sources use headers, not C++ modules.
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
+
 include("${CMAKE_CURRENT_SOURCE_DIR}/library/cmake/AxkVcpkgDefaults.cmake")
 include("${CMAKE_CURRENT_SOURCE_DIR}/library/cmake/AxkProjectVersion.cmake")
 axk_derive_project_version("${CMAKE_CURRENT_SOURCE_DIR}")

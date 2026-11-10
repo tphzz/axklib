@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.22.1...3.28)
 
+# These sources use headers, not C++ modules.
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
+
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/AxkVcpkgDefaults.cmake")
 
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
