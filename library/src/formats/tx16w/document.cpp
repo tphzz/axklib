@@ -136,7 +136,7 @@ Result<std::shared_ptr<const Document>> Document::open(std::shared_ptr<const nat
                 result->files_.push_back({*location, *identity, false, unsupported});
                 if (!native_magic(*header) && !unsupported)
                     continue;
-                if (++native_files > maximum_native_files || result->objects_.size() > maximum_objects - 96U)
+                if (++native_files > maximum_native_files || result->objects_.size() > maximum_objects - 160U)
                     return std::unexpected(document_error("TX16W document exceeds its native catalog limits"));
                 if (unsupported) {
                     add(*location, *identity, OpaqueFile{identity->kind}, "native-file", entry.path);
@@ -171,7 +171,7 @@ Result<std::shared_ptr<const Document>> Document::open(std::shared_ptr<const nat
                          "Native file is preserved but its record type is not decoded", occurrence_id(*location)});
                     continue;
                 }
-                const auto size = identity->kind == 'S' ? 1536U : identity->kind == 'V' ? 8704U : 5120U;
+                const auto size = identity->kind == 'S' ? 1536U : identity->kind == 'V' ? 15360U : 5120U;
                 const auto bytes = prefix(*result->sources_, *location, size, cancellation);
                 if (!bytes)
                     return std::unexpected(bytes.error());

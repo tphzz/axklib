@@ -75,11 +75,14 @@ class Tx16wSourceSelection : public ::testing::Test {
         ASSERT_TRUE(document) << document.error().message;
         request.source = *document;
     }
-    void open_hierarchy(bool has_performances, bool named_missing_wave = true, bool shared_timbre = false) {
+    void open_hierarchy(bool has_performances, bool named_missing_wave = true, bool shared_timbre = false,
+                        bool confirmed_empty = false) {
         auto setup = file(1536U), voices = file(8704U), performances = file(5120U);
         put_name(setup, 0xf7U, "PIANO");
         if (named_missing_wave)
             put_name(setup, 0x107U, "ABSENT");
+        else if (confirmed_empty)
+            put_name(setup, 0x107U, "        ");
         for (std::size_t slot = 0; slot < 2U; ++slot) {
             const auto base = 16U + 146U * slot;
             put_name(voices, base + 0x86U, slot == 0U ? "Pno Voice" : "Str Voice");
@@ -146,8 +149,8 @@ TEST_F(Tx16wSourceSelection, SelectAllUsesPlayableRootClosureAndKeepsUnreference
                 return i.source_object == object_id("Str Mid") && i.impact == axk::conversion::Impact::blocker;
             });
             ASSERT_NE(bad, r.issues.end());
-            for (const auto token :
-                 {"Str Mid", "Wave slot 2", named ? "ABSENT.W02" : "blank", "Str Voice", "36..96", "Strings"})
+            for (const auto token : {"Str Mid", "Wave slot 2", named ? "ABSENT.W02" : "not a confirmed empty slot",
+                                     "Str Voice", "36..96", "Strings"})
                 EXPECT_NE(bad->message.find(token), std::string::npos) << bad->message;
             request.options["sourceObjectIds"] = {object_id("Piano"), object_id("Piano 2"), object_id("Strings")};
             const auto explicit_all = prepare();
@@ -155,6 +158,49 @@ TEST_F(Tx16wSourceSelection, SelectAllUsesPlayableRootClosureAndKeepsUnreference
             EXPECT_EQ((*explicit_all)->report().issues.size(), r.issues.size());
             EXPECT_EQ((*explicit_all)->report().actions.size(), r.actions.size());
         }
+    }
+}
+
+TEST_F(Tx16wSourceSelection, ExactEmptySlotsOmitOnlyAffectedRootsAndNeverAuthorizeAnEmptyWrite) {
+    for (bool performances : {false, true}) {
+        ASSERT_NO_FATAL_FAILURE(open_hierarchy(performances, false, false, true));
+        request.options = {{"mode", "HIERARCHY"}};
+        request.fidelity = axk::conversion::Fidelity::best;
+        const auto best = prepare();
+        ASSERT_TRUE(best) << best.error().message;
+        const auto &report = (*best)->report();
+        EXPECT_TRUE(report.executable);
+        const auto empty_root = object_id(performances ? "Strings" : "Str Voice");
+        EXPECT_EQ(std::ranges::count(report.actions, empty_root, &axk::conversion::Action::source_object), 0);
+        EXPECT_EQ(std::ranges::count_if(report.issues,
+                                        [](const auto &i) {
+                                            return i.code == "tx16w.empty_wave_region" &&
+                                                   i.impact == axk::conversion::Impact::loss &&
+                                                   i.message.find("36..96 (empty Wave slot 2)") != std::string::npos;
+                                        }),
+                  1);
+        EXPECT_EQ(std::ranges::count_if(report.issues,
+                                        [&](const auto &i) {
+                                            return i.source_object == empty_root &&
+                                                   i.code ==
+                                                       (performances ? "tx16w.empty_performance" : "tx16w.empty_voice");
+                                        }),
+                  1);
+        EXPECT_TRUE(std::ranges::any_of(report.issues, [](const auto &i) {
+            return i.code == "tx16w.key_number" && i.impact == axk::conversion::Impact::representation;
+        }));
+        request.fidelity = axk::conversion::Fidelity::strict;
+        auto strict = prepare();
+        ASSERT_TRUE(strict);
+        EXPECT_FALSE((*strict)->report().executable);
+        EXPECT_TRUE(std::get<axk::conversion::ExistingImagePatches>((*strict)->output()).patches.empty());
+        request.fidelity = axk::conversion::Fidelity::best;
+        request.options["sourceObjectIds"] = {empty_root};
+        auto empty = prepare();
+        ASSERT_TRUE(empty);
+        EXPECT_FALSE((*empty)->report().executable);
+        EXPECT_TRUE((*empty)->report().actions.empty());
+        EXPECT_TRUE(std::get<axk::conversion::ExistingImagePatches>((*empty)->output()).patches.empty());
     }
 }
 

@@ -131,7 +131,8 @@ rather than being guessed.
 A Voice may reference a populated Timbre whose native name is blank. The reader
 keeps that record and its exact file-local slot; it does not create objects for
 unused blank slots or resolve references to empty records. A fallback display
-label does not change the native name.
+label does not change the native name. Each Voice file selects its own layout:
+legacy Voices address 64 Timbres and version-0200 Voices address 128.
 
 The parser is bounded and rejects malformed headers and truncated logical data.
 Wave decoding uses the attack-plus-repeat frame count declared by the TX16W
@@ -144,11 +145,14 @@ In hierarchy mode, **All sources in disk set** selects every Performance, or
 every Voice in a group with no Performances. The planner follows their Voice
 regions and Timbres to the required Waves. An unused Timbre remains browsable
 with its missing reference, but cannot block an unrelated sound. A selected
-Timbre that needs an unavailable Wave blocks both Best and Strict. Review
-distinguishes a blank Setup slot from a named Wave that is missing and identifies
-a Voice and native key range that use the Timbre when known. Adding the disk
-with the named Wave can satisfy that reference; a blank slot has no companion
-filename to look for. If the set remains
+Timbre that needs a missing named Wave blocks both Best and Strict. Adding its
+companion can supply the named Wave. A confirmed empty Setup slot has no file
+to find: Best omits just that Voice region and lists its name, native key
+range and Wave slot under Review. Surviving regions keep their limits. If every
+region of a selected sound is empty, Best names the omitted sound and imports
+the others. An entirely empty selection writes nothing. Strict rejects these
+omissions. Ambiguous, malformed or unsupported dependencies remain blockers.
+If the set remains
 incomplete, **Wave Data only** is an explicit recovery mode: it imports every
 decodable `.Wnn` Wave from the selected members without inventing Programs,
 Sample Banks, or Samples. Hierarchy mode imports only Waves reached by a valid
@@ -179,7 +183,7 @@ The preview classifies every non-trivial mapping:
 
 - **Exact** means the source value has a direct supported destination value.
 - **Representation** means an equivalent encoding changes, such as expanding
-  signed 12-bit PCM to 16-bit PCM or translating native key numbering.
+  signed 12-bit PCM to 16-bit PCM.
 - **Loss** means resampling, approximation or an omitted source control.
 - **Uncertainty** means an unverified interpretation or destination default.
 - **Blocker** means the current writer profile cannot preserve the relationship
@@ -206,8 +210,8 @@ Current parameter behavior is:
 | Native sample rate | Preserved when supported; otherwise resampled to the nearest supported A-series rate |
 | Attack and repeat lengths | For a looped Wave, attack becomes the loop start and the remaining resampled frames become the loop length |
 | Loop mode | A native loop becomes an A-series forward loop; a non-looped Wave becomes one-shot playback with no loop window |
-| Timbre root key | Translated from the TX16W native key numbering by `-16` |
-| Voice region low/high keys | Translated to A-series Sample key ranges |
+| Original pitch | Legacy files use the Timbre root; version-0200 files carry a separate original pitch per Voice region. Each Sample keeps its own root. Shared Wave Data keeps its first translated root and reports differing roots. Fine-pitched words that cannot be mapped to a whole note are reported and the region is omitted. |
+| Voice region low/high keys | Packed split limits convert to inclusive MIDI notes 13 through 108. Omitted regions do not extend their neighbors. Out-of-range or invalid splits are reported, not clamped. |
 | Performance receive channel | Mapped to `=Smp` or a one-based A-channel (`A01` through `A16`) |
 | Voice Fade | Reported but not authored |
 | Per-Voice volume, detune, transpose, output, and alternative group | Reported but not authored |

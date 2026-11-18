@@ -220,17 +220,25 @@ TEST(Tx16wSetup, DecodesWaveReferencesVoiceRegionsAndTimbres) {
     EXPECT_EQ(decoded->timbres[1].name, "Piano High");
 }
 
-TEST(Tx16wSetup, DecodesVersion0200LayoutNativePaddingAndSelectorFlags) {
+TEST(Tx16wSetup, DecodesVersion0200UpperTimbresAndExactEmptyWaveRecords) {
     auto setup = tx_file(1536U);
-    auto voices = tx_file(8704U);
+    auto voices = tx_file(15360U);
     auto performances = tx_file(5120U);
     put_text(setup, 7U, "0200", 4U);
+    put_text(voices, 7U, "0200", 4U);
     put_text(setup, 0xf2U + 7U, "TONE", 8U);
+    put_text(setup, 0x109U, "        ", 8U);
+    put_text(setup, 0x119U, "        ", 8U);
+    setup[0x121U] = std::byte{1};
+    put_text(setup, 0x129U, "TONE", 8U);
+    setup[0x12dU] = std::byte{3}; // Not another reference to the valid TONE file.
 
     constexpr std::size_t voice_base = 0x10U;
     voices[voice_base] = std::byte{0x41};
     voices[voice_base + 1U] = std::byte{0x24};
     voices[voice_base + 2U] = std::byte{0x60};
+    voices[0x2e50] = std::byte{0x13};
+    voices[0x2e51] = std::byte{0xaa};
     for (std::size_t region = 1U; region < 32U; ++region) {
         const auto offset = voice_base + region * 4U;
         voices[offset + 1U] = std::byte{0xff};
@@ -239,7 +247,7 @@ TEST(Tx16wSetup, DecodesVersion0200LayoutNativePaddingAndSelectorFlags) {
     put_text(voices, voice_base + 0x86U, "Filtered ", 10U);
     voices[voice_base + 0x86U + 9U] = std::byte{0x18};
 
-    constexpr std::size_t timbre_base = 0x1250U + 0x38U;
+    constexpr std::size_t timbre_base = 0x1250U + 65U * 0x38U;
     voices[timbre_base] = std::byte{0x00};
     voices[timbre_base + 1U] = std::byte{0x4c};
     put_text(voices, timbre_base + 46U, " HC-2    ", 10U);
@@ -260,8 +268,16 @@ TEST(Tx16wSetup, DecodesVersion0200LayoutNativePaddingAndSelectorFlags) {
     ASSERT_EQ(decoded->voices.size(), 1U);
     EXPECT_EQ(decoded->voices.front().name, "Filtered");
     ASSERT_EQ(decoded->voices.front().regions.size(), 1U);
-    EXPECT_EQ(decoded->voices.front().regions.front().timbre_slot, 1U);
-    EXPECT_EQ(decoded->voices.front().regions.front().native_timbre_selector_flags, 0x40U);
+    EXPECT_EQ(decoded->voices.front().regions.front().timbre_slot, 65U);
+    EXPECT_EQ(decoded->voices.front().regions.front().original_pitch, 0x13aaU);
+    EXPECT_EQ(decoded->empty_wave_slots.count(), 1U);
+    EXPECT_TRUE(decoded->empty_wave_slots[1]);
+    EXPECT_FALSE(axk::tx16w::decode_voice_file(std::span{voices}.first(8704U)));
+    std::fill_n(voices.begin() + 7, 4U, std::byte{});
+    auto legacy = axk::tx16w::decode_voice_file(std::span{voices}.first(8704U));
+    ASSERT_TRUE(legacy);
+    EXPECT_EQ(legacy->voices.front().regions.front().timbre_slot, 65U);
+    EXPECT_TRUE(legacy->timbres.empty());
     ASSERT_EQ(decoded->timbres.size(), 1U);
     EXPECT_EQ(decoded->timbres.front().name, "HC-2");
 }
@@ -385,6 +401,34 @@ TEST(Tx16wInspection, ResolvesHierarchyWavesAcrossExplicitDiskSetMembers) {
     }));
 }
 
+TEST(Tx16wASeries, Version0200UsesPackedSplitKeysAndPerRegionOriginalPitch) {
+    axk::tx16w::Inspection inspection;
+    inspection.waves.push_back({{"TONE.W01", 32'000U, 2U, 0U, false, {}, {}, {}, {}, {}}, {0, 16}, {}});
+    auto &setup = inspection.setups.emplace_back();
+    setup.waves = {{0U, "TONE"}};
+    setup.timbres = {{0U, "Shared", 0U, 0x40U}};
+    setup.voices = {{0U, "Splits", {{0U, 0x10U, 0x4dU, 0U, 0x13aaU}, {0U, 0x50U, 0x8eU, 0U, 0x17aaU}}}};
+    const auto plan = axk::tx16w::a_series::plan_import(inspection);
+    ASSERT_TRUE(plan);
+    ASSERT_EQ(plan->samples.size(), 2U);
+    EXPECT_EQ(plan->samples[0].parameters.key_low, 13U);
+    EXPECT_EQ(plan->samples[0].parameters.key_high, 59U);
+    EXPECT_EQ(plan->samples[0].parameters.root_key, 60U);
+    EXPECT_EQ(plan->samples[1].parameters.key_low, 61U);
+    EXPECT_EQ(plan->samples[1].parameters.key_high, 108U);
+    EXPECT_EQ(plan->samples[1].parameters.root_key, 72U);
+    ASSERT_EQ(plan->wave_data.size(), 1U);
+    EXPECT_EQ(plan->wave_data[0].root_key, 60U);
+    setup.voices.front().regions[1].original_pitch = 0x17abU;
+    const auto fractional = axk::tx16w::a_series::plan_import(inspection);
+    ASSERT_TRUE(fractional);
+    EXPECT_EQ(fractional->samples.size(), 1U);
+    EXPECT_TRUE(std::ranges::any_of(fractional->notices, [](const auto &issue) {
+        return issue.source_parameter == "key_number" &&
+               issue.disposition == axk::tx16w::a_series::MappingDisposition::omitted;
+    }));
+}
+
 TEST(Tx16wASeries, PlansRelationshipsAndReportsLossyParameterMappings) {
     axk::tx16w::Inspection inspection;
     inspection.waves.push_back({{"C0.W01", 33'333U, 100U, 200U, true, {}, {}, {}, {}, {}}, {0, 16, -16}, {}});
@@ -392,7 +436,7 @@ TEST(Tx16wASeries, PlansRelationshipsAndReportsLossyParameterMappings) {
     setup.name = "KBD-1";
     setup.waves.push_back({0U, "C0"});
     setup.timbres.push_back({0U, "Piano Low", 0U, 76U});
-    setup.voices.push_back({0U, "Grand Voice", {{0U, 36U, 142U, 4U, 0x40U}}});
+    setup.voices.push_back({0U, "Grand Voice", {{0U, 36U, 142U, 4U}}});
     axk::tx16w::Performance performance;
     performance.slot = 0U;
     performance.name = "Concert Grand Piano";
@@ -412,14 +456,14 @@ TEST(Tx16wASeries, PlansRelationshipsAndReportsLossyParameterMappings) {
     ASSERT_EQ(plan->wave_data.size(), 1U);
     EXPECT_EQ(plan->wave_data[0].name, "C0");
     EXPECT_EQ(plan->wave_data[0].target_sample_rate, 32'000U);
-    EXPECT_EQ(plan->wave_data[0].root_key, 60U);
+    EXPECT_EQ(plan->wave_data[0].root_key, 58U);
     EXPECT_EQ(plan->wave_data[0].loop_start_frame, 96U);
     EXPECT_EQ(plan->wave_data[0].loop_length_frames, 192U);
     ASSERT_EQ(plan->samples.size(), 1U);
     EXPECT_EQ(plan->samples[0].waveform_id, "C0");
-    EXPECT_EQ(plan->samples[0].parameters.root_key, 60U);
-    EXPECT_EQ(plan->samples[0].parameters.key_low, 20U);
-    EXPECT_EQ(plan->samples[0].parameters.key_high, 126U);
+    EXPECT_EQ(plan->samples[0].parameters.root_key, 58U);
+    EXPECT_EQ(plan->samples[0].parameters.key_low, 28U);
+    EXPECT_EQ(plan->samples[0].parameters.key_high, 108U);
     ASSERT_EQ(plan->sample_banks.size(), 1U);
     EXPECT_EQ(plan->sample_banks[0].name, "Grand Voice");
     EXPECT_EQ(plan->sample_banks[0].member_samples, (std::vector<std::string>{"Piano Low"}));
@@ -446,10 +490,6 @@ TEST(Tx16wASeries, PlansRelationshipsAndReportsLossyParameterMappings) {
         return notice.disposition == axk::tx16w::a_series::MappingDisposition::defaulted &&
                notice.source_parameter == "sample_rate_encoding";
     }));
-    EXPECT_TRUE(std::ranges::any_of(plan->notices, [](const auto &notice) {
-        return notice.disposition == axk::tx16w::a_series::MappingDisposition::omitted &&
-               notice.source_parameter == "timbre_selector_flags";
-    }));
 }
 
 TEST(Tx16wASeries, ResolvesSameNamedWavesByNativeFileSlot) {
@@ -461,15 +501,16 @@ TEST(Tx16wASeries, ResolvesSameNamedWavesByNativeFileSlot) {
     setup.waves.push_back({2U, "DUP"});
     setup.waves.push_back({10U, "DUP"});
     setup.timbres.push_back({0U, "First", 2U, 76U});
-    setup.timbres.push_back({1U, "Second", 10U, 76U});
-    setup.voices.push_back({0U, "Both", {{0U, 16U, 79U, 0U, 0U}, {1U, 80U, 143U, 0U, 0U}}});
+    setup.timbres.push_back({1U, "Second", 10U, 0xa1U});
+    setup.voices.push_back({0U, "Both", {{0U, 0x10U, 0x4eU, 0U}, {1U, 0x50U, 0x8eU, 0U}}});
     inspection.setups.push_back(std::move(setup));
 
     const auto plan = axk::tx16w::a_series::plan_import(inspection);
 
     ASSERT_TRUE(plan) << plan.error().message;
     EXPECT_EQ(plan->wave_data.size(), 2U);
-    EXPECT_EQ(plan->samples.size(), 2U);
+    ASSERT_EQ(plan->samples.size(), 2U);
+    EXPECT_EQ(plan->samples[1].parameters.root_key, 122U);
     EXPECT_FALSE(std::ranges::any_of(plan->notices, [](const auto &notice) {
         return notice.disposition == axk::tx16w::a_series::MappingDisposition::blocked;
     }));
@@ -542,7 +583,7 @@ TEST(Tx16wASeries, BlocksIncompleteHierarchyButAllowsExplicitWaveDataOnlyImport)
     axk::tx16w::NativeSetup setup;
     setup.name = "PARTIAL";
     setup.waves = {{0U, "HERE"}, {1U, "OTHER"}};
-    setup.timbres = {{0U, "Present", 0U, 76U}, {1U, "Absent", 1U, 76U}, {2U, "Bad Key", 0U, 8U}};
+    setup.timbres = {{0U, "Present", 0U, 76U}, {1U, "Absent", 1U, 76U}, {2U, "Bad Key", 0U, 0x4fU}};
     setup.voices = {{0U, "Mixed", {{0U, 36U, 96U, 0U}, {1U, 36U, 96U, 0U}, {2U, 36U, 96U, 0U}}}};
     inspection.setups.push_back(std::move(setup));
 

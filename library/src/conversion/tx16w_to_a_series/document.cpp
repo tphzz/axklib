@@ -21,7 +21,7 @@ std::string wave_blocker(const NativeObject &object, const NativeSetup *setup,
         return message + "no unique decoded Setup";
     const auto wave = std::ranges::find(setup->waves, timbre.wave_slot, &WaveReference::slot);
     if (wave == setup->waves.end())
-        return message + "the Setup slot is blank";
+        return message + "the Setup slot has no usable name and is not a confirmed empty slot";
     const auto filename = detail::reference_filename(wave->name, 'W', wave->slot);
     const auto it = requirements.find(filename);
     if (it != requirements.end()) {
@@ -113,6 +113,9 @@ Result<Inspection> inspect_document(const Document &document, ImportMode mode, c
                 if (!source)
                     return std::unexpected(source.error());
                 const auto setup = setup_by_group.find((*source)->file.set_key);
+                if (setup != setup_by_group.end() && setup->second &&
+                    setup->second->empty_wave_slots.test(std::get<Timbre>((*source)->value).wave_slot))
+                    continue; // The planner reports the affected Voice regions, not a missing file.
                 message = wave_blocker(**source, setup == setup_by_group.end() ? nullptr : setup->second, requirements);
             }
             result.notices.push_back(

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <bitset>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -51,7 +52,7 @@ struct VoiceRegion {
     std::uint8_t low_key_number{};
     std::uint8_t high_key_number{};
     std::uint8_t fade{};
-    std::uint8_t native_timbre_selector_flags{};
+    std::optional<std::uint16_t> original_pitch{};
 };
 
 struct Voice {
@@ -93,6 +94,7 @@ struct NativeSetup {
     std::vector<Timbre> timbres;
     NativeSetupLayout layout{NativeSetupLayout::legacy};
     bool write_protected{};
+    std::bitset<64> empty_wave_slots{};
 };
 
 struct VoiceFile {

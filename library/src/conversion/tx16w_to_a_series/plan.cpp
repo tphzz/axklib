@@ -107,10 +107,18 @@ LoopTranslation translate_loop(const Wave &wave, std::uint32_t destination_rate)
     return {start_frame, total_frames - start_frame, AudioSamplerLoopMode::forward_loop};
 }
 
-std::optional<std::uint8_t> midi_key(std::uint8_t native_key) {
-    if (native_key < 16U || native_key > 143U)
+std::optional<std::uint8_t> packed_note(unsigned key, unsigned minimum, unsigned maximum) {
+    if (key < minimum || key > maximum || (key & 3U) == 3U)
         return std::nullopt;
-    return static_cast<std::uint8_t>(native_key - 16U);
+    return static_cast<std::uint8_t>(3U * (key >> 2U) + (key & 3U) + 1U);
+}
+
+std::optional<std::uint8_t> original_pitch_note(std::uint16_t pitch) {
+    const auto key = static_cast<unsigned>(pitch) >> 6U;
+    // Whole semitones also use the low six bits (e.g. MIDI 60 = 0x13aa).
+    if ((pitch & 63U) != (key & 3U) * 21U)
+        return std::nullopt;
+    return packed_note(key, 0U, 0xa6U);
 }
 
 void notice(ImportPlan &plan, MappingDisposition disposition, std::string source_object, std::string source_parameter,
@@ -243,31 +251,47 @@ Result<ImportPlan> plan_import(const Inspection &inspection, const TargetInvento
             maps.wave_names.emplace(reference.slot, reference.name);
         }
 
+        std::set<std::uint8_t> empty_voices;
         for (const auto &voice : setup.voices) {
             const auto voice_id = identity(voice, &Inspection::SetupIdentities::voices);
             SampleBankSpec bank;
-            bank.name = unique_name(voice.name, 16U, bank_names);
+            std::size_t empty_regions{};
             for (const auto &region : voice.regions) {
                 const auto timbre = maps.timbres.find(region.timbre_slot);
                 if (timbre == maps.timbres.end()) {
-                    notice(plan, MappingDisposition::omitted, voice_id, "timbre_slot", bank.name, "Sample",
-                           "Voice region references a missing TX16W Timbre slot");
+                    if (inspection.resolved_setup_waves.empty())
+                        notice(plan, MappingDisposition::blocked, voice_id, "timbre_slot", {}, "Sample",
+                               "Voice region references a missing TX16W Timbre slot");
                     continue;
                 }
                 const auto source_wave = maps.waves.find(timbre->second->wave_slot);
                 if (source_wave == maps.waves.end()) {
-                    notice(plan, MappingDisposition::omitted,
-                           identity(*timbre->second, &Inspection::SetupIdentities::timbres), "wave_slot", bank.name,
-                           "Wave Data", "Timbre references an unavailable TX16W Wave slot");
+                    const auto slot = timbre->second->wave_slot;
+                    if (slot < setup.empty_wave_slots.size() && setup.empty_wave_slots[slot]) {
+                        ++empty_regions;
+                        notice(plan, MappingDisposition::omitted, voice_id, "empty_wave_region", {}, "Sample",
+                               voice.name + ": omitted native keys " + std::to_string(region.low_key_number) + ".." +
+                                   std::to_string(region.high_key_number) + " (empty Wave slot " +
+                                   std::to_string(slot + 1U) + ")");
+                    } else if (inspection.resolved_setup_waves.empty() &&
+                               std::ranges::find(setup.waves, slot, &WaveReference::slot) == setup.waves.end()) {
+                        notice(plan, MappingDisposition::blocked, voice_id, "wave_slot", {}, "Wave Data",
+                               "Timbre references an unidentified Wave slot");
+                    }
                     continue;
                 }
-                const auto root = midi_key(timbre->second->root_key_number);
-                const auto low = midi_key(region.low_key_number);
-                const auto high = midi_key(region.high_key_number);
+                const auto root = region.original_pitch ? original_pitch_note(*region.original_pitch)
+                                                        : packed_note(timbre->second->root_key_number, 0U, 0xa6U);
+                const auto low = packed_note(region.low_key_number, 0x10U, 0x8eU);
+                const auto high = packed_note(region.high_key_number, 0x10U, 0x8eU);
                 if (!root || !low || !high) {
-                    notice(plan, MappingDisposition::omitted,
-                           identity(*timbre->second, &Inspection::SetupIdentities::timbres), "key_number", bank.name,
-                           "key range", "TX16W key number is outside the proven native 16..143 range");
+                    notice(plan, MappingDisposition::omitted, voice_id, "key_number", {}, "key range",
+                           voice.name + ": omitted native keys " + std::to_string(region.low_key_number) + ".." +
+                               std::to_string(region.high_key_number) +
+                               (region.original_pitch ? ", region pitch word " : ", Timbre pitch byte ") +
+                               std::to_string(region.original_pitch.value_or(timbre->second->root_key_number)) +
+                               (root ? ": split outside the playable key range or invalid note code"
+                                     : ": unsupported original pitch"));
                     continue;
                 }
                 const auto &wave = inspection.waves[source_wave->second];
@@ -278,6 +302,8 @@ Result<ImportPlan> plan_import(const Inspection &inspection, const TargetInvento
                            "Wave Data", "Timbre references an unnamed TX16W Wave slot");
                     continue;
                 }
+                if (bank.name.empty())
+                    bank.name = unique_name(voice.name, 16U, bank_names);
                 const auto wave_key = uppercase(wave_name->second);
                 auto wave_plan =
                     std::ranges::find(plan.wave_data, source_wave->second, &WaveDataPlan::source_wave_index);
@@ -317,18 +343,16 @@ Result<ImportPlan> plan_import(const Inspection &inspection, const TargetInvento
                 sample.parameters.loop_length_frames = wave_plan->loop_length_frames;
                 bank.member_samples.push_back(sample.name);
                 plan.samples.push_back(std::move(sample));
-                notice(plan, MappingDisposition::approximated,
-                       identity(*timbre->second, &Inspection::SetupIdentities::timbres), "key_number",
-                       plan.samples.back().name, "MIDI key", "TX16W native key numbers are translated by -16");
                 if (region.fade != 0U) {
                     notice(plan, MappingDisposition::omitted, voice_id, "fade", plan.samples.back().name,
                            "key crossfade", "TX16W Voice Fade is preserved in the preview but is not authored");
                 }
-                if (region.native_timbre_selector_flags != 0U) {
-                    notice(plan, MappingDisposition::omitted, voice_id, "timbre_selector_flags",
-                           plan.samples.back().name, "Sample assignment",
-                           "TX16W native Timbre selector flags are preserved in the source model but are not authored");
-                }
+            }
+            if (empty_regions && empty_regions == voice.regions.size()) {
+                empty_voices.insert(voice.slot);
+                if (setup.performances.empty())
+                    notice(plan, MappingDisposition::omitted, voice_id, "empty_voice", {}, "Sample Bank",
+                           voice.name + ": omitted Voice because every region refers to an empty Wave slot");
             }
             if (!bank.member_samples.empty()) {
                 maps.banks.emplace(voice.slot, bank.name);
@@ -339,6 +363,16 @@ Result<ImportPlan> plan_import(const Inspection &inspection, const TargetInvento
 
         for (const auto &performance : setup.performances) {
             const auto performance_id = identity(performance, &Inspection::SetupIdentities::performances);
+            if (std::ranges::any_of(performance.voices,
+                                    [&](const auto &a) { return empty_voices.contains(a.voice_slot); }) &&
+                std::ranges::all_of(performance.voices, [&](const auto &a) {
+                    return a.voice_slot == 0xffU || empty_voices.contains(a.voice_slot);
+                })) {
+                notice(plan, MappingDisposition::omitted, performance_id, "empty_performance", {}, "Program",
+                       performance.name +
+                           ": omitted Performance because every assigned Voice has only empty Wave regions");
+                continue;
+            }
             const auto number = next_program_slot(occupied);
             if (!number) {
                 notice(plan, MappingDisposition::blocked, performance_id, "performance", {}, "Program slot",

@@ -1,4 +1,4 @@
-"""Compare forward conversions with the pre-refactor file and HTTP results."""
+"""Verify reviewed forward conversions through both file and HTTP bindings."""
 
 import argparse
 import hashlib
@@ -225,6 +225,10 @@ def forward(server, cli, fixture, root, mode):
     tree = run([cli, "info", output])
     assert "TONE" in tree
     if mode == "HIERARCHY":
+        for binding in (report, full):
+            sample = next(a for a in binding["actions"] if a["kind"].lower() == "sample")
+            details = {d["label"]: d["value"] for d in sample["details"]}
+            assert (details["Root key"], details["Key range"]) == ("58", "28..73")
         assert (
             "001: Performa [PROGRAM (PROG)]" in tree
             and "B Voice [SAMPLE BANK (SBAC)] - Rch Assign: A01" in tree
@@ -379,9 +383,9 @@ if __name__ == "__main__":
                 "7f9759fd2a2aad854e4eba177d5700b6e1b787eed49478ab3bc26cfe6611f153",
             ),
             "HIERARCHY": (
-                "5bc877842da1d41a57d6b54ae053e2f1caf49b73e47bb636da20114947200c19",
-                "3054913fca8c5a4ad3d65160c3fef53effce213b8ce9fa265e7b46e7a3f53dc6",
-                "7642699908caa87f3df017c46c494609925e37ac4a5c7fcf8fe194e1551b15c9",
+                "6d825c66f0e7e7210b96c65601b1b02a115858b992260424ff9251170a260b6d",
+                "3139621cac285f79c03e72d74c74de40c53698e576af230f30d397ec4c9f359f",
+                "4cdbca87e521282ebd443f933c9ac20094b8b488664e071ab2e41f97aae20bc0",
             ),
         }.items():
             observed = forward(

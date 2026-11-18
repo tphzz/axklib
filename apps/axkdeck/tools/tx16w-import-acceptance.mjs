@@ -18,7 +18,8 @@ await mkdir(output, { recursive: true });
 const scratchRoot = resolve(repo, 'build/tmp/tx16w-import-fixes');
 await mkdir(scratchRoot, { recursive: true });
 const scratch = await mkdtemp(`${scratchRoot}/http-`);
-const report = { original, sourcePaths: names.map(name => resolve(corpus, name)), cases: [] };
+const guitarPair = ['sd023ye.img', 'sd024ye.img'];
+const report = { original, sourcePaths: [...names, ...guitarPair].map(name => resolve(corpus, name)), cases: [] };
 async function hash(path) { const h = createHash('sha256'); for await (const chunk of createReadStream(path)) h.update(chunk); return h.digest('hex'); }
 report.originalSha256 = await hash(original);
 report.sourceSha256 = [];
@@ -215,7 +216,17 @@ try {
     assert.deepEqual((await snapshot()).request.report.acknowledged.toSorted(), decisions.toSorted());
     assert(await primary.isEnabled());
     await page.screenshot({ path: `${output}/ready-with-conversion-notes.png` });
-    let expectedActionCount = discovered.request.report.actionCount;
+    await begin('corpus', [guitarPair[0]]);
+    const guitars = await snapshot();
+    assert.deepEqual(guitars.request.members, [{ name: guitarPair[0], origin: 'SELECTED' }, { name: guitarPair[1], origin: 'AUTO_ADDED' }]);
+    assert.equal(guitars.request.report.eligible, 32);
+    assert.equal(guitars.request.report.counts.BLOCKER, 0);
+    assert.equal(guitars.request.report.actionCount, 113);
+    assert.deepEqual(guitars.request.report.decisions, []);
+    assert(await primary.isEnabled());
+    report.cases.push({ label: 'Electric Guitars keeps all 32 Performances with region losses', ...guitars });
+    await page.screenshot({ path: `${output}/electric-guitars.png` });
+    let expectedActionCount = guitars.request.report.actionCount;
     if (createVolume) {
         const dialog = page.getByRole('dialog', { name: 'Import TX16W disk set' });
         await dialog.getByRole('group', { name: 'Destination volume type' }).getByRole('button', { name:'New' }).click();

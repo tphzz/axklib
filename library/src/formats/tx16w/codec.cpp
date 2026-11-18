@@ -23,7 +23,6 @@ constexpr std::size_t performance_file_size = 5120U;
 constexpr std::size_t record_header_size = 16U;
 constexpr std::size_t voice_count = 32U;
 constexpr std::size_t voice_stride = 0x92U;
-constexpr std::size_t timbre_count = 64U;
 constexpr std::size_t timbre_stride = 0x38U;
 constexpr std::size_t timbre_table_offset = record_header_size + voice_count * voice_stride;
 constexpr std::size_t wave_reference_count = 64U;
@@ -124,20 +123,19 @@ SampleRateDecode sample_rate(std::span<const std::byte> bytes) {
 
 struct SetupLayoutDecode {
     NativeSetupLayout layout{NativeSetupLayout::legacy};
-    std::size_t wave_reference_offset{};
     bool write_protected{};
 };
 
-Result<SetupLayoutDecode> setup_layout(std::span<const std::byte> bytes, std::string_view source_name) {
+Result<SetupLayoutDecode> native_layout(std::span<const std::byte> bytes, std::string_view source_name) {
     constexpr std::array version_0200{std::byte{'0'}, std::byte{'2'}, std::byte{'0'}, std::byte{'0'}};
     if (std::ranges::equal(bytes.subspan(7U, version_0200.size()), version_0200))
-        return SetupLayoutDecode{NativeSetupLayout::version_0200, 0xf2U, false};
+        return SetupLayoutDecode{NativeSetupLayout::version_0200, false};
     const auto legacy_tail = bytes.subspan(7U, 9U);
     const auto protection = std::to_integer<std::uint8_t>(bytes[6U]);
     if (std::ranges::all_of(legacy_tail, [](std::byte value) { return value == std::byte{0}; }) && protection <= 1U)
-        return SetupLayoutDecode{NativeSetupLayout::legacy, 0xf0U, protection == 1U};
+        return SetupLayoutDecode{NativeSetupLayout::legacy, protection == 1U};
     return std::unexpected{parse_error(ErrorCode::unsupported_profile,
-                                       "TX16W Setup uses an unsupported native layout signature", source_name)};
+                                       "TX16W file uses an unsupported native layout signature", source_name)};
 }
 
 std::int16_t expand_pcm(std::uint16_t packed) {
@@ -240,7 +238,7 @@ Result<NativeSetup> decode_setup_file(std::span<const std::byte> setup_bytes, st
     if (const auto required = require_file(setup_bytes, setup_size, "TX16W Setup", setup_name); !required)
         return std::unexpected{required.error()};
 
-    const auto layout = setup_layout(setup_bytes, setup_name);
+    const auto layout = native_layout(setup_bytes, setup_name);
     if (!layout)
         return std::unexpected{layout.error()};
 
@@ -249,8 +247,19 @@ Result<NativeSetup> decode_setup_file(std::span<const std::byte> setup_bytes, st
     result.layout = layout->layout;
     result.write_protected = layout->write_protected;
     for (std::size_t slot = 0U; slot < wave_reference_count; ++slot) {
-        auto name = fixed_text(setup_bytes, layout->wave_reference_offset + slot * wave_reference_stride + 7U, 8U,
-                               "TX16W Wave reference name");
+        const auto base = layout->layout == NativeSetupLayout::version_0200 ? 0xf9U : 0xf7U;
+        const auto record = setup_bytes.subspan(base + slot * wave_reference_stride, wave_reference_stride);
+        const auto symbol = record.first(8);
+        if (std::ranges::all_of(symbol, [](auto b) { return b == std::byte{' '}; }) &&
+            std::ranges::all_of(record.last(8), [](auto b) { return b == std::byte{}; })) {
+            result.empty_wave_slots.set(slot);
+            continue;
+        }
+        const auto end = std::ranges::find(symbol, std::byte{});
+        if (!std::all_of(symbol.begin(), end, [](auto b) { return b >= std::byte{0x20} && b <= std::byte{0x7e}; }) ||
+            !std::all_of(end, symbol.end(), [](auto b) { return b == std::byte{} || b == std::byte{' '}; }))
+            continue; // A damaged name must not resolve to a file matching only its printable prefix.
+        auto name = fixed_text(record, 0U, 8U, "TX16W Wave reference name");
         if (!name)
             return std::unexpected{name.error()};
         if (!name->empty())
@@ -299,8 +308,16 @@ Result<VoiceFile> decode_voice_file(std::span<const std::byte> voice_bytes, std:
     if (const auto required = require_file(voice_bytes, voice_file_size, "TX16W Voice/Timbre file", source_name);
         !required)
         return std::unexpected(required.error());
+    const auto layout = native_layout(voice_bytes, source_name);
+    if (!layout)
+        return std::unexpected(layout.error());
+    const auto extended = layout->layout == NativeSetupLayout::version_0200;
+    if (extended && voice_bytes.size() < 15360U)
+        return std::unexpected(
+            parse_error(ErrorCode::container_truncated, "Truncated version-0200 Voice file", source_name));
+    const auto timbre_count = extended ? 128U : 64U;
     VoiceFile result;
-    std::array<bool, timbre_count> referenced_timbres{};
+    std::array<bool, 128> referenced_timbres{};
     for (std::size_t slot = 0U; slot < voice_count; ++slot) {
         const auto base = record_header_size + slot * voice_stride;
         auto name = fixed_text(voice_bytes, base + 0x86U, 10U, "TX16W Voice name");
@@ -315,16 +332,23 @@ Result<VoiceFile> decode_voice_file(std::span<const std::byte> voice_bytes, std:
             const auto high_key_number = std::to_integer<std::uint8_t>(voice_bytes[offset + 2U]);
             if (low_key_number == 0xffU)
                 continue;
-            const auto native_timbre_selector = std::to_integer<std::uint8_t>(voice_bytes[offset]);
-            const auto timbre_slot = static_cast<std::uint8_t>(native_timbre_selector & 0x3fU);
+            const auto timbre_slot = std::to_integer<std::uint8_t>(voice_bytes[offset]);
             if (low_key_number > high_key_number) {
                 return std::unexpected{parse_error(ErrorCode::object_malformed,
                                                    "TX16W Voice contains an invalid Timbre slot or key range")};
             }
-            voice.regions.push_back({timbre_slot, low_key_number, high_key_number,
-                                     std::to_integer<std::uint8_t>(voice_bytes[offset + 3U]),
-                                     static_cast<std::uint8_t>(native_timbre_selector & 0xc0U)});
-            referenced_timbres[timbre_slot] = true;
+            VoiceRegion split{timbre_slot, low_key_number, high_key_number,
+                              std::to_integer<std::uint8_t>(voice_bytes[offset + 3U])};
+            if (extended) {
+                const auto pitch_offset =
+                    timbre_table_offset + timbre_count * timbre_stride + (slot * 32U + region) * 2U;
+                split.original_pitch =
+                    static_cast<std::uint16_t>((std::to_integer<unsigned>(voice_bytes[pitch_offset]) << 8U) |
+                                               std::to_integer<unsigned>(voice_bytes[pitch_offset + 1U]));
+            }
+            voice.regions.push_back(split);
+            if (timbre_slot < timbre_count)
+                referenced_timbres[timbre_slot] = true;
         }
         result.voices.push_back(std::move(voice));
     }

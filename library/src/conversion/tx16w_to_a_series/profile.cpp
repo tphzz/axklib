@@ -25,8 +25,6 @@ Impact impact(const MappingNotice &notice) {
         return Impact::blocker;
     if (notice.disposition == MappingDisposition::exact)
         return Impact::exact;
-    if (notice.disposition == MappingDisposition::approximated && notice.source_parameter == "key_number")
-        return Impact::representation;
     if (notice.disposition == MappingDisposition::defaulted)
         return Impact::uncertainty;
     return Impact::loss;
@@ -127,6 +125,9 @@ Result<std::shared_ptr<const PreparedPlan>> prepare(const Request &request, cons
                                          {"Root key", std::to_string(sample.parameters.root_key.value())},
                                          {"Key range", std::to_string(sample.parameters.key_low.value()) + ".." +
                                                            std::to_string(sample.parameters.key_high.value())}};
+        issue(Impact::representation, "tx16w.key_number", report.actions.back().source_object,
+              "Native split limits and original pitch are converted to MIDI note numbers", "key_number", sample.name,
+              "MIDI key");
         issue(Impact::uncertainty, "a-series.sample-defaults", report.actions.back().source_object,
               "Destination-only Sample controls use the A-series writer defaults", {}, sample.name);
     }
