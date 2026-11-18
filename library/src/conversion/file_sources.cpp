@@ -58,6 +58,7 @@ Result<Sources> admit(std::span<const std::filesystem::path> paths, const Cancel
     std::set<std::filesystem::path> selected;
     std::vector<native::SourceMember> sources;
     std::uint64_t total_bytes{};
+    std::uint64_t remaining_disk_bytes = 8ULL * 1024U * 1024U * 1024U;
     auto snapshot = [&](const std::filesystem::path &path) -> Result<std::shared_ptr<const RandomAccessReader>> {
         if (const auto active = cancellation.check(); !active)
             return std::unexpected(active.error());
@@ -102,6 +103,29 @@ Result<Sources> admit(std::span<const std::filesystem::path> paths, const Cancel
         } else {
             if (!std::filesystem::is_regular_file(canonical, error) || error)
                 return std::unexpected(invalid("Conversion sources must be files or folders"));
+            auto disk = FileReader::open(canonical);
+            if (!disk)
+                return std::unexpected(disk.error());
+            auto is_sfs = result.sfs.recognizes(**disk);
+            if (!is_sfs)
+                return std::unexpected(is_sfs.error());
+            if (*is_sfs) {
+                const auto size = (*disk)->size();
+                if (size > remaining_disk_bytes || result.files.size() >= maximum_files)
+                    return std::unexpected(invalid("SFS sources exceed the disk inspection limit"));
+                remaining_disk_bytes -= size;
+                auto digest = package_internal::sha256_reader(**disk, cancellation);
+                if (!digest)
+                    return std::unexpected(digest.error());
+                member.reader = *disk;
+                if (auto added =
+                        result.sfs.admit(member, canonical, package_internal::hex_digest(*digest), cancellation);
+                    !added)
+                    return std::unexpected(added.error());
+                result.files.push_back({canonical, *digest, size});
+                sources.push_back(std::move(member));
+                continue;
+            }
             auto reader = snapshot(canonical);
             if (!reader)
                 return std::unexpected(reader.error());

@@ -1,12 +1,24 @@
 #include "axklib/writer.hpp"
 
+#include "axklib/pcm_import.hpp"
+
 #include "audio_import_internal.hpp"
+#include "axklib/resample.hpp"
 
 #include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <expected>
+#include <filesystem>
 #include <format>
 #include <iterator>
 #include <limits>
+#include <optional>
 #include <ranges>
+#include <span>
+#include <string>
+#include <utility>
+#include <vector>
 
 namespace axk {
 namespace {
@@ -182,137 +194,121 @@ Result<AudioSourceInfo> inspect_sampler_audio(const RandomAccessReader &reader,
     return result;
 }
 
-Result<ImportedAudio> import_sampler_audio(const std::filesystem::path &path, const AudioImportOptions &options) {
-    if (options.expected_channels != 1U && options.expected_channels != 2U) {
-        return std::unexpected{audio_import_error("expected channel count must be one or two")};
-    }
-    const auto source = audio_import_detail::inspect_sndfile(path, options.expected_channels);
-    if (!source)
-        return std::unexpected{source.error()};
-    const auto output_rate = choose_sampler_sample_rate(source->sample_rate, options.target_sample_rate);
-    if (!output_rate)
-        return std::unexpected{output_rate.error()};
-    const auto projected = audio_import_detail::project_sampler_audio_size(source->frames, source->channels,
-                                                                           source->sample_rate, *output_rate);
-    if (!projected)
-        return std::unexpected{projected.error()};
-    if (!projected->valid)
-        return std::unexpected{wave_data_too_large_error(projected->bytes_per_channel)};
-    const bool resampled = *output_rate != source->sample_rate;
-    const bool exact_integer_conversion = (source->is_pcm8 || source->is_pcm16) && !resampled;
-    const bool dither = resampled || source->reduces_precision;
-    std::vector<std::int16_t> quantized;
-    std::uint64_t clipped{};
-    if (exact_integer_conversion) {
-        auto decoded = audio_import_detail::decode_sndfile_pcm16(path, *source);
-        if (!decoded)
-            return std::unexpected{decoded.error()};
-        quantized = std::move(*decoded);
-    } else {
-        auto decoded = audio_import_detail::decode_sndfile_float64(path, *source);
-        if (!decoded)
-            return std::unexpected{decoded.error()};
-        auto floating = std::move(*decoded);
-        if (resampled) {
-            auto converted =
-                audio_import_detail::resample_vhq(floating, source->channels, source->sample_rate, *output_rate);
-            if (!converted)
-                return std::unexpected{converted.error()};
-            floating = std::move(*converted);
-        }
-        auto converted = audio_import_detail::quantize_pcm16(floating, dither);
+namespace {
+using audio_import_detail::SourceAudioInfo;
+
+Result<audio_import_detail::QuantizedPcm16> quantize_at_rate(std::vector<double> samples, const SourceAudioInfo &source,
+                                                             std::uint32_t output_rate, bool dither) {
+    if (output_rate != source.sample_rate) {
+        auto converted = audio::resample_vhq(samples, source.channels, source.sample_rate, output_rate);
         if (!converted)
-            return std::unexpected{converted.error()};
-        quantized = std::move(converted->samples);
-        clipped = converted->clipped_samples;
+            return std::unexpected(converted.error());
+        samples = std::move(*converted);
     }
-    const auto output_frames = quantized.size() / source->channels;
-    if (output_frames > maximum_wave_data_frames_per_channel) {
-        return std::unexpected{wave_data_too_large_error(output_frames * sizeof(std::int16_t))};
+    return audio_import_detail::quantize_pcm16(samples, dither);
+}
+
+template <typename ReadInteger, typename ReadFloating>
+Result<ImportedAudio> import_frames(const SourceAudioInfo &source, std::optional<std::uint32_t> target_rate,
+                                    ReadInteger read_integer, ReadFloating read_floating) {
+    const auto output_rate = choose_sampler_sample_rate(source.sample_rate, target_rate);
+    if (!output_rate)
+        return std::unexpected(output_rate.error());
+    const auto projected = audio_import_detail::project_sampler_audio_size(source.frames, source.channels,
+                                                                           source.sample_rate, *output_rate);
+    if (!projected)
+        return std::unexpected(projected.error());
+    if (!projected->valid)
+        return std::unexpected(wave_data_too_large_error(projected->bytes_per_channel));
+    const bool resampled = *output_rate != source.sample_rate;
+    const bool exact_integer = (source.is_pcm8 || source.is_pcm16) && !resampled;
+    const bool dither = resampled || source.reduces_precision;
+    const auto finish = [&](std::span<const std::int16_t> samples, std::uint64_t clipped) -> Result<ImportedAudio> {
+        const auto frames = samples.size() / source.channels;
+        if (frames > maximum_wave_data_frames_per_channel)
+            return std::unexpected(wave_data_too_large_error(frames * sizeof(std::int16_t)));
+        ImportedAudio result;
+        result.source_format = source.format;
+        result.source_subtype = source.subtype;
+        result.source_channels = static_cast<std::uint8_t>(source.channels);
+        result.source_sample_rate = source.sample_rate;
+        result.output_sample_rate = *output_rate;
+        result.source_sample_width_bits = source.sample_width_bits;
+        result.output_sample_width_bits = sampler_output_sample_width_bits;
+        result.output_frames = frames;
+        result.pcm_channels = audio_import_detail::split_pcm16(samples, source.channels);
+        result.resampled = resampled;
+        result.quantized = !exact_integer;
+        result.sample_width_converted = source.sample_width_bits != 16U;
+        if (dither)
+            result.dither_algorithm = std::string{audio_import_detail::dither_algorithm};
+        result.clipped_samples = clipped;
+        return result;
+    };
+    if (exact_integer) {
+        auto decoded = read_integer();
+        if (!decoded)
+            return std::unexpected(decoded.error());
+        return finish(*decoded, 0U);
     }
-    ImportedAudio result;
-    result.source_path = path;
-    result.source_format = source->format;
-    result.source_subtype = source->subtype;
-    result.source_channels = static_cast<std::uint8_t>(source->channels);
-    result.source_sample_rate = source->sample_rate;
-    result.output_sample_rate = *output_rate;
-    result.source_sample_width_bits = source->sample_width_bits;
-    result.output_sample_width_bits = sampler_output_sample_width_bits;
-    result.output_frames = output_frames;
-    result.pcm_channels = audio_import_detail::split_pcm16(quantized, source->channels);
-    result.resampled = resampled;
-    result.quantized = !exact_integer_conversion;
-    result.sample_width_converted = source->sample_width_bits != 16U;
-    if (dither)
-        result.dither_algorithm = std::string{audio_import_detail::dither_algorithm};
-    result.clipped_samples = clipped;
+    auto decoded = read_floating();
+    if (!decoded)
+        return std::unexpected(decoded.error());
+    auto converted = quantize_at_rate(std::move(*decoded), source, *output_rate, dither);
+    if (!converted)
+        return std::unexpected(converted.error());
+    return finish(converted->samples, converted->clipped_samples);
+}
+
+template <typename Input>
+Result<ImportedAudio> import_container(const Input &input, const AudioImportOptions &options) {
+    if (options.expected_channels != 1U && options.expected_channels != 2U)
+        return std::unexpected(audio_import_error("expected channel count must be one or two"));
+    const auto source = audio_import_detail::inspect_sndfile(input, options.expected_channels);
+    if (!source)
+        return std::unexpected(source.error());
+    return import_frames(
+        *source, options.target_sample_rate, [&] { return audio_import_detail::decode_sndfile_pcm16(input, *source); },
+        [&] { return audio_import_detail::decode_sndfile_float64(input, *source); });
+}
+} // namespace
+
+Result<ImportedAudio> import_sampler_audio(const std::filesystem::path &path, const AudioImportOptions &options) {
+    auto result = import_container(path, options);
+    if (result)
+        result->source_path = path;
     return result;
 }
 
 Result<ImportedAudio> import_sampler_audio(const RandomAccessReader &reader, const AudioImportOptions &options) {
-    if (options.expected_channels != 1U && options.expected_channels != 2U)
-        return std::unexpected{audio_import_error("expected channel count must be one or two")};
-    const auto source = audio_import_detail::inspect_sndfile(reader, options.expected_channels);
-    if (!source)
-        return std::unexpected{source.error()};
-    const auto output_rate = choose_sampler_sample_rate(source->sample_rate, options.target_sample_rate);
-    if (!output_rate)
-        return std::unexpected{output_rate.error()};
-    const auto projected = audio_import_detail::project_sampler_audio_size(source->frames, source->channels,
-                                                                           source->sample_rate, *output_rate);
-    if (!projected)
-        return std::unexpected{projected.error()};
-    if (!projected->valid)
-        return std::unexpected{wave_data_too_large_error(projected->bytes_per_channel)};
-    const bool resampled = *output_rate != source->sample_rate;
-    const bool exact_integer_conversion = (source->is_pcm8 || source->is_pcm16) && !resampled;
-    const bool dither = resampled || source->reduces_precision;
-    std::vector<std::int16_t> quantized;
-    std::uint64_t clipped{};
-    if (exact_integer_conversion) {
-        auto decoded = audio_import_detail::decode_sndfile_pcm16(reader, *source);
-        if (!decoded)
-            return std::unexpected{decoded.error()};
-        quantized = std::move(*decoded);
-    } else {
-        auto decoded = audio_import_detail::decode_sndfile_float64(reader, *source);
-        if (!decoded)
-            return std::unexpected{decoded.error()};
-        auto floating = std::move(*decoded);
-        if (resampled) {
-            auto converted =
-                audio_import_detail::resample_vhq(floating, source->channels, source->sample_rate, *output_rate);
-            if (!converted)
-                return std::unexpected{converted.error()};
-            floating = std::move(*converted);
-        }
-        auto converted = audio_import_detail::quantize_pcm16(floating, dither);
-        if (!converted)
-            return std::unexpected{converted.error()};
-        quantized = std::move(converted->samples);
-        clipped = converted->clipped_samples;
-    }
-    const auto output_frames = quantized.size() / source->channels;
-    if (output_frames > maximum_wave_data_frames_per_channel)
-        return std::unexpected{wave_data_too_large_error(output_frames * sizeof(std::int16_t))};
-    ImportedAudio result;
-    result.source_format = source->format;
-    result.source_subtype = source->subtype;
-    result.source_channels = static_cast<std::uint8_t>(source->channels);
-    result.source_sample_rate = source->sample_rate;
-    result.output_sample_rate = *output_rate;
-    result.source_sample_width_bits = source->sample_width_bits;
-    result.output_sample_width_bits = sampler_output_sample_width_bits;
-    result.output_frames = output_frames;
-    result.pcm_channels = audio_import_detail::split_pcm16(quantized, source->channels);
-    result.resampled = resampled;
-    result.quantized = !exact_integer_conversion;
-    result.sample_width_converted = source->sample_width_bits != 16U;
-    if (dither)
-        result.dither_algorithm = std::string{audio_import_detail::dither_algorithm};
-    result.clipped_samples = clipped;
-    return result;
+    return import_container(reader, options);
+}
+
+Result<ImportedAudio> import_mono_pcm16(std::span<const std::int16_t> frames, std::uint32_t source_rate,
+                                        std::uint32_t target_rate) {
+    if (frames.empty())
+        return std::unexpected(audio_import_error("PCM source has no frames"));
+    const SourceAudioInfo source{.format = "PCM",
+                                 .subtype = "PCM_16",
+                                 .channels = 1U,
+                                 .frames = frames.size(),
+                                 .sample_rate = source_rate,
+                                 .sample_width_bits = 16U,
+                                 .is_pcm16 = true};
+    if (const auto bounded = audio_import_detail::validate_source_resource_limits(
+            source, source_rate == target_rate ? sizeof(std::int16_t) : sizeof(double));
+        !bounded)
+        return std::unexpected(bounded.error());
+    return import_frames(
+        source, target_rate, [&]() -> Result<std::span<const std::int16_t>> { return frames; },
+        [&]() -> Result<std::vector<double>> {
+            // libsndfile normalizes signed PCM16 to [-1, 32767/32768] on float reads.
+            std::vector<double> normalized;
+            normalized.reserve(frames.size());
+            for (const auto sample : frames)
+                normalized.push_back(static_cast<double>(sample) / 32768.0);
+            return normalized;
+        });
 }
 
 } // namespace axk

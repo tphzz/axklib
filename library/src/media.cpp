@@ -338,10 +338,7 @@ Result<MediaContainer> open_media(std::shared_ptr<const RandomAccessReader> read
                 return std::unexpected{disk.error()};
             return MediaContainer{std::move(*disk)};
         }
-        constexpr std::string_view sfs_magic = "YAMAHA_dev3";
-        if (prefix->size() < sfs_magic.size() ||
-            !std::ranges::equal(std::span{*prefix}.first(sfs_magic.size()), sfs_magic,
-                                [](std::byte left, char right) { return left == static_cast<std::byte>(right); })) {
+        if (!detail::sfs_disk_signature(*prefix)) {
             return std::unexpected{detail::media_error(ErrorCode::container_unrecognized,
                                                        "Input is not a recognized media container",
                                                        text::path_to_utf8(source_path), std::nullopt)};

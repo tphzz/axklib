@@ -1,5 +1,8 @@
 #include "image_sessions_internal.hpp"
 
+#include <algorithm>
+#include <unordered_map>
+
 namespace axk::app {
 
 Result<NativeDocumentSnapshot> ImageSessionManager::native_snapshot(const ImageDocumentRef &target,
@@ -23,6 +26,14 @@ Result<NativeDocumentSnapshot> ImageSessionManager::native_snapshot(const ImageD
     const auto document = (*selected)->native->native_document;
     if (!document)
         return std::unexpected(session_error("native_format_unsupported", "Source has no native conversion document"));
+    const auto &ids = (*selected)->native->native_object_ids;
+    std::shared_ptr<std::unordered_map<std::string, std::string>> keys;
+    if (std::ranges::any_of(ids, [](const auto &item) { return item.first != item.second; })) {
+        keys = std::make_shared<std::unordered_map<std::string, std::string>>();
+        keys->reserve(ids.size());
+        for (const auto &[key, id] : ids)
+            keys->emplace(id, key);
+    }
     return NativeDocumentSnapshot{target, expected_revision, document,
                                   [this, target, owner = std::string{owner_id},
                                    expected_revision](const CancellationToken &token) -> Result<void> {
@@ -30,7 +41,8 @@ Result<NativeDocumentSnapshot> ImageSessionManager::native_snapshot(const ImageD
                                       if (!current)
                                           return std::unexpected(current.error());
                                       return {};
-                                  }};
+                                  },
+                                  std::move(keys)};
 }
 
 } // namespace axk::app

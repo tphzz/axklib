@@ -8,8 +8,16 @@
     import { fitsCapacity } from './samplerCapacityFixture';
     import { diskLayoutCapacity, diskLayoutCompletion } from './diskImportLayoutFixture';
     import { idleCompanionSearch } from '../features/import/tx16wCompanions';
+    import { placementError } from '../features/import/tx16wPlacement';
 
-    const target = { partitionIndex: 0, volumeName: 'Samples' };
+    const target = { kind: 'EXISTING_VOLUME' as const, partitionIndex: 0, volumeName: 'Samples' };
+    const destinations = {
+        partitions: [
+            { partitionIndex: 0, name: 'PARTITION 1' },
+            { partitionIndex: 1, name: 'PARTITION 2' },
+        ],
+        volumes: [{ ...target, name: 'PARTITION 1', label: 'Samples' }],
+    };
     const query = new URLSearchParams(location.search);
     const native = query.has('native') || query.get('scenario') === 'native-long';
     const scenario = query.get('scenario') ?? 'normal';
@@ -24,6 +32,45 @@
             executable: true,
             actionCount: 201,
             issueCount: 2,
+            ...(native
+                ? {
+                      sourceCount: 4,
+                      sourceObjects: [
+                          {
+                              id: 'p1',
+                              name: 'Stage Piano',
+                              kind: 'performance',
+                              location: 'Keys-01.img / P01',
+                              selectable: true,
+                              dependencies: ['v1'],
+                          },
+                          {
+                              id: 'p2',
+                              name: 'EP Layer',
+                              kind: 'performance',
+                              location: 'Keys-02.img / P02',
+                              selectable: true,
+                              dependencies: ['w1'],
+                          },
+                          {
+                              id: 'v1',
+                              name: 'Piano Voice',
+                              kind: 'voice',
+                              location: 'Keys-01.img / V01',
+                              selectable: false,
+                              dependencies: ['w1'],
+                          },
+                          {
+                              id: 'w1',
+                              name: 'PFC2',
+                              kind: 'wave',
+                              location: 'Keys-02.img / W01',
+                              selectable: false,
+                              dependencies: [],
+                          },
+                      ],
+                  }
+                : {}),
             offset: 0,
             capacity: fitsCapacity,
             destination: { imageId: 'image-1', documentId: 'document-1', expectedRevision: 1 },
@@ -43,7 +90,7 @@
                     code: 'resampling',
                     impact: 'LOSS',
                     message: 'Wave Data resampled to 48000 Hz',
-                    sourceObject: 'native-wave-1',
+                    sourceObject: native ? 'w1' : 'native-wave-1',
                     sourceParameter: 'sample_rate',
                     targetObject: 'Concert-Piano-1',
                     targetParameter: 'sample_rate',
@@ -53,7 +100,7 @@
                     code: 'defaults',
                     impact: 'UNCERTAINTY',
                     message: 'Destination controls use writer defaults',
-                    sourceObject: 'native-wave-1',
+                    sourceObject: native ? 'w1' : 'native-wave-1',
                     sourceParameter: '',
                     targetObject: 'Concert-Piano-1',
                     targetParameter: '',
@@ -75,6 +122,8 @@
         documentSource: native
             ? { kind: 'DOCUMENT', sessionId: 1, documentId: 'tx16w', expectedRevision: 1 }
             : undefined,
+        sourceName: native ? 'Keys-01.img' : undefined,
+        destinationProfile: native ? 'yamaha.tx16w-to-a-series' : undefined,
         destinationName: native
             ? query.get('scenario') === 'native-long'
                 ? `${'LongDestinationImageName'.repeat(9)}.hds`
@@ -133,9 +182,14 @@
         }
         if (scenario === 'strict') fidelity('STRICT');
         if (
-            ['companion-found', 'searching', 'search-error', 'mixed-losses', 'all-losses', 'long-chips'].includes(
-                scenario,
-            )
+            [
+                'companion-found',
+                'searching',
+                'search-error',
+                'conversion-notes',
+                'audition-program',
+                'long-chips',
+            ].includes(scenario)
         ) {
             request.members = request.members.slice(0, 2);
             request.members[0].sourceName =
@@ -160,7 +214,7 @@
                 requirements: [],
             };
         }
-        if (['mixed-losses', 'all-losses'].includes(scenario)) {
+        if (['conversion-notes', 'audition-program'].includes(scenario)) {
             plan.report!.issues = [
                 ...Array.from({ length: 101 }, (_, index) => ({
                     ...plan.report!.issues[0],
@@ -170,9 +224,16 @@
                 plan.report!.issues[1],
             ];
             plan.report!.issueCount = 102;
-            request.acknowledgedIssueIds = plan
-                .report!.issues.slice(0, scenario === 'all-losses' ? 101 : 50)
-                .map((issue) => issue.id);
+            if (scenario === 'audition-program') {
+                plan.report!.issues.push({
+                    ...plan.report!.issues[101],
+                    id: 'audition-program',
+                    code: 'tx16w.missing_performance',
+                    message: 'No TX16W Performance was present',
+                    decision: 'Create an audition Program from Piano Voice',
+                });
+                plan.report!.issueCount++;
+            }
         }
     }
     function fidelity(value: 'BEST' | 'STRICT') {
@@ -186,13 +247,22 @@
     <Tx16wImportDialog
         {request}
         {completion}
-        volumeOptions={[{ target, key: '0:Samples', label: 'Disk - Samples', partitionName: 'Disk' }]}
+        onbrowse={() => {
+            request.destinationName = 'Second target.hds';
+        }}
+        onsources={(ids) => {
+            request.sourceObjectIds = ids;
+        }}
+        {destinations}
         onrecover={() => {
             completion.phase = 'completed';
             open = false;
         }}
         ontarget={(value) => {
             request.target = value;
+            request.sourceObjects = plan.report?.sourceObjects;
+            request.plan = placementError(value, destinations) ? null : plan;
+            request.status = request.plan ? 'ready' : 'waiting-target';
         }}
         onmode={(value) => {
             request.importMode = value;

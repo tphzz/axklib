@@ -11,6 +11,7 @@
 
 #include "axklib/audio.hpp"
 #include "axklib/conversion/file_plan.hpp"
+#include "axklib/conversion/tx16w_to_a_series/profile.hpp"
 #include "axklib/media.hpp"
 #include "axklib/relationship.hpp"
 #include "axklib/writer.hpp"
@@ -22,9 +23,11 @@
 namespace {
 class ConversionFiles : public testing::Test {
   protected:
-    std::filesystem::path root = std::filesystem::temp_directory_path() / "axk-conversion-file-plan-test";
+    std::filesystem::path root;
     axk::conversion::FileRequest request;
     void SetUp() override {
+        root = std::filesystem::temp_directory_path() /
+               (std::string{"axk-conversion-files-"} + testing::UnitTest::GetInstance()->current_test_info()->name());
         std::filesystem::remove_all(root);
         std::filesystem::create_directories(root / "source");
         std::vector<char> bytes(35U);
@@ -45,7 +48,7 @@ class ConversionFiles : public testing::Test {
         request = {"yamaha.tx16w-to-a-series",
                    {root / "source"},
                    root / "target.hds",
-                   {{"partitionIndex", 0}, {"volumeName", "Samples"}},
+                   {{"kind", "EXISTING_VOLUME"}, {"partitionIndex", 0}, {"volumeName", "Samples"}},
                    {{"mode", "WAVE_DATA_ONLY"}},
                    {},
                    {}};
@@ -58,12 +61,133 @@ class ConversionFiles : public testing::Test {
     static std::vector<std::string> acknowledgements(const axk::conversion::Report &report) {
         std::vector<std::string> result;
         for (const auto &issue : report.issues)
-            if (issue.impact == axk::conversion::Impact::loss || issue.impact == axk::conversion::Impact::uncertainty)
+            if (!issue.decision.empty())
                 result.push_back(issue.id);
         return result;
     }
 };
 } // namespace
+
+TEST_F(ConversionFiles, CreatesVolumeInSecondPartitionOnlyWhenApplyingAndNeverMergesANameCollision) {
+    const axk::HdsBuildManifest manifest{
+        "1.0", 8U * 1024U * 1024U, {{"First", {{"Imported", {}, {}, {}, {}}}}, {"Second", {}}}};
+    ASSERT_TRUE(axk::write_hds_image(manifest, request.destination, true));
+    const auto before = bytes(request.destination);
+    const auto plan = [&] { return axk::conversion::FilePlan::prepare(request); };
+    request.selection = {{"kind", "CREATE_VOLUME"}, {"partitionIndex", 0}, {"volumeName", "Imported"}};
+    EXPECT_FALSE(plan());
+    request.selection["partitionIndex"] = 1;
+    for (const auto name : {"", " padding", "PRF3", "12345678901234567"}) {
+        request.selection["volumeName"] = name;
+        EXPECT_FALSE(plan()) << name;
+    }
+    request.selection["volumeName"] = "Imported";
+    request.selection.erase("kind");
+    EXPECT_FALSE(plan());
+    request.selection["kind"] = "CREATE_VOLUME";
+    auto prepared = plan();
+    ASSERT_TRUE(prepared) << prepared.error().message;
+    ASSERT_TRUE(prepared->report().executable);
+    EXPECT_EQ(bytes(request.destination), before);
+    const auto output = root / "created.hds";
+    const auto written = prepared->apply(output, acknowledgements(prepared->report()));
+    ASSERT_TRUE(written) << written.error().message;
+    EXPECT_EQ(bytes(request.destination), before);
+    const auto opened = axk::open_image(output);
+    ASSERT_TRUE(opened);
+    const auto catalog = axk::build_object_catalog(*opened);
+    ASSERT_TRUE(catalog);
+    ASSERT_EQ(catalog->objects.size(), 1U);
+    ASSERT_TRUE(catalog->objects.front().placement);
+    EXPECT_EQ(catalog->objects.front().placement->volume_name, "Imported");
+    EXPECT_EQ(catalog->objects.front().partition.value, 1U);
+}
+
+TEST_F(ConversionFiles, OmittingReverseProfileLeavesNativeWaveReadingAndForwardConversionIntact) {
+    axk::conversion::Registry forward_only;
+    ASSERT_TRUE(forward_only.add(axk::tx16w::a_series::profile()));
+    const auto before = bytes(root / "source" / "TONE.W01");
+    auto plan = axk::conversion::FilePlan::prepare(request, {}, nullptr, forward_only);
+    ASSERT_TRUE(plan) << plan.error().message;
+    ASSERT_TRUE(plan->report().executable);
+    ASSERT_TRUE(plan->apply(root / "forward.hds", acknowledgements(plan->report())));
+    const auto reopened = axk::open_image(root / "forward.hds");
+    ASSERT_TRUE(reopened) << reopened.error().message;
+    const auto catalog = axk::build_object_catalog(*reopened);
+    ASSERT_TRUE(catalog);
+    ASSERT_EQ(catalog->objects.size(), 1U);
+    EXPECT_EQ(catalog->objects.front().object.header.type, axk::ObjectType::smpl);
+    EXPECT_EQ(bytes(root / "source" / "TONE.W01"), before);
+    request.profile_id = "yamaha.a-series-to-tx16w.wave-disk";
+    request.sources = {root / "forward.hds"};
+    request.destination.clear();
+    request.selection = nullptr;
+    const auto rejected = axk::conversion::FilePlan::prepare(request, {}, nullptr, forward_only);
+    ASSERT_FALSE(rejected);
+    EXPECT_EQ(rejected.error().message, "Unknown conversion profile");
+}
+
+TEST_F(ConversionFiles, PublishesOnlyTheRetainedNewImageWithoutATemplate) {
+    using namespace axk::conversion;
+    const auto expected = bytes(root / "target.hds");
+    const auto source = root / "source" / "TONE.W01";
+    const auto before = bytes(source);
+    std::filesystem::remove(root / "target.hds");
+    unsigned calls{};
+    Registry registry;
+    Profile producer{"test.new-image",
+                     "Test image",
+                     "yamaha.tx16w",
+                     "test.image",
+                     {},
+                     [&](const Request &input, const axk::CancellationToken &,
+                         axk::ProgressSink *) -> axk::Result<std::shared_ptr<const PreparedPlan>> {
+                         ++calls;
+                         Report report{"test.new-image", input.fidelity, true, {}, {}, {}};
+                         report.issues.push_back({"L", "fixture.loss", Impact::loss, {}, {}, {}, {}, "Fixture loss"});
+                         const auto data = std::as_bytes(std::span{expected});
+                         return std::make_shared<const PreparedPlan>(
+                             std::move(report), NewImage{{data.begin(), data.end()}}, data.size() + 4096U);
+                     },
+                     OutputKind::new_image};
+    ASSERT_TRUE(registry.add(std::move(producer)));
+    request.profile_id = "test.new-image";
+    request.destination.clear();
+    request.selection = nullptr;
+    const auto output = root / "published.img";
+    auto prepare = [&] { return FilePlan::prepare(request, {}, nullptr, registry); };
+    auto plan = prepare();
+    ASSERT_TRUE(plan) << plan.error().message;
+    const auto review = plan->report_json();
+    EXPECT_FALSE(review.contains("capacity"));
+    EXPECT_EQ(review.at("newImage").at("sizeBytes"), expected.size());
+    EXPECT_FALSE(std::filesystem::exists(output));
+    EXPECT_FALSE(plan->apply(output, std::vector<std::string>{"L"}));
+    EXPECT_FALSE(std::filesystem::exists(output));
+    const auto ids = acknowledgements(plan->report());
+    EXPECT_TRUE(ids.empty());
+    ASSERT_TRUE(plan->apply(output, ids));
+    EXPECT_EQ(calls, 1U);
+    EXPECT_EQ(bytes(output), expected);
+    EXPECT_EQ(bytes(source), before);
+    EXPECT_FALSE(plan->apply(root / "again.img", ids));
+
+    auto collision = prepare();
+    ASSERT_TRUE(collision);
+    EXPECT_FALSE(collision->apply(source, ids));
+    EXPECT_EQ(bytes(source), before);
+    auto stale = prepare();
+    ASSERT_TRUE(stale);
+    {
+        std::ofstream changed{source, std::ios::app | std::ios::binary};
+        changed.put('x');
+    }
+    EXPECT_FALSE(stale->apply(root / "stale.img", ids));
+    EXPECT_FALSE(std::filesystem::exists(root / "stale.img"));
+    request.destination = output;
+    EXPECT_FALSE(prepare());
+    EXPECT_EQ(calls, 3U);
+}
 
 TEST_F(ConversionFiles, PreparesWithoutWritesAndPublishesOnceToANewOutput) {
     const auto before = bytes(request.destination);
@@ -71,8 +195,9 @@ TEST_F(ConversionFiles, PreparesWithoutWritesAndPublishesOnceToANewOutput) {
     ASSERT_TRUE(plan) << plan.error().message;
     EXPECT_EQ(bytes(request.destination), before);
     EXPECT_FALSE(std::filesystem::exists(root / "output.hds"));
-    EXPECT_FALSE(plan->apply(root / "output.hds", {}));
-    const auto applied = plan->apply(root / "output.hds", acknowledgements(plan->report()));
+    ASSERT_TRUE(std::ranges::any_of(plan->report().issues,
+                                    [](const auto &issue) { return issue.impact == axk::conversion::Impact::loss; }));
+    const auto applied = plan->apply(root / "output.hds", {});
     ASSERT_TRUE(applied) << applied.error().message;
     EXPECT_EQ(bytes(request.destination), before);
     EXPECT_NE(bytes(root / "output.hds"), before);
@@ -110,7 +235,7 @@ TEST_F(ConversionFiles, ConvertsNativeHierarchyWithOccurrenceIdsAndReadableAudio
     request.options["mode"] = "HIERARCHY";
     auto plan = axk::conversion::FilePlan::prepare(request);
     ASSERT_TRUE(plan) << plan.error().message;
-    ASSERT_TRUE(plan->report().executable) << axk::conversion::report_json(plan->report()).dump();
+    ASSERT_TRUE(plan->report().executable) << plan->report_json().dump();
     ASSERT_EQ(plan->report().actions.size(), 4U);
     for (const auto &action : plan->report().actions) {
         EXPECT_FALSE(action.source_object.empty());
@@ -130,6 +255,20 @@ TEST_F(ConversionFiles, ConvertsNativeHierarchyWithOccurrenceIdsAndReadableAudio
     EXPECT_EQ(audio->format.sample_rate, 48000U);
     EXPECT_GT(audio->frame_count, 0U);
     EXPECT_FALSE(audio->pcm.empty());
+
+    std::filesystem::remove(root / "source" / "SET.U01");
+    auto voice_only = axk::conversion::FilePlan::prepare(request);
+    ASSERT_TRUE(voice_only) << voice_only.error().message;
+    ASSERT_TRUE(voice_only->report().executable);
+    const auto &issues = voice_only->report().issues;
+    const auto choice = std::ranges::find(issues, "tx16w.missing_performance", &axk::conversion::Issue::code);
+    ASSERT_NE(choice, issues.end());
+    EXPECT_FALSE(choice->decision.empty());
+    const auto voice_out = root / "voice.hds";
+    EXPECT_FALSE(voice_only->apply(voice_out, {}));
+    EXPECT_FALSE(std::filesystem::exists(voice_out));
+    const auto applied = voice_only->apply(voice_out, std::vector<std::string>{choice->id});
+    ASSERT_TRUE(applied) << applied.error().message;
 }
 
 TEST_F(ConversionFiles, NeverOverwritesAnExistingDestinationAndConsumesFailedAttempts) {
@@ -187,13 +326,19 @@ TEST_F(ConversionFiles, InstalledFacadeRetainsReportAndExecutesTheReviewedPlan) 
     ASSERT_TRUE(report);
     const auto document = nlohmann::json::parse(*report);
     EXPECT_TRUE(document.at("executable"));
-    std::vector<std::string> ids;
-    for (const auto &issue : document.at("issues"))
-        if (issue.at("impact") == "LOSS" || issue.at("impact") == "UNCERTAINTY")
-            ids.push_back(issue.at("id"));
-    const auto applied = plan->apply((root / "output.hds").string(), ids, context);
+    ASSERT_EQ(document.at("sourceCount"), 1U);
+    ASSERT_EQ(document.at("sourceObjects").size(), 1U);
+    const auto &wave = document.at("sourceObjects").front();
+    EXPECT_EQ(wave.at("kind"), "wave");
+    EXPECT_TRUE(wave.at("selectable"));
+    EXPECT_FALSE(wave.at("id").get<std::string>().empty());
+    EXPECT_FALSE(wave.at("location").get<std::string>().empty());
+    EXPECT_EQ(wave.at("dependencies"), nlohmann::json::array());
+    EXPECT_TRUE(
+        std::ranges::none_of(document.at("issues"), [](const auto &issue) { return issue.contains("decision"); }));
+    const auto applied = plan->apply((root / "output.hds").string(), {}, context);
     ASSERT_TRUE(applied) << applied.error().message;
     EXPECT_TRUE(nlohmann::json::parse(*applied).at("applied"));
-    EXPECT_FALSE(plan->apply((root / "retry.hds").string(), ids, context));
+    EXPECT_FALSE(plan->apply((root / "retry.hds").string(), {}, context));
 }
 #endif

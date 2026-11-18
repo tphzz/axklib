@@ -473,6 +473,7 @@ pub fn run() {
         .manage(Mutex::new(PackageSaveCandidateStore::default()))
         .manage(Mutex::new(DirectorySaveCandidateStore::default()))
         .manage(native_drag::state())
+        .manage(native_companions::CompanionScan::default())
         .manage(editor_exit::EditorExitGuard::default())
         .manage(startup.clone())
         .manage(diagnostic_capture::CaptureRuntime::default())
@@ -561,7 +562,8 @@ pub fn run() {
             cancel_retained_directory_export,
             native_directory::read_native_drop_directory,
             native_companions::inspect_native_disk_source,
-            native_companions::nearby_native_disk_sources,
+            native_companions::resolve_native_disk_companions,
+            native_companions::cancel_native_companion_scan,
             native_companions::select_native_disk_sources,
             native_drag::reserve_native_files_drag,
             native_drag::prepare_native_files_drag,

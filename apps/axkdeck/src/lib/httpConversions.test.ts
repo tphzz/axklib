@@ -57,6 +57,7 @@ function fixture() {
     return {
         client,
         jobs,
+        sessions,
         transport: new HttpConversions(
             client as unknown as AxklibHttpApiClient,
             jobs as unknown as HttpJobController,
@@ -68,13 +69,31 @@ const input: ConversionInput = {
     profileId: 'yamaha.tx16w-to-a-series',
     source: { kind: 'DOCUMENT', sessionId: 1, documentId: 'tx16w', expectedRevision: 4 },
     destinationSessionId: 2,
-    selection: { partitionIndex: 0, volumeName: 'Samples' },
+    selection: { kind: 'EXISTING_VOLUME', partitionIndex: 0, volumeName: 'Samples' },
     options: { mode: 'HIERARCHY' },
     fidelity: 'BEST',
     capacityPolicy: { target: 'A4000_A5000' },
 };
 
 describe('retained conversion transport', () => {
+    it('prepares a new image without obtaining a writable session or sending a capacity policy', async () => {
+        const { client, jobs, sessions, transport } = fixture();
+        const prepared = plan();
+        prepared.report!.destination = { kind: 'NEW_IMAGE', sizeBytes: 512, sha256: 'a'.repeat(64) };
+        prepared.report!.capacity = null;
+        prepared.report!.actionCount = 1;
+        jobs.wait.mockResolvedValue({ status: 'completed', result: prepared });
+        await transport.prepareConversion({
+            profileId: 'fixture.new-image',
+            source: { kind: 'SOURCES', sources: [serverFileLocation({ rootId: 'root', relativePath: 'source.img' })] },
+            destination: { kind: 'NEW_IMAGE' },
+            options: {},
+            fidelity: 'BEST',
+        });
+        expect(sessions.get).not.toHaveBeenCalled();
+        expect(client.invoke.mock.calls[0][1].destination).toEqual({ kind: 'NEW_IMAGE' });
+        expect(client.invoke.mock.calls[0][1]).not.toHaveProperty('capacityPolicy');
+    });
     it('resolves workspace companions as a cancellable read job without exposing client paths', async () => {
         const { client, jobs, transport } = fixture();
         const result = {
@@ -150,6 +169,32 @@ describe('retained conversion transport', () => {
                 { kind: 'UPLOAD', upload: { uploadId: 'upload' } },
             ],
         });
+    });
+    it('retrieves all selectable occurrences even when output and notes fit on one page', async () => {
+        const { client, jobs, transport } = fixture();
+        function sourcePage(offset: number) {
+            const value = plan(offset);
+            const report = value.report!;
+            report.actionCount = 1;
+            report.sourceCount = 201;
+            report.sourceObjects = Array.from({ length: offset ? 1 : 200 }, (_, i) => ({
+                id: `wave-${offset + i}`,
+                name: 'Piano',
+                kind: 'wave',
+                location: 'disk.img',
+                selectable: true,
+                dependencies: [],
+            }));
+            if (offset) report.actions = [];
+            return value;
+        }
+        jobs.wait.mockResolvedValue({ status: 'completed', result: sourcePage(0) });
+        client.request.mockResolvedValue(sourcePage(200));
+        const result = await transport.prepareConversion(input);
+        expect(client.request).toHaveBeenCalledWith('GET', '/conversion-plans/plan-1?offset=200&limit=200');
+        expect(result.report!.sourceObjects).toHaveLength(201);
+        expect(result.report!.sourceObjects!.at(-1)?.id).toBe('wave-200');
+        expect(result.report!.actions).toHaveLength(1);
     });
     it('recovers a lost submission through the retained job without resubmitting', async () => {
         const { client, transport } = fixture();

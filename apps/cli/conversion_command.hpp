@@ -4,6 +4,8 @@
 #include <string>
 #include <vector>
 
+#include "axklib/conversion/profiles.hpp"
+
 namespace CLI {
 class App;
 }
@@ -19,5 +21,6 @@ struct ConversionCommand {
     bool strict{};
 };
 void register_conversion_command(CLI::App &app, ConversionCommand &state);
-int run_conversion(const ConversionCommand &state);
+int run_conversion(const ConversionCommand &state,
+                   const conversion::Registry &profiles = conversion::builtin_profiles());
 } // namespace axk::cli

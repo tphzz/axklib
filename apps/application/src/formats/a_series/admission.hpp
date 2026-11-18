@@ -1,11 +1,9 @@
 #pragma once
 
-#include "native_document_admission.hpp"
+#include "axklib/application/session_format_composition.hpp"
 
 namespace axk::app::formats::a_series {
 
-[[nodiscard]] Result<std::vector<NativeDocumentAdmission>>
-admit_documents(const Sandbox &sandbox, const AdmittedImageSources &sources, const CancellationToken &cancellation,
-                ProgressSink *progress, diagnostic_sink *diagnostics);
+ConfigureSessionFormats register_format;
 
 } // namespace axk::app::formats::a_series

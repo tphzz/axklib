@@ -1,14 +1,17 @@
 <script lang="ts">
-    import { tick, untrack } from 'svelte';
-    import type { Tx16wImportRequest, Tx16wVolumeOption } from '../../features/import/tx16wWorkflow.svelte';
+    import { tick } from 'svelte';
+    import type { Tx16wImportRequest } from '../../features/import/tx16wWorkflow.svelte';
+    import { placementError, suggestedVolume, type PlacementOptions } from '../../features/import/tx16wPlacement';
     import type { ClientUploadSource } from '../clientUploadSource';
-    import type { Tx16wImportMode } from '../transport';
+    import type { Tx16wImportMode, VolumeImportDestination } from '../transport';
     import { requiredConversionIssues, type ConversionFidelity } from '../conversions';
     import { modal } from '../modal';
     import Icon from './Icon.svelte';
     import ImportDestinationChooser from './ImportDestinationChooser.svelte';
     import ImportCapacityControl from './ImportCapacityControl.svelte';
     import ConversionReport from './ConversionReport.svelte';
+    import ConversionSourceList from './ConversionSourceList.svelte';
+    import ConversionImageDestination from './ConversionImageDestination.svelte';
     import ImportSourceHeader from './ImportSourceHeader.svelte';
     import DiskSourcePicker from './DiskSourcePicker.svelte';
     import DiskImportSettings from './DiskImportSettings.svelte';
@@ -18,12 +21,14 @@
 
     let {
         request,
-        volumeOptions,
+        destinations,
         completion,
         onrecover,
         ontarget,
+        onbrowse,
         onmode,
         onfidelity,
+        onsources,
         onprepare,
         onadd,
         onremove,
@@ -31,20 +36,29 @@
         oncancel,
     }: {
         request: Tx16wImportRequest;
-        volumeOptions: Tx16wVolumeOption[];
+        destinations: PlacementOptions;
         completion: ImportCompletion;
         onrecover: () => void;
-        ontarget: (target: Tx16wVolumeOption['target'] | null) => void;
+        ontarget: (target: VolumeImportDestination | null, typing?: boolean) => void;
+        onbrowse?: () => void;
         onmode: (mode: Tx16wImportMode) => void;
         onfidelity: (fidelity: ConversionFidelity) => void;
+        onsources?: (ids: string[] | undefined) => void;
         onprepare: () => void;
         onadd: (files: ClientUploadSource[]) => void;
         onremove: (id: number) => void | Promise<void>;
         onconfirm: () => void;
         oncancel: () => void;
     } = $props();
-    let partitionIndex = $state<number | null>(untrack(() => request.target?.partitionIndex ?? null));
-    let targetSelected = $state(true);
+    const partitionIndex = $derived(request.target?.partitionIndex ?? null);
+    const creating = $derived(request.target?.kind === 'CREATE_VOLUME');
+    const error = $derived(placementError(request.target, destinations));
+    let editedName = $state<{ destination?: string; value: string }>();
+    const newName = $derived(
+        editedName && editedName.destination === request.destinationName
+            ? editedName.value
+            : suggestedVolume(request.members[0]?.sourceName ?? request.sourceName ?? ''),
+    );
     let active = $state<'contents' | 'review'>('contents');
     let shell: HTMLDivElement;
     $effect(() => {
@@ -62,11 +76,14 @@
         }
     });
     const busy = $derived(
-        completion.locked || ['uploading', 'discovering', 'inspecting', 'importing'].includes(request.status),
+        completion.locked ||
+            ['opening-target', 'uploading', 'discovering', 'inspecting', 'importing'].includes(request.status),
     );
     const report = $derived(request.plan?.report);
+    const sourceObjects = $derived(request.sourceObjects ?? report?.sourceObjects ?? []);
+    const title = $derived(request.documentSource ? 'Convert' : 'Import TX16W disk set');
     const canConfirm = $derived(
-        targetSelected &&
+        !error &&
             (!!request.documentSource || request.members.length > 0) &&
             !busy &&
             !request.error &&
@@ -74,37 +91,42 @@
             request.status === 'ready' &&
             !!report?.executable &&
             !!request.plan &&
-            requiredConversionIssues(request.plan).every((id) => request.acknowledgedIssueIds.includes(id)) &&
-            volumeOptions.some(
-                (option) =>
-                    option.target.partitionIndex === request.target?.partitionIndex &&
-                    option.target.volumeName === request.target?.volumeName,
-            ),
+            requiredConversionIssues(request.plan).every((id) => request.acknowledgedIssueIds.includes(id)),
     );
-    const partitions = $derived(
-        Array.from(
-            new Map(
-                volumeOptions.map((option) => [
-                    option.target.partitionIndex,
-                    { partitionIndex: option.target.partitionIndex, name: option.partitionName },
-                ]),
-            ).values(),
-        ),
-    );
-    const volumes = $derived(
-        volumeOptions.map((option) => ({ ...option.target, name: option.partitionName, label: option.label })),
-    );
+    const partitionVolumes = $derived(destinations.volumes.filter((v) => v.partitionIndex === partitionIndex));
+    const existingNames = new Map<number, string>();
+    let rememberedImage: string | undefined;
     const canDismiss = $derived(
         completion.canDismiss &&
             (request.status !== 'importing' || ['warnings', 'refresh-failed'].includes(completion.phase)),
     );
-    function selectTarget(index: number | null, name: string) {
-        partitionIndex = index;
-        const option = volumeOptions.find(
-            (option) => option.target.partitionIndex === index && option.target.volumeName === name,
+    function existingVolume(index: number) {
+        if (rememberedImage !== request.destinationName) {
+            rememberedImage = request.destinationName;
+            existingNames.clear();
+        }
+        const current = request.target;
+        if (current?.kind === 'EXISTING_VOLUME' && current.volumeName)
+            existingNames.set(current.partitionIndex, current.volumeName);
+        const volumes = destinations.volumes.filter((v) => v.partitionIndex === index);
+        return volumes.find((v) => v.volumeName === existingNames.get(index)) ?? volumes[0];
+    }
+    function choosePartition(index: number) {
+        const existing = existingVolume(index);
+        ontarget(
+            creating || !existing
+                ? { kind: 'CREATE_VOLUME', partitionIndex: index, volumeName: newName }
+                : { kind: 'EXISTING_VOLUME', partitionIndex: index, volumeName: existing.volumeName },
         );
-        targetSelected = !!option;
-        ontarget(option?.target ?? null);
+    }
+    function chooseMode(mode: 'existing' | 'create') {
+        if (partitionIndex === null) return;
+        const existing = existingVolume(partitionIndex);
+        ontarget({
+            kind: mode === 'create' ? 'CREATE_VOLUME' : 'EXISTING_VOLUME',
+            partitionIndex,
+            volumeName: mode === 'create' ? newName : (existing?.volumeName ?? ''),
+        });
     }
 </script>
 
@@ -113,7 +135,7 @@
         class="dialog-shell dialog-shell-wide dialog-popovers-visible tx16w-import-dialog"
         role="dialog"
         aria-modal="true"
-        aria-label="Import TX16W disk set"
+        aria-label={title}
         bind:this={shell}
         use:modal={{
             onescape: () => {
@@ -122,32 +144,33 @@
         }}
     >
         <header class="dialog-header">
-            <h2>Import TX16W disk set</h2>
+            <h2>{title}</h2>
             <button class="icon-button" aria-label="Close" disabled={!canDismiss} onclick={oncancel}
                 ><Icon name="close" size={15} /></button
             >
         </header>
         <div class="disk-import-body">
-            <ImportSourceHeader
-                label={request.documentSource ? 'Open TX16W document' : 'TX16W disk set'}
-                truncateSummary={!!request.documentSource}
-                summary={request.documentSource
-                    ? request.destinationName
-                        ? `Destination image: ${request.destinationName}`
-                        : 'TX16W document'
-                    : `${request.members.length} ${request.members.length === 1 ? 'disk' : 'disks'}${report ? ` · ${report.actionCount} planned objects` : ''}`}
-                members={request.documentSource
-                    ? []
-                    : request.members.map((member) => ({
-                          id: member.id,
-                          name: member.sourceName,
-                          autoAdded: member.origin === 'AUTO_ADDED',
-                      }))}
-                disabled={busy}
-                onremove={request.documentSource ? undefined : onremove}
-            >
-                {#snippet actions()}
-                    {#if !request.documentSource}
+            {#if request.documentSource}
+                <ConversionImageDestination
+                    source={request.sourceName}
+                    profile={request.destinationProfile ?? report?.profileId}
+                    destination={request.destinationName}
+                    disabled={busy}
+                    {onbrowse}
+                />
+            {:else}
+                <ImportSourceHeader
+                    label="TX16W disk set"
+                    summary={`${request.members.length} ${request.members.length === 1 ? 'disk' : 'disks'}${report ? ` · ${report.actionCount} planned objects` : ''}`}
+                    members={request.members.map((member) => ({
+                        id: member.id,
+                        name: member.sourceName,
+                        autoAdded: member.origin === 'AUTO_ADDED',
+                    }))}
+                    disabled={busy}
+                    {onremove}
+                >
+                    {#snippet actions()}
                         <DiskSourcePicker
                             disabled={busy}
                             {onadd}
@@ -155,25 +178,10 @@
                                 request.error = message;
                             }}
                         />
-                    {/if}
-                {/snippet}
-            </ImportSourceHeader>
-            <DiskImportSettings>
-                <ImportDestinationChooser
-                    compact
-                    explainUnavailable
-                    mode="existing"
-                    {partitionIndex}
-                    volumeName={request.target?.volumeName ?? ''}
-                    {partitions}
-                    {volumes}
-                    disabled={busy}
-                    unavailableModes={{ create: 'TX16W conversion requires an existing volume' }}
-                    onmode={() => undefined}
-                    onname={() => undefined}
-                    onvolume={selectTarget}
-                    onpartition={(index) => selectTarget(index, '')}
-                />
+                    {/snippet}
+                </ImportSourceHeader>
+            {/if}
+            {#snippet capacityControl()}
                 <ImportCapacityControl
                     compact
                     showSummary={false}
@@ -181,6 +189,46 @@
                     disabled={busy}
                     onchange={onprepare}
                 />
+            {/snippet}
+            <DiskImportSettings>
+                {#key request.destinationName}
+                    <ImportDestinationChooser
+                        compact
+                        placement
+                        mode={creating ? 'create' : 'existing'}
+                        {partitionIndex}
+                        volumeName={request.target?.volumeName ?? ''}
+                        partitions={destinations.partitions}
+                        volumes={destinations.volumes}
+                        disabled={completion.locked ||
+                            request.status === 'importing' ||
+                            request.status === 'opening-target' ||
+                            (!!request.documentSource && !request.destinationName)}
+                        unavailableModes={{
+                            create: partitionIndex === null ? 'Choose a partition first' : undefined,
+                            existing: partitionVolumes.length ? undefined : 'No existing volumes in this partition',
+                        }}
+                        nameError={creating ? error : ''}
+                        onmode={chooseMode}
+                        onname={(value) => {
+                            if (partitionIndex === null) return;
+                            editedName = { destination: request.destinationName, value };
+                            ontarget({ kind: 'CREATE_VOLUME', partitionIndex, volumeName: value }, true);
+                        }}
+                        onvolume={(index, volumeName) => {
+                            if (index !== null)
+                                ontarget({ kind: 'EXISTING_VOLUME', partitionIndex: index, volumeName });
+                        }}
+                        onpartition={choosePartition}
+                    />
+                {/key}
+                {#if !creating || !error}<small class="placement-note"
+                        >{!creating
+                            ? 'Existing objects are kept.'
+                            : partitionVolumes.length
+                              ? 'Existing volumes are kept.'
+                              : 'No existing volumes in this partition.'}</small
+                    >{/if}
             </DiskImportSettings>
             <div class="mode-controls">
                 <div class="mode-option">
@@ -221,12 +269,29 @@
                         >
                     </div>
                 </div>
+                <div class="target-model">{@render capacityControl()}</div>
             </div>
-            {#snippet capacity()}<ImportCapacityDetails
+            {#snippet capacityDetails()}<ImportCapacityDetails
                     review={completion.capacity}
                     admission={report?.capacity}
                     pending={['uploading', 'discovering', 'inspecting'].includes(request.status)}
                 />{/snippet}
+            {#snippet capacity()}
+                {#if request.documentSource && report}
+                    <details class="capacity-disclosure" open={report.capacity?.allowed === false}>
+                        <summary
+                            >Sampler capacity <span
+                                >{report.capacity
+                                    ? report.capacity.allowed
+                                        ? 'Fits'
+                                        : 'Does not fit'
+                                    : 'Not checked'}</span
+                            ></summary
+                        >
+                        {@render capacityDetails()}
+                    </details>
+                {:else}{@render capacityDetails()}{/if}
+            {/snippet}
             {#snippet feedback()}
                 {#if request.discovery.error}<div class="discovery-recovery">
                         <p class="dialog-error" role="alert">{request.discovery.message} {request.discovery.error}</p>
@@ -235,11 +300,20 @@
                 {#if request.error}<p class="dialog-error" role="alert">{request.error}</p>{/if}
                 {#each completion.warnings as warning}<p class="package-warning">{warning}</p>{/each}
             {/snippet}
-            {#if report}
+            {#snippet sourceSelection()}<ConversionSourceList
+                    objects={sourceObjects}
+                    selected={request.sourceObjectIds}
+                    onchange={(ids) => onsources?.(ids)}
+                    disabled={completion.locked ||
+                        !request.target ||
+                        !onsources ||
+                        ['importing', 'opening-target'].includes(request.status)}
+                />{/snippet}
+            {#if report || sourceObjects.length}
                 <ConversionReport
-                    lossConsent
-                    lossConsentPreparing={['uploading', 'discovering', 'inspecting'].includes(request.status)}
-                    {report}
+                    sourceSelection={sourceObjects.length && onsources ? sourceSelection : undefined}
+                    sourceSummary={`${request.sourceObjectIds?.length ?? sourceObjects.filter((o) => o.selectable).length} selected`}
+                    report={report ?? null}
                     bind:active
                     bind:acknowledged={request.acknowledgedIssueIds}
                     disabled={busy}
@@ -273,20 +347,27 @@
             <span class="dialog-footer-status" role="status"
                 >{completion.message ||
                     request.error ||
+                    (creating && error ? 'Choose a valid volume name' : '') ||
                     (request.status === 'discovering' || request.discovery.error || !report?.executable
                         ? request.discovery.message
                         : '') ||
-                    (busy
-                        ? 'Preparing conversion'
-                        : report
-                          ? report.executable
-                              ? canConfirm
-                                  ? 'Ready to import'
-                                  : 'Review mapping losses'
-                              : 'Conversion blocked'
-                          : request.target && !request.members.length && !request.documentSource
-                            ? 'Add disks to continue'
-                            : 'Choose a destination')}</span
+                    (request.status === 'opening-target'
+                        ? 'Opening destination image'
+                        : busy
+                          ? 'Preparing conversion'
+                          : report
+                            ? report.executable
+                                ? canConfirm
+                                    ? request.documentSource
+                                        ? `Ready · ${report.actionCount} objects`
+                                        : 'Ready to import'
+                                    : 'Resolve the mapping decision'
+                                : 'Conversion blocked'
+                            : request.sourceObjectIds?.length === 0
+                              ? 'Nothing selected'
+                              : request.target && !request.members.length && !request.documentSource
+                                ? 'Add disks to continue'
+                                : 'Choose a destination')}</span
             >
             <div class="dialog-footer-actions">
                 <button class="secondary-button" disabled={!canDismiss} onclick={oncancel}
@@ -304,12 +385,18 @@
                         >{['unconfirmed', 'checking'].includes(completion.phase) ? 'Check status' : 'Refresh'}</button
                     >
                 {:else if completion.phase !== 'warnings'}
-                    {#if !request.plan && request.status === 'ready' && !request.discovery.error && (request.members.length || request.documentSource)}<button
+                    {#if !request.plan && request.sourceObjectIds?.length !== 0 && request.status === 'ready' && !request.discovery.error && (request.members.length || request.documentSource)}<button
                             class="secondary-button"
                             disabled={busy}
                             onclick={onprepare}>Prepare again</button
                         >{/if}
-                    <button class="primary-button" disabled={!canConfirm} onclick={onconfirm}>Import</button>
+                    <button class="primary-button" disabled={!canConfirm} onclick={onconfirm}
+                        >{creating
+                            ? 'Create volume and import'
+                            : request.documentSource
+                              ? 'Add to volume'
+                              : 'Import'}</button
+                    >
                 {/if}
             </div>
         </footer>
@@ -342,6 +429,31 @@
         gap: 4px;
         flex: none;
         min-height: 28px;
+    }
+    .target-model {
+        margin-left: auto;
+    }
+    .placement-note {
+        color: var(--color-text-muted);
+    }
+    @container disk-import (max-width: 800px) {
+        .placement-note {
+            display: none;
+        }
+    }
+    .capacity-disclosure {
+        border-bottom: 1px solid var(--color-border);
+        margin-bottom: 6px;
+    }
+    .capacity-disclosure summary {
+        cursor: pointer;
+        min-height: 26px;
+        line-height: 26px;
+        color: var(--color-text-muted);
+    }
+    .capacity-disclosure summary span {
+        float: right;
+        color: var(--color-text);
     }
     .mode-label {
         color: var(--color-text-muted);

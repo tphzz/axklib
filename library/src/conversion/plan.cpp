@@ -12,13 +12,64 @@ Error invalid(std::string message) {
 }
 } // namespace
 
+void to_json(nlohmann::json &json, const SourceObject &object) {
+    json = {{"id", object.id},
+            {"name", object.name},
+            {"kind", object.kind},
+            {"location", object.location},
+            {"selectable", object.selectable},
+            {"dependencies", object.dependencies}};
+}
+
+std::uint64_t report_bytes(const Report &report) {
+    std::uint64_t bytes = sizeof(PreparedPlan) + report.profile_id.capacity() +
+                          report.actions.capacity() * sizeof(Action) + report.issues.capacity() * sizeof(Issue);
+    for (const auto &action : report.actions) {
+        bytes += action.kind.capacity() + action.name.capacity() + action.source_object.capacity() +
+                 action.action.capacity() + action.details.capacity() * sizeof(Action::Detail);
+        for (const auto &detail : action.details)
+            bytes += detail.label.capacity() + detail.value.capacity();
+    }
+    for (const auto &notice : report.issues)
+        bytes += notice.id.capacity() + notice.code.capacity() + notice.source_object.capacity() +
+                 notice.source_parameter.capacity() + notice.target_object.capacity() +
+                 notice.target_parameter.capacity() + notice.message.capacity() + notice.decision.capacity();
+    bytes += report.source_objects.capacity() * sizeof(SourceObject);
+    for (const auto &object : report.source_objects) {
+        bytes += object.id.capacity() + object.name.capacity() + object.kind.capacity() + object.location.capacity() +
+                 object.dependencies.capacity() * sizeof(std::string);
+        for (const auto &id : object.dependencies)
+            bytes += id.capacity();
+    }
+    const auto *admission = std::get_if<VolumeCapacityAdmission>(&report.destination);
+    if (!admission)
+        return bytes;
+    bytes += admission->reports.capacity() * sizeof(VolumeCapacityReport);
+    for (const auto &capacity : admission->reports) {
+        bytes += capacity.volume_name.capacity() +
+                 capacity.object_counts.capacity() * sizeof(VolumeCapacityObjectCount) +
+                 capacity.profiles.capacity() * sizeof(VolumeCapacityProfile);
+        for (const auto &object : capacity.object_counts)
+            bytes += object.type.capacity();
+        for (const auto &profile : capacity.profiles) {
+            bytes += profile.reasons.capacity() * sizeof(VolumeCapacityReason);
+            for (const auto &reason : profile.reasons)
+                bytes += reason.code.capacity() + reason.message.capacity();
+        }
+    }
+    return bytes;
+}
+
 PreparedPlan::PreparedPlan(Report report, std::vector<Patch> patches, std::uint64_t destination_size,
                            std::uint64_t retained_bytes)
-    : report_(std::move(report)), patches_(std::move(patches)), destination_size_(destination_size),
+    : report_(std::move(report)), output_(ExistingImagePatches{std::move(patches), destination_size}),
       retained_bytes_(retained_bytes) {}
+PreparedPlan::PreparedPlan(Report report, NewImage image, std::uint64_t retained_bytes)
+    : report_(std::move(report)), output_(std::move(image)), retained_bytes_(retained_bytes) {
+    report_.destination = NewImageReview{std::get<NewImage>(output_).bytes.size()};
+}
 const Report &PreparedPlan::report() const noexcept { return report_; }
-std::span<const Patch> PreparedPlan::patches() const noexcept { return patches_; }
-std::uint64_t PreparedPlan::destination_size() const noexcept { return destination_size_; }
+const PreparedOutput &PreparedPlan::output() const noexcept { return output_; }
 std::uint64_t PreparedPlan::retained_bytes() const noexcept { return retained_bytes_; }
 
 Result<void> PreparedPlan::acknowledge(std::span<const std::string> issue_ids) const {
@@ -29,12 +80,12 @@ Result<void> PreparedPlan::acknowledge(std::span<const std::string> issue_ids) c
         if (!supplied.insert(id).second)
             return std::unexpected(invalid("Duplicate conversion acknowledgement"));
         const auto issue = std::ranges::find(report_.issues, id, &Issue::id);
-        if (issue == report_.issues.end() || (issue->impact != Impact::loss && issue->impact != Impact::uncertainty))
+        if (issue == report_.issues.end() || issue->decision.empty())
             return std::unexpected(invalid("Unknown or unnecessary conversion acknowledgement"));
     }
     for (const auto &issue : report_.issues)
-        if ((issue.impact == Impact::loss || issue.impact == Impact::uncertainty) && !supplied.contains(issue.id))
-            return std::unexpected(invalid("Review and acknowledge all conversion losses and uncertainties"));
+        if (!issue.decision.empty() && !supplied.contains(issue.id))
+            return std::unexpected(invalid("Resolve the required conversion mapping decisions"));
     return {};
 }
 
@@ -56,8 +107,13 @@ Result<std::shared_ptr<const PreparedPlan>> Registry::prepare(std::string_view p
     if (profile == profiles_.end())
         return std::unexpected(invalid("Unknown directional conversion profile"));
     if (!request.source || request.source->summary().format_id != profile->source_format ||
-        request.destination.format_id != profile->destination_format || !request.destination.reader)
+        request.destination.format_id != profile->destination_format)
         return std::unexpected(invalid("Conversion source or destination does not match the selected profile"));
+    const bool new_image = profile->output_kind == OutputKind::new_image;
+    if (new_image ? (request.destination.reader || !request.destination.label.empty() ||
+                     !request.destination.selection.is_null() || request.capacity_policy.has_value())
+                  : !request.destination.reader)
+        return std::unexpected(invalid("Conversion destination inputs do not match the profile output"));
     if (request.limits.maximum_bytes == 0U || request.limits.maximum_actions == 0U ||
         request.limits.maximum_issues == 0U)
         return std::unexpected(invalid("Conversion resource limits must be positive"));
@@ -75,8 +131,6 @@ Result<std::shared_ptr<const PreparedPlan>> Registry::prepare(std::string_view p
         (*prepared)->report().issues.size() > request.limits.maximum_issues)
         return std::unexpected(invalid("Prepared conversion violates its profile or resource limits"));
     const auto &plan = **prepared;
-    if (plan.destination_size() != request.destination.reader->size())
-        return std::unexpected(invalid("Prepared conversion destination size changed"));
     std::set<std::string, std::less<>> issue_ids;
     for (const auto &issue : plan.report().issues) {
         if (issue.impact != Impact::exact && issue.impact != Impact::representation && issue.impact != Impact::loss &&
@@ -84,22 +138,34 @@ Result<std::shared_ptr<const PreparedPlan>> Registry::prepare(std::string_view p
             return std::unexpected(invalid("Conversion issue has an invalid impact"));
         if (issue.id.empty() || !issue_ids.insert(issue.id).second)
             return std::unexpected(invalid("Conversion issues require unique identities"));
+        if (!issue.decision.empty() && issue.impact != Impact::uncertainty)
+            return std::unexpected(invalid("Only uncertain mappings can request a decision"));
         if (plan.report().executable && (issue.impact == Impact::blocker ||
                                          (request.fidelity == Fidelity::strict &&
                                           (issue.impact == Impact::loss || issue.impact == Impact::uncertainty))))
             return std::unexpected(invalid("Executable conversion violates its fidelity policy"));
     }
-    std::uint64_t end{}, bytes{};
-    for (const auto &patch : plan.patches()) {
-        if (patch.original.empty() || patch.original.size() != patch.replacement.size() || patch.offset < end ||
-            patch.offset > plan.destination_size() || patch.original.size() > plan.destination_size() - patch.offset ||
-            patch.original.size() > (std::numeric_limits<std::uint64_t>::max() - bytes) / 2U)
-            return std::unexpected(invalid("Prepared conversion contains invalid or overlapping patches"));
-        end = patch.offset + patch.original.size();
-        bytes += patch.original.size() * 2U;
+    if (const auto *image = std::get_if<NewImage>(&plan.output())) {
+        if (!new_image || image->bytes.capacity() > plan.retained_bytes() ||
+            plan.report().executable == image->bytes.empty())
+            return std::unexpected(invalid("Prepared conversion image retention is invalid"));
+    } else {
+        const auto &edit = std::get<ExistingImagePatches>(plan.output());
+        if (new_image || !std::holds_alternative<VolumeCapacityAdmission>(plan.report().destination) ||
+            edit.destination_size != request.destination.reader->size())
+            return std::unexpected(invalid("Prepared conversion destination does not match the requested edit"));
+        std::uint64_t end{}, bytes{};
+        for (const auto &patch : edit.patches) {
+            if (patch.original.empty() || patch.original.size() != patch.replacement.size() || patch.offset < end ||
+                patch.offset > edit.destination_size || patch.original.size() > edit.destination_size - patch.offset ||
+                patch.original.size() > (std::numeric_limits<std::uint64_t>::max() - bytes) / 2U)
+                return std::unexpected(invalid("Prepared conversion contains invalid or overlapping patches"));
+            end = patch.offset + patch.original.size();
+            bytes += patch.original.size() * 2U;
+        }
+        if (bytes > plan.retained_bytes() || (!plan.report().executable && !edit.patches.empty()))
+            return std::unexpected(invalid("Prepared conversion patch retention is invalid"));
     }
-    if (bytes > plan.retained_bytes() || (!plan.report().executable && !plan.patches().empty()))
-        return std::unexpected(invalid("Prepared conversion patch retention is invalid"));
     if (const auto active = request.source->sources()->verify(cancellation); !active)
         return std::unexpected(active.error());
     return prepared;

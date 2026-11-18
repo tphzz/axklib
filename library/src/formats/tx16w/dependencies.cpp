@@ -4,6 +4,7 @@
 #include <cctype>
 #include <cstddef>
 #include <optional>
+#include <set>
 #include <string_view>
 #include <variant>
 
@@ -24,6 +25,20 @@ bool matches(const FileIdentity &expected, const FileIdentity &candidate) {
            expected.kind == candidate.kind;
 }
 
+void each_requirement(std::span<const NativeObject> objects, std::span<const NativeFile> files, auto &&require) {
+    for (const auto &file : files) {
+        if (!file.decoded || (file.identity.kind != 'S' && file.identity.kind != 'V' && file.identity.kind != 'U'))
+            continue;
+        auto expected = file.identity;
+        expected.kind = expected.kind == 'S' ? 'V' : 'S';
+        require(expected, std::nullopt);
+    }
+    for (const auto &object : objects)
+        if (const auto *setup = std::get_if<NativeSetup>(&object.value))
+            for (const auto &wave : setup->waves)
+                require(FileIdentity{'W', {}, wave.name, wave.slot}, object.id);
+}
+
 } // namespace
 
 std::string reference_filename(std::string name, char kind, std::uint8_t slot) {
@@ -33,6 +48,17 @@ std::string reference_filename(std::string name, char kind, std::uint8_t slot) {
     if (number < 10U)
         name += '0';
     return name + std::to_string(number);
+}
+
+std::string file_key(const FileIdentity &identity) {
+    return reference_filename(symbol(identity.set_name), identity.kind, identity.native_slot);
+}
+
+std::set<std::string> required_file_keys(const Document &document) {
+    std::set<std::string> result;
+    each_requirement(document.native_objects(), document.native_files(),
+                     [&](const FileIdentity &id, const auto &) { result.insert(file_key(id)); });
+    return result;
 }
 
 std::vector<native::SourceRequirement> source_requirements(std::span<const NativeObject> objects,
@@ -63,17 +89,7 @@ std::vector<native::SourceRequirement> source_requirements(std::span<const Nativ
         if (std::ranges::none_of(result, [&](const auto &item) { return item.name == name && item.state == state; }))
             result.push_back({std::move(name), state, std::move(object_id)});
     };
-    for (const auto &file : files) {
-        if (!file.decoded || (file.identity.kind != 'S' && file.identity.kind != 'V' && file.identity.kind != 'U'))
-            continue;
-        auto expected = file.identity;
-        expected.kind = expected.kind == 'S' ? 'V' : 'S';
-        require(expected, std::nullopt);
-    }
-    for (const auto &object : objects)
-        if (const auto *setup = std::get_if<NativeSetup>(&object.value))
-            for (const auto &wave : setup->waves)
-                require({'W', {}, wave.name, wave.slot}, object.id);
+    each_requirement(objects, files, require);
     return result;
 }
 

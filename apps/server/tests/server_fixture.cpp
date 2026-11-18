@@ -2,6 +2,7 @@
 #include <chrono>
 #include <iostream>
 #include <memory>
+#include <string_view>
 #include <thread>
 
 #include <nlohmann/json.hpp>
@@ -9,9 +10,14 @@
 #include "axklib/application/operation_registry.hpp"
 #include "axklib/server/config.hpp"
 #include "axklib/server/server.hpp"
+#include "fixture_conversion_profile.hpp"
+#include "fixture_sampler.hpp"
 
 int main(int argc, char **argv) {
-    const auto command_line = axk::server::parse_command_line(argc, argv);
+    const bool with_sampler = argc > 1 && std::string_view{argv[argc - 1]} == "--with-fixture-sampler";
+    const bool with_profile = argc > 1 && std::string_view{argv[argc - 1]} == "--with-fixture-profile";
+    const auto command_line =
+        axk::server::parse_command_line(argc - static_cast<int>(with_sampler || with_profile), argv);
     if (!command_line) {
         std::cerr << command_line.error().message << '\n';
         return 2;
@@ -91,7 +97,10 @@ int main(int argc, char **argv) {
         std::cerr << bound.error().message << '\n';
         return 2;
     }
-    const auto result = axk::server::run(command_line->config, std::move(registry));
+    const auto result =
+        axk::server::run(command_line->config, std::move(registry),
+                         with_sampler ? fixture::with_sampler : axk::app::configure_builtin_session_formats,
+                         fixture::conversion_profiles(with_profile));
     if (!result) {
         std::cerr << result.error().code << ": " << result.error().message << '\n';
         return 2;

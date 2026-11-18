@@ -157,6 +157,7 @@ export class HttpImageTransport extends HttpConversionTransport implements Image
             {
                 filename: file.name,
                 kind,
+                sha256: file.sha256,
                 mediaType: file.type || undefined,
             },
             { onProgress, signal },

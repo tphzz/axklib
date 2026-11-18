@@ -1,6 +1,8 @@
 #include "diagnostic_log.hpp"
+#include "native_companion_inspector.hpp"
 #include <exception>
 #include <iostream>
+#include <string_view>
 
 #include "axklib/server/config.hpp"
 #include "axklib/server/server.hpp"
@@ -8,6 +10,9 @@
 
 int main(int argc, char **argv) {
     try {
+        if (argc == 2 && std::string_view(argv[1]) == "--inspect-native-companions") {
+            return axk::server::inspect_native_companions();
+        }
         const auto command_line = axk::server::parse_command_line(argc, argv);
         if (!command_line) {
             axk::server::detail::write_startup_error(command_line.error().code, command_line.error().message);

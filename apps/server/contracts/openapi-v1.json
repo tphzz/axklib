@@ -2063,6 +2063,11 @@
           "code": {
             "type": "string"
           },
+          "decision": {
+            "description": "An explicit mapping choice; only issues with a decision require acknowledgement.",
+            "minLength": 1,
+            "type": "string"
+          },
           "id": {
             "type": "string"
           },
@@ -2101,6 +2106,60 @@
           "targetObject",
           "targetParameter",
           "message"
+        ],
+        "type": "object"
+      },
+      "ConversionMutationResult": {
+        "additionalProperties": false,
+        "properties": {
+          "applied": {
+            "type": "boolean"
+          },
+          "cleanupPending": {
+            "type": "boolean"
+          },
+          "documentId": {
+            "type": "string"
+          },
+          "imageId": {
+            "type": "string"
+          },
+          "planId": {
+            "type": "string"
+          },
+          "revision": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "planId",
+          "imageId",
+          "documentId",
+          "revision",
+          "applied",
+          "cleanupPending",
+          "warnings"
+        ],
+        "type": "object"
+      },
+      "ConversionNewImageDestination": {
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "enum": [
+              "NEW_IMAGE"
+            ]
+          }
+        },
+        "required": [
+          "kind"
         ],
         "type": "object"
       },
@@ -2157,31 +2216,14 @@
             "$ref": "#/components/schemas/VolumeCapacityPolicy"
           },
           "destination": {
-            "additionalProperties": false,
-            "properties": {
-              "documentId": {
-                "minLength": 1,
-                "type": "string"
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ConversionNewImageDestination"
               },
-              "expectedRevision": {
-                "minimum": 1,
-                "type": "integer"
-              },
-              "imageId": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "selection": {
-                "type": "object"
+              {
+                "$ref": "#/components/schemas/ConversionSessionDestination"
               }
-            },
-            "required": [
-              "imageId",
-              "documentId",
-              "expectedRevision",
-              "selection"
-            ],
-            "type": "object"
+            ]
           },
           "fidelity": {
             "enum": [
@@ -2239,6 +2281,12 @@
           "optionsSchema": {
             "type": "object"
           },
+          "outputKind": {
+            "enum": [
+              "EXISTING_IMAGE",
+              "NEW_IMAGE"
+            ]
+          },
           "sourceFormat": {
             "type": "string"
           }
@@ -2248,6 +2296,7 @@
           "name",
           "sourceFormat",
           "destinationFormat",
+          "outputKind",
           "optionsSchema"
         ],
         "type": "object"
@@ -2297,10 +2346,52 @@
             "type": "array"
           },
           "capacity": {
-            "$ref": "#/components/schemas/VolumeCapacityAdmission"
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/VolumeCapacityAdmission"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "destination": {
-            "$ref": "#/components/schemas/ConversionDocumentRef"
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ConversionDocumentRef"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "kind": {
+                    "enum": [
+                      "NEW_IMAGE"
+                    ]
+                  },
+                  "sha256": {
+                    "oneOf": [
+                      {
+                        "pattern": "^[0-9a-f]{64}$",
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "sizeBytes": {
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "sizeBytes",
+                  "sha256"
+                ],
+                "type": "object"
+              }
+            ]
           },
           "executable": {
             "type": "boolean"
@@ -2331,6 +2422,50 @@
           },
           "profileId": {
             "type": "string"
+          },
+          "sourceCount": {
+            "maximum": 32768,
+            "minimum": 0,
+            "type": "integer"
+          },
+          "sourceObjects": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "dependencies": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "location": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "selectable": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "id",
+                "name",
+                "kind",
+                "location",
+                "selectable",
+                "dependencies"
+              ],
+              "type": "object"
+            },
+            "maxItems": 200,
+            "type": "array"
           }
         },
         "required": [
@@ -2348,42 +2483,53 @@
         "type": "object"
       },
       "ConversionResult": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/ConversionMutationResult"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "download": {
+                "$ref": "#/components/schemas/RetainedDownload"
+              },
+              "planId": {
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "planId",
+              "download"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "ConversionSessionDestination": {
         "additionalProperties": false,
         "properties": {
-          "applied": {
-            "type": "boolean"
-          },
-          "cleanupPending": {
-            "type": "boolean"
-          },
           "documentId": {
+            "minLength": 1,
             "type": "string"
           },
-          "imageId": {
-            "type": "string"
-          },
-          "planId": {
-            "type": "string"
-          },
-          "revision": {
+          "expectedRevision": {
             "minimum": 1,
             "type": "integer"
           },
-          "warnings": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
+          "imageId": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "selection": {
+            "type": "object"
           }
         },
         "required": [
-          "planId",
           "imageId",
           "documentId",
-          "revision",
-          "applied",
-          "cleanupPending",
-          "warnings"
+          "expectedRevision",
+          "selection"
         ],
         "type": "object"
       },
@@ -19806,10 +19952,7 @@
                 "default": {
                   "value": {
                     "destination": {
-                      "documentId": "x",
-                      "expectedRevision": 1,
-                      "imageId": "x",
-                      "selection": {}
+                      "kind": "NEW_IMAGE"
                     },
                     "fidelity": "BEST",
                     "options": {},

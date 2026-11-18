@@ -39,12 +39,13 @@ class ConversionCli : public testing::Test {
     }
     void TearDown() override { std::filesystem::remove_all(root); }
     int run(std::vector<std::string> extra = {}, const std::string &confirmation = {}) {
-        std::vector<std::string> arguments{"axklib",        "convert",
-                                           "--profile",     "yamaha.tx16w-to-a-series",
-                                           "--source",      (root / "source").string(),
-                                           "--destination", (root / "target.hds").string(),
-                                           "--selection",   R"({"partitionIndex":0,"volumeName":"Samples"})",
-                                           "--options",     R"({"mode":"WAVE_DATA_ONLY"})"};
+        std::vector<std::string> arguments{
+            "axklib",        "convert",
+            "--profile",     "yamaha.tx16w-to-a-series",
+            "--source",      (root / "source").string(),
+            "--destination", (root / "target.hds").string(),
+            "--selection",   R"({"kind":"EXISTING_VOLUME","partitionIndex":0,"volumeName":"Samples"})",
+            "--options",     R"({"mode":"WAVE_DATA_ONLY"})"};
         arguments.insert(arguments.end(), extra.begin(), extra.end());
         std::vector<char *> argv;
         for (auto &value : arguments)
@@ -65,25 +66,24 @@ class ConversionCli : public testing::Test {
     }
 };
 
-TEST_F(ConversionCli, ReviewsAndPublishesOnlyAfterExactAcknowledgement) {
+TEST_F(ConversionCli, BestPublishesWithApplyWithoutLossAcknowledgements) {
     const auto before = bytes(root / "target.hds");
     ASSERT_EQ(run(), 0);
     const auto report = nlohmann::json::parse(output);
     EXPECT_TRUE(report.at("executable"));
     EXPECT_FALSE(std::filesystem::exists(root / "output.hds"));
-    std::string confirmation = "APPLY";
-    for (const auto &issue : report.at("issues"))
-        if (issue.at("impact") == "LOSS" || issue.at("impact") == "UNCERTAINTY")
-            confirmation += ' ' + issue.at("id").get<std::string>();
+    const auto &issues = report.at("issues");
+    const auto loss = std::ranges::find_if(issues, [](const auto &issue) { return issue.at("impact") == "LOSS"; });
+    ASSERT_NE(loss, issues.end());
     const std::vector<std::string> publish{"--output", (root / "output.hds").string()};
-    EXPECT_NE(run(publish, "APPLY\n"), 0);
+    EXPECT_NE(run(publish, "APPLY " + loss->at("id").get<std::string>() + '\n'), 0);
     EXPECT_FALSE(std::filesystem::exists(root / "output.hds"));
     EXPECT_NE(run({"--strict"}), 0);
-    ASSERT_EQ(run(publish, confirmation + '\n'), 0);
+    ASSERT_EQ(run(publish, "APPLY\n"), 0);
     EXPECT_EQ(bytes(root / "target.hds"), before);
     const auto after = bytes(root / "output.hds");
     EXPECT_NE(after, before);
-    EXPECT_NE(run(publish, confirmation + '\n'), 0);
+    EXPECT_NE(run(publish, "APPLY\n"), 0);
     EXPECT_EQ(bytes(root / "output.hds"), after);
 }
 } // namespace

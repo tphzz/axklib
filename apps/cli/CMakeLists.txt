@@ -47,6 +47,7 @@ add_library(
   app.cpp
   command_line.cpp
   conversion_command.cpp
+  source_set_info.cpp
   local_operation_projection.cpp
   local_operations.cpp
   commands/analysis.cpp
@@ -71,7 +72,7 @@ target_include_directories(
 target_link_libraries(
   axk_cli_adapter
   PUBLIC axklib::core axklib::application
-  PRIVATE axklib::audio axklib::conversion_files CLI11::CLI11 nlohmann_json::nlohmann_json
+  PRIVATE axklib::audio axklib::conversion_files axklib::disk_inspection CLI11::CLI11 nlohmann_json::nlohmann_json
 )
 axk_set_project_warnings(axk_cli_adapter)
 axk_enable_sanitizers(axk_cli_adapter)

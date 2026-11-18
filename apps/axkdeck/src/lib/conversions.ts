@@ -6,6 +6,7 @@ import type { JobState } from './transport';
 export type ConversionPlan = components['schemas']['ConversionPlan'];
 export type ConversionProfile = components['schemas']['ConversionProfile'];
 export type ConversionReport = components['schemas']['ConversionReport'];
+export type ConversionSourceObject = NonNullable<ConversionReport['sourceObjects']>[number];
 export type ConversionFidelity = ConversionReport['fidelity'];
 export type CompanionSourceResolution = components['schemas']['CompanionSourceResolution'];
 export interface CompanionSourceInput {
@@ -17,15 +18,15 @@ export interface CompanionSourceInput {
 export type ConversionSource =
     | { kind: 'DOCUMENT'; sessionId: number; documentId: string; expectedRevision: number }
     | { kind: 'SOURCES'; sources: (InputFileLocation | DirectoryLocation)[] };
-export interface ConversionInput {
+export type ConversionInput = {
     profileId: string;
     source: ConversionSource;
-    destinationSessionId: number;
-    selection: Record<string, unknown>;
     options: Record<string, unknown>;
     fidelity: ConversionFidelity;
-    capacityPolicy: CapacityPolicy;
-}
+} & (
+    | { destinationSessionId: number; selection: Record<string, unknown>; capacityPolicy: CapacityPolicy }
+    | { destination: { kind: 'NEW_IMAGE' } }
+);
 export interface ConversionTransport {
     resolveCompanionSources(input: CompanionSourceInput, signal?: AbortSignal): Promise<CompanionSourceResolution>;
     conversionProfiles(): Promise<ConversionProfile[]>;
@@ -37,9 +38,5 @@ export interface ConversionTransport {
 }
 
 export function requiredConversionIssues(plan: ConversionPlan): string[] {
-    return (
-        plan.report?.issues
-            .filter((issue) => ['LOSS', 'UNCERTAINTY'].includes(issue.impact))
-            .map((issue) => issue.id) ?? []
-    );
+    return plan.report?.issues.filter((issue) => !!issue.decision).map((issue) => issue.id) ?? [];
 }

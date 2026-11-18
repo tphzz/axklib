@@ -15,9 +15,38 @@
 
 #include "audio_import_internal.hpp"
 #include "axklib/audio.hpp"
+#include "axklib/pcm_import.hpp"
+#include "axklib/resample.hpp"
 #include "axklib/writer.hpp"
 
 namespace detail = axk::audio_import_detail;
+
+TEST(NativePcmImport, EqualRatePreservesSignedExtremaAndDoesNotDither) {
+    const std::array<std::int16_t, 5U> frames{-32768, -32, 0, 4656, 32767};
+    const auto audio = axk::import_mono_pcm16(frames, 44100U, 44100U);
+    ASSERT_TRUE(audio) << audio.error().message;
+    ASSERT_EQ(audio->pcm_channels.size(), 1U);
+    const std::vector<std::byte> expected{std::byte{0x00}, std::byte{0x80}, std::byte{0xe0}, std::byte{0xff},
+                                          std::byte{0x00}, std::byte{0x00}, std::byte{0x30}, std::byte{0x12},
+                                          std::byte{0xff}, std::byte{0x7f}};
+    EXPECT_EQ(audio->pcm_channels.front(), expected);
+    EXPECT_EQ(audio->output_frames, frames.size());
+    EXPECT_EQ(audio->source_sample_rate, 44100U);
+    EXPECT_EQ(audio->output_sample_rate, 44100U);
+    EXPECT_FALSE(audio->resampled);
+    EXPECT_FALSE(audio->quantized);
+    EXPECT_TRUE(audio->dither_algorithm.empty());
+}
+
+TEST(NativePcmImport, RejectsEmptyInputInvalidRatesAndOversizedProjectedOutput) {
+    const std::array<std::int16_t, 400U> frames{};
+    EXPECT_FALSE(axk::import_mono_pcm16({}, 44100U, 44100U));
+    EXPECT_FALSE(axk::import_mono_pcm16(frames, 0U, 44100U));
+    EXPECT_FALSE(axk::import_mono_pcm16(frames, 44100U, 12345U));
+    const auto oversized = axk::import_mono_pcm16(frames, 1U, 48000U);
+    ASSERT_FALSE(oversized);
+    EXPECT_EQ(oversized.error().code, axk::ErrorCode::audio_wave_data_too_large);
+}
 
 namespace {
 
@@ -366,12 +395,12 @@ TEST(AudioResampler, ConvertsCompleteFramesAndRejectsPartialFrames) {
         stereo[frame * 2U] = std::sin(static_cast<double>(frame) * 0.1);
         stereo[frame * 2U + 1U] = std::cos(static_cast<double>(frame) * 0.1);
     }
-    const auto converted = detail::resample_vhq(stereo, 2U, 48'000U, 44'100U);
+    const auto converted = axk::audio::resample_vhq(stereo, 2U, 48'000U, 44'100U);
     ASSERT_TRUE(converted);
     EXPECT_EQ(converted->size() % 2U, 0U);
     EXPECT_NEAR(static_cast<double>(converted->size() / 2U), 441.0, 1.0);
 
-    EXPECT_FALSE(detail::resample_vhq(std::span{stereo}.first(3U), 2U, 48'000U, 44'100U));
+    EXPECT_FALSE(axk::audio::resample_vhq(std::span{stereo}.first(3U), 2U, 48'000U, 44'100U));
 }
 
 TEST(AudioResampler, CoversIntegerNonIntegerShortAndLongRatiosDeterministically) {
@@ -390,8 +419,8 @@ TEST(AudioResampler, CoversIntegerNonIntegerShortAndLongRatiosDeterministically)
     };
     for (const auto &item : cases) {
         const auto input = deterministic_signal(item.frames, item.channels);
-        const auto first = detail::resample_vhq(input, item.channels, item.source_rate, item.output_rate);
-        const auto second = detail::resample_vhq(input, item.channels, item.source_rate, item.output_rate);
+        const auto first = axk::audio::resample_vhq(input, item.channels, item.source_rate, item.output_rate);
+        const auto second = axk::audio::resample_vhq(input, item.channels, item.source_rate, item.output_rate);
         ASSERT_TRUE(first);
         ASSERT_TRUE(second);
         EXPECT_EQ(*first, *second);

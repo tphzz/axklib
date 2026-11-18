@@ -23,10 +23,12 @@ result<conversion_plan> conversion_plan::prepare(const conversion_request &reque
     return protect<conversion_plan>([&]() -> result<conversion_plan> {
         conversion::FileRequest input;
         input.profile_id = request.profile_id;
-        auto path = checked_path(request.destination_path, "conversion destination");
-        if (!path)
-            return path.error();
-        input.destination = *path;
+        if (!request.destination_path.empty()) {
+            auto path = checked_path(request.destination_path, "conversion destination");
+            if (!path)
+                return path.error();
+            input.destination = *path;
+        }
         for (const auto &source : request.source_paths) {
             auto source_path = checked_path(source, "conversion source");
             if (!source_path)
@@ -34,7 +36,8 @@ result<conversion_plan> conversion_plan::prepare(const conversion_request &reque
             input.sources.push_back(*source_path);
         }
         try {
-            input.selection = nlohmann::json::parse(request.destination_selection_json);
+            if (!request.destination_selection_json.empty())
+                input.selection = nlohmann::json::parse(request.destination_selection_json);
             input.options = nlohmann::json::parse(request.options_json);
         } catch (const nlohmann::json::exception &) {
             return invalid_argument("Conversion options and destination selection must be valid JSON");
@@ -51,7 +54,7 @@ result<std::string> conversion_plan::report_json() const noexcept {
     return protect<std::string>([&]() -> result<std::string> {
         if (!impl_)
             return invalid_argument("Conversion plan has been moved");
-        return conversion::report_json(impl_->plan.report()).dump();
+        return impl_->plan.report_json().dump();
     });
 }
 

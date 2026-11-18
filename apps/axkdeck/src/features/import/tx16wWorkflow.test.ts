@@ -4,13 +4,14 @@ import { clientUploadLocation, serverFileLocation } from '../../lib/storageLocat
 import type { AudioImportTarget, ImageTransport } from '../../lib/transport';
 import type { DiskTreeItem, WorkspaceView } from '../../lib/types';
 import type { JobController } from '../jobs/actions';
-import { collectTx16wVolumeOptions, Tx16wImportWorkflow } from './tx16wWorkflow.svelte';
+import { Tx16wImportWorkflow } from './tx16wWorkflow.svelte';
+import { FloppyImportWorkflow } from './floppyWorkflow.svelte';
 import type { ConversionPlan, CompanionSourceInput, CompanionSourceResolution } from '../../lib/conversions';
 import type { InputFileLocation } from '../../lib/storageLocations';
-import type { PickerController } from '../dialogs/picker';
+import { PickerController } from '../dialogs/picker';
 import { fitsCapacity, inspectFitsCapacity } from '../../test/samplerCapacityFixture';
 
-const target = { partitionIndex: 0, volumeName: 'Imported' };
+const target = { kind: 'EXISTING_VOLUME' as const, partitionIndex: 0, volumeName: 'Imported' };
 const diskSource: ClientUploadSource = {
     name: 'library.ima',
     type: 'application/octet-stream',
@@ -167,7 +168,11 @@ describe('Tx16wImportWorkflow', () => {
 
     it('keeps removed canonical native members excluded until explicitly re-added', async () => {
         const companion = { ...diskSource, name: 'second.img', identity: 'native:second' };
-        const seed = { ...diskSource, identity: 'native:first', nearbySources: vi.fn().mockResolvedValue([companion]) };
+        const seed = {
+            ...diskSource,
+            identity: 'native:first',
+            nearbySources: vi.fn().mockResolvedValue({ sources: [companion], ambiguous: [] }),
+        };
         let uploadId = 0;
         const uploadClientFile = vi.fn(async (source: ClientUploadSource) =>
             clientUploadLocation({ uploadId: `upload-${++uploadId}` }, 'DISK_IMAGE', source.name),
@@ -236,7 +241,7 @@ describe('Tx16wImportWorkflow', () => {
         const nearbySources = vi
             .fn()
             .mockRejectedValueOnce(new Error('Directory scan exceeds its limit'))
-            .mockResolvedValueOnce([]);
+            .mockResolvedValueOnce({ sources: [], ambiguous: ['Wave.W01'] });
         const executeConversion = vi.fn();
         const workflow = createWorkflow(
             {
@@ -263,6 +268,7 @@ describe('Tx16wImportWorkflow', () => {
         await workflow.reprepare();
         expect(nearbySources).toHaveBeenCalledTimes(2);
         expect(workflow.request!.discovery.error).toBe('');
+        expect(workflow.request!.discovery.state).toBe('ambiguous');
         await workflow.close();
     });
 
@@ -270,10 +276,11 @@ describe('Tx16wImportWorkflow', () => {
         const prepared = inspection();
         prepared.report!.issues = [
             {
-                id: 'loss',
-                impact: 'LOSS',
-                message: 'Resampled',
-                code: 'resample',
+                id: 'audition',
+                impact: 'UNCERTAINTY',
+                message: 'No Performance present',
+                code: 'tx16w.missing_performance',
+                decision: 'Create an audition Program from Piano Voice',
                 sourceObject: 'wave',
                 sourceParameter: '',
                 targetObject: '',
@@ -288,7 +295,7 @@ describe('Tx16wImportWorkflow', () => {
             sourceTree()[0].children![0],
         );
         await workflow.requestDroppedFiles([serverFileLocation({ rootId: 'root', relativePath: 'disk.img' })]);
-        workflow.request!.acknowledgedIssueIds = ['loss'];
+        workflow.request!.acknowledgedIssueIds = ['audition'];
         await workflow.selectFidelity('STRICT');
         expect(workflow.request!.acknowledgedIssueIds).toEqual([]);
         expect(workflow.request!.error).toContain('release failed');
@@ -339,11 +346,10 @@ describe('Tx16wImportWorkflow', () => {
         );
     });
 
-    it('uploads native candidates only locally, releases nonmembers and does not rescan for fidelity changes', async () => {
-        const companion = { ...diskSource, name: 'second.img', identity: 'native:second' };
-        const unrelated = { ...diskSource, name: 'other.img', identity: 'native:other' };
-        const nearbySources = vi.fn().mockResolvedValue([companion, unrelated]);
-        const seed = { ...diskSource, identity: 'native:first', nearbySources };
+    it('uploads exactly the seed and its verified companion across floppy inspection and TX16W import', async () => {
+        const companion = { ...diskSource, name: 'sd024ye.img', identity: 'native:second' };
+        const nearbySources = vi.fn().mockResolvedValue({ sources: [companion], ambiguous: [] });
+        const seed = { ...diskSource, name: 'sd023ye.img', identity: 'native:first', nearbySources };
         const uploadClientFile = vi.fn(async (source: ClientUploadSource) =>
             clientUploadLocation({ uploadId: source.name }, 'DISK_IMAGE', source.name),
         );
@@ -365,26 +371,44 @@ describe('Tx16wImportWorkflow', () => {
                 requirements: input.candidates?.length ? [] : [{ name: 'Wave.W01', state: 'MISSING' }],
             }),
         );
-        const workflow = createWorkflow(
-            {
-                connectionMode: 'local',
-                uploadClientFile,
-                releaseClientUpload,
-                resolveCompanionSources,
-                prepareConversion: vi.fn().mockResolvedValue(inspection()),
-            },
-            sourceTree()[0].children![0],
-        );
-        await workflow.requestDroppedFiles([seed]);
+        const transport = {
+            connectionMode: 'local',
+            uploadClientFile,
+            releaseClientUpload,
+            resolveCompanionSources,
+            prepareConversion: vi.fn().mockResolvedValue(inspection()),
+            cancelJob: vi.fn().mockResolvedValue(undefined),
+            startFloppyInspection: vi
+                .fn()
+                .mockResolvedValue({ jobId: 1, status: 'completed', result: { format: 'TX16W' } }),
+        } as unknown as ImageTransport;
+        const volume = sourceTree()[0].children![0];
+        const workflow = createWorkflow(transport, volume);
+        const floppy = new FloppyImportWorkflow({
+            transport,
+            jobs: { run: (start: () => Promise<unknown>) => start() } as unknown as JobController,
+            picker: new PickerController(() => undefined),
+            isDesktop: true,
+            sessionId: () => 12,
+            mutationsAvailable: () => true,
+            sourceItems: sourceTree,
+            invalidateSession: vi.fn(),
+            refreshSession: vi.fn(),
+            setStatus: vi.fn(),
+            otherFormat: (_format, sources, target, claim) => workflow.requestDroppedFiles(sources, target, claim),
+        });
+        await floppy.requestDroppedFiles([seed], volume);
+        expect(floppy.request).toBeNull();
+        expect(transport.startFloppyInspection).toHaveBeenCalledOnce();
         expect(nearbySources).toHaveBeenCalledOnce();
         expect(workflow.request?.members.map((member) => member.sourceName)).toEqual([seed.name, companion.name]);
-        expect(releaseClientUpload).toHaveBeenCalledWith(
-            clientUploadLocation({ uploadId: unrelated.name }, 'DISK_IMAGE', unrelated.name),
-        );
+        expect(uploadClientFile.mock.calls.map(([file]) => file.name)).toEqual([seed.name, companion.name]);
+        expect(releaseClientUpload).not.toHaveBeenCalled();
         await workflow.selectFidelity('STRICT');
         expect(nearbySources).toHaveBeenCalledOnce();
         expect(resolveCompanionSources).toHaveBeenCalledTimes(2);
         await workflow.close();
+        expect(releaseClientUpload).toHaveBeenCalledTimes(2);
     });
 
     it('never scans native local siblings for a desktop-to-remote upload', async () => {
@@ -449,7 +473,11 @@ describe('Tx16wImportWorkflow', () => {
             sourceTree()[0].children![0],
         );
         const pending = workflow.requestDroppedFiles([
-            { ...diskSource, identity: 'native:first', nearbySources: vi.fn().mockResolvedValue([candidate]) },
+            {
+                ...diskSource,
+                identity: 'native:first',
+                nearbySources: vi.fn().mockResolvedValue({ sources: [candidate], ambiguous: [] }),
+            },
         ]);
         await vi.waitFor(() => expect(uploadClientFile).toHaveBeenCalledTimes(2));
         await workflow.close();
@@ -470,7 +498,7 @@ describe('Tx16wImportWorkflow', () => {
                 prepareConversion,
                 releaseClientUpload: vi.fn().mockResolvedValue(undefined),
             },
-            { id: 'partition-0', name: 'Samples', kind: 'partition', partitionIndex: 0, childCount: 1 },
+            { id: 'root', name: 'Disk', kind: 'disk', childCount: 1 },
         );
 
         await workflow.requestDroppedFiles([diskSource]);
@@ -673,6 +701,42 @@ describe('Tx16wImportWorkflow', () => {
         expect(releaseClientUpload).toHaveBeenCalledTimes(2);
     });
 
+    it('replans only the selected occurrences and never treats an empty selection as the whole disk set', async () => {
+        const plan = inspection();
+        const roots = ['p1', 'p2'].map((id) => ({
+            id,
+            name: id,
+            kind: 'performance',
+            location: id,
+            selectable: true,
+            dependencies: [],
+        }));
+        plan.report!.sourceObjects = roots;
+        plan.report!.sourceCount = roots.length;
+        const prepareConversion = vi.fn().mockResolvedValue(plan);
+        const executeConversion = vi.fn();
+        const releaseConversion = vi.fn().mockResolvedValue(undefined);
+        const workflow = createWorkflow(
+            { prepareConversion, executeConversion, releaseConversion },
+            sourceTree()[0].children![0],
+        );
+        await workflow.requestDroppedFiles([serverFileLocation({ rootId: 'root', relativePath: 'disk.ima' })]);
+        expect(workflow.request?.sourceObjects).toEqual(roots);
+        expect(prepareConversion.mock.calls[0][0].options).toEqual({ mode: 'HIERARCHY' });
+        await workflow.selectSources(['p2']);
+        expect(prepareConversion.mock.lastCall![0].options).toEqual({ mode: 'HIERARCHY', sourceObjectIds: ['p2'] });
+        await workflow.selectSources([]);
+        expect(workflow.request?.sourceObjects).toEqual(roots);
+        expect(workflow.request?.plan).toBeNull();
+        await workflow.commit();
+        expect(executeConversion).not.toHaveBeenCalled();
+        expect(prepareConversion).toHaveBeenCalledTimes(2);
+        await workflow.selectSources(undefined);
+        expect(prepareConversion).toHaveBeenCalledTimes(3);
+        expect(prepareConversion.mock.lastCall![0].options).toEqual({ mode: 'HIERARCHY' });
+        expect(workflow.request?.plan?.report?.executable).toBe(true);
+    });
+
     it('converts an open native document through an owned target session and closes only that target', async () => {
         const prepareConversion = vi.fn().mockResolvedValue(inspection());
         const opened = {
@@ -686,9 +750,13 @@ describe('Tx16wImportWorkflow', () => {
         const refreshImage = vi.fn().mockResolvedValue(opened);
         const refreshSession = vi.fn();
         const invalidateSession = vi.fn();
+        const openImage = vi.fn().mockResolvedValue(opened);
+        const chooseLocation = vi
+            .fn()
+            .mockResolvedValue(serverFileLocation({ rootId: 'root', relativePath: 'target.hds' }));
         const workflow = createWorkflow(
             {
-                openImage: vi.fn().mockResolvedValue(opened),
+                openImage,
                 closeImage,
                 refreshImage,
                 prepareConversion,
@@ -698,15 +766,18 @@ describe('Tx16wImportWorkflow', () => {
             {
                 refreshSession,
                 invalidateSession,
-                picker: {
-                    chooseLocation: vi
-                        .fn()
-                        .mockResolvedValue(serverFileLocation({ rootId: 'root', relativePath: 'target.hds' })),
-                } as unknown as PickerController,
+                picker: { chooseLocation } as unknown as PickerController,
             },
         );
         await workflow.requestNativeDocument(12, 'tx16w', 7);
-        expect(workflow.volumeOptions()).toHaveLength(1);
+        expect(workflow.request?.status).toBe('waiting-target');
+        expect(workflow.destinations().volumes).toEqual([]);
+        expect(workflow.request?.destinationProfile).toBe('yamaha.tx16w-to-a-series');
+        expect(chooseLocation).not.toHaveBeenCalled();
+        expect(openImage).not.toHaveBeenCalled();
+        await workflow.browseNativeDestination();
+        expect(chooseLocation).toHaveBeenCalledOnce();
+        expect(workflow.destinations().volumes).toHaveLength(1);
         await workflow.selectTarget(target);
         expect(prepareConversion).toHaveBeenCalledWith(
             expect.objectContaining({
@@ -722,6 +793,42 @@ describe('Tx16wImportWorkflow', () => {
         expect(refreshSession).not.toHaveBeenCalled();
         expect(invalidateSession).not.toHaveBeenCalled();
         expect(workflow.request).toBeNull();
+        await workflow.requestNativeDocument(12, 'tx16w', 7);
+        expect(workflow.request?.status).toBe('waiting-target');
+        expect(workflow.request?.plan).toBeNull();
+        expect(chooseLocation).toHaveBeenCalledOnce();
+        expect(workflow.destinations().volumes).toEqual([]);
+    });
+
+    it('keeps the source open and reports an unavailable target route without opening or writing a destination', async () => {
+        const openImage = vi.fn(),
+            executeConversion = vi.fn(),
+            closeImage = vi.fn();
+        const chooseLocation = vi
+            .fn()
+            .mockResolvedValue(serverFileLocation({ rootId: 'root', relativePath: 'target.hds' }));
+        const workflow = createWorkflow(
+            { conversionProfiles: vi.fn().mockResolvedValue([]), openImage, executeConversion, closeImage },
+            sourceTree()[0],
+            {
+                picker: { chooseLocation } as unknown as PickerController,
+            },
+        );
+        await workflow.requestNativeDocument(12, 'tx16w', 7);
+        expect(workflow.request?.error).toMatch(/server.*existing A-series/i);
+        await workflow.browseNativeDestination();
+        expect(workflow.request?.error).toMatch(/server.*existing A-series/i);
+        expect(workflow.request?.documentSource).toEqual({
+            kind: 'DOCUMENT',
+            sessionId: 12,
+            documentId: 'tx16w',
+            expectedRevision: 7,
+        });
+        await workflow.commit();
+        expect(openImage).not.toHaveBeenCalled();
+        expect(executeConversion).not.toHaveBeenCalled();
+        expect(closeImage).not.toHaveBeenCalled();
+        expect(chooseLocation).not.toHaveBeenCalled();
     });
 
     it('recovers an execution identity after a lost response without submitting again', async () => {
@@ -749,18 +856,33 @@ describe('Tx16wImportWorkflow', () => {
         expect(workflow.request).toBeNull();
     });
 
-    it('exposes every nested volume as a target without introducing A-series data into the parser model', () => {
-        expect(collectTx16wVolumeOptions(sourceTree())).toEqual([
-            {
-                key: '0:Imported',
-                label: 'Samples · Imported',
-                partitionName: 'Samples',
-                target,
-            },
-        ]);
+    it('creates on a partition drop, rejects collisions without writing, and coalesces edits without changing source selection', async () => {
+        const releaseConversion = vi.fn(),
+            executeConversion = vi.fn(),
+            prepareConversion = vi.fn().mockResolvedValue(inspection());
+        const workflow = createWorkflow({ prepareConversion, releaseConversion, executeConversion }, sourceTree()[0]);
+        await workflow.requestDroppedFiles([serverFileLocation({ rootId: 'root', relativePath: 'Keys.img' })]);
+        const dest = { kind: 'CREATE_VOLUME' as const, partitionIndex: 0, volumeName: 'Keys' };
+        expect(workflow.request?.target).toEqual(dest);
+        expect(prepareConversion.mock.calls[0][0].selection).toEqual(dest);
+        workflow.request!.sourceObjectIds = ['occurrence-1'];
+        const obsolete = workflow.selectTarget({ ...dest, volumeName: 'old' }, true);
+        expect(workflow.request?.plan).toBeNull();
+        await workflow.selectTarget({ ...dest, volumeName: 'Imported' }, true);
+        await workflow.commit();
+        expect(executeConversion).not.toHaveBeenCalled();
+        const final = { ...dest, volumeName: 'final' };
+        await workflow.selectTarget(final, true);
+        await obsolete;
+        expect(prepareConversion).toHaveBeenCalledTimes(2);
+        expect(prepareConversion.mock.calls[1][0]).toMatchObject({
+            selection: final,
+            options: { sourceObjectIds: ['occurrence-1'] },
+        });
+        await workflow.close();
     });
 
-    it('requires explicit loss acknowledgement and releases a plan when fidelity changes', async () => {
+    it('executes known loss without sending an acknowledgement and releases a plan when fidelity changes', async () => {
         const prepared = inspection();
         prepared.report!.issueCount = 1;
         prepared.report!.issues = [
@@ -777,22 +899,76 @@ describe('Tx16wImportWorkflow', () => {
         ];
         const executeConversion = vi.fn().mockResolvedValue({ jobId: 22, status: 'queued' });
         const releaseConversion = vi.fn().mockResolvedValue(undefined);
-        const prepareConversion = vi.fn().mockResolvedValue(prepared);
+        const strict = { ...prepared, report: { ...prepared.report!, fidelity: 'STRICT', executable: false } };
+        const prepareConversion = vi
+            .fn()
+            .mockResolvedValueOnce(prepared)
+            .mockResolvedValueOnce(strict)
+            .mockResolvedValue(prepared);
         const workflow = createWorkflow(
             { prepareConversion, executeConversion, releaseConversion },
             sourceTree()[0].children![0],
         );
         await workflow.requestDroppedFiles([serverFileLocation({ rootId: 'root', relativePath: 'disk.ima' })]);
-        await workflow.commit();
-        expect(executeConversion).not.toHaveBeenCalled();
         await workflow.selectFidelity('STRICT');
         expect(releaseConversion).toHaveBeenCalledWith('conversion-1');
         expect(prepareConversion).toHaveBeenLastCalledWith(
             expect.objectContaining({ fidelity: 'STRICT' }),
             expect.any(AbortSignal),
         );
+        await workflow.commit();
+        expect(executeConversion).not.toHaveBeenCalled();
+        await workflow.selectFidelity('BEST');
+        await workflow.commit();
+        expect(executeConversion).toHaveBeenCalledWith(prepared, []);
     });
 
+    it('locks placement and commit while replacing an already prepared destination image', async () => {
+        const opened = {
+            sessionId: 99,
+            documentId: 'a-series',
+            documents: [{ id: 'a-series', formatId: 'yamaha.a-series' }],
+            volumeMutationsAvailable: true,
+            tree: sourceTree(),
+        };
+        let finish!: () => void;
+        const openImage = vi
+            .fn()
+            .mockResolvedValueOnce(opened)
+            .mockImplementationOnce(
+                () =>
+                    new Promise((done) => {
+                        finish = () => done({ ...opened, sessionId: 100 });
+                    }),
+            );
+        const prepareConversion = vi.fn().mockResolvedValue(inspection()),
+            executeConversion = vi.fn(),
+            closeImage = vi.fn();
+        const chooseLocation = vi
+            .fn()
+            .mockResolvedValue(serverFileLocation({ rootId: 'root', relativePath: 'target.hds' }));
+        const workflow = createWorkflow(
+            { openImage, prepareConversion, executeConversion, closeImage },
+            sourceTree()[0],
+            { picker: { chooseLocation } as unknown as PickerController },
+        );
+        await workflow.requestNativeDocument(12, 'tx16w', 7);
+        await workflow.browseNativeDestination();
+        await workflow.selectTarget(target);
+        const replacement = workflow.browseNativeDestination();
+        await vi.waitFor(() => expect(openImage).toHaveBeenCalledTimes(2));
+        await workflow.selectTarget({ ...target, kind: 'CREATE_VOLUME', volumeName: 'New' });
+        await workflow.commit();
+        expect(workflow.request?.status).toBe('opening-target');
+        expect(workflow.request?.target).toEqual(target);
+        expect(prepareConversion).toHaveBeenCalledTimes(1);
+        expect(executeConversion).not.toHaveBeenCalled();
+        finish();
+        await replacement;
+        expect(workflow.request?.target).toBeNull();
+        expect(workflow.request?.plan).toBeNull();
+        expect(closeImage).toHaveBeenCalledWith(99);
+    });
     it('closes a destination opened after disposal without replacing the source workspace', async () => {
         let resolve!: (opened: unknown) => void;
         const closeImage = vi.fn().mockResolvedValue(undefined);
@@ -809,7 +985,8 @@ describe('Tx16wImportWorkflow', () => {
                     .mockResolvedValue(serverFileLocation({ rootId: 'root', relativePath: 'target.hds' })),
             } as unknown as PickerController,
         });
-        const pending = workflow.requestNativeDocument(12, 'tx16w', 7);
+        await workflow.requestNativeDocument(12, 'tx16w', 7);
+        const pending = workflow.browseNativeDestination();
         await vi.waitFor(() => expect(openImage).toHaveBeenCalled());
         await workflow.dispose();
         resolve({ sessionId: 99 });
@@ -837,6 +1014,14 @@ function createWorkflow(
             members: selectedMembers(input.sources),
             requirements: [],
         })),
+        conversionProfiles: vi.fn().mockResolvedValue([
+            {
+                id: 'yamaha.tx16w-to-a-series',
+                sourceFormat: 'yamaha.tx16w',
+                destinationFormat: 'yamaha.a-series',
+                outputKind: 'EXISTING_IMAGE',
+            },
+        ]),
         releaseConversion: vi.fn().mockResolvedValue(undefined),
         inspectImportCapacity: vi.fn(inspectFitsCapacity),
         ...operations,

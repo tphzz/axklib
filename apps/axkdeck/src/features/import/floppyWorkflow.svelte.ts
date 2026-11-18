@@ -47,6 +47,7 @@ type Dependencies = PackageImportDependencies & {
         format: FloppyInspection['format'],
         sources: (ClientUploadSource | FileLocation)[],
         target: DiskTreeItem | null,
+        claimUpload: (source: ClientUploadSource | FileLocation) => ClientUploadLocation | undefined,
     ) => Promise<void>;
 };
 
@@ -526,8 +527,23 @@ export class FloppyImportWorkflow {
                         .map((m) => m.source)
                         .filter((source): source is ClientUploadSource | FileLocation => !isDirectory(source)),
                     target = r.target;
-                await this.close();
-                await this.dependencies.otherFormat(inspection.format, sources, target);
+                // The inspected upload already contains the exact bytes the TX16W planner needs.
+                const uploads = new Map(
+                    r.members.flatMap((member) => (member.upload ? [[member.source, member.upload] as const] : [])),
+                );
+                for (const member of r.members) member.upload = null;
+                try {
+                    await this.close();
+                    await this.dependencies.otherFormat(inspection.format, sources, target, (source) => {
+                        const upload = uploads.get(source);
+                        uploads.delete(source);
+                        return upload;
+                    });
+                } finally {
+                    await Promise.all(
+                        [...uploads.values()].map((upload) => this.dependencies.transport.releaseClientUpload(upload)),
+                    );
+                }
                 return;
             }
             r.inspection = inspection;

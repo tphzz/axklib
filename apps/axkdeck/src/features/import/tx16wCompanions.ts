@@ -78,6 +78,7 @@ export class Tx16wCompanionDiscovery {
         if (request.documentSource || request.members.length === 0) return;
         const signature = request.members.map((member) => member.id).join(',');
         if (!force && signature === this.completedMembers) return;
+        request.status = 'discovering';
         const search = request.discovery;
         search.state = 'searching';
         search.message = 'Looking for companion disks...';
@@ -92,8 +93,11 @@ export class Tx16wCompanionDiscovery {
                 (source): source is FileLocation => source !== null,
             );
             const first = request.members[0].source;
+            const selected = request.members
+                .map(({ source }) => source)
+                .filter((source): source is ClientUploadSource => !('kind' in source) && !!source.nearbySources);
             const native =
-                !('kind' in first) && this.transport.connectionMode === 'local'
+                !('kind' in first) && selected.length === sources.length && this.transport.connectionMode === 'local'
                     ? first.nearbySources?.bind(first)
                     : undefined;
             let result = await this.transport.resolveCompanionSources(
@@ -102,9 +106,13 @@ export class Tx16wCompanionDiscovery {
             );
             signal.throwIfAborted();
             if (result.requirements.length && native) {
-                const nearby = await native(signal);
+                const { sources: nearby, ambiguous } = await native(
+                    selected,
+                    [...this.exclusions.keys()].filter((key): key is string => typeof key === 'string'),
+                    signal,
+                );
                 signal.throwIfAborted();
-                if (nearby.length > 1024) throw new Error('Companion discovery exceeds 1024 candidates');
+                if (nearby.length + selected.length > 32) throw new Error('Companion set exceeds 32 disks');
                 let bytes = 0;
                 const seen = new Set(request.members.map((member) => member.sourceIdentity));
                 for (const source of nearby) {
@@ -120,16 +128,21 @@ export class Tx16wCompanionDiscovery {
                     temporary.push({ source, upload });
                     signal.throwIfAborted();
                 }
-                result = await this.transport.resolveCompanionSources(
-                    {
-                        sources,
-                        candidates: temporary.map((candidate) => candidate.upload),
-                        exclusions,
-                        searchNearby: false,
-                    },
-                    signal,
-                );
+                if (temporary.length)
+                    result = await this.transport.resolveCompanionSources(
+                        {
+                            sources,
+                            candidates: temporary.map((candidate) => candidate.upload),
+                            exclusions,
+                            searchNearby: false,
+                        },
+                        signal,
+                    );
                 signal.throwIfAborted();
+                for (const requirement of result.requirements) {
+                    if (requirement.state === 'MISSING' && ambiguous.includes(requirement.name))
+                        requirement.state = 'AMBIGUOUS';
+                }
             }
             const members = result.members.map((item) => {
                 const location = item.source.kind === 'FILE' ? serverFileLocation(item.source.file, item.name) : null;

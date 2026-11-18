@@ -31,7 +31,7 @@ const ALLOWED_ORIGINS: [&str; 3] = [
 ];
 
 #[cfg(windows)]
-fn suppress_child_console(command: &mut Command) {
+pub(crate) fn suppress_child_console(command: &mut Command) {
     use std::os::windows::process::CommandExt;
 
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
@@ -39,7 +39,7 @@ fn suppress_child_console(command: &mut Command) {
 }
 
 #[cfg(not(windows))]
-fn suppress_child_console(_command: &mut Command) {}
+pub(crate) fn suppress_child_console(_command: &mut Command) {}
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -636,7 +636,7 @@ fn validate_connection(
     Ok(())
 }
 
-fn server_binary() -> Option<PathBuf> {
+pub(crate) fn server_binary() -> Option<PathBuf> {
     if let Some(configured) = std::env::var_os("AXKLIB_SERVER_BINARY") {
         let path = PathBuf::from(configured);
         return path.is_file().then_some(path);

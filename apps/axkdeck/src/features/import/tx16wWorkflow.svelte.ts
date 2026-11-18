@@ -1,11 +1,20 @@
 import type { ClientUploadSource } from '../../lib/clientUploadSource';
 import type { ClientUploadLocation, FileLocation, ImageLocation, InputFileLocation } from '../../lib/storageLocations';
-import type { AudioImportTarget, ImageTransport, OpenedImage, Tx16wImportMode } from '../../lib/transport';
+import type {
+    AudioImportTarget,
+    ImageTransport,
+    OpenedImage,
+    Tx16wImportMode,
+    VolumeImportDestination,
+} from '../../lib/transport';
+import { collectImportDestinations } from './packageDestinations';
+import { droppedPlacement, placementError, type PlacementOptions } from './tx16wPlacement';
 import {
     requiredConversionIssues,
     type ConversionPlan,
     type ConversionFidelity,
     type ConversionSource,
+    type ConversionSourceObject,
 } from '../../lib/conversions';
 import type { PickerController } from '../dialogs/picker';
 import type { DiskTreeItem, WorkspaceView } from '../../lib/types';
@@ -14,19 +23,13 @@ import { tx16wDiskMediaType } from '../../lib/tx16wImport';
 import type { JobController } from '../jobs/actions';
 import { ImportCompletion } from './importCompletion.svelte';
 import { AxklibApiError } from '../../lib/httpErrors';
+import { imageLocation } from '../../lib/httpImageSources';
 import {
     idleCompanionSearch,
     Tx16wCompanionDiscovery,
     tx16wSourceKey,
     type Tx16wCompanionSearch,
 } from './tx16wCompanions';
-
-export interface Tx16wVolumeOption {
-    key: string;
-    label: string;
-    partitionName: string;
-    target: AudioImportTarget;
-}
 
 export interface Tx16wImportMember {
     id: number;
@@ -40,15 +43,19 @@ export interface Tx16wImportMember {
 
 export interface Tx16wImportRequest {
     members: Tx16wImportMember[];
-    target: AudioImportTarget | null;
+    target: VolumeImportDestination | null;
     importMode: Tx16wImportMode;
     plan: ConversionPlan | null;
     fidelity: ConversionFidelity;
     acknowledgedIssueIds: string[];
     documentSource?: Extract<ConversionSource, { kind: 'DOCUMENT' }>;
+    destinationProfile?: string;
     destinationName?: string;
+    sourceName?: string;
+    sourceObjects?: ConversionSourceObject[];
+    sourceObjectIds?: string[];
     discovery: Tx16wCompanionSearch;
-    status: 'waiting-target' | 'uploading' | 'discovering' | 'inspecting' | 'ready' | 'importing';
+    status: 'waiting-target' | 'opening-target' | 'uploading' | 'discovering' | 'inspecting' | 'ready' | 'importing';
     progress: number;
     error: string;
 }
@@ -73,12 +80,13 @@ export class Tx16wImportWorkflow {
     request = $state<Tx16wImportRequest | null>(null);
     private abortController: AbortController | null = null;
     private nextMemberId = 0;
-    private ownedTarget: OpenedImage | null = null;
+    private ownedTarget = $state.raw<OpenedImage | null>(null);
     private openingTarget = false;
     private targetGeneration = 0;
     private disposed = false;
     private readonly companions: Tx16wCompanionDiscovery;
     private readonly releasingMembers = new WeakMap<Tx16wImportMember, Promise<void>>();
+    private readonly unreleasedPlans = new Set<string>();
 
     readonly completion: ImportCompletion;
 
@@ -95,73 +103,145 @@ export class Tx16wImportWorkflow {
         return this.dependencies.mutationsAvailable() && this.dependencies.imageLocation() !== null;
     }
 
-    activeTarget(): AudioImportTarget | null {
-        const selected = this.dependencies.selectedSource();
-        return this.dropAvailable() && selected.kind === 'volume' && selected.partitionIndex !== undefined
-            ? { partitionIndex: selected.partitionIndex, volumeName: selected.name }
-            : null;
+    destinations(): PlacementOptions {
+        return collectImportDestinations(
+            this.ownedTarget?.tree ?? (this.request?.documentSource ? [] : this.dependencies.sourceItems()),
+        );
     }
 
-    volumeOptions(): Tx16wVolumeOption[] {
-        return collectTx16wVolumeOptions(this.ownedTarget?.tree ?? this.dependencies.sourceItems());
+    private canStart(): boolean {
+        return (
+            !this.disposed &&
+            !this.openingTarget &&
+            (!this.completion.locked || (!this.request && this.completion.canDismiss))
+        );
     }
 
-    async requestNativeDocument(sessionId: number, documentId: string, expectedRevision: number): Promise<void> {
-        if (!this.dependencies.picker || this.openingTarget || this.completion.locked || this.disposed) return;
+    private async loadDestinationProfile(request: Tx16wImportRequest): Promise<void> {
+        const profiles = await this.dependencies.transport.conversionProfiles();
+        if (this.request !== request) return;
+        const profile = profiles.find(
+            (p) =>
+                p.sourceFormat === 'yamaha.tx16w' &&
+                p.destinationFormat === 'yamaha.a-series' &&
+                p.outputKind === 'EXISTING_IMAGE' &&
+                p.id === 'yamaha.tx16w-to-a-series',
+        );
+        if (!profile) throw new Error('This server does not offer conversion to an existing A-series image');
+        request.destinationProfile = profile.id;
+    }
+
+    async requestNativeDocument(
+        sessionId: number,
+        documentId: string,
+        expectedRevision: number,
+        session?: Pick<OpenedImage, 'sources' | 'documents'>,
+    ): Promise<void> {
+        if (!this.dependencies.picker || !this.canStart()) return;
         await this.close();
         if (this.request) return;
-        this.openingTarget = true;
-        const generation = ++this.targetGeneration;
+        this.completion.reset();
+        const members = session?.documents.find((document) => document.id === documentId)?.sourceMemberIds;
+        const sourceName = session?.sources
+            .filter((s) => members?.includes(s.id))
+            .map((s) => imageLocation(s.source).displayName.split('/').at(-1))
+            .join(' + ');
+        this.request = {
+            members: [],
+            target: null,
+            importMode: 'HIERARCHY',
+            plan: null,
+            fidelity: 'BEST',
+            acknowledgedIssueIds: [],
+            status: 'waiting-target',
+            progress: 0,
+            error: '',
+            documentSource: { kind: 'DOCUMENT', sessionId, documentId, expectedRevision },
+            sourceName: sourceName || this.dependencies.imageLocation()?.displayName,
+            discovery: idleCompanionSearch(),
+        };
+        const request = this.request;
+        request.status = 'inspecting';
         try {
-            const location = await this.dependencies.picker.chooseLocation('file', 'Conversion destination', [
-                'hds',
-                'hda',
-                'img',
-            ]);
-            if (!location || location.kind !== 'server-file' || generation !== this.targetGeneration || this.disposed)
-                return;
-            this.dependencies.setStatus('Opening conversion destination');
-            let opened = await this.dependencies.transport.openImage([location]);
-            if (generation !== this.targetGeneration || this.disposed) {
-                await this.dependencies.transport.closeImage(opened.sessionId);
+            await this.loadDestinationProfile(request);
+        } catch (error) {
+            if (this.request === request) request.error = userFacingMessage(error);
+        } finally {
+            if (this.request === request) request.status = 'waiting-target';
+        }
+    }
+
+    async browseNativeDestination(): Promise<void> {
+        const request = this.request;
+        if (
+            !request?.documentSource ||
+            !this.dependencies.picker ||
+            !['waiting-target', 'ready'].includes(request.status) ||
+            this.openingTarget ||
+            this.completion.locked ||
+            this.disposed
+        )
+            return;
+        this.openingTarget = true;
+        const priorStatus = request.status;
+        request.status = 'opening-target';
+        const generation = ++this.targetGeneration;
+        let candidate: OpenedImage | null = null;
+        try {
+            if (!request.destinationProfile) {
+                await this.loadDestinationProfile(request);
+                if (generation !== this.targetGeneration || this.disposed) return;
+            }
+            const location = await this.dependencies.picker.chooseLocation(
+                'file',
+                'Choose existing A-series image',
+                ['hds', 'hda', 'img'],
+                '',
+                { parentDialog: 'conversion-destination' },
+            );
+            if (generation !== this.targetGeneration || this.disposed) return;
+            if (!location || location.kind !== 'server-file') {
+                request.status = priorStatus;
                 return;
             }
-            this.ownedTarget = opened;
-            const documents = opened.documents.filter((document) => document.formatId === 'yamaha.a-series');
-            if (documents.length !== 1) throw new Error('Choose an image with one A-series document');
-            if (opened.documentId !== documents[0].id)
-                opened = await this.dependencies.transport.selectDocument(opened.sessionId, documents[0].id);
+            this.abortController?.abort();
+            request.error = '';
+            candidate = await this.dependencies.transport.openImage([location]);
             if (generation !== this.targetGeneration || this.disposed) return;
-            this.ownedTarget = opened;
-            if (!opened.volumeMutationsAvailable) throw new Error('Conversion requires a writable A-series SFS image');
-            this.completion.reset();
-            this.request = {
-                members: [],
-                target: null,
-                importMode: 'HIERARCHY',
-                plan: null,
-                fidelity: 'BEST',
-                acknowledgedIssueIds: [],
-                status: 'waiting-target',
-                progress: 0,
-                error: '',
-                documentSource: { kind: 'DOCUMENT', sessionId, documentId, expectedRevision },
-                destinationName: location.displayName,
-                discovery: idleCompanionSearch(),
-            };
+            const documents = candidate.documents.filter((document) => document.formatId === 'yamaha.a-series');
+            if (documents.length !== 1) throw new Error('Choose an image with one A-series document');
+            if (candidate.documentId !== documents[0].id)
+                candidate = await this.dependencies.transport.selectDocument(candidate.sessionId, documents[0].id);
+            if (generation !== this.targetGeneration || this.disposed) return;
+            if (!candidate.volumeMutationsAvailable)
+                throw new Error('Conversion requires a writable A-series SFS image');
+            await this.discardPlan(request);
+            if (generation !== this.targetGeneration || this.disposed) return;
+            const previous = this.ownedTarget;
+            this.ownedTarget = candidate;
+            candidate = null;
+            request.target = null;
+            request.destinationName = location.displayName;
+            request.status = 'waiting-target';
+            if (previous) await this.dependencies.transport.closeImage(previous.sessionId);
         } catch (error) {
-            this.dependencies.setStatus(userFacingMessage(error));
-            await this.releaseAndClose();
+            if (this.request === request && generation === this.targetGeneration) {
+                request.error = userFacingMessage(error);
+                request.status = request.target ? 'ready' : 'waiting-target';
+                this.dependencies.setStatus(request.error);
+            }
         } finally {
             this.openingTarget = false;
+            if (candidate) await this.dependencies.transport.closeImage(candidate.sessionId);
         }
     }
 
     async requestDroppedFiles(
         files: (ClientUploadSource | FileLocation)[],
-        target: AudioImportTarget | null = this.activeTarget(),
+        selected: DiskTreeItem | null = this.dependencies.selectedSource(),
+        claimUpload?: (source: ClientUploadSource | FileLocation) => ClientUploadLocation | undefined,
     ): Promise<void> {
-        if (this.openingTarget || this.disposed || this.completion.locked) return;
+        if (!this.canStart()) return;
         const admitted = admittedSources(files);
         if (files.some((source) => tx16wDiskMediaType(sourceName(source)) === null) || admitted.length === 0) {
             this.dependencies.setStatus('Drop one or more TX16W .img or .ima disk images');
@@ -188,8 +268,14 @@ export class Tx16wImportWorkflow {
         await this.close();
         if (this.request) return;
         this.completion.reset();
+        const target = droppedPlacement(selected, sourceName(admitted[0]));
         this.request = {
-            members: admitted.map((source) => this.member(source)),
+            members: admitted.map((source) => {
+                const member = this.member(source);
+                const upload = claimUpload?.(source);
+                if (upload) member.upload = member.resolvedSource = upload;
+                return member;
+            }),
             target,
             importMode: 'HIERARCHY',
             plan: null,
@@ -233,6 +319,7 @@ export class Tx16wImportWorkflow {
             if (old) old.origin = 'SELECTED';
         }
         request.members.push(...additions.map((source) => this.member(source)));
+        if (additions.length) this.resetEligibility(request);
         request.error = '';
         if (request.target) await this.inspect();
     }
@@ -254,6 +341,7 @@ export class Tx16wImportWorkflow {
             if (this.request !== request || generation !== this.targetGeneration) return;
             this.companions.exclude(removed);
             request.members.splice(index, 1);
+            this.resetEligibility(request);
             if (request.members.length === 0) {
                 request.discovery = idleCompanionSearch();
                 request.status = request.target ? 'ready' : 'waiting-target';
@@ -267,29 +355,44 @@ export class Tx16wImportWorkflow {
         }
     }
 
-    async selectTarget(target: AudioImportTarget | null): Promise<void> {
+    async selectTarget(target: VolumeImportDestination | null, typing = false): Promise<void> {
         const request = this.request;
-        if (!request || this.completion.locked) return;
+        if (
+            !request ||
+            this.openingTarget ||
+            this.completion.locked ||
+            request.status === 'importing' ||
+            (request.documentSource && !this.ownedTarget)
+        )
+            return;
         request.target = target;
         request.error = '';
-        if (target) await this.inspect();
-        else {
-            this.abortController?.abort();
-            await this.discardPlan(request);
-            request.status = 'waiting-target';
-        }
+        await this.inspect(false, typing);
     }
 
     async selectImportMode(importMode: Tx16wImportMode): Promise<void> {
         const request = this.request;
         if (!request || this.completion.locked || request.importMode === importMode) return;
         request.importMode = importMode;
+        this.resetEligibility(request);
         request.error = '';
         if (request.target) await this.inspect();
     }
 
+    private resetEligibility(request: Tx16wImportRequest) {
+        request.sourceObjects = undefined;
+        if (request.sourceObjectIds !== undefined) request.sourceObjectIds = [];
+    }
+
+    async selectSources(ids: string[] | undefined): Promise<void> {
+        const request = this.request;
+        if (!request || this.completion.locked || !request.sourceObjects?.length) return;
+        request.sourceObjectIds = ids;
+        await this.inspect();
+    }
+
     async commit(): Promise<void> {
-        if (this.completion.locked) return;
+        if (this.completion.locked || this.openingTarget) return;
         const request = this.request;
         const sessionId = this.ownedTarget?.sessionId ?? this.dependencies.sessionId();
         if (
@@ -300,6 +403,7 @@ export class Tx16wImportWorkflow {
             request.discovery.error ||
             requiredConversionIssues(request.plan).some((id) => !request.acknowledgedIssueIds.includes(id)) ||
             !request.target ||
+            placementError(request.target, this.destinations()) ||
             sessionId === null
         ) {
             return;
@@ -363,17 +467,16 @@ export class Tx16wImportWorkflow {
 
     private async discardPlan(request: Tx16wImportRequest): Promise<void> {
         const plan = request.plan;
+        request.plan = null;
         request.acknowledgedIssueIds = [];
-        if (plan?.state === 'READY') {
+        if (plan?.state === 'READY') this.unreleasedPlans.add(plan.planId);
+        for (const id of this.unreleasedPlans) {
             try {
-                await this.dependencies.transport.releaseConversion(plan.planId);
+                await this.dependencies.transport.releaseConversion(id);
             } catch (error) {
                 if (!(error instanceof AxklibApiError && error.status === 404)) throw error;
             }
-        }
-        if (request.plan === plan) {
-            request.plan = null;
-            request.acknowledgedIssueIds = [];
+            this.unreleasedPlans.delete(id);
         }
     }
 
@@ -405,7 +508,8 @@ export class Tx16wImportWorkflow {
         this.abortController?.abort();
         this.abortController = null;
         const request = this.request;
-        if (request?.plan?.state === 'READY' && !this.completion.locked) await this.discardPlan(request);
+        if (request && (request.plan?.state === 'READY' || this.unreleasedPlans.size) && !this.completion.locked)
+            await this.discardPlan(request);
         for (const member of request?.members ?? []) {
             await this.releaseMemberUpload(member);
         }
@@ -454,10 +558,10 @@ export class Tx16wImportWorkflow {
         };
     }
 
-    private async inspect(forceDiscovery = false): Promise<void> {
+    private async inspect(forceDiscovery = false, typing = false): Promise<void> {
         const request = this.request;
         const sessionId = this.ownedTarget?.sessionId ?? this.dependencies.sessionId();
-        if (!request?.target || (!request.documentSource && request.members.length === 0) || sessionId === null) return;
+        if (!request || this.openingTarget) return;
         this.abortController?.abort();
         const controller = new AbortController();
         this.abortController = controller;
@@ -466,6 +570,22 @@ export class Tx16wImportWorkflow {
         try {
             await this.discardPlan(request);
             if (controller.signal.aborted || this.request !== request) return;
+            if (!request.target || placementError(request.target, this.destinations()) || sessionId === null) {
+                request.status = 'waiting-target';
+                return;
+            }
+            if (!request.documentSource && request.members.length === 0) {
+                request.status = 'ready';
+                return;
+            }
+            if (typing) {
+                await new Promise<void>((resolve) => setTimeout(resolve, 250));
+                if (controller.signal.aborted || this.request !== request) return;
+            }
+            if (request.sourceObjectIds?.length === 0 && request.sourceObjects) {
+                request.status = 'ready';
+                return;
+            }
             for (const [index, member] of request.members.entries()) {
                 if (member.resolvedSource) continue;
                 request.status = 'uploading';
@@ -487,21 +607,23 @@ export class Tx16wImportWorkflow {
                 member.resolvedSource = upload;
             }
             if (controller.signal.aborted || this.request !== request) return;
-            request.status = 'discovering';
             await this.companions.resolve(request, controller.signal, forceDiscovery);
             if (controller.signal.aborted || this.request !== request) return;
             request.status = 'inspecting';
             request.progress = 1;
             const plan = await this.dependencies.transport.prepareConversion(
                 {
-                    profileId: 'yamaha.tx16w-to-a-series',
+                    profileId: request.destinationProfile ?? 'yamaha.tx16w-to-a-series',
                     source: request.documentSource ?? {
                         kind: 'SOURCES',
                         sources: request.members.map((member) => member.resolvedSource as InputFileLocation),
                     },
                     destinationSessionId: sessionId,
                     selection: { ...request.target },
-                    options: { mode: request.importMode },
+                    options: {
+                        mode: request.importMode,
+                        ...(request.sourceObjectIds?.length ? { sourceObjectIds: [...request.sourceObjectIds] } : {}),
+                    },
                     fidelity: request.fidelity,
                     capacityPolicy: this.completion.capacity.policy(),
                 },
@@ -511,7 +633,11 @@ export class Tx16wImportWorkflow {
                 await this.dependencies.transport.releaseConversion(plan.planId);
                 return;
             }
-            request.plan = plan;
+            request.sourceObjects = plan.report?.sourceObjects;
+            if (request.sourceObjectIds?.length === 0) {
+                await this.dependencies.transport.releaseConversion(plan.planId);
+                if (controller.signal.aborted || this.request !== request) return;
+            } else request.plan = plan;
             request.status = 'ready';
         } catch (error) {
             if (controller.signal.aborted || this.request !== request) return;
@@ -522,27 +648,6 @@ export class Tx16wImportWorkflow {
             if (this.abortController === controller) this.abortController = null;
         }
     }
-}
-
-export function collectTx16wVolumeOptions(items: readonly DiskTreeItem[]): Tx16wVolumeOption[] {
-    const result: Tx16wVolumeOption[] = [];
-    function visit(nodes: readonly DiskTreeItem[], partitionName = ''): void {
-        for (const item of nodes) {
-            const nextPartitionName = item.kind === 'partition' ? item.name : partitionName;
-            if (item.kind === 'volume' && item.partitionIndex !== undefined) {
-                const target = { partitionIndex: item.partitionIndex, volumeName: item.name };
-                result.push({
-                    key: `${target.partitionIndex}:${target.volumeName}`,
-                    label: `${nextPartitionName || `Partition ${target.partitionIndex + 1}`} · ${item.name}`,
-                    partitionName: nextPartitionName || `Partition ${target.partitionIndex + 1}`,
-                    target,
-                });
-            }
-            visit(item.children ?? [], nextPartitionName);
-        }
-    }
-    visit(items);
-    return result;
 }
 
 function admittedSources(files: (ClientUploadSource | FileLocation)[]): (ClientUploadSource | FileLocation)[] {

@@ -13,7 +13,8 @@ NativeDocument::NativeDocument(std::shared_ptr<const a_series::Document> decoded
 
 Result<std::shared_ptr<const NativeDocument>> NativeDocument::create(std::shared_ptr<const a_series::Document> decoded,
                                                                      std::shared_ptr<const native::SourceSet> sources,
-                                                                     std::string id, Locations locations) {
+                                                                     std::string id, Locations locations,
+                                                                     std::string_view object_prefix) {
     if (!decoded || !sources || id.empty())
         return std::unexpected(make_error(ErrorCode::invalid_argument, ErrorCategory::object,
                                           "Native document requires a decoded owner, admitted sources and identity"));
@@ -21,6 +22,7 @@ Result<std::shared_ptr<const NativeDocument>> NativeDocument::create(std::shared
         std::move(id),         "yamaha.a-series", "a-series", "A-series", native::Completeness::complete,
         {{"browse", true, {}}}};
     native::Catalog catalog;
+    const auto scoped = [&](const std::string &key) { return std::string{object_prefix}.append(key); };
     const auto &state = decoded->state();
     for (const auto &object : state.inventory.catalog.objects) {
         auto &bound = locations[object.key];
@@ -30,24 +32,28 @@ Result<std::shared_ptr<const NativeDocument>> NativeDocument::create(std::shared
                 return std::unexpected(make_error(ErrorCode::invalid_argument, ErrorCategory::object,
                                                   "Object location is outside its admitted source"));
         }
-        catalog.objects.push_back({object.key,
+        catalog.objects.push_back({scoped(object.key),
                                    object.object.header.raw_type,
                                    object.object.header.name,
                                    std::move(bound),
-                                   {{"inspect", true, {}}}});
+                                   {{"inspect", true, {}}},
+                                   object.placement ? std::optional{object.placement->volume_name} : std::nullopt});
     }
     for (const auto &edge : state.graph.relationships) {
         const auto resolution = edge.target_key                   ? native::Resolution::resolved
                                 : edge.candidate_keys.size() > 1U ? native::Resolution::ambiguous
                                                                   : native::Resolution::missing;
-        catalog.relationships.push_back({edge.key, edge.source_key, edge.target_key, edge.candidate_keys, edge.type,
-                                         edge.assignment_name, resolution});
+        auto candidates = edge.candidate_keys;
+        for (auto &candidate : candidates)
+            candidate = scoped(candidate);
+        catalog.relationships.push_back({edge.key, scoped(edge.source_key), edge.target_key.transform(scoped),
+                                         std::move(candidates), edge.type, edge.assignment_name, resolution});
     }
     const auto append = [&](const auto &self, const ContentNode &node,
                             const std::optional<std::string> &parent) -> void {
         const auto node_id = "node-" + std::to_string(catalog.nodes.size());
         catalog.nodes.push_back({node_id, parent,
-                                 node.object_key.empty() ? std::nullopt : std::optional{node.object_key},
+                                 node.object_key.empty() ? std::nullopt : std::optional{scoped(node.object_key)},
                                  node.node_type, node.display_name});
         for (const auto &child : node.children)
             self(self, child, node_id);

@@ -13,6 +13,7 @@
 
 #include "axklib/application/alteration_journal.hpp"
 #include "axklib/application/conversions.hpp"
+#include "axklib/application/download_archives.hpp"
 #include "axklib/application/image_sessions.hpp"
 #include "axklib/application/uploads.hpp"
 #include "axklib/writer.hpp"
@@ -31,6 +32,7 @@ class ConversionOperations : public testing::Test {
     std::unique_ptr<ImageSessionManager> images;
     std::unique_ptr<AlterationJournalStore> journals;
     std::unique_ptr<JobManager> jobs;
+    std::unique_ptr<DownloadArchiveStore> downloads;
     std::unique_ptr<ConversionService> service;
     OperationContext context{};
     ImageSessionSummary workspace;
@@ -62,7 +64,9 @@ class ConversionOperations : public testing::Test {
                                                        std::chrono::steady_clock::now, &reservations);
         journals = std::make_unique<AlterationJournalStore>(root / "journals");
         jobs = std::make_unique<JobManager>(registry, 1U, 1U, 8U, 16U);
-        service = std::make_unique<ConversionService>(*sandbox, *uploads, *images, *journals, *jobs);
+        downloads = std::make_unique<DownloadArchiveStore>(root / "downloads", 16U * 1024U * 1024U, 8U * 1024U * 1024U,
+                                                           16U, std::chrono::minutes{15});
+        service = std::make_unique<ConversionService>(*sandbox, *uploads, *images, *journals, *jobs, *downloads);
         ASSERT_TRUE(service->bind(registry));
         context.owner_id = "owner";
         auto opened = images->open({{{"root", "target.hds"}, {"root", "TONE.W01"}}, {}}, "owner");
@@ -72,6 +76,7 @@ class ConversionOperations : public testing::Test {
     void TearDown() override {
         jobs->shutdown();
         service.reset();
+        downloads.reset();
         jobs.reset();
         images.reset();
         uploads.reset();
@@ -93,7 +98,7 @@ class ConversionOperations : public testing::Test {
                  {{"imageId", workspace.image_id},
                   {"documentId", "document-a-series-source-1"},
                   {"expectedRevision", 1},
-                  {"selection", {{"partitionIndex", 0}, {"volumeName", "Samples"}}}}},
+                  {"selection", {{"kind", "EXISTING_VOLUME"}, {"partitionIndex", 0}, {"volumeName", "Samples"}}}}},
                 {"options", {{"mode", "WAVE_DATA_ONLY"}}},
                 {"fidelity", "BEST"}};
     }
@@ -127,7 +132,7 @@ class ConversionOperations : public testing::Test {
     Json acknowledge(const Json &plan) const {
         Json ids = Json::array();
         for (const auto &issue : plan.at("report").at("issues"))
-            if (issue.at("impact") == "LOSS" || issue.at("impact") == "UNCERTAINTY")
+            if (issue.contains("decision"))
                 ids.push_back(issue.at("id"));
         return {{"acknowledgedIssueIds", ids}};
     }
@@ -144,7 +149,8 @@ TEST_F(ConversionOperations, NativeSourceAndDestinationInOneWorkspacePrepareAndC
     EXPECT_TRUE(plan.at("report").at("executable").get<bool>());
     EXPECT_EQ(images->inspect(workspace.image_id, "owner")->revision, 1U);
     const auto id = plan.at("planId").get<std::string>();
-    EXPECT_FALSE(service->execute(id, {{"acknowledgedIssueIds", Json::array()}}, context));
+    ASSERT_EQ(acknowledge(plan).at("acknowledgedIssueIds"), Json::array());
+    EXPECT_FALSE(service->execute(id, {{"acknowledgedIssueIds", Json::array({"unknown"})}}, context));
     auto execution = service->execute(id, acknowledge(plan), context);
     ASSERT_TRUE(execution) << execution.error().message;
     auto repeated = service->execute(id, acknowledge(plan), context);
@@ -173,6 +179,38 @@ TEST_F(ConversionOperations, ExplicitSourcePreparationIsReadOnlyAndRejectsChange
     auto completed = wait(execution->job_id);
     EXPECT_EQ(completed.state, JobState::failed);
     EXPECT_EQ(service->execute(id, acknowledge(*prepared), context)->job_id, execution->job_id);
+}
+
+TEST_F(ConversionOperations, NewVolumePlanCannotPublishAfterAnotherConversionChangesThePartition) {
+    auto input = request(false);
+    auto &selection = input["destination"]["selection"];
+    selection["kind"] = "CREATE_VOLUME";
+    selection["volumeName"] = "First";
+    const auto first = registry.invoke("conversions.prepare", input, context);
+    ASSERT_TRUE(first) << first.error().message;
+    selection["volumeName"] = "Stale";
+    const auto stale = registry.invoke("conversions.prepare", input, context);
+    ASSERT_TRUE(stale) << stale.error().message;
+    ASSERT_EQ(images->inspect(workspace.image_id, "owner")->revision, 1U);
+
+    const auto run = [&](const Json &plan) {
+        return service->execute(plan.at("planId").get<std::string>(), acknowledge(plan), context);
+    };
+    const auto commit = run(*first);
+    ASSERT_TRUE(commit) << commit.error().message;
+    ASSERT_EQ(wait(commit->job_id).state, JobState::completed);
+    const ImageDocumentRef destination{workspace.image_id, "document-a-series-source-1"};
+    const auto fingerprint = [&]() {
+        auto image = images->begin_read(destination, "owner", 2U);
+        return image.value().content_fingerprint({});
+    };
+    const auto before = fingerprint();
+    ASSERT_TRUE(before);
+    const auto retry = run(*stale);
+    ASSERT_TRUE(retry) << retry.error().message;
+    EXPECT_EQ(wait(retry->job_id).state, JobState::failed);
+    EXPECT_EQ(images->inspect(workspace.image_id, "owner")->revision, 2U);
+    EXPECT_EQ(fingerprint().value(), *before);
 }
 
 TEST_F(ConversionOperations, NativeSnapshotDoesNotRetainAnAccessLockAndClosedWorkspaceCannotExecute) {

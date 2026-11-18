@@ -99,6 +99,12 @@ axklib extract wav file source.iso -o exports/wav
 axklib extract sfz file source.iso -o exports/sfz
 ```
 
+To browse TX16W disks together rather than as independent containers, use
+[`info --source-set`](tx16w-import.md#inspect-without-importing).
+
+For a regular A-series SFS image, explicit source-set inspection also returns
+volume-scoped Wave occurrences. Use those IDs to [create a TX16W Wave disk](conversion.md#create-a-tx16w-wave-disk).
+
 For a narrower scope, obtain selector paths with `info --format paths`, then
 repeat `--path` for each selection:
 

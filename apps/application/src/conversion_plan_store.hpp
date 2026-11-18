@@ -8,6 +8,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <variant>
 #include <vector>
 
 #include "axklib/application/contracts.hpp"
@@ -16,12 +17,18 @@
 
 namespace axk::app::conversion_internal {
 
-struct Payload {
-    std::shared_ptr<const conversion::PreparedPlan> prepared;
+struct EditTarget {
     ImageDocumentRef destination;
     std::uint64_t revision{};
     std::string destination_fingerprint;
     VolumeCapacityPolicy capacity_policy;
+};
+struct ImageDelivery {
+    std::string digest;
+};
+struct Payload {
+    std::shared_ptr<const conversion::PreparedPlan> prepared;
+    std::variant<EditTarget, ImageDelivery> target;
     std::shared_ptr<const native::Document> source;
     std::function<Result<void>(const CancellationToken &)> verify_workspace;
     std::uint64_t source_retention_bytes{};

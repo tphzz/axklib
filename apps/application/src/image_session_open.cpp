@@ -61,7 +61,8 @@ Result<ImageSessionSummary> ImageSessionManager::select_documents(std::string_vi
         Implementation::Session fresh;
         fresh.sources = (*session)->sources;
         fresh.selected_formats = selected_formats;
-        if (auto discovered = implementation_->discover(fresh, cancellation); !discovered)
+        if (auto discovered = implementation_->discover(fresh, cancellation, nullptr, nullptr, session->get());
+            !discovered)
             return std::unexpected(discovered.error());
         if (auto preserved = Implementation::preserve_documents(fresh, **session); !preserved)
             return std::unexpected(preserved.error());
@@ -120,7 +121,9 @@ Result<ImageSessionSummary> ImageSessionManager::attach_companions(const ImageDo
         Implementation::Session fresh;
         fresh.sources = std::move(*sources);
         fresh.selected_formats = (*session)->selected_formats;
-        if (auto discovered = implementation_->discover(fresh, cancellation); !discovered)
+        if (auto discovered =
+                implementation_->discover(fresh, cancellation, nullptr, nullptr, session->get(), target.document_id);
+            !discovered)
             return std::unexpected(discovered.error());
         auto updated = Implementation::document(fresh, target.document_id);
         if (!updated || (*updated)->member_ids == (*document)->member_ids)

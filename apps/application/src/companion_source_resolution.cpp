@@ -157,14 +157,9 @@ Result<Json> resolve_companion_sources(const Json &input, const native::FormatRe
         auto selected_document = std::dynamic_pointer_cast<const axk::tx16w::Document>(selected_documents->front());
         if (!selected_document)
             return std::unexpected(Error{"invalid_companion_sources", "Expected a TX16W source set"});
-        // Explicitly selected members form one source scope. Nearby files must not
-        // compete with references that this selection already satisfies.
-        auto seed_member = members.front();
-        seed_member.roots.clear();
-        for (const auto &member : members)
-            seed_member.roots.insert(seed_member.roots.end(), member.roots.begin(), member.roots.end());
         const auto needs_companions = !selected_document->summary().source_requirements.empty();
         Json nearby = needs_companions ? supplied : Json::array();
+        const auto supplied_count = nearby.size();
         if (needs_companions && input.value("searchNearby", true) && selected.front().at("kind") == "FILE") {
             auto seed = image_source_ref_from_json(selected.front());
             if (!seed)
@@ -177,23 +172,31 @@ Result<Json> resolve_companion_sources(const Json &input, const native::FormatRe
         }
         if (nearby.size() > 1024U)
             return std::unexpected(Error{"companion_discovery_limit", "Too many companion discovery candidates"});
-        for (const auto &reference : nearby)
-            if (const auto result = admit(reference, false); !result)
+        for (std::size_t i = 0; i < nearby.size(); ++i)
+            if (const auto result = admit(nearby.at(i), false); !result) {
+                // A sandbox-listed neighbor may disappear or be an unrelated malformed image.
+                // Never turn an invalid supplied reference, resource limit or stale read into a match.
+                if (i >= supplied_count &&
+                    (result.error().code == "entry_not_found" || result.error().code == "image_open_failed" ||
+                     result.error().code == "filesystem_invalid"))
+                    continue;
                 return std::unexpected(result.error());
-        members = {std::move(seed_member)};
-        std::vector<std::shared_ptr<const axk::tx16w::Document>> documents{std::move(selected_document)};
+            }
+        std::vector<native::SourceMember> neighbors;
+        std::vector<std::shared_ptr<const axk::tx16w::Document>> documents;
         for (const auto &candidate : candidates) {
             if (candidate.selected)
                 continue;
-            members.push_back(candidate.member);
+            neighbors.push_back(candidate.member);
             documents.push_back(candidate.document);
         }
-        const auto groups = axk::tx16w::detail::group_companions(members, documents);
-        const auto group = std::ranges::find_if(groups, [&](const auto &item) {
-            return std::ranges::find(item.member_ids, members.front().id) != item.member_ids.end();
-        });
-        if (group == groups.end())
-            return std::unexpected(Error{"invalid_companion_sources", "Resolved source set exceeds its member limit"});
+        const auto group = axk::tx16w::detail::resolve_companions(*selected_document, members, neighbors, documents,
+                                                                  context.cancellation);
+        if (!group)
+            return std::unexpected(Error{group.error().code == ErrorCode::operation_cancelled
+                                             ? "operation_cancelled"
+                                             : "invalid_companion_sources",
+                                         group.error().message});
         members.clear();
         Json result_members = Json::array();
         for (const auto &candidate : candidates) {

@@ -2256,45 +2256,31 @@
             "$ref": "#/components/schemas/ConversionSource"
           },
           "destination": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": [
-              "imageId",
-              "documentId",
-              "expectedRevision",
-              "selection"
-            ],
-            "properties": {
-              "imageId": {
-                "type": "string",
-                "minLength": 1
-              },
-              "documentId": {
-                "type": "string",
-                "minLength": 1
-              },
-              "expectedRevision": {
-                "type": "integer",
-                "minimum": 1
-              },
-              "selection": {
-                "type": "object"
-              }
-            }
-          },
-          "options": {
-            "type": "object"
-          },
-          "fidelity": {
-            "type": "string",
-            "enum": [
-              "BEST",
-              "STRICT"
+            "oneOf": [
+              { "$ref": "#/components/schemas/ConversionNewImageDestination" },
+              { "$ref": "#/components/schemas/ConversionSessionDestination" }
             ]
           },
-          "capacityPolicy": {
-            "$ref": "#/components/schemas/VolumeCapacityPolicy"
-          }
+          "options": { "type": "object" },
+          "fidelity": { "type": "string", "enum": ["BEST", "STRICT"] },
+          "capacityPolicy": { "$ref": "#/components/schemas/VolumeCapacityPolicy" }
+        }
+      },
+      "ConversionNewImageDestination": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind"],
+        "properties": { "kind": { "enum": ["NEW_IMAGE"] } }
+      },
+      "ConversionSessionDestination": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["imageId", "documentId", "expectedRevision", "selection"],
+        "properties": {
+          "imageId": { "type": "string", "minLength": 1 },
+          "documentId": { "type": "string", "minLength": 1 },
+          "expectedRevision": { "type": "integer", "minimum": 1 },
+          "selection": { "type": "object" }
         }
       },
       "ConversionAction": {
@@ -2348,6 +2334,7 @@
           "message"
         ],
         "properties": {
+          "decision": {"type": "string", "minLength": 1, "description": "An explicit mapping choice; only issues with a decision require acknowledgement."},
           "id": {
             "type": "string"
           },
@@ -2397,6 +2384,19 @@
           "destination"
         ],
         "properties": {
+          "sourceCount": {"type":"integer","minimum":0,"maximum":32768},
+          "sourceObjects": {
+            "type": "array", "maxItems": 200,
+            "items": {
+              "type":"object","additionalProperties":false,
+              "required":["id","name","kind","location","selectable","dependencies"],
+              "properties":{
+                "id":{"type":"string"},"name":{"type":"string"},"kind":{"type":"string"},
+                "location":{"type":"string"},"selectable":{"type":"boolean"},
+                "dependencies":{"type":"array","items":{"type":"string"}}
+              }
+            }
+          },
           "profileId": {
             "type": "string"
           },
@@ -2440,10 +2440,25 @@
             "maximum": 32768
           },
           "capacity": {
-            "$ref": "#/components/schemas/VolumeCapacityAdmission"
+            "oneOf": [
+              { "$ref": "#/components/schemas/VolumeCapacityAdmission" },
+              { "type": "null" }
+            ]
           },
           "destination": {
-            "$ref": "#/components/schemas/ConversionDocumentRef"
+            "oneOf": [
+              { "$ref": "#/components/schemas/ConversionDocumentRef" },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["kind", "sizeBytes", "sha256"],
+                "properties": {
+                  "kind": { "enum": ["NEW_IMAGE"] },
+                  "sizeBytes": { "type": "integer", "minimum": 0 },
+                  "sha256": { "oneOf": [{ "type": "string", "pattern": "^[0-9a-f]{64}$" }, { "type": "null" }] }
+                }
+              }
+            ]
           }
         }
       },
@@ -2512,6 +2527,19 @@
         }
       },
       "ConversionResult": {
+        "oneOf": [
+          { "$ref": "#/components/schemas/ConversionMutationResult" },
+          {
+            "type": "object", "additionalProperties": false,
+            "required": ["planId", "download"],
+            "properties": {
+              "planId": { "type": "string", "minLength": 1 },
+              "download": { "$ref": "#/components/schemas/RetainedDownload" }
+            }
+          }
+        ]
+      },
+      "ConversionMutationResult": {
         "type": "object",
         "additionalProperties": false,
         "required": [
@@ -2559,6 +2587,7 @@
           "name",
           "sourceFormat",
           "destinationFormat",
+          "outputKind",
           "optionsSchema"
         ],
         "properties": {
@@ -2574,6 +2603,7 @@
           "destinationFormat": {
             "type": "string"
           },
+          "outputKind": { "enum": ["EXISTING_IMAGE", "NEW_IMAGE"] },
           "optionsSchema": {
             "type": "object"
           }

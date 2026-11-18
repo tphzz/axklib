@@ -3,23 +3,22 @@
     import type { ConversionReport } from '../conversions';
     import ImportReviewLayout from './ImportReviewLayout.svelte';
     import ImportReportPagination from './ImportReportPagination.svelte';
-    import ConversionLossConsent from './ConversionLossConsent.svelte';
     let {
-        report,
+        report: prepared,
         acknowledged = $bindable<string[]>([]),
         disabled = false,
-        lossConsent = false,
-        lossConsentPreparing = false,
+        sourceSelection,
+        sourceSummary = '',
         capacity,
         feedback,
         feedbackNotice = '',
         active = $bindable<'contents' | 'review'>('contents'),
     }: {
-        report: ConversionReport;
+        report: ConversionReport | null;
         acknowledged?: string[];
         disabled?: boolean;
-        lossConsent?: boolean;
-        lossConsentPreparing?: boolean;
+        sourceSelection?: Snippet;
+        sourceSummary?: string;
         capacity?: Snippet;
         feedback?: Snippet;
         feedbackNotice?: string;
@@ -30,25 +29,37 @@
     let objectList: HTMLDivElement;
     let issueList: HTMLDivElement;
     const pageSize = 100;
+    const report = $derived(prepared ?? { actions: [], issues: [], actionCount: 0, issueCount: 0, fidelity: 'BEST' });
     const currentObjectPage = $derived(
         Math.min(objectPage, Math.max(0, Math.ceil(report.actions.length / pageSize) - 1)),
     );
     const currentIssuePage = $derived(Math.min(issuePage, Math.max(0, Math.ceil(report.issues.length / pageSize) - 1)));
-    const required = $derived(report.issues.filter((issue) => ['LOSS', 'UNCERTAINTY'].includes(issue.impact)));
+    const required = $derived(report.issues.filter((issue) => !!issue.decision));
+    const notes = $derived(
+        report.issues.filter((issue) => !issue.decision && ['LOSS', 'UNCERTAINTY'].includes(issue.impact)),
+    );
     const blockers = $derived(report.issues.filter((issue) => issue.impact === 'BLOCKER'));
     const information = $derived(
         report.issues.filter((issue) => !['LOSS', 'UNCERTAINTY', 'BLOCKER'].includes(issue.impact)),
     );
-    const orderedIssues = $derived([...blockers, ...required, ...information]);
+    const orderedIssues = $derived([...blockers, ...required, ...notes, ...information]);
     const visibleIssues = $derived(orderedIssues.slice(currentIssuePage * pageSize, (currentIssuePage + 1) * pageSize));
     const remaining = $derived(required.filter((issue) => !acknowledged.includes(issue.id)).length);
     const strict = $derived(report.fidelity === 'STRICT');
+    const sources = $derived(new Map((prepared?.sourceObjects ?? []).map((object) => [object.id, object])));
+    function sourceLabel(id: string): string {
+        const source = sources.get(id);
+        if (source) return `${source.name} · ${source.location}`;
+        return id && !id.startsWith('tx16w:') ? id : 'Disk set';
+    }
     const reviewNotice = $derived(
         blockers.length
             ? `${blockers.length} ${blockers.length === 1 ? 'blocker' : 'blockers'}`
-            : remaining
-              ? `${remaining} to acknowledge`
-              : feedbackNotice,
+            : strict && (required.length || notes.length)
+              ? 'Blocked by Strict'
+              : remaining
+                ? `${remaining} mapping decisions`
+                : feedbackNotice,
     );
     async function changePage(pane: 'contents' | 'review', page: number) {
         if (pane === 'contents') objectPage = page;
@@ -79,11 +90,8 @@
 {#snippet issueRows(issues: ConversionReport['issues'])}
     <ul>
         {#each issues as issue (issue.id)}
-            <li
-                class:blocker={issue.impact === 'BLOCKER'}
-                class:required={['LOSS', 'UNCERTAINTY'].includes(issue.impact)}
-            >
-                {#if ['LOSS', 'UNCERTAINTY'].includes(issue.impact)}
+            <li class:blocker={issue.impact === 'BLOCKER'} class:required={!!issue.decision}>
+                {#if issue.decision && !strict}
                     <label>
                         <input
                             type="checkbox"
@@ -92,15 +100,14 @@
                             checked={acknowledged.includes(issue.id)}
                             onchange={(event) => toggle(issue.id, event.currentTarget.checked)}
                         />
-                        <span
-                            ><strong>{issue.impact === 'LOSS' ? 'Loss' : 'Uncertainty'}</strong> · {issue.message}</span
-                        >
+                        <span>{issue.decision}</span>
                     </label>
                 {:else}<p>
-                        <strong>{issue.impact === 'BLOCKER' ? 'Blocked' : 'Information'}</strong> · {issue.message}
+                        {#if issue.impact === 'BLOCKER'}<strong>Blocked</strong> ·
+                        {/if}{issue.message}
                     </p>{/if}
-                <small
-                    >Source: {issue.sourceObject || 'Disk set'}{issue.sourceParameter
+                <small title={issue.sourceObject}
+                    >Source: {sourceLabel(issue.sourceObject)}{issue.sourceParameter
                         ? ` · ${issue.sourceParameter}`
                         : ''}</small
                 >
@@ -109,19 +116,13 @@
     </ul>
 {/snippet}
 
-{#snippet lossToolbar()}<ConversionLossConsent
-        {report}
-        bind:acknowledged
-        {disabled}
-        preparing={lossConsentPreparing}
-    />{/snippet}
-
 <ImportReviewLayout
     bind:active
+    {sourceSelection}
+    {sourceSummary}
     contentsSummary={`${report.actionCount} planned objects`}
     reviewSummary={`${report.issueCount} mapping details`}
     {reviewNotice}
-    reviewToolbar={lossConsent ? lossToolbar : undefined}
 >
     {#snippet columns()}<div class="object-columns">
             <span>Object</span><span>Type</span><span>Action</span>
@@ -141,20 +142,35 @@
     {#snippet review()}
         <div bind:this={issueList}>
             {@render feedback?.()}
+            {#if sourceSelection}<dl class="summary">
+                    <div>
+                        <dt>Source selection</dt>
+                        <dd>{sourceSummary}</dd>
+                    </div>
+                    <div>
+                        <dt>Planned output</dt>
+                        <dd>{prepared ? `${report.actionCount} objects` : 'No current plan'}</dd>
+                    </div>
+                </dl>{/if}
             {#if blockers.length}<h4 class="blocker">
                     {blockers.length} blocking {blockers.length === 1 ? 'issue' : 'issues'}
                 </h4>
                 {@render issueRows(visibleIssues.filter((issue) => issue.impact === 'BLOCKER'))}{/if}
-            {#if strict && required.length}<p class="blocker">
-                    Strict fidelity does not allow loss or uncertainty.
+            {#if strict && (required.length || notes.length)}<p class="blocker">
+                    Strict fidelity cannot preserve this mapping. Choose Best or change the source selection.
                 </p>{/if}
             {@render capacity?.()}
             {#if required.length}
                 <div class="review-heading">
-                    <h4>Required acknowledgements</h4>
-                    <small>{required.length - remaining} of {required.length} accepted</small>
+                    <h4>Mapping decisions</h4>
                 </div>
-                {@render issueRows(visibleIssues.filter((issue) => ['LOSS', 'UNCERTAINTY'].includes(issue.impact)))}
+                {@render issueRows(visibleIssues.filter((issue) => !!issue.decision))}
+            {/if}
+            {#if notes.length}
+                <h4>Conversion notes</h4>
+                {@render issueRows(
+                    visibleIssues.filter((issue) => !issue.decision && ['LOSS', 'UNCERTAINTY'].includes(issue.impact)),
+                )}
             {/if}
             {#if information.length}
                 <div class="review-heading">
@@ -165,7 +181,7 @@
                     visibleIssues.filter((issue) => !['LOSS', 'UNCERTAINTY', 'BLOCKER'].includes(issue.impact)),
                 )}
             {/if}
-            {#if !report.issues.length}<p class="empty">No mapping issues</p>{/if}
+            {#if !report.issues.length}<p class="empty">{prepared ? 'No mapping issues' : 'No current plan'}</p>{/if}
         </div>
     {/snippet}
     {#snippet contentsFooter()}<ImportReportPagination
@@ -218,6 +234,25 @@
         font-size: var(--dialog-section-font-size);
         font-weight: 600;
         color: var(--color-text-strong);
+    }
+    .summary {
+        padding: 4px 0;
+        margin: 0;
+        border-block: 1px solid var(--color-border);
+    }
+    .summary > div {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        align-items: center;
+        min-height: 25px;
+    }
+    .summary dt {
+        color: var(--color-text-muted);
+    }
+    .summary dd {
+        margin: 0;
+        text-align: right;
     }
     .review-heading {
         display: flex;

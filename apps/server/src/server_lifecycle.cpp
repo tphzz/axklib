@@ -224,7 +224,8 @@ class ScopedConnectionFile {
 } // namespace
 
 ServerApplication::ServerApplication(axk::server::Config config, axk::app::OperationRegistry registry,
-                                     axk::server::WorkspaceStore workspaces)
+                                     axk::server::WorkspaceStore workspaces,
+                                     app::ConfigureSessionFormats &configure_formats, conversion::Registry profiles)
     : config_(std::move(config)), diagnostics_(!config_.connection_file.empty()), workspaces_(std::move(workspaces)),
       sandbox_(workspaces_.sandbox()),
       uploads_(upload_directory(), config_.maximum_upload_total_bytes, config_.maximum_upload_bytes,
@@ -241,7 +242,7 @@ ServerApplication::ServerApplication(axk::server::Config config, axk::app::Opera
                app::native_device_provider(config_.device_helper)),
       images_(sandbox_, config_.maximum_image_sessions, config_.maximum_page_size,
               std::chrono::seconds{config_.image_idle_seconds}, std::chrono::steady_clock::now, &path_reservations_,
-              config_.maximum_audition_bundle_bytes, 256U, &devices_),
+              config_.maximum_audition_bundle_bytes, 256U, &devices_, configure_formats),
       registry_(prepare_registry(std::move(registry), sandbox_, uploads_, images_, alteration_journals_,
                                  download_archives_,
                                  {config_.maximum_media_build_object_bytes, config_.maximum_media_build_payload_bytes,
@@ -253,7 +254,7 @@ ServerApplication::ServerApplication(axk::server::Config config, axk::app::Opera
                                 config_.maximum_queued_jobs, config_.replay_events_per_job,
                                 config_.maximum_retained_jobs, std::chrono::seconds{config_.job_retention_seconds},
                                 [] { return axk::app::JobManager::Clock::now(); }, &uploads_, &path_reservations_),
-      conversions_(sandbox_, uploads_, images_, alteration_journals_, jobs_),
+      conversions_(sandbox_, uploads_, images_, alteration_journals_, jobs_, download_archives_, std::move(profiles)),
       event_tickets_(std::chrono::seconds{config_.event_ticket_ttl_seconds}, config_.maximum_event_tickets),
       event_dispatcher_(config_.maximum_websocket_delivery_events,
                         [this](const axk::app::JobEvent &event) { broadcast(event); }) {

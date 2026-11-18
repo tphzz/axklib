@@ -426,8 +426,23 @@ describe('floppy import', () => {
         expect(missing.transport.planFloppyImport).not.toHaveBeenCalled();
         const other = setup({ ...inspection, format: 'TX16W', inspectionToken: null });
         await other.workflow.requestDroppedFiles([source], volume);
-        expect(other.otherFormat).toHaveBeenCalledWith('TX16W', [source], volume);
+        expect(other.otherFormat).toHaveBeenCalledWith('TX16W', [source], volume, expect.any(Function));
         expect(other.workflow.request).toBeNull();
+    });
+    it('transfers a recognized TX16W seed upload exactly once, releasing it only if not claimed', async () => {
+        for (const accept of [true, false]) {
+            const other = setup({ ...inspection, format: 'TX16W', inspectionToken: null });
+            const disk = { name: 'disk.img', type: '', size: 10, readChunk: vi.fn() };
+            other.otherFormat.mockImplementationOnce(async (_format, files, _target, claim) => {
+                if (accept) {
+                    expect(claim(files[0])?.reference.uploadId).toBe('upload');
+                    expect(claim(files[0])).toBeUndefined();
+                }
+            });
+            await other.workflow.requestDroppedFiles([disk], volume);
+            expect(other.transport.uploadClientFile).toHaveBeenCalledOnce();
+            expect(other.transport.releaseClientUpload).toHaveBeenCalledTimes(accept ? 0 : 1);
+        }
     });
     it.each(['UNKNOWN', 'SU700'] as const)('keeps an unsupported %s drop open with an explanation', async (format) => {
         const { workflow, otherFormat, transport } = setup({ ...inspection, format, inspectionToken: null });

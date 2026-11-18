@@ -34,7 +34,7 @@ for (const kind of ['floppy', 'tx16w']) {
     for (const scenario of ['warnings', 'refresh-failed', 'unconfirmed']) cases.push({ kind, width: 732, height: 680, zoom: 1, scenario });
 }
 cases.push({ kind: 'tx16w', width: 732, height: 680, zoom: 1.5, scenario: 'native-long' });
-for (const scenario of ['companion-found', 'searching', 'search-error', 'mixed-losses', 'all-losses', 'long-chips']) {
+for (const scenario of ['companion-found', 'searching', 'search-error', 'conversion-notes', 'audition-program', 'long-chips']) {
     for (const width of [1152, 732]) cases.push({ kind: 'tx16w', width, height: 820, zoom: 1, scenario });
 }
 cases.push({ kind: 'tx16w', width: 390, height: 820, zoom: 1.5, scenario: 'long-chips' });
@@ -83,21 +83,11 @@ try {
                     await contents.getByText('Concert-Piano-100', { exact: true }).waitFor();
                     assert.equal(await contents.evaluate(node => node.scrollTop), 0, 'New objects page must start at top');
                     if (geometry.narrow) await dialog.getByRole('tab', { name: /^Review/ }).click();
-                    const ack = dialog.locator('[data-pane="review"] input[type=checkbox]');
-                    const allLosses = dialog.getByRole('checkbox', { name: 'Accept all losses', exact: true });
-                    await allLosses.focus(); await page.keyboard.press('Space');
-                    assert(await dialog.getByRole('button', { name: 'Import', exact: true }).isDisabled(), 'Bulk losses must leave uncertainty consent unchanged');
-                    const uncertainty = dialog.getByRole('checkbox', { name: /Uncertainty.*Destination controls/ });
-                    await uncertainty.focus(); await page.keyboard.press('Space');
+                    assert.equal(await dialog.locator('[data-pane="review"] input[type=checkbox]').count(), 0);
                     assert(await dialog.getByRole('button', { name: 'Import', exact: true }).isEnabled());
                     await dialog.getByRole('button', { name: 'Strict', exact: true }).click();
                     assert(await dialog.getByRole('button', { name: 'Import', exact: true }).isDisabled());
-                    assert(await ack.first().isDisabled());
-                    const help = dialog.getByRole('button', { name: 'Destination availability', exact: true });
-                    await help.focus();
-                    await page.getByRole('tooltip').filter({ hasText: 'TX16W conversion requires an existing volume' }).waitFor();
-                    await page.keyboard.press('Escape');
-                    assert.equal(await page.getByRole('dialog').count(), 1, 'Tooltip Escape must not close dialog');
+                    assert(await dialog.getByRole('group',{name:'Destination volume type'}).getByRole('button',{name:'New'}).isEnabled());
                 }
                 assert.deepEqual(await footer.boundingBox(), footerBounds, 'Footer must remain stationary');
                 if (entry.width === 1152 && entry.zoom === 1) {
@@ -115,7 +105,7 @@ try {
                 }
                 if (entry.kind === 'tx16w' && entry.width === 1152 && entry.zoom === 1) {
                     await dialog.getByRole('button', { name: 'Best', exact: true }).click();
-                    await dialog.locator('[data-pane="review"] input[type=checkbox]').first().focus();
+                    await dialog.locator('[data-pane="review"] .import-pane-scroll').focus();
                     await page.setViewportSize({ width: 732, height: 820 });
                     await page.waitForFunction(() => document.activeElement?.getAttribute('data-tab') === 'contents');
                 }
@@ -144,22 +134,23 @@ try {
                 await dialog.getByRole('button', { name: 'Retry', exact: true }).click();
                 assert.equal(await dialog.getByRole('button', { name: 'Retry', exact: true }).count(), 0);
             }
-            if (['mixed-losses', 'all-losses'].includes(entry.scenario)) {
+            if (['conversion-notes', 'audition-program'].includes(entry.scenario)) {
+                const primary = dialog.getByRole('button', { name: 'Import', exact: true });
+                assert.equal(await primary.isDisabled(), entry.scenario === 'audition-program');
                 if (geometry.narrow) {
                     await dialog.getByRole('tab', { name: /^Review/ }).focus();
                     await page.keyboard.press('Enter');
                     await page.screenshot({ path: resolve(output, `${name}-review.png`) });
                 }
-                const all = dialog.getByRole('checkbox', { name: 'Accept all losses', exact: true });
-                assert.equal(await all.evaluate(node => node.indeterminate), entry.scenario === 'mixed-losses');
-                if (entry.scenario === 'mixed-losses') await all.click();
-                assert(await all.isChecked());
+                assert.equal(await dialog.getByRole('checkbox', { name: 'Accept all losses' }).count(), 0);
+                if (entry.scenario === 'audition-program') {
+                    const decision = dialog.getByRole('checkbox', { name: 'Create an audition Program from Piano Voice' });
+                    await decision.focus(); await page.keyboard.press('Space');
+                    assert(await primary.isEnabled());
+                }
                 await dialog.getByRole('button', { name: 'Next mapping details page' }).click();
-                const loss = dialog.getByRole('checkbox', { name: /Loss.*Wave Data 100 resampled/ });
-                assert(await loss.isChecked(), 'Bulk loss acceptance must include subsequent pages');
-                assert(await dialog.getByRole('button', { name: 'Import', exact: true }).isDisabled(), 'Uncertainty must remain individually unaccepted');
-                await all.click();
-                assert.equal(await loss.isChecked(), false);
+                await dialog.getByText(/Wave Data 100 resampled/).waitFor();
+                assert(await primary.isEnabled(), 'Paging through notes must not change the plan readiness');
             }
             if (entry.scenario === 'long-chips') {
                 const fileName = dialog.locator('.member-name button').first();

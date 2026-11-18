@@ -12,7 +12,8 @@
 #include "server_application.hpp"
 #include "state_storage_paths.hpp"
 
-axk::app::Result<int> axk::server::run(const Config &config, app::OperationRegistry registry) {
+axk::app::Result<int> axk::server::run(const Config &config, app::OperationRegistry registry,
+                                       app::ConfigureSessionFormats &configure_formats, conversion::Registry profiles) {
     try {
         if (const auto valid = validate_config(config); !valid)
             return std::unexpected(valid.error());
@@ -52,7 +53,8 @@ axk::app::Result<int> axk::server::run(const Config &config, app::OperationRegis
         auto workspaces = WorkspaceStore::open(resolved_config.workspace_store, std::move(protected_paths));
         if (!workspaces)
             return std::unexpected(workspaces.error());
-        detail::ServerApplication application{std::move(resolved_config), std::move(registry), std::move(*workspaces)};
+        detail::ServerApplication application{std::move(resolved_config), std::move(registry), std::move(*workspaces),
+                                              configure_formats, std::move(profiles)};
         return application.run();
     } catch (const std::exception &error) {
         return std::unexpected(

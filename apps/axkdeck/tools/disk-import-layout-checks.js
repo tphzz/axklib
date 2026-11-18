@@ -41,13 +41,6 @@ window.runDiskImportLayoutChecks = async () => {
         check(scroll.clientHeight >= 70, 'List has less than 70px of usable vertical space');
         check(scroll.scrollWidth <= scroll.clientWidth + 1, 'Pane has horizontal overflow');
         check(scroll.tabIndex === 0, 'Pane cannot be scrolled by keyboard');
-        const toolbar = pane.querySelector('.loss-consent-toolbar');
-        if (toolbar) {
-            check(!scroll.contains(toolbar), 'Bulk loss consent scrolls away with review items');
-            check(box(toolbar).bottom <= box(scroll).y + 1, 'Bulk loss consent overlaps the review list');
-            check(toolbar.scrollWidth <= toolbar.clientWidth + 1, 'Bulk loss consent overflows horizontally');
-            check(getComputedStyle(toolbar.querySelector('label')).fontSize === '11px', 'Safety consent label is not 11px');
-        }
     }
     if (panes.length && !narrow) check(box(panes[0]).right <= box(panes[1]).x - 10 * zoom, 'Panes overlap');
     if (narrow) {

@@ -3,6 +3,8 @@
     import TabStrip from './TabStrip.svelte';
     let {
         contents,
+        sourceSelection,
+        sourceSummary = '',
         review,
         columns,
         contentsFooter,
@@ -14,6 +16,8 @@
         active = $bindable<'contents' | 'review'>('contents'),
     }: {
         contents: Snippet;
+        sourceSelection?: Snippet;
+        sourceSummary?: string;
         review: Snippet;
         columns?: Snippet;
         contentsFooter?: Snippet;
@@ -28,19 +32,38 @@
     let width = $state(0);
     let root: HTMLDivElement;
     const narrow = $derived(width > 0 && width < 736);
+    let contentView = $state<'source' | 'output'>('source');
+    const showingSource = $derived(!!sourceSelection && contentView === 'source');
+    const contentTabs = $derived([
+        { id: 'source' as const, label: 'Source selection', panelId: `${id}-contents-panel` },
+        { id: 'output' as const, label: 'Planned output', panelId: `${id}-contents-panel` },
+    ]);
     $effect.pre(() => {
         if (!narrow) return;
         const current = active;
         // Resizing must not leave keyboard focus inside the now-hidden pane.
         const focused = document.activeElement;
         if (focused && root?.querySelector(`[data-pane]:not([data-pane="${current}"])`)?.contains(focused)) {
-            void tick().then(() => root?.querySelector<HTMLButtonElement>(`[data-tab="${current}"]`)?.focus());
+            const tab = current === 'contents' && sourceSelection ? contentView : current;
+            void tick().then(() => root?.querySelector<HTMLButtonElement>(`[data-tab="${tab}"]`)?.focus());
         }
     });
 </script>
 
 <div class="import-review-layout" class:narrow bind:clientWidth={width} bind:this={root}>
-    {#if narrow}
+    {#if narrow && sourceSelection}
+        <TabStrip
+            fill
+            tabs={[...contentTabs, { id: 'review', label: 'Review', panelId: `${id}-review-panel` }]}
+            active={active === 'review' ? 'review' : contentView}
+            onselect={(v) => {
+                active = v === 'review' ? 'review' : 'contents';
+                if (v !== 'review') contentView = v;
+            }}
+            label="Conversion views"
+            idPrefix={id}
+        />
+    {:else if narrow}
         <TabStrip
             fill
             tabs={[
@@ -69,15 +92,31 @@
                 id={`${id}-${pane}-panel`}
                 role={narrow ? 'tabpanel' : 'region'}
                 aria-label={narrow ? undefined : pane === 'contents' ? 'Contents' : 'Review'}
-                aria-labelledby={narrow ? `${id}-${pane}` : undefined}
+                aria-labelledby={narrow
+                    ? `${id}-${pane === 'contents' && sourceSelection ? contentView : pane}`
+                    : undefined}
                 aria-hidden={inactive}
                 inert={inactive}
             >
                 <header class="pane-heading">
                     <h3>{pane === 'contents' ? 'Contents' : 'Review'}</h3>
-                    <span>{pane === 'contents' ? contentsSummary : reviewSummary}</span>
+                    <span
+                        >{pane === 'contents' ? (showingSource ? sourceSummary : contentsSummary) : reviewSummary}</span
+                    >
                 </header>
-                {#if pane === 'contents' && columns}<div class="pane-columns">{@render columns()}</div>{/if}
+                {#if pane === 'contents' && sourceSelection && !narrow}<TabStrip
+                        fill
+                        tabs={contentTabs}
+                        active={contentView}
+                        onselect={(v) => {
+                            contentView = v;
+                        }}
+                        label="Contents views"
+                        idPrefix={id}
+                    />{/if}
+                {#if pane === 'contents' && columns && !showingSource}<div class="pane-columns">
+                        {@render columns()}
+                    </div>{/if}
                 {#if pane === 'review' && reviewToolbar}<div class="pane-toolbar">{@render reviewToolbar()}</div>{/if}
                 <!-- svelte-ignore a11y_no_noninteractive_tabindex (Both bounded panes support keyboard scrolling.) -->
                 <div
@@ -86,9 +125,9 @@
                     role="region"
                     aria-label={pane === 'contents' ? 'Import contents' : 'Import review'}
                 >
-                    {#if pane === 'contents'}{@render contents()}{:else}{@render review()}{/if}
+                    {#if pane === 'contents' && showingSource}{@render sourceSelection?.()}{:else if pane === 'contents'}{@render contents()}{:else}{@render review()}{/if}
                 </div>
-                {#if pane === 'contents' && contentsFooter}<div class="pane-footer">
+                {#if pane === 'contents' && contentsFooter && !showingSource}<div class="pane-footer">
                         {@render contentsFooter()}
                     </div>{/if}
                 {#if pane === 'review' && reviewFooter}<div class="pane-footer">{@render reviewFooter()}</div>{/if}

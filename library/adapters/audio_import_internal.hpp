@@ -66,9 +66,6 @@ Result<std::vector<std::int16_t>> decode_sndfile_pcm16(const RandomAccessReader 
 Result<std::vector<double>> decode_sndfile_float64(const std::filesystem::path &path, const SourceAudioInfo &info);
 Result<std::vector<double>> decode_sndfile_float64(const RandomAccessReader &reader, const SourceAudioInfo &info);
 
-Result<std::vector<double>> resample_vhq(std::span<const double> samples, std::size_t channels,
-                                         std::uint32_t source_rate, std::uint32_t output_rate);
-
 Result<QuantizedPcm16> quantize_pcm16(std::span<const double> samples, bool dither);
 
 std::vector<std::vector<std::byte>> split_pcm16(std::span<const std::int16_t> samples, std::size_t channels);

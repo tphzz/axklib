@@ -1,64 +1,35 @@
 #include "axklib/writer_internal.hpp"
 
 #include "axklib/file_publication.hpp"
+#include "axklib/filesystems/fat/floppy_writer.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
+#include <expected>
 #include <format>
-#include <limits>
+#include <functional>
 #include <memory>
-#include <mutex>
 #include <set>
 #include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
-
-// clang-format off
-#include <ff.h>
-#include <diskio.h>
-// clang-format on
 
 namespace {
 
-constexpr std::size_t sector_size = 512;
-constexpr std::size_t sector_count = 2880;
-constexpr std::size_t sectors_per_fat = 9;
-constexpr std::size_t first_fat_offset = sector_size;
-constexpr std::size_t second_fat_offset = first_fat_offset + sectors_per_fat * sector_size;
-constexpr std::size_t root_directory_offset = (1U + 2U * sectors_per_fat) * sector_size;
 constexpr std::size_t root_directory_entries = 224U;
-constexpr std::size_t directory_entry_bytes = 32U;
 constexpr std::size_t directory_attribute_offset = 0x0bU;
-constexpr std::byte floppy_media_descriptor{0xf0};
 constexpr std::string_view single_marker_logical_path{"\\A3000.SYM"};
 constexpr std::string_view single_marker_physical_path{"A3000_SY.001"};
 constexpr std::size_t boot_jump_offset = 0x00;
 constexpr std::size_t oem_name_offset = 0x03;
-constexpr std::size_t media_descriptor_offset = 0x15;
-constexpr std::size_t sectors_per_track_offset = 0x18;
-constexpr std::size_t head_count_offset = 0x1a;
-constexpr std::size_t drive_number_offset = 0x24;
 constexpr std::size_t reserved_boot_offset = 0x25;
 constexpr std::size_t extended_boot_signature_offset = 0x26;
 constexpr std::size_t volume_label_offset = 0x2b;
 constexpr std::size_t filesystem_name_offset = 0x36;
-
-struct FatDisk {
-    std::vector<std::byte> bytes;
-};
-
-FatDisk *active_disk{};
-std::mutex fatfs_mutex;
-
-axk::Error fatfs_error(std::string message, FRESULT result) {
-    return axk::make_error(axk::ErrorCode::io_read_failed, axk::ErrorCategory::io,
-                           std::move(message) + " (FatFs result " + std::to_string(static_cast<unsigned int>(result)) +
-                               ")");
-}
 
 void apply_yamaha_floppy_profile(std::span<std::byte> bytes) {
     constexpr std::array<std::byte, 3> jump{std::byte{0xeb}, std::byte{0x58}, std::byte{0x90}};
@@ -68,77 +39,14 @@ void apply_yamaha_floppy_profile(std::span<std::byte> bytes) {
     std::ranges::copy(jump, bytes.begin() + boot_jump_offset);
     std::ranges::transform(oem_name, bytes.begin() + oem_name_offset,
                            [](char character) { return static_cast<std::byte>(character); });
-    bytes[media_descriptor_offset] = floppy_media_descriptor;
-    bytes[sectors_per_track_offset] = std::byte{18};
-    bytes[sectors_per_track_offset + 1U] = std::byte{0};
-    bytes[head_count_offset] = std::byte{2};
-    bytes[head_count_offset + 1U] = std::byte{0};
-    bytes[drive_number_offset] = std::byte{0};
     bytes[reserved_boot_offset] = std::byte{0};
     bytes[extended_boot_signature_offset] = std::byte{0x29};
     std::fill_n(bytes.begin() + volume_label_offset, 11, std::byte{' '});
     std::ranges::transform(filesystem_name, bytes.begin() + filesystem_name_offset,
                            [](char character) { return static_cast<std::byte>(character); });
-    bytes[first_fat_offset] = floppy_media_descriptor;
-    bytes[second_fat_offset] = floppy_media_descriptor;
-}
-
-void normalize_yamaha_root_attributes(std::span<std::byte> bytes) {
-    for (std::size_t index = 0U; index < root_directory_entries; ++index) {
-        const auto offset = root_directory_offset + index * directory_entry_bytes;
-        const auto first = std::to_integer<std::uint8_t>(bytes[offset]);
-        if (first == 0U)
-            break;
-        if (first != 0xe5U && std::to_integer<std::uint8_t>(bytes[offset + directory_attribute_offset]) != 0x0fU)
-            bytes[offset + directory_attribute_offset] = std::byte{};
-    }
 }
 
 } // namespace
-
-extern "C" DSTATUS disk_initialize(BYTE drive) { return drive == 0U && active_disk != nullptr ? 0U : STA_NOINIT; }
-
-extern "C" DSTATUS disk_status(BYTE drive) { return drive == 0U && active_disk != nullptr ? 0U : STA_NOINIT; }
-
-extern "C" DRESULT disk_read(BYTE drive, BYTE *buffer, LBA_t sector, UINT count) {
-    if (drive != 0U || active_disk == nullptr || buffer == nullptr || count == 0U || sector > sector_count ||
-        count > sector_count - sector) {
-        return RES_PARERR;
-    }
-    const auto offset = static_cast<std::size_t>(sector) * sector_size;
-    std::memcpy(buffer, active_disk->bytes.data() + offset, static_cast<std::size_t>(count) * sector_size);
-    return RES_OK;
-}
-
-extern "C" DRESULT disk_write(BYTE drive, const BYTE *buffer, LBA_t sector, UINT count) {
-    if (drive != 0U || active_disk == nullptr || buffer == nullptr || count == 0U || sector > sector_count ||
-        count > sector_count - sector) {
-        return RES_PARERR;
-    }
-    const auto offset = static_cast<std::size_t>(sector) * sector_size;
-    std::memcpy(active_disk->bytes.data() + offset, buffer, static_cast<std::size_t>(count) * sector_size);
-    return RES_OK;
-}
-
-extern "C" DRESULT disk_ioctl(BYTE drive, BYTE command, void *buffer) {
-    if (drive != 0U || active_disk == nullptr)
-        return RES_PARERR;
-    switch (command) {
-    case CTRL_SYNC:
-        return RES_OK;
-    case GET_SECTOR_COUNT:
-        *static_cast<LBA_t *>(buffer) = sector_count;
-        return RES_OK;
-    case GET_SECTOR_SIZE:
-        *static_cast<WORD *>(buffer) = sector_size;
-        return RES_OK;
-    case GET_BLOCK_SIZE:
-        *static_cast<DWORD *>(buffer) = 1;
-        return RES_OK;
-    default:
-        return RES_PARERR;
-    }
-}
 
 namespace axk::detail {
 
@@ -302,115 +210,33 @@ Result<std::vector<std::byte>> build_fat12_image(const PreparedMediaImage &image
     if (!catalog_bytes)
         return std::unexpected{catalog_bytes.error()};
 
-    std::scoped_lock lock{fatfs_mutex};
-    FatDisk disk{std::vector<std::byte>(sector_count * sector_size)};
-    active_disk = &disk;
-    const auto reset_disk = [&]() { active_disk = nullptr; };
-    std::array<std::byte, 4096> work{};
-    const MKFS_PARM options{static_cast<BYTE>(FM_FAT | FM_SFD), 2, 0, 224, sector_size};
-    auto status = f_mkfs("", &options, work.data(), static_cast<UINT>(work.size()));
-    if (status != FR_OK) {
-        reset_disk();
-        return std::unexpected{fatfs_error("could not format FAT12 image", status)};
-    }
-    apply_yamaha_floppy_profile(disk.bytes);
-    FATFS filesystem{};
-    status = f_mount(&filesystem, "", 1);
-    if (status != FR_OK) {
-        reset_disk();
-        return std::unexpected{fatfs_error("could not mount formatted FAT12 image", status)};
-    }
-
-    const auto write_file = [&](std::string_view filename, std::span<const std::byte> payload) -> Result<void> {
-        FIL file{};
-        auto write_status = f_open(&file, std::string{filename}.c_str(), FA_CREATE_NEW | FA_WRITE);
-        if (write_status == FR_OK) {
-            UINT written{};
-            write_status = f_write(&file, payload.data(), static_cast<UINT>(payload.size()), &written);
-            if (write_status == FR_OK && written != payload.size())
-                write_status = FR_DISK_ERR;
-            const auto close_status = f_close(&file);
-            if (write_status == FR_OK)
-                write_status = close_status;
-        }
-        if (write_status != FR_OK)
-            return std::unexpected{fatfs_error("could not write FAT12 file", write_status)};
-        return {};
-    };
-    enum class FileSource : std::uint8_t { system, retained, object };
-    struct PlannedFile {
-        std::string path;
-        FileSource source{};
-        std::size_t index{};
-    };
-    std::vector<PlannedFile> files;
-    files.reserve(single_marker_count + retained_count + image.objects.size());
+    std::vector<filesystems::FloppyFile> files;
+    files.reserve(single_marker_count + retained_count + image.objects.size() + 1U);
     if (!image.floppy_catalog)
-        files.push_back({std::string{single_marker_physical_path}, FileSource::system, 0U});
-    for (std::size_t index = 0U; index < image.retained_files.size(); ++index) {
-        if (!is_yamaha_floppy_catalog_path(image.retained_files[index].path) &&
-            (image.floppy_catalog || !is_single_marker_physical_path(image.retained_files[index].path))) {
-            files.push_back({image.retained_files[index].path, FileSource::retained, index});
+        files.push_back({std::string{single_marker_physical_path}, std::span<const std::byte>{}});
+    for (const auto &retained : image.retained_files) {
+        if (!is_yamaha_floppy_catalog_path(retained.path) &&
+            (image.floppy_catalog || !is_single_marker_physical_path(retained.path))) {
+            files.push_back({retained.path, std::span{retained.payload}});
         }
     }
-    for (std::size_t index = 0U; index < image.objects.size(); ++index)
-        files.push_back({(*object_filenames)[index], FileSource::object, index});
-    std::ranges::sort(files, {}, &PlannedFile::path);
-
-    for (const auto &file : files) {
-        if (const auto check = cancellation.check(); !check) {
-            f_mount(nullptr, "", 0);
-            reset_disk();
-            return std::unexpected{check.error()};
-        }
-        if (file.source == FileSource::system) {
-            if (auto written = write_file(file.path, {}); !written) {
-                f_mount(nullptr, "", 0);
-                reset_disk();
-                return std::unexpected{written.error()};
-            }
-            continue;
-        }
-        if (file.source == FileSource::retained) {
-            if (auto written = write_file(file.path, image.retained_files[file.index].payload); !written) {
-                f_mount(nullptr, "", 0);
-                reset_disk();
-                return std::unexpected{written.error()};
-            }
-            continue;
-        }
-        const auto &object = image.objects[file.index];
-        if (object.payload == nullptr || object.size() > std::numeric_limits<UINT>::max()) {
-            f_mount(nullptr, "", 0);
-            reset_disk();
-            return std::unexpected{make_error(ErrorCode::io_unsupported_size, ErrorCategory::io,
-                                              "FAT12 object payload reader is missing or too large")};
-        }
-        std::vector<std::byte> payload(static_cast<std::size_t>(object.size()));
-        if (auto read = object.payload->read_exact_at(0U, payload); !read) {
-            f_mount(nullptr, "", 0);
-            reset_disk();
-            return std::unexpected{read.error()};
-        }
-        if (auto written = write_file(file.path, payload); !written) {
-            f_mount(nullptr, "", 0);
-            reset_disk();
-            return std::unexpected{written.error()};
-        }
+    for (std::size_t i = 0; i < image.objects.size(); ++i) {
+        const auto &reader = image.objects[i].payload;
+        if (!reader)
+            return std::unexpected(make_error(ErrorCode::io_unsupported_size, ErrorCategory::io,
+                                              "FAT12 object payload reader is missing"));
+        files.push_back({(*object_filenames)[i], std::cref(*reader)});
     }
-    if (auto written = write_file("YAMAHA.SYM", *catalog_bytes); !written) {
-        f_mount(nullptr, "", 0);
-        reset_disk();
-        return std::unexpected{written.error()};
-    }
-    f_mount(nullptr, "", 0);
-    reset_disk();
-
-    normalize_yamaha_root_attributes(disk.bytes);
-    if (auto validated = validate_yamaha_fat12_profile(disk.bytes, catalog, cancellation); !validated)
+    std::ranges::sort(files, {}, &filesystems::FloppyFile::name);
+    files.push_back({"YAMAHA.SYM", std::span{*catalog_bytes}});
+    auto disk = filesystems::build_floppy(filesystems::FloppyLayout::hd_1440k, files, cancellation);
+    if (!disk)
+        return std::unexpected(disk.error());
+    apply_yamaha_floppy_profile(*disk);
+    if (auto validated = validate_yamaha_fat12_profile(*disk, catalog, cancellation); !validated)
         return std::unexpected{validated.error()};
 
-    return disk.bytes;
+    return disk;
 }
 
 Result<void> write_fat12_image(const PreparedMediaImage &image, TemporaryPublication &publication,

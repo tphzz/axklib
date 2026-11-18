@@ -190,14 +190,8 @@
         mutationsAvailable: () => imageSessionWorkflow.packageImportAvailable,
         selectedSource: () => imageSessionWorkflow.importDestinationSource(),
         sourceItems: () => imageSessionWorkflow.sourceItems,
-        otherFormat: async (format, sources, target) => {
-            if (format === 'TX16W')
-                await tx16wImportWorkflow.requestDroppedFiles(
-                    sources,
-                    target?.kind === 'volume' && target.partitionIndex !== undefined
-                        ? { partitionIndex: target.partitionIndex, volumeName: target.name }
-                        : null,
-                );
+        otherFormat: async (format, sources, target, claimUpload) => {
+            if (format === 'TX16W') await tx16wImportWorkflow.requestDroppedFiles(sources, target, claimUpload);
             else
                 imageSessionWorkflow.setStatus(
                     format === 'SU700'
@@ -591,6 +585,7 @@
                     imageSessionWorkflow.sessionId,
                     imageSessionWorkflow.documentId,
                     imageSessionWorkflow.revision ?? 0,
+                    imageSessionWorkflow,
                 );
         }}
         {programs}

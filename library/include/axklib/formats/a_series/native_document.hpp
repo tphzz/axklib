@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -16,7 +17,7 @@ class NativeDocument final : public native::Document {
     using Locations = std::unordered_map<std::string, std::vector<native::SourceLocation>>;
     [[nodiscard]] static Result<std::shared_ptr<const NativeDocument>>
     create(std::shared_ptr<const a_series::Document> decoded, std::shared_ptr<const native::SourceSet> sources,
-           std::string id, Locations locations = {});
+           std::string id, Locations locations = {}, std::string_view object_prefix = {});
 
     [[nodiscard]] const native::DocumentSummary &summary() const noexcept override { return summary_; }
     [[nodiscard]] const native::Catalog &catalog() const noexcept override { return catalog_; }

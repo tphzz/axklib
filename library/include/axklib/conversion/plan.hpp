@@ -5,9 +5,12 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
+#include <unordered_map>
+#include <variant>
 #include <vector>
 
 #include <nlohmann/json.hpp>
@@ -29,7 +32,15 @@ struct Issue {
     std::string target_object;
     std::string target_parameter;
     std::string message;
+    std::string decision{};
 };
+
+struct SourceObject {
+    std::string id, name, kind, location;
+    bool selectable{};
+    std::vector<std::string> dependencies{};
+};
+void to_json(nlohmann::json &json, const SourceObject &object);
 
 struct Action {
     std::string kind;
@@ -43,20 +54,37 @@ struct Action {
     std::vector<Detail> details{};
 };
 
+struct NewImageReview {
+    std::uint64_t size_bytes{};
+};
+
 struct Report {
     std::string profile_id;
     Fidelity fidelity{Fidelity::best};
     bool executable{};
     std::vector<Action> actions;
     std::vector<Issue> issues;
-    VolumeCapacityAdmission capacity;
+    std::variant<VolumeCapacityAdmission, NewImageReview> destination;
+    std::vector<SourceObject> source_objects{};
 };
+
+[[nodiscard]] std::uint64_t report_bytes(const Report &report);
 
 struct Patch {
     std::uint64_t offset{};
     std::vector<std::byte> original;
     std::vector<std::byte> replacement;
 };
+
+enum class OutputKind : std::uint8_t { existing_image, new_image };
+struct ExistingImagePatches {
+    std::vector<Patch> patches;
+    std::uint64_t destination_size{};
+};
+struct NewImage {
+    std::vector<std::byte> bytes;
+};
+using PreparedOutput = std::variant<ExistingImagePatches, NewImage>;
 
 struct Limits {
     std::uint64_t maximum_bytes{512ULL * 1024ULL * 1024ULL};
@@ -76,24 +104,25 @@ struct Request {
     Destination destination;
     nlohmann::json options;
     Fidelity fidelity{Fidelity::best};
-    VolumeCapacityPolicy capacity_policy;
+    std::optional<VolumeCapacityPolicy> capacity_policy;
     Limits limits;
+    // Session projections may advertise IDs different from native object keys.
+    std::shared_ptr<const std::unordered_map<std::string, std::string>> native_keys_by_id{};
 };
 
 class PreparedPlan final {
   public:
     PreparedPlan(Report report, std::vector<Patch> patches, std::uint64_t destination_size,
                  std::uint64_t retained_bytes);
+    PreparedPlan(Report report, NewImage image, std::uint64_t retained_bytes);
     [[nodiscard]] const Report &report() const noexcept;
-    [[nodiscard]] std::span<const Patch> patches() const noexcept;
-    [[nodiscard]] std::uint64_t destination_size() const noexcept;
+    [[nodiscard]] const PreparedOutput &output() const noexcept;
     [[nodiscard]] std::uint64_t retained_bytes() const noexcept;
     [[nodiscard]] Result<void> acknowledge(std::span<const std::string> issue_ids) const;
 
   private:
     Report report_;
-    std::vector<Patch> patches_;
-    std::uint64_t destination_size_{};
+    PreparedOutput output_;
     std::uint64_t retained_bytes_{};
 };
 
@@ -106,6 +135,7 @@ struct Profile {
     using Prepare = std::function<Result<std::shared_ptr<const PreparedPlan>>(
         const Request &, const CancellationToken &, ProgressSink *)>;
     Prepare prepare;
+    OutputKind output_kind{OutputKind::existing_image};
 };
 
 class Registry final {

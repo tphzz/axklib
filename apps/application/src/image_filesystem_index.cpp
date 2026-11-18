@@ -11,6 +11,7 @@
 #include <utility>
 
 #include "axklib/filesystem_transaction.hpp"
+#include "axklib/filesystems/fat/view.hpp"
 #include "axklib/lookups.hpp"
 
 namespace axk::app::detail {
@@ -171,7 +172,7 @@ class Builder {
             fat.geometry().profile == FatProfile::ex5_disk || fat.geometry().profile == FatProfile::ex5_removable;
         const bool fat16 = fat.geometry().profile == FatProfile::fat16;
         index.filesystem_name = ex5 ? "EX5 FAT16" : fat16 ? "FAT16" : "FAT12";
-        const auto prefix = std::format("fat-{}", member);
+        const auto prefix = filesystems::fat_root_id(member);
         const auto root = add(prefix,
                               ex5     ? "EX5 disk"
                               : fat16 ? "FAT16 volume"
@@ -210,8 +211,8 @@ class Builder {
             const auto parent = directories.find(parent_path(directory.path));
             if (parent == directories.end())
                 continue;
-            const auto position = add(std::format("{}-d{}", prefix, directory.directory_offset), directory.name,
-                                      "directory", parent->second);
+            const auto position = add(filesystems::fat_entry_id(prefix, true, directory.directory_offset),
+                                      directory.name, "directory", parent->second);
             directories.emplace(directory.path, position);
             index.entries[position].storage = std::format("{} clusters", directory.clusters.size());
             describe_fat_attributes(index.entries[position], directory.attributes);
@@ -225,7 +226,7 @@ class Builder {
             if (parent == directories.end())
                 continue;
             const auto position =
-                add(std::format("{}-f{}", prefix, file.directory_offset), file.name, "file", parent->second);
+                add(filesystems::fat_entry_id(prefix, false, file.directory_offset), file.name, "file", parent->second);
             index.entries[position].size_bytes = file.size;
             index.files.emplace(index.entries[position].id, FatFilesystemFile{member, ordinal});
             index.entries[position].storage =

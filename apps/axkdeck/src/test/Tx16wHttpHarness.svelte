@@ -5,6 +5,7 @@
     import type { OpenedImage } from '../lib/transport';
     import { serverFileLocation } from '../lib/storageLocations';
     import { JobController } from '../features/jobs/actions';
+    import { PickerController } from '../features/dialogs/picker';
     import { Tx16wImportWorkflow } from '../features/import/tx16wWorkflow.svelte';
     import Tx16wImportDialog from '../lib/components/Tx16wImportDialog.svelte';
     import { ASeriesPreferences, provideASeriesPreferences } from '../lib/aSeriesPreferences.svelte';
@@ -16,12 +17,17 @@
     const preferences = new ASeriesPreferences({ load: async () => 'A4000_A5000', save: async () => {} });
     provideASeriesPreferences(preferences);
     let opened = $state<OpenedImage | null>(null);
+    let native: OpenedImage | null = null;
     let status = $state('Ready');
     const destination = serverFileLocation({ rootId: 'target', relativePath: 'target.hds' });
     const target = { partitionIndex: 0, volumeName: 'test05' };
+    const picker = new PickerController((request) => {
+        if (request) queueMicrotask(() => picker.finish(destination));
+    });
     const workflow = new Tx16wImportWorkflow({
         transport,
         jobs,
+        picker,
         sessionId: () => opened?.sessionId ?? null,
         imageLocation: () => (opened ? destination : null),
         mutationsAvailable: () => opened?.volumeMutationsAvailable ?? false,
@@ -46,12 +52,23 @@
     workflow.completion.capacity.target = 'A4000_A5000';
     Object.assign(window, {
         tx16wAcceptance: {
+            beginNative: async (rootId: string, names: string[]) => {
+                native = await transport.openImage(
+                    names.map((relativePath) => serverFileLocation({ rootId, relativePath })),
+                );
+                const document = native.documents.find((item) => item.formatId === 'yamaha.tx16w');
+                if (!document) throw new Error('Expected a TX16W document in the selected source set');
+                await workflow.requestNativeDocument(native.sessionId, document.id, native.revision, native);
+            },
             begin: async (rootId: string, names: string[]) => {
                 await workflow.close();
+                if (native) {
+                    await transport.closeImage(native.sessionId);
+                    native = null;
+                }
                 if (!opened) opened = await transport.openImage([destination]);
                 await workflow.requestDroppedFiles(
                     names.map((relativePath) => serverFileLocation({ rootId, relativePath })),
-                    target,
                 );
             },
             snapshot: () => ({
@@ -60,6 +77,9 @@
                 request: workflow.request
                     ? {
                           status: workflow.request.status,
+                          destination: workflow.request.destinationName,
+                          target: workflow.request.target,
+                          selected: workflow.request.sourceObjectIds,
                           error: workflow.request.error,
                           members: workflow.request.members.map((member) => ({
                               name: member.sourceName,
@@ -69,6 +89,11 @@
                           report: workflow.request.plan?.report
                               ? {
                                     executable: workflow.request.plan.report.executable,
+                                    eligible: workflow.request.sourceObjects?.filter((o) => o.selectable).length,
+                                    decisions: workflow.request.plan.report.issues
+                                        .filter((issue) => issue.decision)
+                                        .map((issue) => issue.id),
+                                    acknowledged: workflow.request.acknowledgedIssueIds,
                                     actionCount: workflow.request.plan.report.actionCount,
                                     issueCount: workflow.request.plan.report.issueCount,
                                     counts: Object.fromEntries(
@@ -88,6 +113,7 @@
             shutdown: async () => {
                 await workflow.dispose();
                 await jobs.dispose();
+                if (native) await transport.closeImage(native.sessionId);
                 if (opened) await transport.closeImage(opened.sessionId);
                 opened = null;
             },
@@ -102,10 +128,12 @@
     <Tx16wImportDialog
         request={workflow.request}
         completion={workflow.completion}
-        volumeOptions={workflow.volumeOptions()}
+        destinations={workflow.destinations()}
         onrecover={() => void workflow.recoverCompletion()}
-        ontarget={(value) => void workflow.selectTarget(value)}
+        onbrowse={() => void workflow.browseNativeDestination()}
+        ontarget={(value, typing) => void workflow.selectTarget(value, typing)}
         onmode={(value) => void workflow.selectImportMode(value)}
+        onsources={(ids) => void workflow.selectSources(ids)}
         onfidelity={(value) => void workflow.selectFidelity(value)}
         onprepare={() => void workflow.reprepare()}
         onadd={(files) => void workflow.addFiles(files)}

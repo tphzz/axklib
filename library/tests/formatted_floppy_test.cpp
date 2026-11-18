@@ -1,9 +1,13 @@
 #include <algorithm>
+#include <array>
+#include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <string>
 
 #include <gtest/gtest.h>
 
+#include "axklib/audio.hpp"
 #include "axklib/io.hpp"
 #include "axklib/media.hpp"
 #include "axklib/package_archive.hpp"
@@ -96,4 +100,29 @@ TEST(FormattedFloppy, RejectsUnknownModesAndHonorsCancellation) {
     const auto cancelled = axk::plan_floppy_creation(axk::FloppyFormatMode::full, source.token());
     ASSERT_FALSE(cancelled);
     EXPECT_EQ(cancelled.error().code, axk::ErrorCode::operation_cancelled);
+}
+
+TEST(FormatGeneralization, W2ASeriesControl) {
+    const auto root = std::filesystem::temp_directory_path() / "axklib-floppy-w2-control";
+    std::filesystem::create_directories(root);
+    const auto json = axk::serialize_build_manifest_template(axk::BuildManifestKind::fat12_floppy);
+    ASSERT_TRUE(json);
+    const auto manifest = axk::parse_media_build_manifest(*json, root);
+    ASSERT_TRUE(manifest) << manifest.error().message;
+    axk::Waveform tone;
+    tone.format = {1U, 2U, 44100U};
+    tone.frame_count = 64;
+    for (int repeat = 0; repeat < 8; ++repeat) {
+        for (const auto frame : std::array<std::int16_t, 8>{0, 16, -16, 4656, -32, -32768, 32752, 0}) {
+            const auto bits = static_cast<std::uint16_t>(frame);
+            tone.pcm.push_back(static_cast<std::byte>(bits & 0xffU));
+            tone.pcm.push_back(static_cast<std::byte>(bits >> 8U));
+        }
+    }
+    ASSERT_TRUE(axk::write_wav_atomic(root / "tone.wav", tone));
+    const auto out = root / "disk.ima";
+    const auto result = axk::write_media_image(*manifest, out, true);
+    ASSERT_TRUE(result) << result.error().message;
+    EXPECT_EQ(file_digest(out), "88ef3365d43db8aafd7d4805b21ceea6f97a4486b83a5b8a27873ee796c6fb20");
+    std::filesystem::remove_all(root);
 }

@@ -1,5 +1,6 @@
 #include "axklib/formats/a_series/authoring/prepare.hpp"
 
+#include <algorithm>
 #include <charconv>
 #include <cstddef>
 #include <utility>
@@ -15,6 +16,19 @@ Result<MutablePartition *> destination_partition(TransactionState &state, const 
     const auto found = state.partitions.find(destination.partition_index);
     if (found == state.partitions.end())
         return std::unexpected(transaction_error("Conversion target partition does not exist"));
+    if (destination.create) {
+        const auto &name = destination.volume_name;
+        if (name.empty() || name.size() > 16U || name.front() == ' ' || name.back() == ' ' ||
+            !std::ranges::all_of(name, [](unsigned char c) { return c >= 0x20U && c <= 0x7eU; }))
+            return std::unexpected(transaction_error(
+                "Enter a volume name of 1 to 16 printable ASCII characters without leading or trailing spaces"));
+        auto inserted = insert_volume(state, {"native-import-volume", "insert_volume"},
+                                      {PartitionIndex{destination.partition_index}, VolumeSpec{name, {}, {}, {}, {}}},
+                                      cancellation);
+        if (!inserted)
+            return std::unexpected(inserted.error());
+        state.reports.push_back(std::move(*inserted));
+    }
     const auto volume = unique_directory_child(state, found->second, SfsId{1U}, destination.volume_name, cancellation);
     if (!volume)
         return std::unexpected(volume.error());

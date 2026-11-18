@@ -101,7 +101,9 @@ def exercise(server: Path, fixture: Path, root: Path) -> None:
             detail = get(f"{native_base}/objects/{quote(native_object['id'], safe='')}")
             assert detail["objectId"] == native_object["id"], detail
         for invalid_id in ("%", "%0", "%gg", "%00"):
-            rejected = request(port, TOKEN, "GET", f"{native_base}/objects/{invalid_id}")
+            rejected = request(
+                port, TOKEN, "GET", f"{native_base}/objects/{invalid_id}"
+            )
             assert rejected.status == 400, rejected.content
         objects = get(f"{base}/objects?limit=100")["items"]
         sample = next(item for item in objects if item["type"] == "SBNK")
@@ -123,6 +125,7 @@ def exercise(server: Path, fixture: Path, root: Path) -> None:
                 "documentId": document,
                 "expectedRevision": 1,
                 "selection": {
+                    "kind": "EXISTING_VOLUME",
                     "partitionIndex": editing["partitionIndex"],
                     "volumeName": editing["volumeName"],
                 },
@@ -150,32 +153,35 @@ def exercise(server: Path, fixture: Path, root: Path) -> None:
         page = get(f"{path}?offset=0&limit=1")["report"]
         assert len(page["issues"]) == 1 and page["issueCount"] > 1, page
         assert page["actions"][0]["details"], page
+        notes = [
+            issue["id"]
+            for issue in plan["report"]["issues"]
+            if issue["impact"] == "LOSS"
+        ]
+        assert notes and not any(
+            issue.get("decision") for issue in plan["report"]["issues"]
+        )
         rejected = request(
             port,
             TOKEN,
             "POST",
             path + "/executions",
-            {"acknowledgedIssueIds": []},
+            {"acknowledgedIssueIds": notes},
             {"Idempotency-Key": "reject"},
         )
         assert rejected.status == 409, rejected.content
-        ids = [
-            issue["id"]
-            for issue in plan["report"]["issues"]
-            if issue["impact"] in {"LOSS", "UNCERTAINTY"}
-        ]
         for headers in ({}, {"Idempotency-Key": ""}, {"Idempotency-Key": "x" * 129}):
             invalid = request(
                 port,
                 TOKEN,
                 "POST",
                 path + "/executions",
-                {"acknowledgedIssueIds": ids},
+                {"acknowledgedIssueIds": []},
                 headers,
             )
             assert invalid.status == 400, invalid.content
             assert get(path)["state"] == "READY"
-        result = job(path + "/executions", {"acknowledgedIssueIds": ids}, "execute")
+        result = job(path + "/executions", {"acknowledgedIssueIds": []}, "execute")
         assert result["applied"] and result["revision"] == 2, result
         accepted_id = get(path)["jobId"]
         repeated = request(
@@ -183,7 +189,7 @@ def exercise(server: Path, fixture: Path, root: Path) -> None:
             TOKEN,
             "POST",
             path + "/executions",
-            {"acknowledgedIssueIds": ids},
+            {"acknowledgedIssueIds": []},
             {"Idempotency-Key": "different-key"},
         )
         assert (
@@ -195,7 +201,7 @@ def exercise(server: Path, fixture: Path, root: Path) -> None:
             TOKEN,
             "POST",
             old_path,
-            {"acknowledgedIssueIds": ids},
+            {"acknowledgedIssueIds": []},
             {"Idempotency-Key": "stale"},
         )
         assert response.status == 202, response.content

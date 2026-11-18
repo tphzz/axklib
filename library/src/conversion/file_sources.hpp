@@ -5,6 +5,7 @@
 
 #include "axklib/native/source.hpp"
 #include "axklib/package_archive.hpp"
+#include "axklib/sfs_disk_sources.hpp"
 
 namespace axk::conversion::file_internal {
 struct Binding {
@@ -17,6 +18,7 @@ struct Directory {
     std::vector<std::filesystem::path> members;
 };
 struct Sources {
+    inspection::SfsDiskSources sfs;
     std::shared_ptr<const native::SourceSet> sources;
     std::vector<Binding> files;
     std::vector<Directory> directories;

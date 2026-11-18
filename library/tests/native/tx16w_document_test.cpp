@@ -12,6 +12,7 @@
 
 #include <gtest/gtest.h>
 
+#include "axklib/formats/tx16w/dependencies.hpp"
 #include "axklib/formats/tx16w/document.hpp"
 
 namespace {
@@ -65,6 +66,61 @@ axk::filesystems::Entry entry(std::string name, std::vector<std::byte> bytes) {
 }
 
 } // namespace
+
+TEST(Tx16wDocument, NearbyFollowsOnlyTheSelectedRequirementsUntilComplete) {
+    auto setup = file(1536U);
+    text(setup, 0xf7U, "TONE");
+    text(setup, 0x107U, "PAD");
+    text(setup, 0x117U, "HELD");
+    auto other = file(1536U);
+    text(other, 0xf7U, "TONE");
+    std::vector candidates{
+        member("wrong", {entry("TONE.W01", wave()), entry("HELD.W03", wave())}),
+        member("wave", {entry("TONE.W01", wave()), entry("PAD.W02", wave())}),
+        member("damaged", {entry("TONE.W01", wave()), entry("PAD.W02", wave()), entry("BAD.W09", file(8U))}),
+        member("setup", {entry("SET.S01", std::move(setup))}),
+        member("elsewhere", {entry("OTHER.S01", std::move(other)), entry("OTHER.V01", file(8704U))})};
+    std::vector selected{member("seed", {entry("SET.V01", file(8704U)), entry("HELD.W03", wave())})};
+    const auto seed = axk::tx16w::Document::open(*axk::native::SourceSet::create(selected));
+    ASSERT_TRUE(seed);
+    for (unsigned order = 0U; order < 2U; ++order) {
+        std::reverse(candidates.begin(), candidates.end());
+        std::vector<std::shared_ptr<const axk::tx16w::Document>> documents;
+        for (const auto &candidate : candidates) {
+            const auto document = axk::tx16w::Document::open(*axk::native::SourceSet::create({candidate}));
+            ASSERT_TRUE(document);
+            documents.push_back(*document);
+        }
+        const auto group = axk::tx16w::detail::resolve_companions(**seed, selected, candidates, documents);
+        ASSERT_TRUE(group) << group.error().message;
+        EXPECT_EQ(group->member_ids, (std::vector<std::string>{"setup", "wave"}));
+        EXPECT_TRUE(group->ambiguous_requirements.empty());
+    }
+}
+
+TEST(Tx16wDocument, NearbyOrdersNumericRunsAroundSeedButNeverBreaksASupplierTie) {
+    const std::vector<std::string> labels{"dir/Disk19.img", "Disk11.img", "Disk2.img", "Disk9.img"};
+    EXPECT_EQ(axk::tx16w::detail::nearby_order("dir/Disk10.img", labels), (std::vector<std::size_t>{3U, 1U, 2U, 0U}));
+    auto setup = file(1536U);
+    text(setup, 0xf7U, "TONE");
+    std::vector selected{member("seed", {entry("SET.S01", std::move(setup)), entry("SET.V01", file(8704U))})};
+    selected.front().label = "Disk10.img";
+    const auto seed = axk::tx16w::Document::open(*axk::native::SourceSet::create(selected));
+    ASSERT_TRUE(seed);
+    std::vector candidates{member("near", {entry("TONE.W01", wave())}), member("far", {entry("TONE.W01", wave())})};
+    candidates.front().label = "Disk11.img";
+    candidates.back().label = "Disk19.img";
+    std::vector<std::shared_ptr<const axk::tx16w::Document>> documents;
+    for (const auto &candidate : candidates) {
+        const auto document = axk::tx16w::Document::open(*axk::native::SourceSet::create({candidate}));
+        ASSERT_TRUE(document);
+        documents.push_back(*document);
+    }
+    const auto result = axk::tx16w::detail::resolve_companions(**seed, selected, candidates, documents);
+    ASSERT_TRUE(result) << result.error().message;
+    EXPECT_TRUE(result->member_ids.empty());
+    EXPECT_EQ(result->ambiguous_requirements, (std::vector<std::string>{"TONE.W01"}));
+}
 
 TEST(Tx16wDocument, BrowsesWaveHeadersWithoutReadingPcmAndKeepsDuplicateOccurrences) {
     auto counted = std::make_shared<CountingReader>(wave());

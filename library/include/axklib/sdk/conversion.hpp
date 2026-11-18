@@ -14,6 +14,7 @@ class operation_context;
 struct conversion_request {
     std::string profile_id;
     std::vector<std::string> source_paths;
+    // Leave both destination fields empty for a profile producing a new image.
     std::string destination_path;
     std::string destination_selection_json;
     std::string options_json;

@@ -3,7 +3,12 @@ export interface ClientUploadSource {
     type: string;
     size: number;
     readonly identity?: string | object;
-    nearbySources?(signal: AbortSignal): Promise<ClientUploadSource[]>;
+    readonly sha256?: string;
+    nearbySources?(
+        selected: ClientUploadSource[],
+        excluded: string[],
+        signal: AbortSignal,
+    ): Promise<{ sources: ClientUploadSource[]; ambiguous: string[] }>;
     readChunk(start: number, end: number): Promise<Blob>;
 }
 

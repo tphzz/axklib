@@ -5,9 +5,10 @@
 #include <limits>
 #include <utility>
 
-#include "axklib/audio.hpp"
 #include "axklib/conversion/tx16w_to_a_series/plan.hpp"
 #include "axklib/formats/a_series/authoring/prepare.hpp"
+#include "axklib/pcm_import.hpp"
+#include "selection.hpp"
 
 namespace axk::tx16w::a_series {
 namespace {
@@ -31,51 +32,8 @@ Impact impact(const MappingNotice &notice) {
     return Impact::loss;
 }
 
-std::uint64_t report_bytes(const Report &report) {
-    std::uint64_t bytes = sizeof(PreparedPlan) + report.profile_id.capacity() +
-                          report.actions.capacity() * sizeof(Action) + report.issues.capacity() * sizeof(Issue);
-    for (const auto &action : report.actions) {
-        bytes += action.kind.capacity() + action.name.capacity() + action.source_object.capacity() +
-                 action.action.capacity() + action.details.capacity() * sizeof(Action::Detail);
-        for (const auto &detail : action.details)
-            bytes += detail.label.capacity() + detail.value.capacity();
-    }
-    for (const auto &notice : report.issues)
-        bytes += notice.id.capacity() + notice.code.capacity() + notice.source_object.capacity() +
-                 notice.source_parameter.capacity() + notice.target_object.capacity() +
-                 notice.target_parameter.capacity() + notice.message.capacity();
-    bytes += report.capacity.reports.capacity() * sizeof(VolumeCapacityReport);
-    for (const auto &capacity : report.capacity.reports) {
-        bytes += capacity.volume_name.capacity() +
-                 capacity.object_counts.capacity() * sizeof(VolumeCapacityObjectCount) +
-                 capacity.profiles.capacity() * sizeof(VolumeCapacityProfile);
-        for (const auto &object : capacity.object_counts)
-            bytes += object.type.capacity();
-        for (const auto &profile : capacity.profiles) {
-            bytes += profile.reasons.capacity() * sizeof(VolumeCapacityReason);
-            for (const auto &reason : profile.reasons)
-                bytes += reason.code.capacity() + reason.message.capacity();
-        }
-    }
-    return bytes;
-}
-
 Result<ImportedAudio> materialize(const Wave &source, std::uint32_t rate) {
-    Waveform waveform;
-    waveform.name = source.name;
-    waveform.format = {.channels = 1U, .sample_width_bytes = 2U, .sample_rate = source.sample_rate};
-    waveform.frame_count = source.pcm.size();
-    waveform.pcm.resize(source.pcm.size() * sizeof(std::int16_t));
-    for (std::size_t index = 0U; index < source.pcm.size(); ++index) {
-        const auto sample = static_cast<std::uint16_t>(source.pcm[index]);
-        waveform.pcm[index * 2U] = static_cast<std::byte>(sample & 0xffU);
-        waveform.pcm[index * 2U + 1U] = static_cast<std::byte>(sample >> 8U);
-    }
-    auto bytes = wav_bytes(waveform);
-    if (!bytes)
-        return std::unexpected(bytes.error());
-    MemoryReader reader{std::move(*bytes)};
-    auto audio = import_sampler_audio(reader, {.expected_channels = 1U, .target_sample_rate = rate});
+    auto audio = import_mono_pcm16(source.pcm, source.sample_rate, rate);
     if (!audio)
         return std::unexpected(audio.error());
     audio->source_format = "TX16W";
@@ -93,8 +51,9 @@ Result<std::shared_ptr<const PreparedPlan>> prepare(const Request &request, cons
     ImportMode mode;
     authoring::Destination destination;
     try {
-        if (!request.options.is_object() || request.options.size() != 1U ||
-            !request.destination.selection.is_object() || request.destination.selection.size() != 2U)
+        if (!request.options.is_object() ||
+            request.options.size() != (request.options.contains("sourceObjectIds") ? 2U : 1U) ||
+            !request.destination.selection.is_object() || request.destination.selection.size() != 3U)
             return std::unexpected(invalid("Conversion options and destination contain unknown or missing fields"));
         const auto name = request.options.at("mode").get<std::string>();
         if (name != "HIERARCHY" && name != "WAVE_DATA_ONLY")
@@ -103,14 +62,21 @@ Result<std::shared_ptr<const PreparedPlan>> prepare(const Request &request, cons
         const auto &partition = request.destination.selection.at("partitionIndex");
         if (!partition.is_number_integer() || partition < 0 || partition > 7)
             return std::unexpected(invalid("Destination partition index must be between 0 and 7"));
-        destination = {partition.get<std::uint8_t>(),
-                       request.destination.selection.at("volumeName").get<std::string>()};
+        const auto &kind = request.destination.selection.at("kind");
+        if (kind != "EXISTING_VOLUME" && kind != "CREATE_VOLUME")
+            return std::unexpected(invalid("Select an existing or new destination volume"));
+        destination = {partition.get<std::uint8_t>(), request.destination.selection.at("volumeName").get<std::string>(),
+                       kind == "CREATE_VOLUME"};
         if (destination.volume_name.empty())
-            return std::unexpected(invalid("Conversion requires an existing destination volume"));
+            return std::unexpected(invalid("Conversion requires a destination volume name"));
     } catch (const nlohmann::json::exception &) {
         return std::unexpected(invalid("Malformed conversion options or destination"));
     }
-    auto source = inspect_document(*document, mode, cancellation);
+    auto selection = select_source(*document, mode, request.options, request.limits);
+    if (!selection)
+        return std::unexpected(selection.error());
+    auto source =
+        inspect_document(*document, mode, cancellation, selection->included ? &*selection->included : nullptr);
     if (!source)
         return std::unexpected(source.error());
     const auto inventory = authoring::inventory(request.destination.reader, destination, cancellation);
@@ -122,6 +88,7 @@ Result<std::shared_ptr<const PreparedPlan>> prepare(const Request &request, cons
     if (!mapped)
         return std::unexpected(mapped.error());
     Report report;
+    report.source_objects = std::move(selection->catalog);
     report.profile_id = profile_id;
     report.fidelity = request.fidelity;
     report.executable = true;
@@ -135,9 +102,12 @@ Result<std::shared_ptr<const PreparedPlan>> prepare(const Request &request, cons
             (request.fidelity == Fidelity::strict && (severity == Impact::loss || severity == Impact::uncertainty)))
             report.executable = false;
     };
-    for (const auto &notice : mapped->notices)
+    for (const auto &notice : mapped->notices) {
         issue(impact(notice), "tx16w." + notice.source_parameter, notice.source_object, notice.message,
               notice.source_parameter, notice.target_object, notice.target_parameter);
+        if (notice.source_parameter == "missing_performance" && impact(notice) == Impact::uncertainty)
+            report.issues.back().decision = "Create audition Program " + notice.target_object + " from this Voice";
+    }
     for (const auto &wave : mapped->wave_data) {
         const auto &id = source->wave_object_ids.at(wave.source_wave_index);
         report.actions.push_back({"wave-data", wave.name, id});
@@ -175,6 +145,7 @@ Result<std::shared_ptr<const PreparedPlan>> prepare(const Request &request, cons
         issue(Impact::blocker, "conversion.empty", {}, "No convertible objects were found for this mode");
     if (report.actions.size() > request.limits.maximum_actions || report.issues.size() > request.limits.maximum_issues)
         return std::unexpected(invalid("Conversion report exceeds its bounded size"));
+    describe_blocker_owners(*document, report, selection->included);
     std::uint64_t retained_bytes = report_bytes(report);
     if (retained_bytes > request.limits.maximum_bytes)
         return std::unexpected(invalid("Conversion report exceeds its memory limit"));
@@ -230,12 +201,13 @@ Result<std::shared_ptr<const PreparedPlan>> prepare(const Request &request, cons
         }
         bundle.wave_data.push_back({std::move(spec), std::move(*audio)});
     }
+    const auto policy = request.capacity_policy.value_or(VolumeCapacityPolicy{});
     auto authored = authoring::prepare(request.destination.reader, request.destination.label, destination, bundle,
-                                       request.capacity_policy, cancellation, progress);
+                                       policy, cancellation, progress);
     if (!authored)
         return std::unexpected(authored.error());
-    report.capacity = std::move(authored->capacity);
-    if (const auto admitted = enforce_volume_capacity_admission(report.capacity, request.capacity_policy); !admitted)
+    const auto &admission = report.destination.emplace<VolumeCapacityAdmission>(std::move(authored->capacity));
+    if (const auto admitted = enforce_volume_capacity_admission(admission, policy); !admitted)
         issue(Impact::blocker, "conversion.capacity", {}, admitted.error().message);
     retained_bytes = report_bytes(report);
     if (retained_bytes > request.limits.maximum_bytes || report.issues.size() > request.limits.maximum_issues)
@@ -269,7 +241,10 @@ conversion::Profile profile() {
             {{"type", "object"},
              {"additionalProperties", false},
              {"required", {"mode"}},
-             {"properties", {{"mode", {{"type", "string"}, {"enum", {"HIERARCHY", "WAVE_DATA_ONLY"}}}}}}},
+             {"properties",
+              {{"mode", {{"type", "string"}, {"enum", {"HIERARCHY", "WAVE_DATA_ONLY"}}}},
+               {"sourceObjectIds",
+                {{"type", "array"}, {"minItems", 1}, {"uniqueItems", true}, {"items", {{"type", "string"}}}}}}}},
             prepare};
 }
 

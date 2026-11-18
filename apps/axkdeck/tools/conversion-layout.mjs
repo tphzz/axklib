@@ -27,14 +27,42 @@ try {
             const errors = [];
             page.on('pageerror', (error) => errors.push(error.message));
             await page.goto(`http://127.0.0.1:${port}/tools/layout-fixtures/conversion.html${native ? '?native' : ''}`);
-            const dialog = page.getByRole('dialog', { name: 'Import TX16W disk set' });
+            const dialog = page.getByRole('dialog', { name: native ? 'Convert' : 'Import TX16W disk set' });
             await dialog.waitFor();
             const bounds = await dialog.boundingBox();
             const footer = dialog.locator('footer');
             const footerBounds = await footer.boundingBox();
-            const primary = dialog.getByRole('button', { name: 'Import', exact: true });
-            assert(await primary.isDisabled());
-            assert(await dialog.getByRole('button', { name: 'New', exact: true }).isDisabled());
+            const primary = dialog.getByRole('button', { name: native ? 'Add to volume' : 'Import', exact: true });
+            assert(await primary.isEnabled(), 'Best does not require viewing or acknowledging conversion notes');
+            const volumeMode = dialog.getByRole('group', {name:'Destination volume type'});
+            if (native) assert(await dialog.getByRole('group',{name:'Destination image type'}).getByRole('button',{name:'New'}).isDisabled());
+            await volumeMode.getByRole('button',{name:'New'}).click();
+            const name = dialog.getByRole('textbox',{name:'New volume name'});
+            const create = dialog.getByRole('button',{name:'Create volume and import'});
+            assert(await create.isEnabled());
+            await page.screenshot({ path: resolve(output, `${native ? 'native' : 'import'}-${width}-create.png`) });
+            await name.fill('Samples');
+            assert.equal(await name.getAttribute('aria-invalid'),'true');
+            assert(await create.isDisabled());
+            await dialog.getByText('Name already exists in this partition.').waitFor();
+            if (native) {
+                const format = await dialog.getByRole('combobox', { name: 'Target format' }).boundingBox();
+                const destination = await dialog.locator('.disk-import-settings').first().boundingBox();
+                assert(format.y + format.height <= destination.y, 'Wrapped target format must clear the destination row');
+            }
+            await page.screenshot({ path: resolve(output, `${native ? 'native' : 'import'}-${width}-duplicate.png`) });
+            await name.fill('New keys');
+            assert(await create.isEnabled());
+            const partition = dialog.getByRole('combobox',{name:'Destination partition'});
+            await partition.click();
+            await dialog.getByRole('option',{name:'PARTITION 2'}).click();
+            assert(await volumeMode.getByRole('button',{name:'Existing'}).isDisabled());
+            assert.equal(await name.inputValue(),'New keys');
+            await page.screenshot({ path: resolve(output, `${native ? 'native' : 'import'}-${width}-empty.png`) });
+            await partition.click();
+            await dialog.getByRole('option',{name:'PARTITION 1'}).click();
+            await volumeMode.getByRole('button',{name:'Existing'}).click();
+            assert(await primary.isEnabled());
             const style = await footer.locator('button').evaluateAll((buttons) => buttons.map((button) => ({
                 height: button.getBoundingClientRect().height, marginTop: getComputedStyle(button).marginTop,
                 marginBottom: getComputedStyle(button).marginBottom,
@@ -43,6 +71,34 @@ try {
             assert.equal(style[0].marginTop, '0px');
             assert.equal(style[0].marginBottom, '0px');
             const report = dialog.locator('[data-pane="contents"] .import-pane-scroll');
+            if (native) {
+                const browse = dialog.getByRole('button', {name: /^Browse/});
+                assert(await browse.isEnabled());
+                const overlap = (a, b) => Math.min(a.y + a.height, b.y + b.height) > Math.max(a.y, b.y);
+                assert(overlap(await dialog.getByLabel('File', {exact: true}).boundingBox(), await browse.boundingBox()), 'File and Browse stay on one line at every width');
+                assert(overlap(await dialog.getByText('Target format', {exact:true}).boundingBox(), await dialog.getByRole('combobox', {name:'Target format'}).boundingBox()), 'Target format and its selector stay together');
+                if (width >= 1000) {
+                    assert(overlap(await dialog.getByRole('combobox', {name:'Destination medium'}).boundingBox(), await browse.boundingBox()), 'Destination medium, mode and browse share one desktop row');
+                }
+                const source = dialog.getByRole('tab', { name: 'Source selection' });
+                assert.equal(await source.getAttribute('aria-selected'), 'true');
+                const layer = dialog.getByRole('checkbox', { name: /EP Layer/ });
+                await layer.focus();
+                await page.keyboard.press('Space');
+                await dialog.getByText('1 of 2 selected').waitFor();
+                await dialog.getByText('Required by Stage Piano').waitFor();
+                await dialog.getByText('Piano Voice', { exact:true }).waitFor();
+                assert.equal(await dialog.getByRole('checkbox', { name: /Piano Voice/ }).count(), 0);
+                if (width >= 1000) {
+                    await page.screenshot({ path: resolve(output, 'native-source-ready-wide.png') });
+                    await dialog.getByRole('region', { name: 'Import review' }).focus();
+                    await page.setViewportSize({width:640,height:844});
+                    await page.waitForFunction(() => document.activeElement?.getAttribute('role') === 'tab' && document.activeElement?.textContent?.trim() === 'Source selection');
+                    await page.setViewportSize({width,height:844});
+                    await dialog.getByRole('region', { name: 'Review', exact:true }).waitFor();
+                }
+                await dialog.getByRole('tab', { name: 'Planned output' }).click();
+            }
             assert(await report.evaluate((node) => node.scrollHeight > node.clientHeight));
             await dialog.getByRole('button', { name: 'Next objects page' }).click();
             await dialog.getByText('Concert-Piano-100', { exact: true }).waitFor();
@@ -50,28 +106,25 @@ try {
             await dialog.getByRole('button', { name: 'Previous objects page' }).click();
             if (await dialog.getByRole('tab', { name: /^Review/ }).count()) await dialog.getByRole('tab', { name: /^Review/ }).click();
             const checks = dialog.locator('[data-pane="review"] input[type=checkbox]');
-            for (let index = 0; index < 2; ++index) {
-                await checks.nth(index).focus();
-                await page.keyboard.press('Space');
-            }
-            assert(await primary.isEnabled());
+            assert.equal(await checks.count(), 0);
+            await dialog.getByRole('heading', { name: 'Conversion notes' }).waitFor();
+            if (native) await dialog.locator('[data-pane="review"]').getByText(/Source: PFC2/).first().waitFor();
             assert.deepEqual(await dialog.boundingBox(), bounds);
             await dialog.getByRole('button', { name: 'Strict', exact: true }).click();
             assert(await primary.isDisabled());
             await dialog.getByRole('status').getByText('Conversion blocked', { exact: true }).waitFor();
             await dialog.getByRole('button', { name: 'Best', exact: true }).click();
-            for (let index = 0; index < 2; ++index) await checks.nth(index).check();
             assert(await primary.isEnabled());
             assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth), false);
             const contents = await dialog.locator('[data-pane="contents"]').boundingBox();
             const review = await dialog.locator('[data-pane="review"]').boundingBox();
-            if (!await dialog.getByRole('tab').count()) assert(contents.x + contents.width <= review.x);
+            if (!await dialog.getByRole('tab', { name: /^Review/ }).count()) assert(contents.x + contents.width <= review.x);
             assert((await dialog.locator('.disk-import-body').boundingBox()).y < footerBounds.y);
             assert.equal(await dialog.getByRole('region', { name: 'Source disks' }).count(), native ? 0 : 1);
             await report.evaluate((node) => { node.scrollTop = 0; });
             await page.screenshot({ path: resolve(output, `${native ? 'native' : 'import'}-${width}.png`) });
             await primary.click();
-            assert.equal(await dialog.getByRole('button', { name: 'Import', exact: true }).count(), 0);
+            assert.equal(await primary.count(), 0);
             await dialog.getByRole('button', { name: 'Refresh', exact: true }).click();
             await page.getByText('Conversion closed', { exact: true }).waitFor();
             assert.deepEqual(errors, []);

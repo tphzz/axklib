@@ -46,6 +46,7 @@ struct ObjectSummary {
     std::string name;
     std::vector<SourceLocation> locations;
     std::vector<Capability> capabilities;
+    std::optional<std::string> volume_name{};
 };
 
 struct Relationship {

@@ -111,6 +111,7 @@ add_library(
   src/http_headers.cpp
   src/infrastructure_routes.cpp
   src/job_json.cpp
+  src/native_companion_inspector.cpp
   src/operation_routes.cpp
   src/process_lifetime.cpp
   src/request_validation.cpp
@@ -261,13 +262,71 @@ if(BUILD_TESTING)
   axk_enable_sanitizers(axk_server_tests)
   axk_enable_coverage(axk_server_tests)
   gtest_discover_tests(axk_server_tests PROPERTIES LABELS server)
-  add_executable(axk_server_fixture tests/server_fixture.cpp)
+  add_executable(axk_server_fixture tests/server_fixture.cpp tests/fixture_sampler.cpp)
+  target_include_directories(axk_server_fixture PRIVATE "${AXK_REPOSITORY_ROOT}/apps/application/src")
   target_compile_features(axk_server_fixture PRIVATE cxx_std_23)
   target_link_libraries(axk_server_fixture PRIVATE axk_server_adapter)
   axk_set_project_warnings(axk_server_fixture)
   axk_enable_sanitizers(axk_server_fixture)
   axk_enable_coverage(axk_server_fixture)
   add_dependencies(axk_server_fixture axklib_cli)
+  add_executable(axk_file_profile_fixture tests/fixture_file_profile_client.cpp tests/fixture_sfs_reads.cpp)
+  target_include_directories(axk_file_profile_fixture PRIVATE "${AXK_REPOSITORY_ROOT}/library/internal")
+  find_package(CLI11 CONFIG REQUIRED)
+  target_link_libraries(axk_file_profile_fixture PRIVATE axklib::conversion_files axk_cli_adapter CLI11::CLI11)
+  axk_set_project_warnings(axk_file_profile_fixture)
+  axk_enable_sanitizers(axk_file_profile_fixture)
+  axk_enable_coverage(axk_file_profile_fixture)
+  set(axk_forward_control "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/conversion_profile_test.py"
+      "$<TARGET_FILE:axklib_server>" "$<TARGET_FILE:axklib_cli>"
+      "${AXK_REPOSITORY_ROOT}/tests/fixtures/images/sampler-authored/HD00_512_single_sbnk_authored.hds")
+  add_test(NAME FormatGeneralization.C1a COMMAND ${axk_forward_control} --registration
+           "$<TARGET_FILE:axk_server_fixture>" "$<TARGET_FILE:axk_file_profile_fixture>")
+  axk_configure_server_process_test(FormatGeneralization.C1a 60 server)
+  add_test(NAME FormatGeneralization.C1b COMMAND ${axk_forward_control})
+  axk_configure_server_process_test(FormatGeneralization.C1b 60 server)
+  add_test(NAME FormatGeneralization.C2 COMMAND "${Python3_EXECUTABLE}"
+           "${CMAKE_CURRENT_SOURCE_DIR}/tests/server_conversion_image_test.py" "$<TARGET_FILE:axk_server_fixture>"
+           "$<TARGET_FILE:axk_file_profile_fixture>")
+  axk_configure_server_process_test(FormatGeneralization.C2 60 server)
+  add_test(NAME FormatGeneralization.ASeriesSelectionControl COMMAND "${Python3_EXECUTABLE}"
+           "${CMAKE_CURRENT_SOURCE_DIR}/tests/server_wave_selection_test.py" "$<TARGET_FILE:axklib_server>"
+           "$<TARGET_FILE:axklib_cli>")
+  axk_configure_server_process_test(FormatGeneralization.ASeriesSelectionControl 60 server)
+  add_test(NAME FormatGeneralization.ASeriesFileCatalog COMMAND "${Python3_EXECUTABLE}"
+           "${CMAKE_CURRENT_SOURCE_DIR}/tests/server_wave_selection_test.py" --file "$<TARGET_FILE:axklib_cli>")
+  set_tests_properties(FormatGeneralization.ASeriesFileCatalog PROPERTIES TIMEOUT 60)
+  add_test(NAME FormatGeneralization.W3b COMMAND "${Python3_EXECUTABLE}"
+           "${CMAKE_CURRENT_SOURCE_DIR}/tests/reverse_wave_disk_test.py" "$<TARGET_FILE:axklib_cli>"
+           "$<TARGET_FILE:axk_file_profile_fixture>")
+  set_tests_properties(FormatGeneralization.W3b PROPERTIES TIMEOUT 90)
+  add_test(NAME FormatGeneralization.W3bBoundaries COMMAND "${Python3_EXECUTABLE}"
+           "${CMAKE_CURRENT_SOURCE_DIR}/tests/reverse_boundaries_test.py" "$<TARGET_FILE:axklib_cli>"
+           "$<TARGET_FILE:axklib_cli>")
+  set_tests_properties(FormatGeneralization.W3bBoundaries PROPERTIES TIMEOUT 90)
+  add_test(NAME FormatGeneralization.R1
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/server_format_reader_test.py"
+            "$<TARGET_FILE:axk_server_fixture>")
+  axk_configure_server_process_test(FormatGeneralization.R1 45 server)
+  if(AXK_BUILD_SHARED_SDK AND NOT AXK_ENABLE_SANITIZERS AND NOT AXK_ENABLE_THREAD_SANITIZER)
+    add_test(NAME FormatGeneralization.R2
+      COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/server_native_set_test.py"
+              "$<TARGET_FILE:axklib_server>" "$<TARGET_FILE:axklib_cli>"
+              "${CMAKE_BINARY_DIR}/library/consumer-test")
+    axk_configure_server_process_test(FormatGeneralization.R2 60 server)
+    set_tests_properties(FormatGeneralization.R2 PROPERTIES FIXTURES_REQUIRED axk_installed_sdk)
+    add_test(NAME FormatGeneralization.W3a COMMAND "${Python3_EXECUTABLE}"
+             "${CMAKE_CURRENT_SOURCE_DIR}/tests/server_wave_conversion_selection_test.py"
+             "$<TARGET_FILE:axk_server_fixture>" "$<TARGET_FILE:axklib_cli>" "$<TARGET_FILE:axk_file_profile_fixture>"
+             "${CMAKE_BINARY_DIR}/library/consumer-test")
+    axk_configure_server_process_test(FormatGeneralization.W3a 120 server)
+    set_tests_properties(FormatGeneralization.W3a PROPERTIES FIXTURES_REQUIRED axk_installed_sdk)
+    add_test(NAME FormatGeneralization.W3c COMMAND "${Python3_EXECUTABLE}"
+             "${CMAKE_CURRENT_SOURCE_DIR}/tests/reverse_delivery_test.py" "$<TARGET_FILE:axklib_server>"
+             "$<TARGET_FILE:axklib_cli>" "${CMAKE_BINARY_DIR}/library/consumer-test")
+    axk_configure_server_process_test(FormatGeneralization.W3c 120 server)
+    set_tests_properties(FormatGeneralization.W3c PROPERTIES FIXTURES_REQUIRED axk_installed_sdk)
+  endif()
   add_executable(axk_server_direct_benchmark tests/server_direct_benchmark.cpp)
   target_compile_features(axk_server_direct_benchmark PRIVATE cxx_std_23)
   target_link_libraries(axk_server_direct_benchmark PRIVATE axklib::application)

@@ -1,15 +1,15 @@
-#include "audio_import_internal.hpp"
+#include "axklib/resample.hpp"
 
 #include <cmath>
 #include <string>
 
 #include <soxr.h>
 
-namespace axk::audio_import_detail {
+namespace axk::audio {
 
 Result<std::vector<double>> resample_vhq(std::span<const double> samples, std::size_t channels,
                                          std::uint32_t source_rate, std::uint32_t output_rate) {
-    if (channels == 0U || samples.size() % channels != 0U) {
+    if (!source_rate || !output_rate || channels == 0U || samples.size() % channels != 0U) {
         return std::unexpected{make_error(ErrorCode::audio_unsupported_format, ErrorCategory::audio,
                                           "resampler input is not a complete channel frame")};
     }
@@ -33,4 +33,4 @@ Result<std::vector<double>> resample_vhq(std::span<const double> samples, std::s
     return converted;
 }
 
-} // namespace axk::audio_import_detail
+} // namespace axk::audio

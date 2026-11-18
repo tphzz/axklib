@@ -52,7 +52,17 @@ export class HttpConversions implements ConversionTransport {
     }
     async prepareConversion(input: ConversionInput, signal?: AbortSignal): Promise<ConversionPlan> {
         signal?.throwIfAborted();
-        const destination = this.sessions.get(input.destinationSessionId);
+        let destination;
+        if ('destinationSessionId' in input) {
+            const session = this.sessions.get(input.destinationSessionId);
+            destination = {
+                ...documentTarget(session),
+                expectedRevision: session.revision,
+                selection: input.selection,
+            };
+        } else {
+            destination = input.destination;
+        }
         const source = input.source.kind === 'DOCUMENT' ? this.sessions.get(input.source.sessionId) : null;
         const request = {
             profileId: input.profileId,
@@ -77,14 +87,10 @@ export class HttpConversions implements ConversionTransport {
                                     )
                                   : [],
                       },
-            destination: {
-                ...documentTarget(destination),
-                expectedRevision: destination.revision,
-                selection: input.selection,
-            },
+            destination,
             options: input.options,
             fidelity: input.fidelity,
-            capacityPolicy: input.capacityPolicy,
+            ...('capacityPolicy' in input ? { capacityPolicy: input.capacityPolicy } : {}),
         };
         const submitted = await this.client.invoke<never>('conversions.prepare', request);
         if (!this.jobs.isJob(submitted)) throw new Error('Conversion preparation did not return a job');
@@ -99,13 +105,14 @@ export class HttpConversions implements ConversionTransport {
         try {
             signal?.throwIfAborted();
             if (!plan.report) throw new Error('Conversion preparation returned no report');
-            const count = Math.max(plan.report.actionCount, plan.report.issueCount);
+            const count = Math.max(plan.report.actionCount, plan.report.issueCount, plan.report.sourceCount ?? 0);
             for (let offset = 200; offset < count; offset += 200) {
                 const page = await this.conversionPlan(plan.planId, offset);
                 signal?.throwIfAborted();
                 if (!page.report || page.state !== 'READY') throw new Error('Conversion plan expired during review');
                 plan.report.actions.push(...page.report.actions);
                 plan.report.issues.push(...page.report.issues);
+                if (page.report.sourceObjects) plan.report.sourceObjects?.push(...page.report.sourceObjects);
             }
             return plan;
         } catch (error) {
@@ -130,7 +137,7 @@ export class HttpConversions implements ConversionTransport {
     async executeConversion(plan: ConversionPlan, acknowledgedIssueIds: string[]) {
         const identity = `conversion:${plan.planId}`;
         const tracked = this.client.deviceWrites.begin(
-            plan.report?.destination.imageId,
+            plan.report && 'imageId' in plan.report.destination ? plan.report.destination.imageId : undefined,
             'conversions.execute',
             identity,
         );

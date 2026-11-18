@@ -20,6 +20,7 @@
 #include "axklib/application/image_filesystem.hpp"
 #include "axklib/application/native_document_snapshot.hpp"
 #include "axklib/application/path_reservations.hpp"
+#include "axklib/application/session_format_composition.hpp"
 #include "axklib/deletion.hpp"
 #include "axklib/export.hpp"
 #include "axklib/filesystem_import.hpp"
@@ -471,7 +472,8 @@ class ImageSessionManager {
                         Clock clock = std::chrono::steady_clock::now,
                         PathReservationCoordinator *path_reservations = nullptr,
                         std::uint64_t maximum_audition_bundle_bytes = 128ULL * 1024ULL * 1024ULL,
-                        std::size_t maximum_audition_clips = 256U, DeviceSessionManager *devices = nullptr);
+                        std::size_t maximum_audition_clips = 256U, DeviceSessionManager *devices = nullptr,
+                        ConfigureSessionFormats &configure_formats = configure_builtin_session_formats);
     ~ImageSessionManager();
     ImageSessionManager(ImageSessionManager &&) noexcept;
     ImageSessionManager &operator=(ImageSessionManager &&) noexcept;

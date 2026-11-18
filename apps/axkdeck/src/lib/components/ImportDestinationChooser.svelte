@@ -23,6 +23,8 @@
         unavailableModes?: Partial<Record<ImportDestinationMode, string>>;
         compact?: boolean;
         explainUnavailable?: boolean;
+        placement?: boolean;
+        nameError?: string;
     }
 
     let {
@@ -39,6 +41,8 @@
         unavailableModes = {},
         compact = false,
         explainUnavailable = false,
+        placement = false,
+        nameError = '',
     }: Props = $props();
 
     let query = $state('');
@@ -159,46 +163,49 @@
     }
 </script>
 
-<section class="import-destination" class:compact aria-label="Import destination">
-    <strong class="destination-label">Destination volume</strong>
-    <div class="destination-mode-group">
-        <div
-            class="destination-mode dialog-segmented-control"
-            class:dialog-segmented-control--compact={compact}
-            role="group"
-            aria-label="Destination volume type"
-        >
-            <button
-                type="button"
-                aria-pressed={mode === 'existing'}
-                title={unavailableModes.existing ??
-                    (volumes.length === 0 ? 'No existing volumes available' : undefined)}
-                aria-describedby={unavailableModes.existing ? `${descriptionId}-existing` : undefined}
-                disabled={disabled || !!unavailableModes.existing || volumes.length === 0}
-                onclick={() => {
-                    if (!disabled && !unavailableModes.existing && volumes.length) onmode('existing');
-                }}>Existing</button
+<section class="import-destination" class:compact class:placement aria-label="Import destination">
+    <strong class="destination-label">{placement ? 'Volume placement' : 'Destination volume'}</strong>
+    {#snippet modeControl()}
+        <div class="destination-mode-group">
+            <div
+                class="destination-mode dialog-segmented-control"
+                class:dialog-segmented-control--compact={compact}
+                role="group"
+                aria-label="Destination volume type"
             >
-            <button
-                type="button"
-                aria-pressed={mode === 'create'}
-                title={unavailableModes.create}
-                aria-describedby={unavailableModes.create ? `${descriptionId}-create` : undefined}
-                disabled={disabled || !!unavailableModes.create}
-                onclick={() => {
-                    if (!disabled && !unavailableModes.create) onmode('create');
-                }}>New</button
-            >
+                <button
+                    type="button"
+                    aria-pressed={mode === 'existing'}
+                    title={unavailableModes.existing ??
+                        (volumes.length === 0 ? 'No existing volumes available' : undefined)}
+                    aria-describedby={unavailableModes.existing ? `${descriptionId}-existing` : undefined}
+                    disabled={disabled || !!unavailableModes.existing || volumes.length === 0}
+                    onclick={() => {
+                        if (!disabled && !unavailableModes.existing && volumes.length) onmode('existing');
+                    }}>Existing</button
+                >
+                <button
+                    type="button"
+                    aria-pressed={mode === 'create'}
+                    title={unavailableModes.create}
+                    aria-describedby={unavailableModes.create ? `${descriptionId}-create` : undefined}
+                    disabled={disabled || !!unavailableModes.create}
+                    onclick={() => {
+                        if (!disabled && !unavailableModes.create) onmode('create');
+                    }}>New</button
+                >
+            </div>
+            {#if explainUnavailable && (unavailableModes.create || unavailableModes.existing)}
+                <AttributeHelp
+                    label="Destination availability"
+                    description={unavailableModes.create || unavailableModes.existing}
+                >
+                    <Icon name="info" size={13} />
+                </AttributeHelp>
+            {/if}
         </div>
-        {#if explainUnavailable && (unavailableModes.create || unavailableModes.existing)}
-            <AttributeHelp
-                label="Destination availability"
-                description={unavailableModes.create || unavailableModes.existing}
-            >
-                <Icon name="info" size={13} />
-            </AttributeHelp>
-        {/if}
-    </div>
+    {/snippet}
+    {#if placement}<span>Partition</span>{:else}{@render modeControl()}{/if}
     {#if unavailableModes.existing}<span hidden id={`${descriptionId}-existing`}>{unavailableModes.existing}</span>{/if}
     {#if unavailableModes.create}<span hidden id={`${descriptionId}-create`}>{unavailableModes.create}</span>{/if}
 
@@ -212,6 +219,7 @@
         onchange={changePartition}
     />
 
+    {#if placement}<span>Volume</span>{@render modeControl()}{/if}
     {#if mode === 'existing'}
         <div
             class="volume-combobox dialog-autocomplete-control"
@@ -279,6 +287,8 @@
             class="new-volume-name dialog-field-control"
             type="text"
             aria-label="New volume name"
+            aria-invalid={!!nameError}
+            aria-describedby={nameError ? descriptionId + '-error' : undefined}
             minlength="1"
             maxlength="16"
             value={volumeName}
@@ -288,6 +298,7 @@
             oninput={(event) => onname(event.currentTarget.value)}
         />
     {/if}
+    {#if nameError}<small id={descriptionId + '-error'} class="name-error" role="status">{nameError}</small>{/if}
 </section>
 
 <style>
@@ -384,6 +395,46 @@
     .new-volume-name {
         min-width: 0;
         width: 100%;
+    }
+    .import-destination.compact.placement {
+        display: flex;
+        flex: 0 1 auto;
+        flex-wrap: wrap;
+        gap: 6px;
+        min-width: 0;
+    }
+    .placement :global(.destination-partition) {
+        width: 140px;
+    }
+    .placement .new-volume-name,
+    .placement .volume-combobox {
+        width: 160px;
+        max-width: 100%;
+    }
+    .name-error {
+        color: var(--color-danger);
+    }
+    .new-volume-name[aria-invalid='true'] {
+        border-color: var(--color-danger);
+    }
+    .placement > span {
+        color: var(--color-text-muted);
+    }
+    @container disk-import (max-width:600px) {
+        .import-destination.compact.placement {
+            display: grid;
+            flex-basis: 100%;
+            grid-template-columns: max-content minmax(0, 1fr);
+        }
+        .placement .destination-label,
+        .placement .new-volume-name,
+        .placement .volume-combobox,
+        .placement .name-error {
+            grid-column: 1 / -1;
+        }
+        .placement .destination-mode-group {
+            justify-self: start;
+        }
     }
 
     .volume-options {

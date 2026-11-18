@@ -121,6 +121,7 @@ struct axk::app::ImageSessionManager::Implementation {
     Clock clock;
     PathReservationCoordinator *path_reservations;
     DeviceSessionManager *devices;
+    ConfigureSessionFormats &configure_formats;
     std::mutex mutex;
     std::unordered_map<std::string, std::shared_ptr<Session>> sessions;
     struct AuditionOwner {
@@ -146,12 +147,12 @@ struct axk::app::ImageSessionManager::Implementation {
     Implementation(const Sandbox &sandbox_value, std::size_t session_count, std::size_t page_size,
                    std::chrono::seconds retention, Clock now, PathReservationCoordinator *reservations,
                    std::uint64_t audition_bundle_bytes, std::size_t audition_clips,
-                   DeviceSessionManager *device_manager)
+                   DeviceSessionManager *device_manager, ConfigureSessionFormats &compose)
         : sandbox(sandbox_value), maximum_sessions(std::max<std::size_t>(session_count, 1U)),
           maximum_page_size(std::max<std::size_t>(page_size, 1U)),
           maximum_audition_bundle_bytes(std::max<std::uint64_t>(audition_bundle_bytes, 45U)),
           maximum_audition_clips(std::max<std::size_t>(audition_clips, 1U)), idle_retention(retention),
-          clock(std::move(now)), path_reservations(reservations), devices(device_manager) {}
+          clock(std::move(now)), path_reservations(reservations), devices(device_manager), configure_formats(compose) {}
 
     void cleanup_locked() {
         const auto now = clock();
@@ -223,7 +224,8 @@ struct axk::app::ImageSessionManager::Implementation {
     }
 
     Result<void> discover(Session &session, const CancellationToken &cancellation, ProgressSink *progress = nullptr,
-                          diagnostic_sink *diagnostics = nullptr);
+                          diagnostic_sink *diagnostics = nullptr, const Session *previous = nullptr,
+                          std::string_view extended_document = {});
     Result<std::shared_ptr<const detail::ImageFilesystemIndex>> filesystem(Session &session) const;
     Result<ImageDocumentSummary> summarize(const Session &session, const Document &document,
                                            const VerifiedRead *verified = nullptr) const;

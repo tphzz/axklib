@@ -41,6 +41,32 @@ fn rejects_auxiliary_windows_and_unauthorized_seed_before_io() {
 }
 
 #[test]
+fn native_snapshots_bind_identity_and_content_even_at_the_same_size() {
+    let fixture = Fixture::new();
+    let path = fixture.file("seed.img", 3);
+    let seed = super::fingerprint(disk_source(&path).unwrap()).unwrap();
+    std::fs::write(&path, b"new").unwrap();
+    let changed = super::fingerprint(disk_source(&path).unwrap()).unwrap();
+    assert_eq!(seed.identity, changed.identity);
+    assert_eq!(seed.size, changed.size);
+    assert_ne!(seed.sha256, changed.sha256);
+    std::fs::rename(&path, fixture.0.join("old.img")).unwrap();
+    fixture.file("seed.img", 3);
+    assert!(super::snapshot(&seed).is_err());
+}
+
+#[test]
+fn a_delayed_cancellation_cannot_stop_a_new_scan() {
+    use std::sync::atomic::Ordering;
+    let scan = super::CompanionScan::default();
+    scan.0.store(2, Ordering::SeqCst);
+    scan.stop(1);
+    assert_eq!(scan.0.load(Ordering::SeqCst), 2);
+    scan.stop(2);
+    assert_eq!(scan.0.load(Ordering::SeqCst), 0);
+}
+
+#[test]
 fn enumerates_only_regular_same_folder_disks_and_deduplicates_file_identity() {
     let fixture = Fixture::new();
     let seed = fixture.file("first.img", 1);

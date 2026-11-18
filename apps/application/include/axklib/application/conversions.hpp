@@ -7,17 +7,20 @@
 #include <nlohmann/json.hpp>
 
 #include "axklib/application/jobs.hpp"
+#include "axklib/conversion/profiles.hpp"
 
 namespace axk::app {
 class Sandbox;
 class UploadStore;
 class ImageSessionManager;
 class AlterationJournalStore;
+class DownloadArchiveStore;
 
 class ConversionService final {
   public:
     ConversionService(const Sandbox &sandbox, UploadStore &uploads, ImageSessionManager &images,
-                      AlterationJournalStore &journals, JobManager &jobs);
+                      AlterationJournalStore &journals, JobManager &jobs, DownloadArchiveStore &downloads,
+                      conversion::Registry profiles = conversion::builtin_profiles());
     ~ConversionService();
     ConversionService(const ConversionService &) = delete;
     ConversionService &operator=(const ConversionService &) = delete;

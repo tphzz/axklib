@@ -37,82 +37,66 @@ function report(): Report {
     };
 }
 
+const decision = 'Create an audition Program from Piano Voice';
+
+function reportWithDecision(): Report {
+    const data = report();
+    data.issues.push({ ...data.issues[0], impact: 'UNCERTAINTY', id: 'voice', decision });
+    data.issueCount++;
+    return data;
+}
+
 describe('Conversion report panes', () => {
-    it('accepts losses across every page and clears only losses without changing uncertainty consent', async () => {
+    it('reports losses and ordinary defaults without consent on any page', async () => {
         const data = report();
-        data.issues.push({ ...data.issues[0], id: 'uncertainty', impact: 'UNCERTAINTY', message: 'Uncertain pitch' });
+        data.issues.push({ ...data.issues[0], id: 'default', impact: 'UNCERTAINTY', message: 'Writer default' });
         data.issueCount++;
-        const view = render(ConversionReport, {
-            report: data,
-            lossConsent: true,
-            acknowledged: ['uncertainty', 'loss-0'],
-        });
-        const all = view.getByRole('checkbox', { name: 'Accept all losses' }) as HTMLInputElement;
-        expect(all.indeterminate).toBe(true);
-        expect(all.closest('.import-pane-scroll')).toBeNull();
-        await fireEvent.click(all);
-        expect(all.checked).toBe(true);
-        expect(all.indeterminate).toBe(false);
+        const view = render(ConversionReport, { report: data });
+        const region = view.getByRole('region', { name: 'Review' });
+        expect(region.textContent).toContain('Conversion notes');
+        expect(within(region).queryByRole('checkbox')).toBeNull();
         await fireEvent.click(view.getByRole('button', { name: 'Next mapping details page' }));
-        expect((view.getByRole('checkbox', { name: /Mapping loss 100\b/ }) as HTMLInputElement).checked).toBe(true);
-        expect((view.getByRole('checkbox', { name: /Uncertain pitch/ }) as HTMLInputElement).checked).toBe(true);
-        await fireEvent.click(all);
-        expect((view.getByRole('checkbox', { name: /Mapping loss 100\b/ }) as HTMLInputElement).checked).toBe(false);
-        expect((view.getByRole('checkbox', { name: /Uncertain pitch/ }) as HTMLInputElement).checked).toBe(true);
+        expect(region.textContent).toContain('Mapping loss 100');
+        expect(region.textContent).toContain('Writer default');
+        expect(within(region).queryByRole('checkbox')).toBeNull();
     });
 
-    it('disables bulk loss consent with no eligible losses, Strict fidelity or a write lock', async () => {
-        const data = report();
-        const view = render(ConversionReport, { report: data, lossConsent: true, disabled: true });
-        const all = () => view.getByRole('checkbox', { name: 'Accept all losses' }) as HTMLInputElement;
-        expect(all().disabled).toBe(true);
-        expect(view.getByText('Controls locked')).toBeTruthy();
-        await view.rerender({ lossConsentPreparing: true });
-        expect(view.getByText('Preparing... / controls locked')).toBeTruthy();
-        await view.rerender({ report: { ...data, fidelity: 'STRICT' }, disabled: false, lossConsentPreparing: false });
-        expect(all().disabled).toBe(true);
-        expect(view.getByText('101 losses / Strict')).toBeTruthy();
-        await view.rerender({ report: { ...data, issues: [], issueCount: 0 } });
-        expect(all().disabled).toBe(true);
-    });
-
-    it('pages objects and mapping details independently and retains per-issue consent', async () => {
-        const view = render(ConversionReport, { report: report() });
+    it('pages output and notes independently while retaining the explicit mapping decision', async () => {
+        const view = render(ConversionReport, { report: reportWithDecision() });
         const contents = within(view.getByRole('region', { name: 'Contents' }));
-        const review = within(view.getByRole('region', { name: 'Review' }));
-        const firstConsent = review.getByRole('checkbox', { name: /Mapping loss 0\b/ }) as HTMLInputElement;
-        await fireEvent.click(firstConsent);
+        const region = view.getByRole('region', { name: 'Review' });
+        const review = within(region);
+        const control = review.getByRole('checkbox', { name: decision }) as HTMLInputElement;
+        expect(control.checked).toBe(false);
+        await fireEvent.click(control);
         await fireEvent.click(contents.getByRole('button', { name: 'Next objects page' }));
         expect(contents.queryByText('Wave 0')).toBeNull();
         expect(contents.getByText('Wave 100')).toBeTruthy();
-        expect(firstConsent.checked).toBe(true);
+        expect(control.checked).toBe(true);
         await fireEvent.click(review.getByRole('button', { name: 'Next mapping details page' }));
-        expect(review.getByRole('checkbox', { name: /Mapping loss 100\b/ })).toBeTruthy();
+        expect(region.textContent).toContain('Mapping loss 100');
         expect(contents.getByText('Wave 100')).toBeTruthy();
         expect(review.getByRole('button', { name: 'Next mapping details page' }).hasAttribute('disabled')).toBe(true);
         await fireEvent.click(review.getByRole('button', { name: 'Previous mapping details page' }));
-        expect((review.getByRole('checkbox', { name: /Mapping loss 0\b/ }) as HTMLInputElement).checked).toBe(true);
+        expect((review.getByRole('checkbox', { name: decision }) as HTMLInputElement).checked).toBe(true);
     });
 
-    it('prioritizes blockers and never allows Strict loss consent to override fidelity', () => {
+    it('prioritizes blockers and offers no acknowledgement to override Strict fidelity', () => {
         const data = report();
         data.fidelity = 'STRICT';
         data.executable = false;
         data.issues.push({ ...data.issues[0], id: 'blocker', impact: 'BLOCKER', message: 'Missing Wave PIANO' });
         data.issueCount++;
         const view = render(ConversionReport, { report: data });
-        expect(view.getByText(/Missing Wave PIANO/)).toBeTruthy();
         const review = view.getByRole('region', { name: 'Review' });
-        expect(review.textContent!.indexOf('Missing Wave PIANO')).toBeLessThan(
-            review.textContent!.indexOf('Mapping loss 0'),
-        );
-        expect(view.getAllByRole('checkbox').every((checkbox) => checkbox.hasAttribute('disabled'))).toBe(true);
-        expect(view.getByText('Strict fidelity does not allow loss or uncertainty.')).toBeTruthy();
+        expect(review.textContent).toContain('Missing Wave PIANO');
+        expect(review.textContent).toMatch(/Strict/);
+        expect(within(review).queryByRole('checkbox')).toBeNull();
     });
 
-    it('keeps report navigation available but locks every consent while submitting', () => {
-        const view = render(ConversionReport, { report: report(), disabled: true });
-        expect(view.getAllByRole('checkbox').every((checkbox) => checkbox.hasAttribute('disabled'))).toBe(true);
+    it('keeps navigation available but locks explicit decisions while submitting', () => {
+        const view = render(ConversionReport, { report: reportWithDecision(), disabled: true });
+        expect(view.getByRole('checkbox', { name: decision }).hasAttribute('disabled')).toBe(true);
         expect(view.getByRole('button', { name: 'Next objects page' }).hasAttribute('disabled')).toBe(false);
     });
 });

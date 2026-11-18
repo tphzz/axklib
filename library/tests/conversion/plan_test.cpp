@@ -28,23 +28,34 @@ class TestDocument final : public axk::native::Document {
 };
 } // namespace
 
-TEST(ConversionPlan, RequiresOnlyMeaningfulAcknowledgements) {
+TEST(ConversionPlan, OnlyExplicitMappingDecisionsCanBeAcknowledged) {
     axk::conversion::Report report;
     report.executable = true;
     report.issues = {
         {"representation", "pcm-expansion", axk::conversion::Impact::representation, {}, {}, {}, {}, "Exact"},
         {"loss", "resampling", axk::conversion::Impact::loss, {}, {}, {}, {}, "Resampled"},
         {"uncertain", "rate", axk::conversion::Impact::uncertainty, {}, {}, {}, {}, "Rate defaulted"}};
-    const axk::conversion::PreparedPlan plan{report, {}, 0U, 0U};
-    EXPECT_FALSE(plan.acknowledge({}));
-    EXPECT_TRUE(plan.acknowledge(std::vector<std::string>{"loss", "uncertain"}));
-    EXPECT_FALSE(plan.acknowledge(std::vector<std::string>{"loss", "uncertain", "unknown"}));
-    EXPECT_FALSE(plan.acknowledge(std::vector<std::string>{"loss", "uncertain", "loss"}));
-    report.issues.resize(1U);
-    const axk::conversion::PreparedPlan exact{report, {}, 0U, 0U};
-    EXPECT_TRUE(exact.acknowledge({}));
+    const axk::conversion::PreparedPlan notes{report, {}, 0U, 0U};
+    EXPECT_TRUE(notes.acknowledge({}));
+    EXPECT_FALSE(notes.acknowledge(std::vector<std::string>{"loss"}));
+    EXPECT_FALSE(notes.acknowledge(std::vector<std::string>{"uncertain"}));
+    report.issues.push_back({"choice",
+                             "missing-performance",
+                             axk::conversion::Impact::uncertainty,
+                             {},
+                             {},
+                             {},
+                             {},
+                             "No Performance",
+                             "Create an audition Program"});
+    const axk::conversion::PreparedPlan decision{report, {}, 0U, 0U};
+    EXPECT_FALSE(decision.acknowledge({}));
+    EXPECT_TRUE(decision.acknowledge(std::vector<std::string>{"choice"}));
+    EXPECT_FALSE(decision.acknowledge(std::vector<std::string>{"choice", "loss"}));
+    EXPECT_FALSE(decision.acknowledge(std::vector<std::string>{"choice", "unknown"}));
+    EXPECT_FALSE(decision.acknowledge(std::vector<std::string>{"choice", "choice"}));
     report.executable = false;
-    EXPECT_FALSE((axk::conversion::PreparedPlan{report, {}, 0U, 0U}.acknowledge({})));
+    EXPECT_FALSE((axk::conversion::PreparedPlan{report, {}, 0U, 0U}.acknowledge(std::vector<std::string>{"choice"})));
 }
 
 TEST(ConversionRegistry, DispatchesAnExplicitNonSamplerProfileAndEnforcesLimits) {

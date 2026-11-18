@@ -47,7 +47,7 @@ def choose_port() -> int:
         return int(listener.getsockname()[1])
 
 
-def write_workspace_store(path: Path, workspace: Path) -> None:
+def write_workspace_store(path: Path, workspace: Path, *, writable: bool = True) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(
@@ -59,7 +59,7 @@ def write_workspace_store(path: Path, workspace: Path) -> None:
                         "id": "workspace",
                         "displayName": "Workspace",
                         "path": str(workspace.resolve()),
-                        "writable": True,
+                        "writable": writable,
                     }
                 ],
             }

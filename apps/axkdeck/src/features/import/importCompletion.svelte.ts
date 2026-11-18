@@ -155,6 +155,7 @@ function completionWarnings(job: JobState, reviewed: readonly string[]): string[
     const value = job.result;
     if (job.kind === 'conversions.execute') {
         const result = value as components['schemas']['ConversionResult'];
+        if ('download' in result) return [];
         return [
             ...result.warnings.filter((message) => !reviewed.includes(message)),
             ...(result.cleanupPending ? ['Conversion saved; journal cleanup is pending. Retain recovery data.'] : []),

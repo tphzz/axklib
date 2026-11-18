@@ -86,6 +86,7 @@ add_library(axklib::application ALIAS axk_application)
 target_sources(axk_application PRIVATE src/read_diagnostics.cpp src/image_audition_access.cpp src/operation_read_scheduling.cpp src/image_read_jobs.cpp)
 target_sources(axk_application PRIVATE src/operation_job_admission.cpp src/job_submission.cpp)
 target_sources(axk_application PRIVATE src/image_document_discovery.cpp src/image_document_browsing.cpp src/native_document_snapshot.cpp
+  src/session_formats.cpp
   src/conversion_plan_store.cpp src/conversion_operations.cpp src/conversion_sources.cpp src/companion_source_resolution.cpp src/prepared_session_commit.cpp
   src/image_source_read.cpp src/image_filesystem_workspace.cpp src/formats/a_series/admission.cpp
   src/formats/tx16w/session_state.cpp src/formats/tx16w/audio.cpp src/formats/tx16w/admission.cpp)
@@ -110,8 +111,8 @@ target_include_directories(
 )
 target_link_libraries(
   axk_application
-  PUBLIC axklib::audio axklib::format_a_series axklib::conversion nlohmann_json::nlohmann_json
-  PRIVATE axklib::profile_tx16w_to_a_series OpenSSL::Crypto unofficial::hash-library ICU::i18n ICU::uc
+  PUBLIC axklib::audio axklib::format_a_series axklib::conversion_profiles nlohmann_json::nlohmann_json
+  PRIVATE axklib::conversion_tx16w_to_a_series OpenSSL::Crypto unofficial::hash-library ICU::i18n ICU::uc
 )
 if(WIN32)
   target_compile_definitions(axk_application PRIVATE NOMINMAX _WIN32_WINNT=0x0A00)
@@ -169,6 +170,7 @@ if(BUILD_TESTING)
   target_compile_features(axk_application_tests PRIVATE cxx_std_23)
   target_sources(axk_application_tests PRIVATE tests/conversion_plan_store_test.cpp tests/conversion_operations_test.cpp)
   target_sources(axk_application_tests PRIVATE tests/conversion_source_verification_test.cpp)
+  target_sources(axk_application_tests PRIVATE tests/format_generalization_test.cpp)
   target_sources(axk_application_tests PRIVATE tests/device_sessions_test.cpp tests/device_guard_reads_test.cpp tests/device_platform_test.cpp)
   target_sources(axk_application_tests PRIVATE tests/device_content_inspection_test.cpp)
   target_sources(axk_application_tests PRIVATE tests/device_prefix_test.cpp)

@@ -2754,6 +2754,8 @@ export interface components {
         };
         ConversionIssue: {
             code: string;
+            /** @description An explicit mapping choice; only issues with a decision require acknowledgement. */
+            decision?: string;
             id: string;
             /** @enum {string} */
             impact: 'EXACT' | 'REPRESENTATION' | 'LOSS' | 'UNCERTAINTY' | 'BLOCKER';
@@ -2762,6 +2764,19 @@ export interface components {
             sourceParameter: string;
             targetObject: string;
             targetParameter: string;
+        };
+        ConversionMutationResult: {
+            applied: boolean;
+            cleanupPending: boolean;
+            documentId: string;
+            imageId: string;
+            planId: string;
+            revision: number;
+            warnings: string[];
+        };
+        ConversionNewImageDestination: {
+            /** @enum {unknown} */
+            kind: 'NEW_IMAGE';
         };
         ConversionPlan: {
             expiresAt: number;
@@ -2773,12 +2788,9 @@ export interface components {
         };
         ConversionPlanRequest: {
             capacityPolicy?: components['schemas']['VolumeCapacityPolicy'];
-            destination: {
-                documentId: string;
-                expectedRevision: number;
-                imageId: string;
-                selection: Record<string, never>;
-            };
+            destination:
+                | components['schemas']['ConversionNewImageDestination']
+                | components['schemas']['ConversionSessionDestination'];
             /** @enum {string} */
             fidelity: 'BEST' | 'STRICT';
             options: Record<string, never>;
@@ -2794,6 +2806,8 @@ export interface components {
             id: string;
             name: string;
             optionsSchema: Record<string, never>;
+            /** @enum {unknown} */
+            outputKind: 'EXISTING_IMAGE' | 'NEW_IMAGE';
             sourceFormat: string;
         };
         ConversionProfiles: {
@@ -2806,8 +2820,15 @@ export interface components {
         ConversionReport: {
             actionCount: number;
             actions: components['schemas']['ConversionAction'][];
-            capacity: components['schemas']['VolumeCapacityAdmission'];
-            destination: components['schemas']['ConversionDocumentRef'];
+            capacity: components['schemas']['VolumeCapacityAdmission'] | null;
+            destination:
+                | components['schemas']['ConversionDocumentRef']
+                | {
+                      /** @enum {unknown} */
+                      kind: 'NEW_IMAGE';
+                      sha256: string | null;
+                      sizeBytes: number;
+                  };
             executable: boolean;
             /** @enum {string} */
             fidelity: 'BEST' | 'STRICT';
@@ -2815,15 +2836,27 @@ export interface components {
             issues: components['schemas']['ConversionIssue'][];
             offset: number;
             profileId: string;
+            sourceCount?: number;
+            sourceObjects?: {
+                dependencies: string[];
+                id: string;
+                kind: string;
+                location: string;
+                name: string;
+                selectable: boolean;
+            }[];
         };
-        ConversionResult: {
-            applied: boolean;
-            cleanupPending: boolean;
+        ConversionResult:
+            | components['schemas']['ConversionMutationResult']
+            | {
+                  download: components['schemas']['RetainedDownload'];
+                  planId: string;
+              };
+        ConversionSessionDestination: {
             documentId: string;
+            expectedRevision: number;
             imageId: string;
-            planId: string;
-            revision: number;
-            warnings: string[];
+            selection: Record<string, never>;
         };
         ConversionSource:
             | {

@@ -7,17 +7,19 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <thread>
 #include <utility>
 #include <vector>
 
+#include "axklib/application/download_archives.hpp"
 #include "axklib/application/image_session_contracts.hpp"
 #include "axklib/application/volume_capacity.hpp"
-#include "axklib/conversion/tx16w_to_a_series/profile.hpp"
 #include "axklib/formats/tx16w/document.hpp"
 #include "companion_source_resolution.hpp"
+#include "content_digest.hpp"
 #include "conversion_plan_store.hpp"
 #include "conversion_sources.hpp"
 #include "prepared_session_commit.hpp"
@@ -107,6 +109,8 @@ Json record_json(const Record &record, std::size_t offset, std::size_t limit) {
                           {"targetObject", issue.target_object},
                           {"targetParameter", issue.target_parameter},
                           {"message", issue.message}});
+        if (!issue.decision.empty())
+            issues.back()["decision"] = issue.decision;
     }
     result["report"] = {{"profileId", report.profile_id},
                         {"fidelity", report.fidelity == conversion::Fidelity::best ? "BEST" : "STRICT"},
@@ -115,12 +119,26 @@ Json record_json(const Record &record, std::size_t offset, std::size_t limit) {
                         {"issues", std::move(issues)},
                         {"actionCount", report.actions.size()},
                         {"issueCount", report.issues.size()},
-                        {"offset", offset},
-                        {"capacity", capacity_admission_json(report.capacity)},
-                        {"destination",
-                         {{"imageId", payload.destination.image_id},
-                          {"documentId", payload.destination.document_id},
-                          {"expectedRevision", payload.revision}}}};
+                        {"offset", offset}};
+    auto &out = result["report"];
+    if (!report.source_objects.empty()) {
+        out["sourceCount"] = report.source_objects.size();
+        auto &rows = out["sourceObjects"] = Json::array();
+        for (std::size_t index = offset; index < report.source_objects.size() && index - offset < limit; ++index)
+            rows.push_back(report.source_objects[index]);
+    }
+    if (const auto *edit = std::get_if<EditTarget>(&payload.target)) {
+        out["capacity"] = capacity_admission_json(std::get<VolumeCapacityAdmission>(report.destination));
+        out["destination"] = {{"imageId", edit->destination.image_id},
+                              {"documentId", edit->destination.document_id},
+                              {"expectedRevision", edit->revision}};
+    } else {
+        const auto &digest = std::get<ImageDelivery>(payload.target).digest;
+        out["capacity"] = nullptr;
+        out["destination"] = {{"kind", "NEW_IMAGE"},
+                              {"sizeBytes", std::get<conversion::NewImageReview>(report.destination).size_bytes},
+                              {"sha256", digest.empty() ? Json(nullptr) : Json(digest)}};
+    }
     return result;
 }
 } // namespace
@@ -131,6 +149,7 @@ struct ConversionService::Implementation {
     ImageSessionManager &images;
     AlterationJournalStore &journals;
     JobManager &jobs;
+    DownloadArchiveStore &downloads;
     conversion::Registry profiles;
     native::FormatRegistry formats;
     std::shared_ptr<PlanStore> store{std::make_shared<PlanStore>()};
@@ -148,13 +167,19 @@ struct ConversionService::Implementation {
         } reservation{*store, *token, context.owner_id};
         try {
             if (!input.is_object() || input.size() != (input.contains("capacityPolicy") ? 6U : 5U) ||
-                !input.at("destination").is_object() || input.at("destination").size() != 4U)
+                !input.at("destination").is_object())
                 return std::unexpected(
                     Error{"invalid_request", "Conversion request contains unknown or missing fields"});
             const auto profile_id = input.at("profileId").get<std::string>();
             const auto profile = std::ranges::find(profiles.profiles(), profile_id, &conversion::Profile::id);
             if (profile == profiles.profiles().end())
                 return std::unexpected(Error{"invalid_request", "Unknown conversion profile"});
+            const auto &destination = input.at("destination");
+            const bool new_image = profile->output_kind == conversion::OutputKind::new_image;
+            if (new_image ? (destination != Json{{"kind", "NEW_IMAGE"}} || input.contains("capacityPolicy"))
+                          : destination.size() != 4U)
+                return std::unexpected(
+                    Error{"invalid_request", "Destination or capacity policy does not match this conversion profile"});
             const auto fidelity = input.at("fidelity").get<std::string>();
             if (fidelity != "BEST" && fidelity != "STRICT")
                 return std::unexpected(Error{"invalid_request", "Fidelity must be BEST or STRICT"});
@@ -177,46 +202,69 @@ struct ConversionService::Implementation {
             if (source_bytes >= conversion::Limits{}.maximum_bytes)
                 return std::unexpected(
                     Error{"conversion_limit_exceeded", "Native source metadata exceeds the plan retention limit"});
-            const auto &destination = input.at("destination");
-            const auto target = image_document_ref(destination);
-            if (!destination.at("expectedRevision").is_number_integer() || destination.at("expectedRevision") < 1)
-                return std::unexpected(Error{"invalid_request", "Destination revision must be a positive integer"});
-            const auto revision = destination.at("expectedRevision").get<std::uint64_t>();
-            auto summary = images.inspect(target.image_id, context.owner_id);
-            if (!summary)
-                return std::unexpected(summary.error());
-            const auto selected = std::ranges::find(summary->documents, target.document_id, &ImageDocumentSummary::id);
-            if (selected == summary->documents.end() || selected->format_id != profile->destination_format)
-                return std::unexpected(Error{"invalid_request", "Destination document does not match the profile"});
-            if (std::ranges::find(selected->available_operations, "images.alter.objects") ==
-                selected->available_operations.end())
-                return std::unexpected(
-                    Error{"image_mutation_unsupported", "Destination document does not support object writes"});
-            auto session = images.begin_read(target, context.owner_id, revision);
-            if (!session)
-                return std::unexpected(session.error());
-            auto fingerprint = session->content_fingerprint(context.cancellation);
-            if (!fingerprint)
-                return std::unexpected(fingerprint.error());
-            auto policy = capacity_policy(input);
-            if (!policy)
-                return std::unexpected(policy.error());
-            conversion::Request request{
-                source->document,
-                {selected->format_id, session->reader, session->source.relative_path, destination.at("selection")},
-                input.at("options"),
-                fidelity == "STRICT" ? conversion::Fidelity::strict : conversion::Fidelity::best,
-                *policy,
-                {}};
+            conversion::Request request{source->document,
+                                        {profile->destination_format, {}, {}, {}},
+                                        input.at("options"),
+                                        fidelity == "STRICT" ? conversion::Fidelity::strict
+                                                             : conversion::Fidelity::best,
+                                        {},
+                                        {}};
+            request.native_keys_by_id = source->native_keys_by_id;
+            auto payload = std::make_shared<Payload>();
+            std::optional<ImageSessionRead> held;
+            if (!new_image) {
+                const auto target = image_document_ref(destination);
+                if (!destination.at("expectedRevision").is_number_integer() || destination.at("expectedRevision") < 1)
+                    return std::unexpected(Error{"invalid_request", "Destination revision must be a positive integer"});
+                const auto revision = destination.at("expectedRevision").get<std::uint64_t>();
+                auto summary = images.inspect(target.image_id, context.owner_id);
+                if (!summary)
+                    return std::unexpected(summary.error());
+                const auto selected =
+                    std::ranges::find(summary->documents, target.document_id, &ImageDocumentSummary::id);
+                if (selected == summary->documents.end() || selected->format_id != profile->destination_format)
+                    return std::unexpected(Error{"invalid_request", "Destination document does not match the profile"});
+                if (std::ranges::find(selected->available_operations, "images.alter.objects") ==
+                    selected->available_operations.end())
+                    return std::unexpected(
+                        Error{"image_mutation_unsupported", "Destination document does not support object writes"});
+                auto session = images.begin_read(target, context.owner_id, revision);
+                if (!session)
+                    return std::unexpected(session.error());
+                auto fingerprint = session->content_fingerprint(context.cancellation);
+                if (!fingerprint)
+                    return std::unexpected(fingerprint.error());
+                auto policy = capacity_policy(input);
+                if (!policy)
+                    return std::unexpected(policy.error());
+                request.destination = {selected->format_id, session->reader, session->source.relative_path,
+                                       destination.at("selection")};
+                request.capacity_policy = *policy;
+                payload->target = EditTarget{target, revision, std::move(*fingerprint), *policy};
+                held.emplace(std::move(*session));
+            }
             request.limits.maximum_bytes -= source_bytes;
             auto prepared = profiles.prepare(profile_id, request, context.cancellation, context.progress);
             if (!prepared)
                 return std::unexpected(failed(prepared.error()));
-            if (auto verified = session->verify_source_unchanged(); !verified)
-                return std::unexpected(verified.error());
-            auto payload =
-                std::make_shared<Payload>(Payload{*prepared, target, revision, *fingerprint, *policy, source->document,
-                                                  std::move(source->verify_current), source_bytes});
+            if (held) {
+                if (auto verified = held->verify_source_unchanged(); !verified)
+                    return std::unexpected(verified.error());
+            } else {
+                ImageDelivery delivery;
+                const auto &image = std::get<conversion::NewImage>((*prepared)->output());
+                if (!image.bytes.empty()) {
+                    auto hash = detail::reader_sha256(PlanBytes(*prepared, image.bytes), context.cancellation);
+                    if (!hash)
+                        return std::unexpected(hash.error());
+                    delivery.digest = std::move(*hash);
+                }
+                payload->target = std::move(delivery);
+            }
+            payload->prepared = std::move(*prepared);
+            payload->source = std::move(source->document);
+            payload->verify_workspace = std::move(source->verify_current);
+            payload->source_retention_bytes = source_bytes;
             auto published = store->publish(*token, context.owner_id, std::move(payload));
             if (!published)
                 return std::unexpected(published.error());
@@ -236,29 +284,49 @@ struct ConversionService::Implementation {
             if (auto current = payload.verify_workspace(context.cancellation); !current)
                 return std::unexpected(current.error());
         }
+        if (std::holds_alternative<ImageDelivery>(payload.target)) {
+            const auto &image = std::get<conversion::NewImage>(payload.prepared->output());
+            if (auto current = payload.source->sources()->verify(context.cancellation); !current)
+                return std::unexpected(failed(current.error()));
+            if (auto active = context.cancellation.check(); !active)
+                return std::unexpected(failed(active.error()));
+            auto file =
+                downloads.retain(context.owner_id, "conversion.img", "application/x-raw-disk-image", image.bytes);
+            if (!file)
+                return std::unexpected(file.error());
+            return Json{{"planId", id},
+                        {"download",
+                         {{"archiveId", file->reference.archive_id},
+                          {"filename", file->filename},
+                          {"sizeBytes", file->size_bytes},
+                          {"expiresInSeconds", file->expires_in_seconds},
+                          {"contentPath", "/api/v1/download-archives/" + file->reference.archive_id + "/content"}}}};
+        }
+        const auto &edit = std::get<EditTarget>(payload.target);
         // Release the target read mutex before mutation admission, including same-workspace conversions.
         {
-            auto read = images.begin_read(payload.destination, context.owner_id, payload.revision);
+            auto read = images.begin_read(edit.destination, context.owner_id, edit.revision);
             if (!read)
                 return std::unexpected(read.error());
             auto fingerprint = read->content_fingerprint(context.cancellation);
             if (!fingerprint)
                 return std::unexpected(fingerprint.error());
-            if (*fingerprint != payload.destination_fingerprint ||
-                read->reader->size() != payload.prepared->destination_size())
+            if (*fingerprint != edit.destination_fingerprint ||
+                read->reader->size() !=
+                    std::get<conversion::ExistingImagePatches>(payload.prepared->output()).destination_size)
                 return std::unexpected(
                     Error{"conversion_plan_stale", "Conversion destination changed; prepare a new plan"});
         }
         std::vector<AlterationJournalPatch> patches;
-        patches.reserve(payload.prepared->patches().size());
-        for (const auto &patch : payload.prepared->patches())
+        const auto &retained = std::get<conversion::ExistingImagePatches>(payload.prepared->output()).patches;
+        patches.reserve(retained.size());
+        for (const auto &patch : retained)
             patches.push_back({patch.offset,
                                AlterationJournalBytes{std::make_shared<PlanBytes>(payload.prepared, patch.original), 0U,
                                                       patch.original.size()},
                                AlterationJournalBytes{std::make_shared<PlanBytes>(payload.prepared, patch.replacement),
                                                       0U, patch.replacement.size()}});
-        auto mutation =
-            images.begin_mutation(payload.destination, context.owner_id, payload.revision, context.mutation_id);
+        auto mutation = images.begin_mutation(edit.destination, context.owner_id, edit.revision, context.mutation_id);
         if (!mutation)
             return std::unexpected(mutation.error());
         const auto verify = [&]() -> Result<void> {
@@ -266,13 +334,14 @@ struct ConversionService::Implementation {
             return current ? Result<void>{} : std::unexpected(failed(current.error()));
         };
         auto committed =
-            commit_prepared_session(images, journals, *mutation, patches, payload.prepared->report().capacity,
-                                    payload.capacity_policy, context, verify);
+            commit_prepared_session(images, journals, *mutation, patches,
+                                    std::get<VolumeCapacityAdmission>(payload.prepared->report().destination),
+                                    edit.capacity_policy, context, verify);
         if (!committed)
             return std::unexpected(committed.error());
         return Json{{"planId", id},
-                    {"imageId", payload.destination.image_id},
-                    {"documentId", payload.destination.document_id},
+                    {"imageId", edit.destination.image_id},
+                    {"documentId", edit.destination.document_id},
                     {"revision", committed->revision},
                     {"applied", !patches.empty()},
                     {"cleanupPending", !journals.storage_ready()},
@@ -281,12 +350,11 @@ struct ConversionService::Implementation {
 };
 
 ConversionService::ConversionService(const Sandbox &sandbox, UploadStore &uploads, ImageSessionManager &images,
-                                     AlterationJournalStore &journals, JobManager &jobs)
-    : implementation_(
-          std::make_shared<Implementation>(Implementation{sandbox, uploads, images, journals, jobs, {}, {}})) {
+                                     AlterationJournalStore &journals, JobManager &jobs,
+                                     DownloadArchiveStore &downloads, conversion::Registry profiles)
+    : implementation_(std::make_shared<Implementation>(
+          Implementation{sandbox, uploads, images, journals, jobs, downloads, std::move(profiles), {}})) {
     auto &impl = *implementation_;
-    if (auto added = impl.profiles.add(tx16w::a_series::profile()); !added)
-        throw std::logic_error(added.error().message);
     if (auto added = impl.formats.add(tx16w::provider()); !added)
         throw std::logic_error(added.error().message);
     impl.subscription = jobs.subscribe([store = impl.store](const JobEvent &event) {
@@ -320,16 +388,7 @@ Result<void> ConversionService::bind(OperationRegistry &registry) {
                          });
 }
 
-nlohmann::json ConversionService::profiles() const {
-    Json result = Json::array();
-    for (const auto &profile : implementation_->profiles.profiles())
-        result.push_back({{"id", profile.id},
-                          {"name", profile.name},
-                          {"sourceFormat", profile.source_format},
-                          {"destinationFormat", profile.destination_format},
-                          {"optionsSchema", profile.options_schema}});
-    return {{"profiles", std::move(result)}};
-}
+nlohmann::json ConversionService::profiles() const { return conversion::profiles_json(implementation_->profiles); }
 
 Result<nlohmann::json> ConversionService::plan(std::string_view id, std::string_view owner, std::size_t offset,
                                                std::size_t limit) {

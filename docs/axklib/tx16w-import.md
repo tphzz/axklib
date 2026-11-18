@@ -5,6 +5,37 @@ data into a writable Yamaha A-series SFS volume. This is an import operation,
 not a claim that TX16W objects are A-series objects or that a TX16W disk is an
 A-series floppy.
 
+## Inspect without importing
+
+Use `info --source-set` when the paths are explicit members of one TX16W disk
+set. This read-only operation needs neither a running server nor a destination.
+Plain `info disk-a.img disk-b.img` still inspects two independent containers.
+
+```sh
+axklib info --source-set disk-a.img disk-b.img
+axklib info --source-set disk-a.img disk-b.img --document tx16w-source-1 --collection objects --offset 0 --limit 100
+```
+
+Use the document ID from the first response. Select `relationships` to see
+resolved, missing or ambiguous references. Each object's locations identify
+the member, filesystem root, entry and record range. Select by ID rather than
+by name: two disks may contain the same filename or identically named presets.
+An incomplete set can be browsed; supply the missing disk explicitly to
+inspect the combined set.
+
+In the installed C++17 SDK, include `<axklib/sdk.hpp>` and
+`<axklib/sdk/source_set.hpp>`, then call
+`axk::source_set::open(paths, context)`. Its `summary_json()`,
+`objects_json(documentId, offset, limit, context)` and
+`relationships_json(documentId, offset, limit, context)` methods read the
+catalog from that open. Limits are 1 to 1,024 records per page. Opening a set
+checks its input files; paging the retained catalog does not read audio or
+rediscover the disks. This file-client mode currently recognizes Yamaha-native
+TX16W records on FAT images and A-series Wave Data on regular SFS images.
+To go in the opposite direction, see [Create a TX16W Wave disk](conversion.md#create-a-tx16w-wave-disk).
+This file-client mode does not search neighboring paths, open raw
+devices or grant permission to write to the input.
+
 Axkdeck accepts one or more `.ima` or `.img` TX16W disks through drag and drop.
 The selected files form one logical disk set. When a writable SFS
 volume is selected, that volume is the initial destination. When no volume is
@@ -17,19 +48,28 @@ The dialog checks native references for missing companion data before preparing
 the conversion. A complete explicit selection is authoritative. Otherwise, a
 workspace FILE source can search its immediate containing directory on either
 a local or remote server. A local desktop file can search authorized sibling
-disk images when using the local server. Only uniquely matching suppliers are
-added, marked **Auto-added**; overlapping alternatives remain ambiguous. There
-is no numbered-filename guess. Use **Add disks** to choose an ambiguous or
+disk images when using the local server. The search starts with the selected
+set's missing native files. A newly found Setup can name additional Waves; the
+search follows those references in the same directory. Nearby names in natural
+sort order are considered first, but a filename cannot establish membership.
+Only nonconflicting suppliers needed by the selected set are **Auto-added**.
+Use **Add disks** to choose an ambiguous or
 missing companion explicitly. Browser files and desktop files uploaded to a
 remote server require explicit selection of all members: they do not expose a
 server-side source directory.
+
+For an already-open disk set, **Search nearby images and retry** uses the same
+matching rules. If multiple disks supply the named Wave, the open set stays
+unchanged. Use **Add floppy image** to attach the known companion. Once the
+set is complete, no nearby search is needed.
 
 Source chips retain complete names in hover/focus help and have an adjacent
 remove action. Removing a member prevents its automatic rediscovery until it
 is explicitly added again. Adding or removing a member invalidates the reviewed
 plan and consent immediately, then prepares the complete current set again.
 Discovery failures remain visible with Retry; cancellation discards late results
-and releases unused candidate uploads. Local path access stays within the
+and releases uploads owned by the canceled operation. A local desktop drop
+reuses the seed upload from floppy inspection. Local path access stays within the
 desktop's authorized per-file scope, not a recursive directory grant.
 
 The server also provides the read-only
@@ -44,8 +84,10 @@ not numbered-filename guesses, and adds only uniquely matching suppliers.
 Overlapping suppliers remain ambiguous rather than being selected by order.
 
 Discovery is bounded to 1,024 directory entries, 4 MiB per source and 64 MiB of
-candidate input, with at most 32 accepted members. It does not recurse or follow
-links. Limits and cancellation fail explicitly. Exclusions suppress automatic
+candidate input, with at most 32 accepted members. It follows references, not
+subdirectories or filesystem links. On a local desktop drop, sibling candidates
+are inspected locally; only selected and accepted disks are uploaded. Limits
+and cancellation fail explicitly. Exclusions suppress automatic
 rediscovery; explicit re-addition takes precedence. UPLOAD references never
 trigger a search of the server's staging directory. The dialog invokes this
 resolution job automatically and reuses completed membership when only the
@@ -98,9 +140,15 @@ An odd final frame is decoded without inventing its unused packed partner.
 Unknown native sample-rate markers use a visible 33,333 Hz default with a
 verification notice rather than silently claiming an exact decode.
 
-References to Waves that are not present in the selected disk set are reported
-as blocking mappings in hierarchy mode. A companion disk can satisfy a
-reference made by a Setup on another selected member. If the set remains
+In hierarchy mode, **All sources in disk set** selects every Performance, or
+every Voice in a group with no Performances. The planner follows their Voice
+regions and Timbres to the required Waves. An unused Timbre remains browsable
+with its missing reference, but cannot block an unrelated sound. A selected
+Timbre that needs an unavailable Wave blocks both Best and Strict. Review
+distinguishes a blank Setup slot from a named Wave that is missing and identifies
+a Voice and native key range that use the Timbre when known. Adding the disk
+with the named Wave can satisfy that reference; a blank slot has no companion
+filename to look for. If the set remains
 incomplete, **Wave Data only** is an explicit recovery mode: it imports every
 decodable `.Wnn` Wave from the selected members without inventing Programs,
 Sample Banks, or Samples. Hierarchy mode imports only Waves reached by a valid
@@ -137,16 +185,18 @@ The preview classifies every non-trivial mapping:
 - **Blocker** means the current writer profile cannot preserve the relationship
   safely, so import is disabled.
 
-**Best** permits explicitly acknowledged loss and uncertainty. **Strict** rejects
-both, while allowing exact and representation-only changes. Unsupported or
-ambiguous relationships cannot be acknowledged away.
+**Best** reports known changes, such as resampling a Wave, without requiring
+acceptance. Only an explicit mapping decision needs confirmation. For example,
+when a Voice has no Performance, review whether to create an audition Program
+for it. Preparing a new plan clears the previous choices.
 
-In Best mode, the fixed **Accept all losses** control covers LOSS items across
-every report page. It does not accept UNCERTAINTY items; those require individual
-review. A mixed checkbox accepts all losses, and a checked checkbox clears only
-loss consent. The control is disabled during preparation or a write/recovery
-lock, for Strict fidelity, and when the report has no losses. Preparing a new
-plan clears previous consent.
+**Strict** rejects loss and uncertainty, while allowing exact and
+representation-only changes. A blocker cannot be waived in either mode. If a
+selected Performance has a broken dependency, exclude that Performance or
+correct its source before converting the hierarchy. Review lists each broken
+relationship once and identifies a selected sound that needs it when one is
+known. To recover just the readable audio, choose **Wave Data only**; this
+does not reconstruct missing Voice assignments.
 
 Current parameter behavior is:
 
@@ -171,20 +221,28 @@ to the A-series adapter, not to the neutral TX16W parser.
 
 ## Validation Workflow
 
+From an open TX16W disk set, right-click **/** in Device view and choose
+**Convert...**. Choose **Browse...** for the destination image, then select its
+partition. Choose **Volume: Existing** to add the planned objects to a volume,
+or **Volume: New** to create a named volume in that partition. The volume and
+its objects are written together; canceling a preview creates nothing. Neither
+choice replaces the image. This workflow
+does not create a new image or format a physical disk.
+
 Use the import dialog as a plan review:
 
 1. Drop the selected `.ima` or `.img` files onto axkdeck. For a multi-floppy
    source, review automatically found companions or select known members
    together. Add missing or ambiguous members in the dialog.
-2. Select a writable SFS volume if no destination was already selected.
+2. Choose a partition on a writable SFS image, then an existing or new volume.
 3. Choose **Programs and samples** for a complete hierarchy. Use **Wave Data
    only** deliberately when recovering decodable Waves from an incomplete or
    partly unsupported set.
-4. Review the paged action table: final names, slots, assignments, key ranges,
-   sample rates and loop boundaries.
-5. Select Best or Strict and review the mapping issues. In Best mode, explicitly
-   acknowledge losses individually or with **Accept all losses**; acknowledge
-   each uncertainty individually before continuing.
+4. Select the source occurrences to convert. Hierarchy selection includes
+   required dependent objects; Wave Data only allows individual Waves.
+   Review the planned names, slots, assignments, key ranges, rates and loops.
+5. Choose Best or Strict and review the conversion notes. In Best mode,
+   confirm only the specific mapping choices requested by the plan.
 6. Import only when the retained plan reports that it is ready. Changes to inputs
    or destination require preparation again; expired or consumed plans cannot be
    executed. Use Refresh after a saved import whose cleanup or refresh failed,

@@ -108,7 +108,7 @@
 {#if stage?.startsWith('tx16w-')}
     <Tx16wImportDialog
         request={tx16wRequest}
-        volumeOptions={[]}
+        destinations={{ partitions: [], volumes: [] }}
         {completion}
         onrecover={noop}
         ontarget={noop}

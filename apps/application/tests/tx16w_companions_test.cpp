@@ -393,8 +393,51 @@ TEST_F(Tx16wCompanions, NearbyDiscoveryUsesTheOwningSessionAndIgnoresUnrelatedFi
     ASSERT_TRUE(attached) << attached.error().message;
     EXPECT_EQ(attached->sources.size(), 3U);
     ASSERT_EQ(attached->documents.size(), 1U);
+    EXPECT_FALSE(attached->documents.front().companions.can_search_nearby);
     EXPECT_EQ(attached->documents.front().completeness, "COMPLETE");
     EXPECT_TRUE(attached->documents.front().companions.requirements.empty());
+}
+
+TEST_F(Tx16wCompanions, NearbyFollowsNewlyDiscoveredSetupWavesInOneAttachment) {
+    std::filesystem::copy_file(root / "main/SET.S01", root / "SET.S01");
+    std::filesystem::copy_file(root / "main/SET.V01", root / "SET.V01");
+    const auto sandbox = axk::app::Sandbox::create({{"root", "Root", root, false}});
+    ASSERT_TRUE(sandbox);
+    axk::app::ImageSessionManager sessions{*sandbox};
+    const auto opened = sessions.open({{{"root", "SET.V01"}}, {}}, "owner");
+    ASSERT_TRUE(opened) << opened.error().message;
+    ASSERT_EQ(opened->documents.front().companions.requirements.size(), 1U);
+    EXPECT_EQ(opened->documents.front().companions.requirements.front().name, "SET.S01");
+    const axk::app::ImageDocumentRef target{opened->image_id, opened->documents.front().id};
+    const auto attached =
+        sessions.attach_companions(target, "owner", 1U, {axk::app::CompanionSelectionKind::immediate_siblings, {}});
+    ASSERT_TRUE(attached) << attached.error().message;
+    EXPECT_EQ(attached->revision, 2U);
+    EXPECT_EQ(attached->sources.size(), 3U);
+    ASSERT_EQ(attached->documents.size(), 1U);
+    EXPECT_EQ(attached->documents.front().completeness, "COMPLETE");
+}
+
+TEST_F(Tx16wCompanions, NearbyDoesNotOfferAnAdoptedWaveToAnotherOpenSetup) {
+    std::filesystem::copy_file(root / "main/SET.S01", root / "SET.S01");
+    std::filesystem::copy_file(root / "main/SET.V01", root / "SET.V01");
+    std::filesystem::copy_file(root / "main/SET.S01", root / "OTHER.S01");
+    const auto sandbox = axk::app::Sandbox::create({{"root", "Root", root, false}});
+    ASSERT_TRUE(sandbox);
+    axk::app::ImageSessionManager sessions{*sandbox};
+    const auto opened = sessions.open({{{"root", "SET.S01"}, {"root", "OTHER.S01"}}, {}}, "owner");
+    ASSERT_TRUE(opened) << opened.error().message;
+    ASSERT_EQ(opened->documents.size(), 2U);
+    const axk::app::ImageDocumentRef target{opened->image_id, opened->documents.front().id};
+    const auto attached =
+        sessions.attach_companions(target, "owner", 1U, {axk::app::CompanionSelectionKind::immediate_siblings, {}});
+    ASSERT_TRUE(attached) << attached.error().message;
+    ASSERT_EQ(attached->documents.size(), 2U);
+    EXPECT_EQ(attached->documents.front().id, target.document_id);
+    EXPECT_EQ(attached->documents.front().completeness, "COMPLETE");
+    EXPECT_EQ(attached->documents.back().id, opened->documents.back().id);
+    EXPECT_EQ(attached->documents.back().source_member_ids, opened->documents.back().source_member_ids);
+    EXPECT_EQ(attached->documents.back().completeness, "INCOMPLETE");
 }
 
 TEST_F(Tx16wCompanions, ExactNativeWaveCanCompleteAnUnsupportedCandidateRequirement) {

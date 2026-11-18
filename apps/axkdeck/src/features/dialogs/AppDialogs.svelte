@@ -596,15 +596,17 @@
         oncancel={() => (sequenceImport.request = null)}
     />
 {/if}
-{#if tx16wImport.request}
+{#if tx16wImport.request && pickerRequest?.parentDialog !== 'conversion-destination'}
     <Tx16wImportDialog
         completion={tx16wImport.completion}
         onrecover={() => void tx16wImport.recoverCompletion()}
         request={tx16wImport.request}
-        volumeOptions={tx16wImport.volumeOptions()}
-        ontarget={(target) => void tx16wImport.selectTarget(target)}
+        destinations={tx16wImport.destinations()}
+        ontarget={(target, typing) => void tx16wImport.selectTarget(target, typing)}
+        onbrowse={() => void tx16wImport.browseNativeDestination()}
         onmode={(mode) => void tx16wImport.selectImportMode(mode)}
         onfidelity={(fidelity) => void tx16wImport.selectFidelity(fidelity)}
+        onsources={(ids) => void tx16wImport.selectSources(ids)}
         onprepare={() => void tx16wImport.reprepare()}
         onadd={(files) => void tx16wImport.addFiles(files)}
         onremove={(memberId) => tx16wImport.removeMember(memberId)}

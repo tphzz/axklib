@@ -1,7 +1,9 @@
 #include "formats/a_series/admission.hpp"
 
 #include <algorithm>
+#include <memory>
 #include <set>
+#include <utility>
 #include <variant>
 
 #include "axklib/formats/a_series/native_document.hpp"
@@ -12,6 +14,7 @@
 #include "formats/a_series/floppy_set.hpp"
 #include "formats/a_series/session_state.hpp"
 #include "image_sessions_internal.hpp"
+#include "session_formats.hpp"
 
 namespace axk::app::formats::a_series {
 namespace {
@@ -35,9 +38,7 @@ bool contains_system_file(const MediaContainer &media) {
     }
     return false;
 }
-} // namespace
-
-Result<std::vector<NativeDocumentAdmission>> admit_documents(const Sandbox &, const AdmittedImageSources &sources,
+Result<std::vector<NativeDocumentAdmission>> admit_documents(const AdmittedImageSources &sources,
                                                              const CancellationToken &cancellation,
                                                              ProgressSink *progress, diagnostic_sink *diagnostics) {
     std::vector<NativeDocumentAdmission> result;
@@ -187,6 +188,49 @@ Result<std::vector<NativeDocumentAdmission>> admit_documents(const Sandbox &, co
         result.push_back(std::move(item));
     }
     return result;
+}
+} // namespace
+
+Result<void> register_format(SessionFormats &formats, const SessionFormatContext &context) {
+    auto admitted = admit_documents(context.sources, context.cancellation, context.progress, context.diagnostics);
+    if (!admitted)
+        return std::unexpected(admitted.error());
+    auto admissions = std::make_shared<std::vector<NativeDocumentAdmission>>(std::move(*admitted));
+    native::FormatProvider provider;
+    provider.descriptor = {"yamaha.a-series", "Yamaha A-series", {"a-series"}};
+    provider.recognize = [admissions](const native::SourceSet &sources,
+                                      const CancellationToken &) -> axk::Result<native::Recognition> {
+        native::Recognition recognition{};
+        recognition.format_id = "yamaha.a-series";
+        if (admissions->empty())
+            return recognition;
+        recognition.state = native::RecognitionState::supported;
+        for (const auto &document : *admissions) {
+            const auto count = recognition.claims.size();
+            for (const auto &object : document.native->native_document->catalog().objects)
+                recognition.claims.insert(recognition.claims.end(), object.locations.begin(), object.locations.end());
+            // A supported empty SFS member still owns its editable volume.
+            if (recognition.claims.size() == count)
+                for (const auto &member_id : document.member_ids)
+                    if (auto claim = sources.locate(member_id, {}, {}); claim)
+                        recognition.claims.push_back(*claim);
+        }
+        return recognition;
+    };
+    provider.open =
+        [admissions](std::shared_ptr<const native::SourceSet>,
+                     const CancellationToken &) -> axk::Result<std::vector<std::shared_ptr<const native::Document>>> {
+        std::vector<std::shared_ptr<const native::Document>> result;
+        for (const auto &document : *admissions)
+            result.push_back(document.native->native_document);
+        return result;
+    };
+    return formats.add(std::move(provider), [admissions](const auto &document) -> Result<NativeDocumentAdmission> {
+        const auto found = std::ranges::find(*admissions, document->summary().id, &NativeDocumentAdmission::id);
+        if (found == admissions->end())
+            return std::unexpected(Error{"document_invalid", "A-series document admission identity is missing"});
+        return std::move(*found);
+    });
 }
 
 } // namespace axk::app::formats::a_series

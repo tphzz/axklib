@@ -40,7 +40,8 @@ using Json = nlohmann::json;
 
 class ServerApplication {
   public:
-    ServerApplication(Config config, app::OperationRegistry registry, WorkspaceStore workspaces);
+    ServerApplication(Config config, app::OperationRegistry registry, WorkspaceStore workspaces,
+                      app::ConfigureSessionFormats &configure_formats, conversion::Registry profiles);
     ~ServerApplication();
 
     app::Result<int> run();

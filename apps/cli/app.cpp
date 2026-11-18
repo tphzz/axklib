@@ -17,6 +17,7 @@
 #include "commands/handlers.hpp"
 #include "conversion_command.hpp"
 #include "requests.hpp"
+#include "source_set_info.hpp"
 #include "writer_commands.hpp"
 
 #include "axklib/application/operation_registry.hpp"
@@ -132,6 +133,8 @@ int axk::cli::run(int argc, char **argv) {
     info->add_flag("--show-quality", info_request.show_quality, "show quality labels");
     info->add_flag("--show-unresolved", info_request.show_unresolved, "show unresolved relationship notes");
     info->add_flag("--show-default-programs", info_request.show_default_programs, "show all 128 Program slots");
+    SourceSetInfo source_set_info;
+    register_source_set_info(*info, source_set_info);
 
     axk::cli::ObjectsRequest objects_request;
     auto *objects = app.add_subcommand("objects", "decode current sampler objects as JSON");
@@ -302,6 +305,8 @@ int axk::cli::run(int argc, char **argv) {
         return exit_code(parser_status == 0 ? ExitStatus::success : ExitStatus::invalid_request);
     }
     if (*info) {
+        if (source_set_info.selected)
+            return run_source_set_info(info_request.paths, source_set_info);
         return run_info_request(info_request);
     }
     if (*conversion_command.command)

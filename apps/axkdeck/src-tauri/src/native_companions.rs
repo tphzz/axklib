@@ -1,9 +1,13 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::HashSet;
-#[cfg(unix)]
-use std::fs::File;
-use std::fs::Metadata;
+use std::fs::{File, Metadata};
+use std::io::Read;
 use std::path::{Component, Path, PathBuf};
+use std::sync::{
+    Arc,
+    atomic::{AtomicU64, Ordering},
+};
 use tauri::{Manager, WebviewWindow};
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_fs::FsExt;
@@ -12,12 +16,38 @@ const MAXIMUM_SOURCE_BYTES: u64 = 4 * 1024 * 1024;
 const MAXIMUM_CANDIDATE_BYTES: u64 = 64 * 1024 * 1024;
 const MAXIMUM_DIRECTORY_ENTRIES: usize = 1024;
 
-#[derive(Clone, Debug, Serialize)]
+#[path = "native_companions_worker.rs"]
+mod worker;
+
+#[derive(Clone, Default)]
+pub(crate) struct CompanionScan(Arc<AtomicU64>);
+
+impl CompanionScan {
+    fn stop(&self, id: u64) {
+        let _ = self
+            .0
+            .compare_exchange(id, 0, Ordering::SeqCst, Ordering::SeqCst);
+    }
+}
+
+#[tauri::command]
+pub(crate) fn cancel_native_companion_scan(
+    window: WebviewWindow,
+    scan_id: u64,
+    scan: tauri::State<'_, CompanionScan>,
+) -> Result<(), String> {
+    main_window(window.label())?;
+    scan.stop(scan_id);
+    Ok(())
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct NativeDiskSource {
     path: String,
     identity: String,
     size: u64,
+    sha256: String,
 }
 
 fn main_window(label: &str) -> Result<(), String> {
@@ -65,14 +95,27 @@ fn safe_path(path: &Path) -> Result<PathBuf, String> {
 
 #[cfg(unix)]
 fn identity(path: &Path) -> Result<String, String> {
-    use std::os::unix::fs::MetadataExt;
-    let file: File = rustix::fs::open(
+    let file = open_source(path)?;
+    file_identity(&file)
+}
+
+#[cfg(unix)]
+fn open_source(path: &Path) -> Result<File, String> {
+    rustix::fs::open(
         path,
-        rustix::fs::OFlags::RDONLY | rustix::fs::OFlags::NOFOLLOW | rustix::fs::OFlags::CLOEXEC,
+        rustix::fs::OFlags::RDONLY
+            | rustix::fs::OFlags::NOFOLLOW
+            | rustix::fs::OFlags::CLOEXEC
+            | rustix::fs::OFlags::NONBLOCK,
         rustix::fs::Mode::empty(),
     )
-    .map_err(|error| error.to_string())?
-    .into();
+    .map(Into::into)
+    .map_err(|error| error.to_string())
+}
+
+#[cfg(unix)]
+fn file_identity(file: &File) -> Result<String, String> {
+    use std::os::unix::fs::MetadataExt;
     let metadata = file.metadata().map_err(|error| error.to_string())?;
     Ok(format!("native:{}:{}", metadata.dev(), metadata.ino()))
 }
@@ -80,11 +123,9 @@ fn identity(path: &Path) -> Result<String, String> {
 #[cfg(windows)]
 fn identity(path: &Path) -> Result<String, String> {
     use std::os::windows::fs::OpenOptionsExt;
-    use std::os::windows::io::AsRawHandle;
     use windows_sys::Win32::Storage::FileSystem::{
-        BY_HANDLE_FILE_INFORMATION, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
-        FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
-        GetFileInformationByHandle,
+        FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_READ_ATTRIBUTES,
+        FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
     };
     let file = std::fs::OpenOptions::new()
         .access_mode(FILE_READ_ATTRIBUTES)
@@ -92,6 +133,26 @@ fn identity(path: &Path) -> Result<String, String> {
         .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
         .open(path)
         .map_err(|error| error.to_string())?;
+    file_identity(&file)
+}
+
+#[cfg(windows)]
+fn open_source(path: &Path) -> Result<File, String> {
+    use std::os::windows::fs::OpenOptionsExt;
+    use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT;
+    std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(path)
+        .map_err(|error| error.to_string())
+}
+
+#[cfg(windows)]
+fn file_identity(file: &File) -> Result<String, String> {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{
+        BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle,
+    };
     let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
     if unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut info) } == 0 {
         return Err(std::io::Error::last_os_error().to_string());
@@ -131,7 +192,41 @@ fn disk_source(path: &Path) -> Result<NativeDiskSource, String> {
             .map_err(|_| "A disk path cannot be represented as text".to_owned())?,
         identity: key,
         size: after.len(),
+        sha256: String::new(),
     })
+}
+
+fn snapshot(source: &NativeDiskSource) -> Result<Vec<u8>, String> {
+    let path = safe_path(Path::new(&source.path))?;
+    let file = open_source(&path)?;
+    let before = file.metadata().map_err(|e| e.to_string())?;
+    if linked(&before)
+        || !before.is_file()
+        || before.len() != source.size
+        || source.size > MAXIMUM_SOURCE_BYTES
+        || file_identity(&file)? != source.identity
+    {
+        return Err("Native disk changed before inspection".into());
+    }
+    let mut bytes = Vec::with_capacity(source.size as usize);
+    (&file)
+        .take(source.size + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|e| e.to_string())?;
+    let after = file.metadata().map_err(|e| e.to_string())?;
+    let current = disk_source(&path)?;
+    if bytes.len() as u64 != source.size
+        || !same_metadata(&before, &after)
+        || current.identity != source.identity
+    {
+        return Err("Native disk changed during inspection".into());
+    }
+    Ok(bytes)
+}
+
+fn fingerprint(mut source: NativeDiskSource) -> Result<NativeDiskSource, String> {
+    source.sha256 = format!("{:x}", Sha256::digest(snapshot(&source)?));
+    Ok(source)
 }
 
 fn same_metadata(before: &Metadata, after: &Metadata) -> bool {
@@ -233,7 +328,7 @@ pub(crate) async fn inspect_native_disk_source(
     main_window(window.label())?;
     let scope = window.fs_scope();
     let source = tauri::async_runtime::spawn_blocking(move || {
-        scoped_source(&path, || scope.is_allowed(&path))
+        fingerprint(scoped_source(&path, || scope.is_allowed(&path))?)
     })
     .await
     .map_err(|error| error.to_string())??;
@@ -242,21 +337,47 @@ pub(crate) async fn inspect_native_disk_source(
 }
 
 #[tauri::command]
-pub(crate) async fn nearby_native_disk_sources(
+pub(crate) async fn resolve_native_disk_companions(
     window: WebviewWindow,
-    path: PathBuf,
-) -> Result<Vec<NativeDiskSource>, String> {
+    selected: Vec<NativeDiskSource>,
+    excluded: Vec<String>,
+    scan_id: u64,
+    scan: tauri::State<'_, CompanionScan>,
+    connections: tauri::State<'_, crate::remote_settings::ServerConnectionState>,
+) -> Result<worker::Discovery, String> {
     main_window(window.label())?;
+    if scan_id == 0 {
+        return Err("Invalid companion scan identifier".into());
+    }
+    scan.0.store(scan_id, Ordering::SeqCst);
+    let running = scan.inner().clone();
+    let connections = connections.inner().clone();
     let scope = window.fs_scope();
-    let sources = tauri::async_runtime::spawn_blocking(move || {
-        siblings(&path, MAXIMUM_DIRECTORY_ENTRIES, || scope.is_allowed(&path))
+    let response = tauri::async_runtime::spawn_blocking(move || {
+        let allowed = || {
+            running.0.load(Ordering::SeqCst) == scan_id
+                && connections
+                    .connection()
+                    .ok()
+                    .flatten()
+                    .is_some_and(|c| c.mode == "local")
+                && selected.iter().all(|s| scope.is_allowed(&s.path))
+        };
+        worker::resolve(&selected, excluded, allowed)
     })
-    .await
-    .map_err(|error| error.to_string())??;
-    for source in &sources {
+    .await;
+    if scan
+        .0
+        .compare_exchange(scan_id, 0, Ordering::SeqCst, Ordering::SeqCst)
+        .is_err()
+    {
+        return Err("Native companion scan cancelled".into());
+    }
+    let response = response.map_err(|error| error.to_string())??;
+    for source in &response.sources {
         allow_file(&window, source)?;
     }
-    Ok(sources)
+    Ok(response)
 }
 
 #[tauri::command]
@@ -288,7 +409,7 @@ pub(crate) async fn select_native_disk_sources(
             .map_err(|_| "Choose a local floppy image".to_owned())?;
         let source = disk_source(&path)?;
         if seen.insert(source.identity.clone()) {
-            sources.push(source);
+            sources.push(fingerprint(source)?);
         }
     }
     for source in &sources {

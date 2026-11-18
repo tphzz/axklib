@@ -1,54 +1,33 @@
 #include "image_sessions_internal.hpp"
 
 #include <set>
+#include <utility>
 
-#include "axklib/native/registry.hpp"
-#include "formats/a_series/admission.hpp"
-#include "formats/tx16w/admission.hpp"
+#include "session_formats.hpp"
 
 namespace axk::app {
 
 Result<void> ImageSessionManager::Implementation::discover(Session &session, const CancellationToken &cancellation,
-                                                           ProgressSink *progress, diagnostic_sink *diagnostics) {
-    auto a_series = formats::a_series::admit_documents(sandbox, session.sources, cancellation, progress, diagnostics);
-    if (!a_series)
-        return std::unexpected(a_series.error());
-    native::FormatRegistry registry;
-    native::FormatProvider a_provider;
-    a_provider.descriptor = {"yamaha.a-series", "Yamaha A-series", {"a-series"}};
-    a_provider.recognize = [&a_series](const native::SourceSet &sources,
-                                       const CancellationToken &) -> axk::Result<native::Recognition> {
-        native::Recognition recognition{};
-        recognition.format_id = "yamaha.a-series";
-        if (a_series->empty())
-            return recognition;
-        recognition.state = native::RecognitionState::supported;
-        for (const auto &document : *a_series) {
-            const auto claim_count = recognition.claims.size();
-            for (const auto &object : document.native->native_document->catalog().objects)
-                recognition.claims.insert(recognition.claims.end(), object.locations.begin(), object.locations.end());
-            if (recognition.claims.size() == claim_count)
-                for (const auto &member_id : document.member_ids) {
-                    auto location = sources.locate(member_id, {}, {});
-                    if (location)
-                        recognition.claims.push_back(*location);
-                }
+                                                           ProgressSink *progress, diagnostic_sink *diagnostics,
+                                                           const Session *previous,
+                                                           std::string_view extended_document) {
+    SessionFormats formats;
+    // New companions belong only to the selected document. Do not reopen them in the
+    // scope of another previously opened Setup that happens to request the same Wave.
+    if (previous)
+        for (const auto &document : previous->documents) {
+            if (!document->companions.can_attach)
+                continue;
+            auto members = document->member_ids;
+            if (document->id == extended_document)
+                for (auto i = previous->sources.members.size(); i < session.sources.members.size(); ++i)
+                    members.push_back(session.sources.members[i]->id);
+            formats.retain_member_group(document->format, std::move(members));
         }
-        return recognition;
-    };
-    a_provider.open =
-        [&a_series](std::shared_ptr<const native::SourceSet>,
-                    const CancellationToken &) -> axk::Result<std::vector<std::shared_ptr<const native::Document>>> {
-        std::vector<std::shared_ptr<const native::Document>> documents;
-        for (const auto &item : *a_series)
-            documents.push_back(item.native->native_document);
-        return documents;
-    };
-    if (auto added = registry.add(std::move(a_provider)); !added)
-        return std::unexpected(core_error(added.error(), session.sources.members.front()->reference));
-    if (auto added = registry.add(axk::tx16w::provider()); !added)
-        return std::unexpected(core_error(added.error(), session.sources.members.front()->reference));
-    auto opened = registry.open(session.sources.native_sources, session.selected_formats, cancellation);
+    if (auto configured = configure_formats(formats, {session.sources, cancellation, progress, diagnostics});
+        !configured)
+        return std::unexpected(configured.error());
+    auto opened = formats.registry().open(session.sources.native_sources, session.selected_formats, cancellation);
     if (!opened)
         return std::unexpected(core_error(opened.error(), session.sources.members.front()->reference));
     session.discovery.selection_required = opened->selection_required;
@@ -71,20 +50,11 @@ Result<void> ImageSessionManager::Implementation::discover(Session &session, con
         session.discovery.candidates.push_back(std::move(value));
     }
     for (const auto &native_document : opened->documents) {
+        auto admission = formats.bind(native_document);
+        if (!admission)
+            return std::unexpected(admission.error());
         auto document_state = std::make_shared<Document>();
-        if (native_document->summary().format_id == "yamaha.a-series") {
-            const auto found =
-                std::ranges::find(*a_series, native_document->summary().id, &NativeDocumentAdmission::id);
-            if (found == a_series->end())
-                return std::unexpected(session_error("document_invalid", "Document admission identity is missing"));
-            static_cast<NativeDocumentAdmission &>(*document_state) = std::move(*found);
-        } else {
-            const auto tx16w = std::dynamic_pointer_cast<const axk::tx16w::Document>(native_document);
-            if (!tx16w)
-                return std::unexpected(session_error("document_invalid", "No application adapter for native document"));
-            static_cast<NativeDocumentAdmission &>(*document_state) =
-                formats::tx16w::admit_document(tx16w, session.sources);
-        }
+        static_cast<NativeDocumentAdmission &>(*document_state) = std::move(*admission);
         session.documents.push_back(std::move(document_state));
     }
     return {};

@@ -45,9 +45,10 @@ Snapshot reads are concurrent; `image`, `build_plan`, `transaction`,
 serialization. Mutation plans are bound to their creating thread when applied.
 
 `axklib/sdk/conversion.hpp` exposes `conversion_profiles_json()` and the move-only
-`conversion_plan`. Preparation materializes one immutable result; application
-requires its loss/uncertainty acknowledgement IDs and never repeats conversion.
-The first profile is TX16W to A-series. See [Directional Conversion](conversion.md)
+`conversion_plan`. Preparation materializes one immutable result. Application
+does not repeat conversion. Pass only IDs for choices with a `decision`
+prompt; known losses do not require acknowledgement in Best mode.
+See [Directional Conversion](conversion.md)
 for explicit sources, destination bindings, expiry and one-attempt semantics.
 
 `set_diagnostic_sink()` borrows an optional `diagnostic_sink` independently from

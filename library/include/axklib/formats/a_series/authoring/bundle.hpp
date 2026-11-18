@@ -24,6 +24,7 @@ struct Bundle {
 struct Destination {
     std::uint8_t partition_index{};
     std::string volume_name;
+    bool create{};
 };
 
 struct Inventory {

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
 #include <span>
 #include <string_view>
@@ -20,6 +21,13 @@ inline bool ex5_descriptor_signature(std::span<const std::byte> descriptor) {
 
 inline bool ex5_disk_signature(std::span<const std::byte> prefix) {
     return prefix.size() >= 0x220U && ex5_descriptor_signature(prefix.subspan(0x200U, 0x20U));
+}
+
+inline bool sfs_disk_signature(std::span<const std::byte> prefix) {
+    constexpr std::string_view magic{"YAMAHA_dev3"};
+    return prefix.size() >= magic.size() && !ex5_disk_signature(prefix) &&
+           std::ranges::equal(prefix.first(magic.size()), magic,
+                              [](std::byte left, char right) { return left == static_cast<std::byte>(right); });
 }
 
 } // namespace axk::detail

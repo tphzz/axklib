@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
+#include <set>
 #include <span>
 #include <string>
 #include <vector>
@@ -47,7 +48,8 @@ struct Inspection {
 };
 
 [[nodiscard]] Result<Inspection> inspect_document(const Document &document, ImportMode mode,
-                                                  const CancellationToken &cancellation = {});
+                                                  const CancellationToken &cancellation = {},
+                                                  const std::set<std::string> *included = nullptr);
 
 [[nodiscard]] AXK_API Result<Inspection> inspect_files(std::span<const SourceFile> files,
                                                        const CancellationToken &cancellation = {});
