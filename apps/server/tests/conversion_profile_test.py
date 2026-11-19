@@ -102,6 +102,8 @@ def service(server, root, workspace, flags=(), *, writable=True):
         def job(path, body, key, expected_state="COMPLETED", *, expected_status=202):
             result = request(port, TOKEN, "POST", path, body, {"Idempotency-Key": key})
             assert result.status == expected_status, result.content
+            if expected_status == 200:
+                return result.json()["data"]
             if expected_status != 202:
                 return result.json()["error"]
             done = wait_for_job(

@@ -54,7 +54,14 @@
     {#if narrow && sourceSelection}
         <TabStrip
             fill
-            tabs={[...contentTabs, { id: 'review', label: 'Review', panelId: `${id}-review-panel` }]}
+            tabs={[
+                ...contentTabs,
+                {
+                    id: 'review',
+                    label: reviewNotice ? `Review · ${reviewNotice}` : 'Review',
+                    panelId: `${id}-review-panel`,
+                },
+            ]}
             active={active === 'review' ? 'review' : contentView}
             onselect={(v) => {
                 active = v === 'review' ? 'review' : 'contents';

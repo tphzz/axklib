@@ -2184,6 +2184,7 @@
         "additionalProperties": false,
         "required": ["sources"],
         "properties": {
+          "formatId": { "type": "string", "minLength": 1, "default": "yamaha.tx16w" },
           "sources": {
             "type": "array",
             "minItems": 1,
@@ -7472,6 +7473,9 @@
           },
           {
             "$ref": "#/components/schemas/Tx16wObjectDetail"
+          },
+          {
+            "$ref": "#/components/schemas/TyphoonObjectDetail"
           }
         ]
       },
@@ -15604,6 +15608,7 @@
               "A_SERIES",
               "SU700",
               "TX16W",
+              "TYPHOON",
               "UNKNOWN"
             ]
           },
@@ -19984,6 +19989,212 @@
           "length": {
             "type": "integer",
             "minimum": 0
+          }
+        }
+      },
+      "TyphoonItemReference": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "name",
+          "version",
+          "diskLabel",
+          "targetObjectId"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "diskLabel": {
+            "type": "string"
+          },
+          "targetObjectId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "TyphoonObjectDetail": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "imageId",
+          "documentId",
+          "revision",
+          "formatId",
+          "profile",
+          "objectId",
+          "type",
+          "name",
+          "details",
+          "locations"
+        ],
+        "properties": {
+          "imageId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "documentId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "formatId": {
+            "const": "nuedge.typhoon"
+          },
+          "profile": {
+            "const": "typhoon-2000"
+          },
+          "objectId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "type": {
+            "type": "string",
+            "minLength": 1
+          },
+          "name": {
+            "type": "string"
+          },
+          "details": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "itemVersion",
+              "referenceCount"
+            ],
+            "properties": {
+              "itemVersion": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "regions": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "keyLow",
+                    "keyHigh",
+                    "velocityLow",
+                    "velocityHigh",
+                    "wave"
+                  ],
+                  "properties": {
+                    "keyLow": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 127
+                    },
+                    "keyHigh": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 127
+                    },
+                    "velocityLow": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 127
+                    },
+                    "velocityHigh": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 127
+                    },
+                    "wave": {
+                      "$ref": "#/components/schemas/TyphoonItemReference"
+                    }
+                  }
+                }
+              },
+              "parts": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "nativeChannel",
+                    "voice"
+                  ],
+                  "properties": {
+                    "nativeChannel": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 255
+                    },
+                    "voice": {
+                      "$ref": "#/components/schemas/TyphoonItemReference"
+                    }
+                  }
+                }
+              },
+              "referenceCount": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "wave": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "frames",
+                  "sampleRate",
+                  "bits",
+                  "rootKey",
+                  "loopStart",
+                  "loopEnd"
+                ],
+                "properties": {
+                  "frames": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "sampleRate": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "bits": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "rootKey": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "minimum": 0
+                  },
+                  "loopStart": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "minimum": 0
+                  },
+                  "loopEnd": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "minimum": 0
+                  }
+                }
+              }
+            }
+          },
+          "locations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NativeSourceLocation"
+            }
           }
         }
       },

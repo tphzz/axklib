@@ -99,16 +99,18 @@ describe('TX16W workspace conventions', () => {
                 receiveChannelDisplay: '',
             },
         ];
-        transport.nativeObjectDetail = async (session, id) =>
-            id === 'voice-1'
-                ? {
-                      ...(await originalDetail(session, 'wave-20')),
-                      objectId: id,
-                      name: 'Voice One',
-                      type: 'voice',
-                      details: { type: 'voice', slot: 1, regions: [] },
-                  }
-                : originalDetail(session, id);
+        transport.nativeObjectDetail = async (session, id) => {
+            if (id !== 'voice-1') return originalDetail(session, id);
+            const detail = await originalDetail(session, 'wave-20');
+            if (detail.formatId !== 'yamaha.tx16w') throw new Error('Expected TX16W fixture detail');
+            return {
+                ...detail,
+                objectId: id,
+                name: 'Voice One',
+                type: 'voice',
+                details: { type: 'voice', slot: 1, regions: [] },
+            };
+        };
         setup(transport);
         await fireEvent.click(screen.getByRole('button', { name: 'Waves' }));
         await fireEvent.input(screen.getByRole('searchbox', { name: 'Search Waves' }), {
@@ -204,6 +206,7 @@ describe('TX16W workspace conventions', () => {
     it('keeps unsupported records out of typed collections without a Native Files workspace tab', async () => {
         const transport = nativeDocumentFixture();
         const detail = await transport.nativeObjectDetail(1, 'wave-20');
+        if (detail.formatId !== 'yamaha.tx16w') throw new Error('Expected TX16W fixture detail');
         transport.nativeObjects = async () => [
             ...nativeObjects,
             { ...nativeObjects[0]!, id: 'unknown', name: 'UNSUPPORTED.C01', type: 'native-file' },

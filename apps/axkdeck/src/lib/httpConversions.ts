@@ -30,6 +30,7 @@ export class HttpConversions implements ConversionTransport {
                 ? { kind: 'UPLOAD', upload: source.reference }
                 : { kind: 'FILE', file: source.reference };
         const submitted = await this.client.invoke<never>('images.companionSources.resolve', {
+            ...(input.formatId ? { formatId: input.formatId } : {}),
             sources: input.sources.map(wire),
             ...(input.candidates ? { candidates: input.candidates.map(wire) } : {}),
             ...(input.exclusions ? { exclusions: input.exclusions.map(wire) } : {}),

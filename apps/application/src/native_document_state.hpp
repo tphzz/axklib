@@ -16,6 +16,7 @@ namespace axk::app {
 
 // Transport projections are retained with their native owner, not with source leases.
 struct NativeDocumentState {
+    void index_native_catalog();
     virtual ~NativeDocumentState() = default;
     [[nodiscard]] virtual std::string_view format_id() const noexcept = 0;
     [[nodiscard]] virtual std::string_view profile() const noexcept = 0;

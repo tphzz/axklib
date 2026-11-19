@@ -1,5 +1,8 @@
 #include <algorithm>
+#include <array>
 #include <cstddef>
+#include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <memory>
 #include <ranges>
@@ -12,7 +15,9 @@
 
 #include "media_test_fixtures.hpp"
 
+#include "axklib/filesystems/fat/floppy_writer.hpp"
 #include "axklib/floppy_import.hpp"
+#include "axklib/package.hpp"
 #include "axklib/writer_internal.hpp"
 
 namespace {
@@ -34,7 +39,159 @@ std::vector<std::byte> catalog_fat_fixture(std::string marker = "A3000F.SYM", st
     return bytes ? *bytes : std::vector<std::byte>{};
 }
 
+constexpr std::size_t dd_root = 7U * 512U;
+constexpr std::size_t dd_data = 14U * 512U;
+
+auto duplicate_voice_image() {
+    std::array<std::byte, 36U> voice{};
+    ascii(voice, 0U, "FORM");
+    be32(voice, 4U, 28U);
+    ascii(voice, 8U, "TYPVVInf");
+    be32(voice, 16U, 16U);
+    auto other = voice;
+    voice.back() = std::byte{0x71};
+    other.back() = std::byte{0xcb};
+    const std::array files{axk::filesystems::FloppyFile{"FIRST.O01", std::span{voice}},
+                           axk::filesystems::FloppyFile{"SECOND.O01", std::span{other}}};
+    auto image = axk::filesystems::build_floppy(axk::filesystems::FloppyLayout::dd_720k, files);
+    if (image) {
+        // Two allocated files with the same raw 8.3 name (including its NUL padding).
+        for (const auto pos : {dd_root, dd_root + 32U}) {
+            std::fill_n(image->begin() + static_cast<std::ptrdiff_t>(pos), 8, std::byte{});
+            (*image)[pos] = std::byte{'('};
+        }
+    }
+    return image;
+}
+
 } // namespace
+
+TEST(Fat12Reader, ReadsDuplicateTyphoonVoiceNamesByDirectoryOccurrence) {
+    auto image = duplicate_voice_image();
+    ASSERT_TRUE(image) << image.error().message;
+    const auto fat = axk::FatImage::open(std::make_shared<axk::MemoryReader>(std::move(*image)), "sounds.img");
+    ASSERT_TRUE(fat) << fat.error().message;
+    ASSERT_EQ(fat->files().size(), std::size_t{2});
+    const auto &first = fat->files()[0];
+    const auto &second = fat->files()[1];
+    EXPECT_EQ(first.name, second.name);
+    EXPECT_NE(first.path, second.path);
+    EXPECT_EQ(first.directory_offset, dd_root);
+    EXPECT_EQ(second.directory_offset, dd_root + 32U);
+    const auto a = fat->read_file_range(first, 35U, 1U);
+    const auto b = fat->read_file_range(second, 35U, 1U);
+    ASSERT_TRUE(a);
+    ASSERT_TRUE(b);
+    EXPECT_EQ(*a, (std::vector{std::byte{0x71}}));
+    EXPECT_EQ(*b, (std::vector{std::byte{0xcb}}));
+}
+
+TEST(Fat12Reader, ReadsDuplicateTyphoonPerformanceNamesByDirectoryOccurrence) {
+    auto image = duplicate_voice_image();
+    ASSERT_TRUE(image);
+    for (const auto pos : {dd_root, dd_root + 32U})
+        ascii(*image, pos + 8U, "P01");
+    for (const auto pos : {dd_data, dd_data + 1024U})
+        ascii(*image, pos + 8U, "TYPP");
+    const auto fat = axk::FatImage::open(std::make_shared<axk::MemoryReader>(std::move(*image)), "sounds.img");
+    ASSERT_TRUE(fat) << fat.error().message;
+    ASSERT_EQ(fat->files().size(), std::size_t{2});
+    EXPECT_EQ(fat->files()[0].name, fat->files()[1].name);
+    EXPECT_NE(fat->files()[0].path, fat->files()[1].path);
+}
+
+TEST(Fat12Reader, RejectsDuplicateNamesWithoutTwoMatchingBoundedTyphoonItems) {
+    for (const auto data_offset : {dd_data, dd_data + 1024U}) {
+        for (const bool invalid_length : {false, true}) {
+            auto image = duplicate_voice_image();
+            ASSERT_TRUE(image);
+            if (invalid_length)
+                be32(*image, data_offset + 4U, 2048U);
+            else
+                ascii(*image, data_offset, "TEXT");
+            const auto fat = axk::FatImage::open(std::make_shared<axk::MemoryReader>(std::move(*image)), "sounds.img");
+            ASSERT_FALSE(fat);
+            EXPECT_EQ(fat.error().code, axk::ErrorCode::container_invalid_geometry);
+        }
+    }
+    auto image = duplicate_voice_image();
+    ASSERT_TRUE(image);
+    ascii(*image, dd_root + 8U, "TXT");
+    ascii(*image, dd_root + 40U, "TXT");
+    const auto fat = axk::FatImage::open(std::make_shared<axk::MemoryReader>(std::move(*image)), "sounds.img");
+    ASSERT_FALSE(fat);
+    EXPECT_EQ(fat.error().code, axk::ErrorCode::container_invalid_geometry);
+}
+
+TEST(Fat12Reader, RejectsCrossLinkedDuplicateTyphoonItems) {
+    auto image = duplicate_voice_image();
+    ASSERT_TRUE(image);
+    le16(*image, dd_root + 32U + 26U, 2U);
+    const auto fat = axk::FatImage::open(std::make_shared<axk::MemoryReader>(std::move(*image)), "cross-linked.img");
+    ASSERT_FALSE(fat);
+}
+
+TEST(Fat12Reader, DoesNotInferTyphoonDiskGeometryFromPaddedFileSize) {
+    auto image = duplicate_voice_image();
+    ASSERT_TRUE(image);
+    le16(*image, 19U, 400U);
+    const auto fat = axk::FatImage::open(std::make_shared<axk::MemoryReader>(std::move(*image)), "padded.img");
+    ASSERT_FALSE(fat);
+    EXPECT_EQ(fat.error().code, axk::ErrorCode::container_invalid_geometry);
+}
+
+TEST(Fat12Reader, DoesNotOfferPackageWritesToDuplicateTyphoonItems) {
+    auto source = axk::FatImage::open(std::make_shared<axk::MemoryReader>(fat_fixture()), "source.ima");
+    ASSERT_TRUE(source);
+    axk::PackageRootSelector selector;
+    selector.kind = axk::PackageRootKind::smpl;
+    selector.partition_index = 0U;
+    selector.volume_name = "FAT root";
+    selector.object_name = "TEST";
+    auto package = axk::build_portable_package(axk::MediaContainer{std::move(*source)}, std::array{selector});
+    ASSERT_TRUE(package) << package.error().message;
+    axk::PackageImportRequest request;
+    auto &target = request.root_destinations.emplace_back();
+    target.partition_index = 0U;
+    target.volume_name = "FAT root";
+    auto image = duplicate_voice_image();
+    ASSERT_TRUE(image);
+    const auto plan = axk::plan_package_import(std::make_shared<axk::MemoryReader>(std::move(*image)), "sounds.img",
+                                               std::array{std::move(package->package)}, request);
+    ASSERT_TRUE(plan) << plan.error().message;
+    EXPECT_FALSE(plan->valid());
+    EXPECT_TRUE(std::ranges::any_of(plan->conflicts,
+                                    [](const auto &conflict) { return conflict.code == "FAT12_PROFILE_UNSUPPORTED"; }));
+}
+
+TEST(Fat12Reader, ReadsIndependentDuplicateVoiceOccurrencesFromExternalImage) {
+#if defined(_WIN32)
+    wchar_t *raw = nullptr;
+    std::size_t length{};
+    ASSERT_EQ(_wdupenv_s(&raw, &length, L"AXK_TYPHOON_DUPLICATE_VOICES_IMAGE"), 0);
+    const std::unique_ptr<wchar_t, decltype(&std::free)> owned{raw, &std::free};
+    const auto *path = owned.get();
+#else
+    const auto *path = std::getenv("AXK_TYPHOON_DUPLICATE_VOICES_IMAGE");
+#endif
+    if (!path || !*path)
+        GTEST_SKIP() << "set AXK_TYPHOON_DUPLICATE_VOICES_IMAGE";
+    const auto fat = axk::FatImage::open(std::filesystem::path{path});
+    ASSERT_TRUE(fat) << fat.error().message;
+    const auto &files = fat->files();
+    const auto a = std::ranges::find(files, std::uint64_t{4320}, &axk::FatFile::directory_offset);
+    const auto b = std::ranges::find(files, std::uint64_t{4416}, &axk::FatFile::directory_offset);
+    ASSERT_NE(a, files.end());
+    ASSERT_NE(b, files.end());
+    EXPECT_EQ(a->name, b->name);
+    EXPECT_NE(a->path, b->path);
+    const auto first = fat->read_file_range(*a, 32U, 4U);
+    const auto second = fat->read_file_range(*b, 32U, 4U);
+    ASSERT_TRUE(first);
+    ASSERT_TRUE(second);
+    EXPECT_EQ(*first, (std::vector{std::byte{0x00}, std::byte{0x0c}, std::byte{0xa5}, std::byte{0x2a}}));
+    EXPECT_EQ(*second, (std::vector{std::byte{0xff}, std::byte{0x0b}, std::byte{0xa5}, std::byte{0x29}}));
+}
 
 TEST(Fat12Reader, ExposesTrustedYamahaCatalogAndContinuationIdentity) {
     const auto fat =

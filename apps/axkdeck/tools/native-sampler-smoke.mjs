@@ -294,6 +294,21 @@ try {
     await tabs.getByRole('button', { name: 'Performances', exact: true }).waitFor();
     await objects.locator('[data-collection-object-id]').first().waitFor();
     assert.equal(await objects.locator('[data-collection-object-id]').count(), 32);
+    const departing = responses
+        .map((response) => /^\/api\/v1(\/images\/image-[0-9a-f]+)\/documents\//.exec(response.path)?.[1])
+        .filter(Boolean).at(-1);
+    assert(departing, 'Reopened disk set must have a server session');
+    const lookup = () => fetch(connection.baseUrl + departing, {
+        headers: { Authorization: `Bearer ${connection.bearerToken}` },
+    });
+    assert.equal((await lookup()).status, 200);
+    await page.reload();
+    await page.getByRole('button', { name: 'I understand', exact: true }).click();
+    await selectSources([['TX16W', ['sd004.img', 'sd003.img']]]);
+    const retired = await lookup();
+    assert.equal(retired.status, 404);
+    assert.equal((await retired.json()).error.code, 'image_not_found');
+    results.checks.push('Reload and reopen retire the previous server session without restarting the sidecar');
     await page.getByRole('button', { name: 'Eject all images', exact: true }).click();
     await selector.waitFor({ state: 'detached' });
     results.checks.push('Whole-set close and reversed-order reopen retain all Performance slots');

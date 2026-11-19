@@ -18,6 +18,7 @@
 #include "axklib/application/secure_random.hpp"
 #include "axklib/conversion/tx16w_to_a_series/source.hpp"
 #include "axklib/floppy_import.hpp"
+#include "axklib/formats/typhoon/document.hpp"
 #include "axklib/su700.hpp"
 #include "content_digest.hpp"
 #include "filesystem_inputs.hpp"
@@ -222,16 +223,20 @@ Result<Json> inspect(const Json &request, const OperationContext &context, const
             logical_bytes += file.size;
         }
         bool recognized = member->yamaha_catalog().has_value();
+        bool native_typhoon = false;
         for (const auto &file : member->files()) {
             if (recognized)
                 break;
-            auto prefix = member->read_file_prefix(file, 12U, context.cancellation);
+            auto prefix = member->read_file_prefix(file, 36U, context.cancellation);
             if (!prefix)
                 return std::unexpected(core_error(prefix.error()));
             recognized = AxkObjectDirectory::recognizes_entry_prefix(*prefix, false);
+            native_typhoon |= !axk::typhoon::item_kind(file.name, *prefix).empty();
         }
         if (recognized) {
             formats.insert("A_SERIES");
+        } else if (native_typhoon) {
+            formats.insert("TYPHOON");
         } else {
             auto su700 = inspect_su700_floppy(*member, context.cancellation);
             if (su700 && su700->status != Su700ImportStatus::unrelated)

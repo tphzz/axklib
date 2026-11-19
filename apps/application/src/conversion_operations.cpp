@@ -18,6 +18,7 @@
 #include "axklib/application/image_session_contracts.hpp"
 #include "axklib/application/volume_capacity.hpp"
 #include "axklib/formats/tx16w/document.hpp"
+#include "axklib/formats/typhoon/document.hpp"
 #include "companion_source_resolution.hpp"
 #include "content_digest.hpp"
 #include "conversion_plan_store.hpp"
@@ -356,6 +357,8 @@ ConversionService::ConversionService(const Sandbox &sandbox, UploadStore &upload
           Implementation{sandbox, uploads, images, journals, jobs, downloads, std::move(profiles), {}})) {
     auto &impl = *implementation_;
     if (auto added = impl.formats.add(tx16w::provider()); !added)
+        throw std::logic_error(added.error().message);
+    if (auto added = impl.formats.add(typhoon::provider()); !added)
         throw std::logic_error(added.error().message);
     impl.subscription = jobs.subscribe([store = impl.store](const JobEvent &event) {
         if (event.operation_id == "conversions.execute" && is_terminal(event.state))

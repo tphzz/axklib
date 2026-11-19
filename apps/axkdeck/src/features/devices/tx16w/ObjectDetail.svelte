@@ -19,7 +19,7 @@
         onselect,
         onrevealFiles,
     }: {
-        detail: components['schemas']['Tx16wObjectDetail'] | null;
+        detail: components['schemas']['Tx16wObjectDetail'] | components['schemas']['TyphoonObjectDetail'] | null;
         preview?: PreviewEnvelope;
         audioError?: string;
         playingObjectId?: string | null;
@@ -32,6 +32,12 @@
     } = $props();
     const labels: Record<string, string> = {
         sampleRate: 'Sample rate (Hz)',
+        frames: 'Frames',
+        bits: 'Native bit depth',
+        itemVersion: 'Item version',
+        referenceCount: 'References',
+        loopStart: 'Loop start',
+        loopEnd: 'Loop end',
         nativeBitDepth: 'Native bit depth',
         attackFrames: 'Attack frames',
         repeatFrames: 'Repeat frames',
@@ -42,7 +48,11 @@
         writeProtected: 'Write protected',
         kind: 'Native kind',
     };
-    const scope = $derived(`yamaha.tx16w:${detail?.type ?? 'empty'}`);
+    const scope = $derived(`${detail?.formatId ?? 'yamaha.tx16w'}:${detail?.type ?? 'empty'}`);
+    const yamaha = $derived(detail?.formatId === 'yamaha.tx16w' ? detail.details : null);
+    const properties = $derived(
+        detail?.formatId === 'nuedge.typhoon' ? { ...detail.details, ...detail.details.wave } : (detail?.details ?? {}),
+    );
     const timeline = $derived(previewTimeline(preview));
     function objectName(id: string) {
         return objects.find((object) => object.id === id)?.name || id;
@@ -68,7 +78,7 @@
             <span>{detail.type}</span>
             <h3>{detail.name}</h3>
         </div>
-        {#if detail.details.type === 'wave'}
+        {#if detail.type === 'wave'}
             <InspectorSection
                 {scope}
                 sectionId="preview"
@@ -88,14 +98,14 @@
                 </div>
                 {#if audioError}<p role="alert">{audioError}</p>{/if}
                 {#each preview?.warnings ?? [] as warning}<p class="warning">{warning}</p>{/each}
-                {#if detail.details.sampleRateApproximate && !preview}
+                {#if yamaha?.type === 'wave' && yamaha.sampleRateApproximate && !preview}
                     <p class="warning">Sample rate is uncertain; audition uses 33,333 Hz. Duration is approximate.</p>
                 {/if}
             </InspectorSection>
         {/if}
         <InspectorSection {scope} sectionId="properties" title="Properties" defaultExpanded={true}>
             <dl class="metadata-list">
-                {#each Object.entries(detail.details).filter(([key, value]) => key !== 'type' && key !== 'sampleRateApproximate' && !Array.isArray(value)) as [key, value] (key)}
+                {#each Object.entries(properties).filter(([key, value]) => key !== 'type' && key !== 'sampleRateApproximate' && typeof value !== 'object') as [key, value] (key)}
                     <div>
                         <dt>{labels[key] ?? key}</dt>
                         <dd>{typeof value === 'boolean' ? (value ? 'Yes' : 'No') : value}</dd>
@@ -103,11 +113,11 @@
                 {/each}
             </dl>
         </InspectorSection>
-        {#if detail.details.type === 'voice'}
+        {#if yamaha?.type === 'voice'}
             <InspectorSection {scope} sectionId="key-regions" title="Key regions" defaultExpanded={true}>
                 <table>
                     <thead><tr><th>Timbre</th><th>Keys</th><th>Fade</th></tr></thead><tbody>
-                        {#each detail.details.regions as region}<tr
+                        {#each yamaha.regions as region}<tr
                                 ><td>{region.timbreSlot}</td><td>{region.lowKey}-{region.highKey}</td><td
                                     >{region.fade}</td
                                 ></tr
@@ -115,9 +125,9 @@
                     </tbody>
                 </table>
             </InspectorSection>
-        {:else if detail.details.type === 'performance'}
+        {:else if yamaha?.type === 'performance'}
             <InspectorSection {scope} sectionId="voice-assignments" title="Voice assignments" defaultExpanded={true}>
-                {#each detail.details.voices as voice, index}
+                {#each yamaha.voices as voice, index}
                     <h4>Part {index + 1}</h4>
                     <dl class="metadata-list">
                         <div>
@@ -151,11 +161,11 @@
                     </dl>
                 {/each}
             </InspectorSection>
-        {:else if detail.details.type === 'setup'}
+        {:else if yamaha?.type === 'setup'}
             <InspectorSection {scope} sectionId="wave-slots" title="Wave slots" defaultExpanded={true}>
                 <table>
                     <thead><tr><th>Slot</th><th>Name</th></tr></thead><tbody>
-                        {#each detail.details.waves as wave}<tr><td>{wave.slot}</td><td>{wave.name}</td></tr>{/each}
+                        {#each yamaha.waves as wave}<tr><td>{wave.slot}</td><td>{wave.name}</td></tr>{/each}
                     </tbody>
                 </table>
             </InspectorSection>

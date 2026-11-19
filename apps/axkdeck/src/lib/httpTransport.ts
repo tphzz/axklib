@@ -81,6 +81,7 @@ import {
 import type { ClientUploadSource } from './clientUploadSource';
 import { downloadServerFile, readDirectoryArchive } from './httpDownloads';
 import { HttpConversionTransport } from './httpConversionTransport';
+import { DepartingImageSessions } from './departingImageSessions';
 import { HttpImageSessions } from './httpImageSessions';
 import { HttpImportOperations } from './httpImportOperations';
 import { HttpCapacityGate, type CapacityReviewHandler } from './httpCapacityGate';
@@ -119,7 +120,12 @@ export class HttpImageTransport extends HttpConversionTransport implements Image
 
     constructor(connection: HttpImageTransportConnection, capacityReviewer?: CapacityReviewHandler) {
         const { client, jobs, devices } = createHttpDeviceConnection(connection);
-        const imageSessions = new HttpImageSessions(client, jobs, new HttpCapacityGate(client, jobs, capacityReviewer));
+        const imageSessions = new HttpImageSessions(
+            client,
+            jobs,
+            new HttpCapacityGate(client, jobs, capacityReviewer),
+            new DepartingImageSessions(connection.baseUrl, (id, keepalive) => client.closeDepartedImage(id, keepalive)),
+        );
         super(client, jobs, imageSessions);
         this.client = client;
         this.jobs = jobs;

@@ -2730,6 +2730,8 @@ export interface components {
         CompanionSourceResolutionRequest: {
             candidates?: components['schemas']['CompanionSourceReference'][];
             exclusions?: components['schemas']['CompanionSourceReference'][];
+            /** @default yamaha.tx16w */
+            formatId: string;
             /** @default true */
             searchNearby: boolean;
             sources: components['schemas']['CompanionSourceReference'][];
@@ -3348,7 +3350,7 @@ export interface components {
                 unreadableObject: boolean;
             }[];
             /** @enum {string} */
-            format: 'A_SERIES' | 'SU700' | 'TX16W' | 'UNKNOWN';
+            format: 'A_SERIES' | 'SU700' | 'TX16W' | 'TYPHOON' | 'UNKNOWN';
             inspectionToken: string | null;
             issues: {
                 code: string;
@@ -4054,7 +4056,10 @@ export interface components {
             validation: components['schemas']['ImageBuildResult']['validation'];
             warnings: components['schemas']['Issue'][];
         };
-        ImageObjectDetail: components['schemas']['ASeriesObjectDetail'] | components['schemas']['Tx16wObjectDetail'];
+        ImageObjectDetail:
+            | components['schemas']['ASeriesObjectDetail']
+            | components['schemas']['Tx16wObjectDetail']
+            | components['schemas']['TyphoonObjectDetail'];
         ImageObjectDetailDescriptor: {
             dataOffsetBytes: number;
             groupLabel: string;
@@ -6081,6 +6086,48 @@ export interface components {
                   /** @constant */
                   type: 'opaque';
               };
+        TyphoonItemReference: {
+            diskLabel: string;
+            name: string;
+            targetObjectId: string | null;
+            version: number;
+        };
+        TyphoonObjectDetail: {
+            details: {
+                itemVersion: number;
+                parts?: {
+                    nativeChannel: number;
+                    voice: components['schemas']['TyphoonItemReference'];
+                }[];
+                referenceCount: number;
+                regions?: {
+                    keyHigh: number;
+                    keyLow: number;
+                    velocityHigh: number;
+                    velocityLow: number;
+                    wave: components['schemas']['TyphoonItemReference'];
+                }[];
+                wave?: {
+                    bits: number;
+                    frames: number;
+                    loopEnd: number | null;
+                    loopStart: number | null;
+                    rootKey: number | null;
+                    sampleRate: number;
+                };
+            };
+            documentId: string;
+            /** @constant */
+            formatId: 'nuedge.typhoon';
+            imageId: string;
+            locations: components['schemas']['NativeSourceLocation'][];
+            name: string;
+            objectId: string;
+            /** @constant */
+            profile: 'typhoon-2000';
+            revision: number;
+            type: string;
+        };
         Upload: {
             declaredSize: number;
             expiresInSeconds: number;

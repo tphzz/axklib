@@ -43,6 +43,9 @@ class FormatRegistry final {
   public:
     [[nodiscard]] Result<void> add(FormatProvider provider);
     [[nodiscard]] std::vector<FormatDescriptor> formats() const;
+    [[nodiscard]] Result<std::shared_ptr<const Document>> open_one(std::shared_ptr<const SourceSet> sources,
+                                                                   std::string_view format,
+                                                                   const CancellationToken &cancellation = {}) const;
     [[nodiscard]] Result<OpenResult> open(std::shared_ptr<const SourceSet> sources,
                                           const std::vector<std::string> &selected_formats = {},
                                           const CancellationToken &cancellation = {}) const;

@@ -22,7 +22,7 @@ Result<PackageImportPlan> plan_fat12_import(const RandomAccessReader &target_rea
     for (const auto &issue : catalog->issues)
         add_conflict(plan, issue.code, issue.message);
     for (const auto &file : fat.files()) {
-        if (file.path.find('/') != std::string::npos) {
+        if (file.path != file.name) {
             add_conflict(plan, "FAT12_PROFILE_UNSUPPORTED",
                          "package import supports only the Yamaha root-level "
                          "FAT12 profile");

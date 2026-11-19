@@ -19,8 +19,9 @@
         volumes: [{ ...target, name: 'PARTITION 1', label: 'Samples' }],
     };
     const query = new URLSearchParams(location.search);
-    const native = query.has('native') || query.get('scenario') === 'native-long';
     const scenario = query.get('scenario') ?? 'normal';
+    const typhoon = scenario === 'typhoon-import' || scenario === 'typhoon-missing';
+    const native = query.has('native') || scenario === 'native-long' || scenario === 'typhoon-missing';
     const plan: ConversionPlan = {
         planId: 'conversion-layout',
         state: 'READY',
@@ -32,7 +33,7 @@
             executable: true,
             actionCount: 201,
             issueCount: 2,
-            ...(native
+            ...(native || typhoon
                 ? {
                       sourceCount: 4,
                       sourceObjects: [
@@ -149,6 +150,103 @@
         cancelJob: async () => undefined,
     };
     const completion = new ImportCompletion(jobs, new JobController(jobs));
+    const missingVersion = {
+        id: 'missing-version',
+        code: 'typhoon.unresolved-reference',
+        impact: 'BLOCKER' as const,
+        sourceObject: 'v2',
+        sourceParameter: '',
+        targetObject: '',
+        targetParameter: '',
+        message:
+            'Strings needs Wave STR-HI (version 00000042) from STRINGS2. This version is missing. Required by: Late Strings. Add the disk containing this version or remove the affected instruments from the selection.',
+    };
+    if (typhoon) {
+        request.sourceFormat = 'nuedge.typhoon';
+        request.destinationProfile = plan.report!.profileId = 'nuedge.typhoon-to-a-series';
+        const report = request.plan!.report!;
+        report.sourceObjects = [
+            {
+                id: 'p1',
+                name: 'Stage Piano',
+                kind: 'performance',
+                location: 'Keys-A.img / STAGE.P01',
+                selectable: true,
+                dependencies: ['v1'],
+            },
+            {
+                id: 'p2',
+                name: 'EP Layer',
+                kind: 'performance',
+                location: 'Keys-A.img / EP.P01',
+                selectable: true,
+                dependencies: ['v1'],
+            },
+            {
+                id: 'p3',
+                name: 'Late Strings',
+                kind: 'performance',
+                location: 'Keys-B.img / LATE.P01',
+                selectable: true,
+                dependencies: ['v2'],
+            },
+            {
+                id: 'v1',
+                name: 'Piano',
+                kind: 'voice',
+                location: 'Keys-A.img / PIANO.O01',
+                selectable: false,
+                dependencies: ['w1'],
+            },
+            {
+                id: 'v2',
+                name: 'Strings',
+                kind: 'voice',
+                location: 'Keys-B.img / STRINGS.O01',
+                selectable: false,
+                dependencies: ['w2'],
+            },
+            {
+                id: 'w1',
+                name: 'PF-C2',
+                kind: 'wave',
+                location: 'Keys-A.img / PF-C2.C01',
+                selectable: false,
+                dependencies: [],
+            },
+            {
+                id: 'w2',
+                name: 'STR-LO',
+                kind: 'wave',
+                location: 'Keys-B.img / STR-LO.C01',
+                selectable: false,
+                dependencies: [],
+            },
+        ];
+        report.sourceCount = report.sourceObjects.length;
+        report.actions = [
+            { kind: 'wave-data', name: 'PF-C2', sourceObject: 'w1' },
+            { kind: 'sample', name: 'PF-C2', sourceObject: 'v1' },
+            { kind: 'sample-bank', name: 'Piano', sourceObject: 'v1' },
+            { kind: 'program', name: 'Stage Piano', sourceObject: 'p1' },
+        ].map((row) => ({ ...row, action: 'create', details: [] }));
+        report.actionCount = report.actions.length;
+        report.issues = [];
+        report.issueCount = 0;
+        if (scenario === 'typhoon-import') {
+            request.members = request.members.slice(0, 2);
+            request.members[0].sourceName = 'Keys-A.img';
+            request.members[1].sourceName = 'Keys-B.img';
+            request.sourceObjectIds = ['p1'];
+            request.target = { kind: 'CREATE_VOLUME', partitionIndex: 0, volumeName: 'Typhoon Keys' };
+        } else {
+            request.sourceName = 'Keys-A.img + Keys-B.img';
+            request.sourceObjectIds = ['p1', 'p2', 'p3'];
+            report.issues = [missingVersion];
+            report.issueCount = 1;
+            report.executable = false;
+        }
+    }
     if (query.has('layout')) {
         diskLayoutCompletion(completion, scenario);
         plan.report!.capacity = diskLayoutCapacity();
@@ -239,6 +337,10 @@
     function fidelity(value: 'BEST' | 'STRICT') {
         request.fidelity = value;
         request.acknowledgedIssueIds = [];
+        if (typhoon && request.plan?.report) {
+            request.plan.report.fidelity = value;
+            return;
+        }
         request.plan = { ...plan, report: { ...plan.report!, fidelity: value, executable: value === 'BEST' } };
     }
 </script>
@@ -252,6 +354,12 @@
         }}
         onsources={(ids) => {
             request.sourceObjectIds = ids;
+            if (scenario === 'typhoon-missing' && request.plan?.report) {
+                const report = request.plan.report;
+                report.issues = !ids || ids.includes('p3') ? [missingVersion] : [];
+                report.issueCount = report.issues.length;
+                report.executable = !!ids?.length && report.issueCount === 0;
+            }
         }}
         {destinations}
         onrecover={() => {

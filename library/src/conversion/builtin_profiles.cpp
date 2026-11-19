@@ -5,6 +5,7 @@
 
 #include "axklib/conversion/a_series_to_tx16w/profile.hpp"
 #include "axklib/conversion/tx16w_to_a_series/profile.hpp"
+#include "axklib/conversion/typhoon_to_a_series/profile.hpp"
 
 namespace axk::conversion {
 Registry builtin_profiles() {
@@ -12,6 +13,8 @@ Registry builtin_profiles() {
     if (auto added = registry.add(tx16w::a_series::profile()); !added)
         throw std::logic_error(added.error().message);
     if (auto added = registry.add(a_series_to_tx16w::profile()); !added)
+        throw std::logic_error(added.error().message);
+    if (auto added = registry.add(typhoon_to_a_series::profile()); !added)
         throw std::logic_error(added.error().message);
     return registry;
 }

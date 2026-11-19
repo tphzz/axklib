@@ -36,8 +36,14 @@ def check_object_detail(get: Get, path: str, object_id: str, document_id: str, r
     detail = get(path + "/objects/" + quote(object_id, safe=""), {})
     if detail["formatId"] == "yamaha.a-series":
         identity = (detail["object"]["id"], detail["image"]["documentId"], detail["image"]["revision"])
-    elif detail["formatId"] == "yamaha.tx16w":
+    elif detail["formatId"] in {"yamaha.tx16w", "nuedge.typhoon"}:
         identity = (detail["objectId"], detail["documentId"], detail["revision"])
+        if detail["formatId"] == "nuedge.typhoon" and (
+            detail["profile"] != "typhoon-2000" or not detail["locations"]
+            or not isinstance(detail["details"]["itemVersion"], int)
+            or not isinstance(detail["details"]["referenceCount"], int)
+        ):
+            raise RuntimeError("incomplete Typhoon object detail")
     else:
         raise RuntimeError("unsupported native detail schema")
     if identity != (object_id, document_id, revision):

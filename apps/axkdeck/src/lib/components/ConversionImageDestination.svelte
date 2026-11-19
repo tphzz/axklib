@@ -1,14 +1,17 @@
 <script lang="ts">
     import DiskImportSettings from './DiskImportSettings.svelte';
     import SelectControl from './SelectControl.svelte';
+    import AttributeHelp from './AttributeHelp.svelte';
     let {
         source,
+        sourceLabel,
         profile,
         destination,
         disabled,
         onbrowse,
     }: {
         source?: string;
+        sourceLabel: string;
         profile?: string;
         destination?: string;
         disabled: boolean;
@@ -17,7 +20,9 @@
 </script>
 
 <div class="route">
-    <span>Source</span><strong>TX16W disk set</strong><span class="path" title={source}>{source ?? ''}</span>
+    <span>Source</span><strong>{sourceLabel}</strong><span class="path"
+        >{#if source}<AttributeHelp label={source} description={source} />{/if}</span
+    >
     <div class="target-format">
         <strong>Target format</strong>
         <SelectControl

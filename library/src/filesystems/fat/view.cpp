@@ -51,7 +51,7 @@ Result<Root> project(std::shared_ptr<const FatImage> disk, std::optional<std::si
                      const CancellationToken &cancellation) {
     if (!disk)
         return std::unexpected(make_error(ErrorCode::invalid_argument, ErrorCategory::io, "FAT view requires a disk"));
-    Root root{partition ? fat_root_id(*partition) : "fat", "FAT", {}};
+    Root root{partition ? fat_root_id(*partition) : "fat", "FAT", {}, disk->volume_label()};
     const auto id = [&](bool directory, std::uint64_t offset) {
         return partition ? fat_entry_id(root.id, directory, offset) : std::to_string(offset);
     };
@@ -67,7 +67,7 @@ Result<Root> project(std::shared_ptr<const FatImage> disk, std::optional<std::si
         if (const auto active = cancellation.check(); !active)
             return std::unexpected(active.error());
         root.entries.push_back({id(false, file.directory_offset), partition ? "/" + file.path : file.path, false,
-                                file.attributes, std::make_shared<EntryReader>(disk, index)});
+                                file.attributes, std::make_shared<EntryReader>(disk, index), file.name});
     }
     return root;
 }

@@ -19,6 +19,7 @@
 
 #include "axklib/filesystems/fat/view.hpp"
 #include "axklib/formats/tx16w/dependencies.hpp"
+#include "axklib/formats/typhoon/companions.hpp"
 #include "axklib/io.hpp"
 #include "axklib/native/source.hpp"
 
@@ -46,7 +47,6 @@ int inspect_native_companions() {
     }
     std::vector<native::SourceMember> selected;
     std::vector<native::SourceMember> candidates;
-    std::vector<std::shared_ptr<const tx16w::Document>> documents;
     std::size_t candidate_bytes{};
     for (std::size_t index = 0; index < files.size(); ++index) {
         const auto &file = files.at(index);
@@ -75,25 +75,44 @@ int inspect_native_companions() {
         if (index < selected_count) {
             selected.push_back(std::move(member));
         } else {
-            auto set = native::SourceSet::create({member});
-            if (set) {
-                auto document = tx16w::Document::open(*set);
-                if (document) {
-                    candidates.push_back(std::move(member));
-                    documents.push_back(std::move(*document));
-                }
-            }
+            candidates.push_back(std::move(member));
         }
     }
     auto set = native::SourceSet::create(selected);
     if (!set) {
         return 2;
     }
+    if (auto native_seed = typhoon::Document::open(*set)) {
+        std::vector<std::shared_ptr<const typhoon::Document>> neighbors;
+        for (const auto &member : candidates) {
+            const auto one = native::SourceSet::create({member});
+            const auto doc = one ? typhoon::Document::open(*one) : std::unexpected(one.error());
+            neighbors.push_back(doc ? *doc : nullptr);
+        }
+        const auto group = typhoon::find_companions(**native_seed, neighbors);
+        if (!group)
+            return 2;
+        std::vector<std::size_t> adopted;
+        for (const auto i : group->candidates)
+            adopted.push_back(static_cast<std::size_t>(std::stoul(candidates.at(i).id)));
+        std::cout << nlohmann::json{{"adopted", adopted}, {"ambiguous", group->ambiguous}}.dump() << '\n';
+        return 0;
+    }
     auto seed = tx16w::Document::open(*set);
     if (!seed) {
         return 2;
     }
-    auto group = tx16w::detail::resolve_companions(**seed, selected, candidates, documents);
+    std::vector<std::shared_ptr<const tx16w::Document>> documents;
+    std::vector<native::SourceMember> recognized;
+    for (auto &member : candidates) {
+        auto one = native::SourceSet::create({member});
+        if (one)
+            if (auto doc = tx16w::Document::open(*one)) {
+                recognized.push_back(std::move(member));
+                documents.push_back(std::move(*doc));
+            }
+    }
+    auto group = tx16w::detail::resolve_companions(**seed, selected, recognized, documents);
     if (!group) {
         return 2;
     }

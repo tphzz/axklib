@@ -617,6 +617,14 @@ export class AxklibHttpApiClient {
         );
     }
 
+    async closeDepartedImage(id: string, keepalive: boolean): Promise<void> {
+        const path = `/images/${encodeURIComponent(id)}`;
+        if (!keepalive) return this.request('DELETE', path);
+        await this.readEnvelope(
+            await this.fetchResponse('DELETE', path, undefined, {}, undefined, requestTimeoutMs, true),
+        );
+    }
+
     private fetchResponse(
         method: 'GET' | 'HEAD' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
         path: string,
@@ -624,11 +632,13 @@ export class AxklibHttpApiClient {
         headers: Record<string, string> = {},
         signal?: AbortSignal,
         timeoutMs = requestTimeoutMs,
+        keepalive = false,
     ): Promise<Response> {
         return fetchWithTimeout(
             `${this.baseUrl}${path}`,
             {
                 method,
+                keepalive,
                 headers: {
                     Authorization: `Bearer ${this.bearerToken}`,
                     ...headers,

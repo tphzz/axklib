@@ -8,6 +8,7 @@
 
 #include "formats/a_series/admission.hpp"
 #include "formats/tx16w/admission.hpp"
+#include "formats/typhoon/admission.hpp"
 
 namespace axk::app {
 
@@ -39,6 +40,8 @@ Result<NativeDocumentAdmission> SessionFormats::bind(const std::shared_ptr<const
 
 Result<void> configure_builtin_session_formats(SessionFormats &formats, const SessionFormatContext &context) {
     if (auto added = formats::a_series::register_format(formats, context); !added)
+        return added;
+    if (auto added = formats::typhoon::register_format(formats, context); !added)
         return added;
     return formats::tx16w::register_format(formats, context);
 }

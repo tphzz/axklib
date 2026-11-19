@@ -282,7 +282,8 @@ axk_set_project_warnings(axk_format_a_series)
 axk_enable_sanitizers(axk_format_a_series)
 axk_enable_coverage(axk_format_a_series)
 
-add_library(axk_format_tx16w STATIC src/formats/tx16w/codec.cpp src/formats/tx16w/document.cpp
+add_library(axk_format_tx16w STATIC src/formats/typhoon/wave.cpp src/formats/typhoon/document.cpp
+  src/formats/typhoon/companions.cpp src/formats/typhoon/instrument.cpp src/formats/tx16w/codec.cpp src/formats/tx16w/document.cpp
                                   src/formats/tx16w/relationships.cpp src/formats/tx16w/dependencies.cpp
                                   src/formats/tx16w/discovery.cpp src/formats/tx16w/wave_writer.cpp)
 add_library(axklib::format_tx16w ALIAS axk_format_tx16w)
@@ -445,6 +446,7 @@ axk_enable_sanitizers(axk_conversion)
 axk_enable_coverage(axk_conversion)
 
 add_library(axk_profile_tx16w_to_a_series STATIC src/conversion/tx16w_to_a_series/profile.cpp
+  src/conversion/a_series_destination.cpp src/conversion/typhoon_to_a_series.cpp src/conversion/typhoon_instruments.cpp
                                                  src/conversion/tx16w_to_a_series/selection.cpp)
 add_library(axklib::profile_tx16w_to_a_series ALIAS axk_profile_tx16w_to_a_series)
 target_compile_features(axk_profile_tx16w_to_a_series PUBLIC cxx_std_23)
@@ -875,7 +877,7 @@ if(BUILD_TESTING)
   gtest_discover_tests(axk_core_reader_tests DISCOVERY_TIMEOUT 30)
   add_executable(axk_native_tests tests/native/source_test.cpp tests/native/registry_test.cpp tests/native/disk_inspection_test.cpp
                                  tests/native/a_series_document_test.cpp
-                                  tests/native/tx16w_document_test.cpp)
+                                  tests/native/tx16w_document_test.cpp tests/typhoon_wave_test.cpp tests/native/typhoon_document_test.cpp)
   target_compile_features(axk_native_tests PRIVATE cxx_std_23)
   target_link_libraries(axk_native_tests PRIVATE axklib::native axklib::disk_inspection axklib::format_tx16w axklib::format_a_series GTest::gtest_main)
   axk_set_project_warnings(axk_native_tests)

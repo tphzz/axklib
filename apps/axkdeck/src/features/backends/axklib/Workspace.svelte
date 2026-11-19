@@ -369,7 +369,7 @@
             onrevealFiles={() => void revealInFiles()}
             children={shell}
         />
-    {:else if document?.formatId === 'yamaha.tx16w'}
+    {:else if document?.formatId === 'yamaha.tx16w' || document?.formatId === 'nuedge.typhoon'}
         <Tx16wPresentation
             bind:this={activePresentation}
             transport={workspace.transport}

@@ -81,7 +81,11 @@
     );
     const report = $derived(request.plan?.report);
     const sourceObjects = $derived(request.sourceObjects ?? report?.sourceObjects ?? []);
-    const title = $derived(request.documentSource ? 'Convert' : 'Import TX16W disk set');
+    const typhoon = $derived(request.sourceFormat === 'nuedge.typhoon');
+    const sourceLabel = $derived(typhoon ? 'TX16W Typhoon disk set' : 'TX16W disk set');
+    const title = $derived(
+        request.documentSource ? 'Convert' : typhoon ? 'Import Typhoon disk set' : 'Import TX16W disk set',
+    );
     const canConfirm = $derived(
         !error &&
             (!!request.documentSource || request.members.length > 0) &&
@@ -152,6 +156,7 @@
         <div class="disk-import-body">
             {#if request.documentSource}
                 <ConversionImageDestination
+                    {sourceLabel}
                     source={request.sourceName}
                     profile={request.destinationProfile ?? report?.profileId}
                     destination={request.destinationName}
@@ -160,7 +165,7 @@
                 />
             {:else}
                 <ImportSourceHeader
-                    label="TX16W disk set"
+                    label={sourceLabel}
                     summary={`${request.members.length} ${request.members.length === 1 ? 'disk' : 'disks'}${report ? ` · ${report.actionCount} planned objects` : ''}`}
                     members={request.members.map((member) => ({
                         id: member.id,

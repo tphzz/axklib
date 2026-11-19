@@ -56,18 +56,22 @@
     const audio = untrack(() => new DocumentAudio(transport, () => sessionId));
     let objects = $state<components['schemas']['ImageObjectItem'][]>([]);
     let relationships = $state<components['schemas']['ImageRelationshipItem'][]>([]);
-    let detail = $state<components['schemas']['Tx16wObjectDetail'] | null>(null);
-    const tabs = [
+    let detail = $state<
+        components['schemas']['Tx16wObjectDetail'] | components['schemas']['TyphoonObjectDetail'] | null
+    >(null);
+    const allTabs = [
         { kind: 'performance', label: 'Performances', icon: 'program-multi' },
         { kind: 'voice', label: 'Voices', icon: 'music' },
         { kind: 'timbre', label: 'Timbres', icon: 'sliders' },
         { kind: 'wave', label: 'Waves', icon: 'waveform' },
         { kind: 'setup', label: 'Setups', icon: 'settings' },
     ] as const;
-    type Kind = (typeof tabs)[number]['kind'];
+    const typhoon = $derived(document.formatId === 'nuedge.typhoon');
+    const tabs = $derived(typhoon ? allTabs.filter((t) => t.kind !== 'timbre') : allTabs);
+    type Kind = (typeof allTabs)[number]['kind'];
     const emptyCollection = () => ({ selected: '', query: '', selection: emptyCollectionSelection() });
     const retained = untrack(() =>
-        remember('tx16w', () => ({
+        remember(document.formatId === 'nuedge.typhoon' ? 'typhoon' : 'tx16w', () => ({
             kind: 'performance' as Kind,
             structureQuery: '',
             collections: {
@@ -159,10 +163,15 @@
         try {
             const value = await transport.nativeObjectDetail(sessionId, objectId);
             if (token !== detailGeneration) return;
-            if (value.formatId !== 'yamaha.tx16w' || value.documentId !== documentId || value.revision !== revision)
+            if (
+                (value.formatId !== 'yamaha.tx16w' && value.formatId !== 'nuedge.typhoon') ||
+                value.formatId !== document.formatId ||
+                value.documentId !== documentId ||
+                value.revision !== revision
+            )
                 throw new Error('Native document changed during loading');
             detail = value;
-            if (value.details.type === 'wave') audio.request(objectId);
+            if (value.type === 'wave') audio.request(objectId);
         } catch (reason) {
             if (token === detailGeneration) error = userFacingMessage(reason);
         }
@@ -238,7 +247,7 @@
 {#snippet navigation()}
     <StructureNavigation
         label="TX16W structure"
-        heading="TX16W floppy image"
+        heading={typhoon ? 'TX16W Typhoon disk set' : 'TX16W floppy image'}
         bind:query={structureQuery}
         searchLabel="Search TX16W structure"
         navigation

@@ -5,6 +5,7 @@
 
 #include "axklib/filesystems/fat/view.hpp"
 #include "axklib/formats/tx16w/document.hpp"
+#include "axklib/formats/typhoon/document.hpp"
 #include "axklib/media.hpp"
 #include "axklib/package_archive.hpp"
 #include "axklib/sfs_disk_sources.hpp"
@@ -76,6 +77,8 @@ Result<DiskInspection> DiskInspection::open(std::span<const std::filesystem::pat
         return std::unexpected(set.error());
     FormatRegistry registry;
     if (auto added = registry.add(std::move(sfs).provider()); !added)
+        return std::unexpected(added.error());
+    if (auto added = registry.add(typhoon::provider()); !added)
         return std::unexpected(added.error());
     if (auto added = registry.add(tx16w::provider()); !added)
         return std::unexpected(added.error());

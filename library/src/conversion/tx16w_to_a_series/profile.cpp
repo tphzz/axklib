@@ -5,6 +5,7 @@
 #include <limits>
 #include <utility>
 
+#include "../a_series_destination.hpp"
 #include "axklib/conversion/tx16w_to_a_series/plan.hpp"
 #include "axklib/formats/a_series/authoring/prepare.hpp"
 #include "axklib/pcm_import.hpp"
@@ -57,16 +58,10 @@ Result<std::shared_ptr<const PreparedPlan>> prepare(const Request &request, cons
         if (name != "HIERARCHY" && name != "WAVE_DATA_ONLY")
             return std::unexpected(invalid("Conversion mode must be HIERARCHY or WAVE_DATA_ONLY"));
         mode = name == "HIERARCHY" ? ImportMode::hierarchy : ImportMode::wave_data_only;
-        const auto &partition = request.destination.selection.at("partitionIndex");
-        if (!partition.is_number_integer() || partition < 0 || partition > 7)
-            return std::unexpected(invalid("Destination partition index must be between 0 and 7"));
-        const auto &kind = request.destination.selection.at("kind");
-        if (kind != "EXISTING_VOLUME" && kind != "CREATE_VOLUME")
-            return std::unexpected(invalid("Select an existing or new destination volume"));
-        destination = {partition.get<std::uint8_t>(), request.destination.selection.at("volumeName").get<std::string>(),
-                       kind == "CREATE_VOLUME"};
-        if (destination.volume_name.empty())
-            return std::unexpected(invalid("Conversion requires a destination volume name"));
+        auto parsed = volume_destination(request.destination.selection);
+        if (!parsed)
+            return std::unexpected(parsed.error());
+        destination = std::move(*parsed);
     } catch (const nlohmann::json::exception &) {
         return std::unexpected(invalid("Malformed conversion options or destination"));
     }
@@ -202,35 +197,7 @@ Result<std::shared_ptr<const PreparedPlan>> prepare(const Request &request, cons
         }
         bundle.wave_data.push_back({std::move(spec), std::move(*audio)});
     }
-    const auto policy = request.capacity_policy.value_or(VolumeCapacityPolicy{});
-    auto authored = authoring::prepare(request.destination.reader, request.destination.label, destination, bundle,
-                                       policy, cancellation, progress);
-    if (!authored)
-        return std::unexpected(authored.error());
-    const auto &admission = report.destination.emplace<VolumeCapacityAdmission>(std::move(authored->capacity));
-    if (const auto admitted = enforce_volume_capacity_admission(admission, policy); !admitted)
-        issue(Impact::blocker, "conversion.capacity", {}, admitted.error().message);
-    retained_bytes = report_bytes(report);
-    if (retained_bytes > request.limits.maximum_bytes || report.issues.size() > request.limits.maximum_issues)
-        return std::unexpected(invalid("Conversion capacity report exceeds its retention limit"));
-    if (!report.executable)
-        return std::make_shared<const PreparedPlan>(std::move(report), std::vector<Patch>{}, authored->image_size_bytes,
-                                                    retained_bytes);
-    std::vector<Patch> patches;
-    patches.reserve(authored->patches.size());
-    const auto patch_overhead = patches.capacity() * sizeof(Patch);
-    if (patch_overhead > request.limits.maximum_bytes - retained_bytes)
-        return std::unexpected(invalid("Conversion patch list exceeds its retention limit"));
-    retained_bytes += patch_overhead;
-    for (auto &patch : authored->patches) {
-        const auto bytes = patch.original.capacity() + patch.replacement.capacity();
-        if (bytes > request.limits.maximum_bytes - retained_bytes)
-            return std::unexpected(invalid("Conversion patches exceed their retained memory limit"));
-        retained_bytes += bytes;
-        patches.push_back({patch.offset, std::move(patch.original), std::move(patch.replacement)});
-    }
-    return std::make_shared<const PreparedPlan>(std::move(report), std::move(patches), authored->image_size_bytes,
-                                                retained_bytes);
+    return finish_volume_plan(request, destination, bundle, std::move(report), cancellation, progress);
 }
 } // namespace
 

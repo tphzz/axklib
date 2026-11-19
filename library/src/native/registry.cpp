@@ -53,6 +53,22 @@ std::vector<FormatDescriptor> FormatRegistry::formats() const {
     return result;
 }
 
+Result<std::shared_ptr<const Document>> FormatRegistry::open_one(std::shared_ptr<const SourceSet> sources,
+                                                                 std::string_view format,
+                                                                 const CancellationToken &cancellation) const {
+    auto provider = std::ranges::find_if(providers_, [&](const auto &p) { return p.descriptor.id == format; });
+    if (provider == providers_.end())
+        return std::unexpected(registry_error("Selected native format is not registered"));
+    FormatRegistry only;
+    only.providers_.push_back(*provider);
+    auto result = only.open(std::move(sources), {std::string{format}}, cancellation);
+    if (!result)
+        return std::unexpected(result.error());
+    if (result->documents.size() != 1U)
+        return std::unexpected(registry_error("Select exactly one native source document"));
+    return result->documents.front();
+}
+
 Result<OpenResult> FormatRegistry::open(std::shared_ptr<const SourceSet> sources,
                                         const std::vector<std::string> &selected_formats,
                                         const CancellationToken &cancellation) const {

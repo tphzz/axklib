@@ -121,7 +121,7 @@
     {sourceSelection}
     {sourceSummary}
     contentsSummary={`${report.actionCount} planned objects`}
-    reviewSummary={`${report.issueCount} mapping details`}
+    reviewSummary={blockers.length ? reviewNotice : `${report.issueCount} mapping details`}
     {reviewNotice}
 >
     {#snippet columns()}<div class="object-columns">

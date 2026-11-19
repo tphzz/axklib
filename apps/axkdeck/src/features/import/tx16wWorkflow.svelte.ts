@@ -42,6 +42,7 @@ export interface Tx16wImportMember {
 }
 
 export interface Tx16wImportRequest {
+    sourceFormat?: 'yamaha.tx16w' | 'nuedge.typhoon';
     members: Tx16wImportMember[];
     target: VolumeImportDestination | null;
     importMode: Tx16wImportMode;
@@ -122,10 +123,9 @@ export class Tx16wImportWorkflow {
         if (this.request !== request) return;
         const profile = profiles.find(
             (p) =>
-                p.sourceFormat === 'yamaha.tx16w' &&
+                p.sourceFormat === request.sourceFormat &&
                 p.destinationFormat === 'yamaha.a-series' &&
-                p.outputKind === 'EXISTING_IMAGE' &&
-                p.id === 'yamaha.tx16w-to-a-series',
+                p.outputKind === 'EXISTING_IMAGE',
         );
         if (!profile) throw new Error('This server does not offer conversion to an existing A-series image');
         request.destinationProfile = profile.id;
@@ -141,7 +141,9 @@ export class Tx16wImportWorkflow {
         await this.close();
         if (this.request) return;
         this.completion.reset();
-        const members = session?.documents.find((document) => document.id === documentId)?.sourceMemberIds;
+        const document = session?.documents.find((d) => d.id === documentId);
+        if (session && document?.formatId !== 'yamaha.tx16w' && document?.formatId !== 'nuedge.typhoon') return;
+        const members = document?.sourceMemberIds;
         const sourceName = session?.sources
             .filter((s) => members?.includes(s.id))
             .map((s) => imageLocation(s.source).displayName.split('/').at(-1))
@@ -157,6 +159,7 @@ export class Tx16wImportWorkflow {
             progress: 0,
             error: '',
             documentSource: { kind: 'DOCUMENT', sessionId, documentId, expectedRevision },
+            sourceFormat: document?.formatId === 'nuedge.typhoon' ? 'nuedge.typhoon' : 'yamaha.tx16w',
             sourceName: sourceName || this.dependencies.imageLocation()?.displayName,
             discovery: idleCompanionSearch(),
         };
@@ -240,6 +243,7 @@ export class Tx16wImportWorkflow {
         files: (ClientUploadSource | FileLocation)[],
         selected: DiskTreeItem | null = this.dependencies.selectedSource(),
         claimUpload?: (source: ClientUploadSource | FileLocation) => ClientUploadLocation | undefined,
+        sourceFormat: NonNullable<Tx16wImportRequest['sourceFormat']> = 'yamaha.tx16w',
     ): Promise<void> {
         if (!this.canStart()) return;
         const admitted = admittedSources(files);
@@ -276,6 +280,7 @@ export class Tx16wImportWorkflow {
                 if (upload) member.upload = member.resolvedSource = upload;
                 return member;
             }),
+            sourceFormat,
             target,
             importMode: 'HIERARCHY',
             plan: null,
@@ -414,7 +419,8 @@ export class Tx16wImportWorkflow {
         const started = performance.now();
         request.status = 'importing';
         request.error = '';
-        this.dependencies.setStatus('Importing TX16W disk set');
+        const sampler = request.sourceFormat === 'nuedge.typhoon' ? 'Typhoon' : 'TX16W';
+        this.dependencies.setStatus(`Importing ${sampler} disk set`);
         try {
             if (!this.ownedTarget) await this.dependencies.invalidateSession(sessionId);
             await this.completion.run(
@@ -428,8 +434,8 @@ export class Tx16wImportWorkflow {
                     this.dependencies.reportTiming('tx16w-disk-set-import', started, objectCount);
                     this.dependencies.setStatus(
                         request.documentSource
-                            ? `Converted TX16W document to ${request.destinationName}`
-                            : `Imported ${request.members.length} TX16W disk image${request.members.length === 1 ? '' : 's'}`,
+                            ? `Converted ${sampler} document to ${request.destinationName}`
+                            : `Imported ${request.members.length} ${sampler} disk image${request.members.length === 1 ? '' : 's'}`,
                     );
                     if (this.completion.warnings.length === 0) await this.releaseAndClose();
                 },
@@ -611,9 +617,11 @@ export class Tx16wImportWorkflow {
             if (controller.signal.aborted || this.request !== request) return;
             request.status = 'inspecting';
             request.progress = 1;
+            if (!request.destinationProfile) await this.loadDestinationProfile(request);
+            if (controller.signal.aborted || this.request !== request || !request.destinationProfile) return;
             const plan = await this.dependencies.transport.prepareConversion(
                 {
-                    profileId: request.destinationProfile ?? 'yamaha.tx16w-to-a-series',
+                    profileId: request.destinationProfile,
                     source: request.documentSource ?? {
                         kind: 'SOURCES',
                         sources: request.members.map((member) => member.resolvedSource as InputFileLocation),

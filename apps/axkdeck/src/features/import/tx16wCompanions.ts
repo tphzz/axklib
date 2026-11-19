@@ -101,7 +101,12 @@ export class Tx16wCompanionDiscovery {
                     ? first.nearbySources?.bind(first)
                     : undefined;
             let result = await this.transport.resolveCompanionSources(
-                { sources, exclusions, searchNearby: sources[0].kind === 'server-file' },
+                {
+                    sources,
+                    exclusions,
+                    ...(request.sourceFormat === 'nuedge.typhoon' ? { formatId: request.sourceFormat } : {}),
+                    searchNearby: sources[0].kind === 'server-file',
+                },
                 signal,
             );
             signal.throwIfAborted();
@@ -133,6 +138,7 @@ export class Tx16wCompanionDiscovery {
                         {
                             sources,
                             candidates: temporary.map((candidate) => candidate.upload),
+                            ...(request.sourceFormat === 'nuedge.typhoon' ? { formatId: request.sourceFormat } : {}),
                             exclusions,
                             searchNearby: false,
                         },

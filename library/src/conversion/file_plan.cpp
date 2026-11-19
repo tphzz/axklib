@@ -7,6 +7,7 @@
 
 #include "axklib/file_publication.hpp"
 #include "axklib/formats/tx16w/document.hpp"
+#include "axklib/formats/typhoon/document.hpp"
 #include "axklib/native/registry.hpp"
 #include "file_sources.hpp"
 
@@ -54,15 +55,18 @@ Result<FilePlan> FilePlan::prepare(const FileRequest &request, const Cancellatio
         return std::unexpected(added.error());
     if (const auto added = formats.add(tx16w::provider()); !added)
         return std::unexpected(added.error());
-    const auto opened = formats.open(sources->sources, {profile->source_format}, cancellation);
+    if (const auto added = formats.add(typhoon::provider()); !added)
+        return std::unexpected(added.error());
+    const auto opened = formats.open_one(sources->sources, profile->source_format, cancellation);
     if (!opened)
         return std::unexpected(opened.error());
-    if (opened->selection_required || opened->documents.size() != 1U)
-        return std::unexpected(invalid("Select exactly one native source document"));
     std::optional<file_internal::Binding> destination;
-    Request input{opened->documents.front(), {profile->destination_format, {}, {}, request.selection},
-                  request.options,           request.fidelity,
-                  request.capacity_policy,   {}};
+    Request input{*opened,
+                  {profile->destination_format, {}, {}, request.selection},
+                  request.options,
+                  request.fidelity,
+                  request.capacity_policy,
+                  {}};
     if (!new_image) {
         auto binding = file_internal::bind(request.destination, cancellation);
         if (!binding)

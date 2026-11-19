@@ -114,15 +114,13 @@ Result<NativeDocumentSnapshot> open_source(const nlohmann::json &input, const na
         auto sources = native::SourceSet::create(std::move(members));
         if (!sources)
             return std::unexpected(Error{"conversion_source_invalid", sources.error().message});
-        auto opened = formats.open(*sources, {std::string{format_id}}, context.cancellation);
+        auto opened = formats.open_one(*sources, format_id, context.cancellation);
         if (!opened)
             return std::unexpected(Error{opened.error().code == ErrorCode::operation_cancelled
                                              ? "operation_cancelled"
                                              : "conversion_source_invalid",
                                          opened.error().message});
-        if (opened->documents.size() != 1U || opened->selection_required)
-            return std::unexpected(Error{"conversion_source_ambiguous", "Select exactly one native source document"});
-        return NativeDocumentSnapshot{{}, 0U, opened->documents.front(), {}};
+        return NativeDocumentSnapshot{{}, 0U, *opened, {}};
     } catch (const nlohmann::json::exception &) {
         return std::unexpected(Error{"invalid_request", "Malformed conversion source selection"});
     }

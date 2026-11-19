@@ -10,6 +10,7 @@ export type ConversionSourceObject = NonNullable<ConversionReport['sourceObjects
 export type ConversionFidelity = ConversionReport['fidelity'];
 export type CompanionSourceResolution = components['schemas']['CompanionSourceResolution'];
 export interface CompanionSourceInput {
+    formatId?: components['schemas']['CompanionSourceResolutionRequest']['formatId'];
     sources: InputFileLocation[];
     candidates?: InputFileLocation[];
     exclusions?: InputFileLocation[];

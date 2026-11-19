@@ -191,6 +191,7 @@ class AXK_API FatImage {
                                                const CancellationToken &cancellation = {});
 
     [[nodiscard]] const FatGeometry &geometry() const noexcept;
+    [[nodiscard]] const std::string &volume_label() const noexcept { return volume_label_; }
     [[nodiscard]] const std::string &source_name() const noexcept;
     [[nodiscard]] const std::vector<FatFile> &files() const noexcept;
     [[nodiscard]] const std::vector<FatDirectory> &directories() const noexcept;
@@ -214,6 +215,7 @@ class AXK_API FatImage {
     std::shared_ptr<const RandomAccessReader> reader_;
     std::string source_name_;
     FatGeometry geometry_;
+    std::string volume_label_;
     std::vector<FatFile> files_;
     std::vector<FatDirectory> directories_;
     std::optional<YamahaFloppyCatalog> yamaha_catalog_;

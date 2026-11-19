@@ -53,6 +53,7 @@ describe('TX16W object names and identities', () => {
         transport.nativeObjects = async () => objects;
         transport.nativeObjectDetail = async (session, id) => {
             const detail = await originalDetail(session, id);
+            if (detail.formatId !== 'yamaha.tx16w') throw new Error('Expected TX16W fixture detail');
             return {
                 ...detail,
                 name: 'init performance',

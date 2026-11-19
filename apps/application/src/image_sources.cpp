@@ -165,6 +165,8 @@ Result<void> project_filesystem(ImageSourceMember &member) {
             if (entry.id == entry.root_id)
                 member.roots.push_back({entry.id, index->filesystem_name, {}});
         }
+        if (const auto *fat = std::get_if<FatImage>(&member.media->storage()); fat && member.roots.size() == 1)
+            member.roots.front().volume_label = fat->volume_label();
         for (const auto &entry : index->entries) {
             if (entry.id == entry.root_id)
                 continue;
@@ -172,7 +174,7 @@ Result<void> project_filesystem(ImageSourceMember &member) {
             if (root == member.roots.end())
                 return std::unexpected(Error{"filesystem_invalid", "Filesystem entry has no root"});
             const auto file = index->files.find(entry.id);
-            filesystems::Entry item{entry.id, entry.path, file == index->files.end(), 0U, {}};
+            filesystems::Entry item{entry.id, entry.path, file == index->files.end(), 0U, {}, entry.name};
             if (file != index->files.end())
                 item.reader = std::make_shared<EntryReader>(member.media, file->second, entry.size_bytes.value_or(0U));
             root->entries.push_back(std::move(item));

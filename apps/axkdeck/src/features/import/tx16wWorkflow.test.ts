@@ -318,6 +318,50 @@ describe('Tx16wImportWorkflow', () => {
         await workflow.close();
     });
 
+    it.each([true, false])(
+        'uses only a server-advertised Typhoon profile for a native drop (available: %s)',
+        async (available) => {
+            const seed = serverFileLocation({ rootId: 'remote', relativePath: 'DBS207A.img' });
+            const profile = {
+                id: 'server-selected-profile',
+                sourceFormat: 'nuedge.typhoon',
+                destinationFormat: 'yamaha.a-series',
+                outputKind: 'EXISTING_IMAGE',
+            };
+            const conversionProfiles = vi
+                .fn()
+                .mockResolvedValue([
+                    { ...profile, id: 'yamaha-only', sourceFormat: 'yamaha.tx16w' },
+                    ...(available ? [profile] : []),
+                ]);
+            const resolveCompanionSources = vi.fn(async (input: CompanionSourceInput) => ({
+                members: selectedMembers(input.sources),
+                requirements: [],
+            }));
+            const prepareConversion = vi.fn().mockResolvedValue(inspection());
+            const workflow = createWorkflow(
+                { connectionMode: 'remote', resolveCompanionSources, conversionProfiles, prepareConversion },
+                sourceTree()[0].children![0],
+            );
+            await workflow.requestDroppedFiles([seed], undefined, undefined, 'nuedge.typhoon');
+            expect(resolveCompanionSources).toHaveBeenCalledWith(
+                expect.objectContaining({ formatId: 'nuedge.typhoon' }),
+                expect.any(AbortSignal),
+            );
+            if (available) {
+                expect(prepareConversion).toHaveBeenCalledWith(
+                    expect.objectContaining({ profileId: profile.id }),
+                    expect.any(AbortSignal),
+                );
+                expect(workflow.request?.error).toBe('');
+            } else {
+                expect(prepareConversion).not.toHaveBeenCalled();
+                expect(workflow.request?.error).toMatch(/does not offer conversion/);
+            }
+            await workflow.close();
+        },
+    );
+
     it('discovers server-workspace companions on remote servers and marks their origin', async () => {
         const first = serverFileLocation({ rootId: 'remote', relativePath: 'set/first.img' });
         const second = serverFileLocation({ rootId: 'remote', relativePath: 'set/second.img' }, 'second.img');

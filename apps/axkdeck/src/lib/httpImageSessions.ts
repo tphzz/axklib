@@ -1,6 +1,7 @@
 import type { AxklibHttpApiClient } from './httpApiClient';
 import type { components } from './generated/axklibApiV1';
-import { imageSourceReference, imageLocation } from './httpImageSources';
+import { imageSourceReference, imageLocation, imageOpenSources } from './httpImageSources';
+import type { DepartingImageSessions } from './departingImageSessions';
 import { AxklibApiError } from './httpErrors';
 import { HttpJobController } from './httpJobController';
 import { HttpCapacityGate } from './httpCapacityGate';
@@ -186,22 +187,16 @@ export class HttpImageSessions {
         private readonly client: AxklibHttpApiClient,
         private readonly jobs: HttpJobController,
         mutations?: HttpCapacityGate,
+        private readonly departing?: DepartingImageSessions,
     ) {
         this.mutations = mutations ?? new HttpCapacityGate(client, jobs);
         this.native = new HttpNativeDocumentReads(client, (id) => this.get(id), jobs);
     }
 
     async open(locations: ImageLocation[], options: ImageOpenOptions = {}): Promise<OpenedImage> {
-        if (
-            !locations.length ||
-            locations.length > 32 ||
-            locations.some((location) => !['server-file', 'server-directory', 'device'].includes(location.kind)) ||
-            (locations.length > 1 && locations.some((location) => location.kind === 'device'))
-        )
-            throw new Error('Select one to 32 files or folders, or one physical device');
-        const submitted = await this.client.request<components['schemas']['Job']>('POST', '/images', {
-            sources: locations.map(imageSourceReference),
-        });
+        const sources = imageOpenSources(locations);
+        if (locations[0].kind !== 'device') await this.departing?.recover();
+        const submitted = await this.client.request<components['schemas']['Job']>('POST', '/images', { sources });
         if (!this.jobs.isJob(submitted)) throw new Error('images.open did not return a job');
         const localJob = this.jobs.map(submitted);
         options.onUpdate?.(localJob);
@@ -224,6 +219,7 @@ export class HttpImageSessions {
         const summary = completed.result as ApiImageSummary;
         const sessionId = this.nextSessionId++;
         if (locations[0].kind === 'device') this.client.deviceWrites.bind(summary.imageId, locations[0]);
+        else this.departing?.track(summary.imageId);
         this.sessions.set(sessionId, { ...documentSession(summary), sources: locations, source: locations[0] });
         try {
             return await this.openedImage(sessionId, summary);
@@ -447,6 +443,7 @@ export class HttpImageSessions {
         const session = this.sessions.get(sessionId);
         if (!session) return;
         await this.client.request('DELETE', `/images/${encodeURIComponent(session.remoteId)}`);
+        this.departing?.forget(session.remoteId);
         this.client.deviceWrites.unbind(session.remoteId);
         this.sessions.delete(sessionId);
         const source = session.source;

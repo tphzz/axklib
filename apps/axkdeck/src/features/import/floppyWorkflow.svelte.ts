@@ -517,7 +517,7 @@ export class FloppyImportWorkflow {
             if (inspection.format !== 'A_SERIES') {
                 if (r.members.some((member) => isDirectory(member.source)))
                     throw new Error('Folder import supports unpacked A-series floppy disks.');
-                if (inspection.format !== 'TX16W')
+                if (inspection.format !== 'TX16W' && inspection.format !== 'TYPHOON')
                     throw new Error(
                         inspection.format === 'SU700'
                             ? 'Import SU700 floppies into a SU700 hard disk in Files mode.'

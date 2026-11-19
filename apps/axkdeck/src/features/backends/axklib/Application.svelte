@@ -191,7 +191,13 @@
         selectedSource: () => imageSessionWorkflow.importDestinationSource(),
         sourceItems: () => imageSessionWorkflow.sourceItems,
         otherFormat: async (format, sources, target, claimUpload) => {
-            if (format === 'TX16W') await tx16wImportWorkflow.requestDroppedFiles(sources, target, claimUpload);
+            if (format === 'TX16W' || format === 'TYPHOON')
+                await tx16wImportWorkflow.requestDroppedFiles(
+                    sources,
+                    target,
+                    claimUpload,
+                    format === 'TYPHOON' ? 'nuedge.typhoon' : 'yamaha.tx16w',
+                );
             else
                 imageSessionWorkflow.setStatus(
                     format === 'SU700'

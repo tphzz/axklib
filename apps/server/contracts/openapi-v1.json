@@ -1954,6 +1954,11 @@
             "maxItems": 1024,
             "type": "array"
           },
+          "formatId": {
+            "default": "yamaha.tx16w",
+            "minLength": 1,
+            "type": "string"
+          },
           "searchNearby": {
             "default": true,
             "type": "boolean"
@@ -4661,6 +4666,7 @@
               "A_SERIES",
               "SU700",
               "TX16W",
+              "TYPHOON",
               "UNKNOWN"
             ],
             "type": "string"
@@ -7859,6 +7865,9 @@
           },
           {
             "$ref": "#/components/schemas/Tx16wObjectDetail"
+          },
+          {
+            "$ref": "#/components/schemas/TyphoonObjectDetail"
           }
         ]
       },
@@ -17457,6 +17466,212 @@
             "type": "object"
           }
         ]
+      },
+      "TyphoonItemReference": {
+        "additionalProperties": false,
+        "properties": {
+          "diskLabel": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "targetObjectId": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "version": {
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "version",
+          "diskLabel",
+          "targetObjectId"
+        ],
+        "type": "object"
+      },
+      "TyphoonObjectDetail": {
+        "additionalProperties": false,
+        "properties": {
+          "details": {
+            "additionalProperties": false,
+            "properties": {
+              "itemVersion": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "parts": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "nativeChannel": {
+                      "maximum": 255,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "voice": {
+                      "$ref": "#/components/schemas/TyphoonItemReference"
+                    }
+                  },
+                  "required": [
+                    "nativeChannel",
+                    "voice"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "referenceCount": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "regions": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "keyHigh": {
+                      "maximum": 127,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "keyLow": {
+                      "maximum": 127,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "velocityHigh": {
+                      "maximum": 127,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "velocityLow": {
+                      "maximum": 127,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "wave": {
+                      "$ref": "#/components/schemas/TyphoonItemReference"
+                    }
+                  },
+                  "required": [
+                    "keyLow",
+                    "keyHigh",
+                    "velocityLow",
+                    "velocityHigh",
+                    "wave"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "wave": {
+                "additionalProperties": false,
+                "properties": {
+                  "bits": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "frames": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "loopEnd": {
+                    "minimum": 0,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "loopStart": {
+                    "minimum": 0,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "rootKey": {
+                    "minimum": 0,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "sampleRate": {
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "frames",
+                  "sampleRate",
+                  "bits",
+                  "rootKey",
+                  "loopStart",
+                  "loopEnd"
+                ],
+                "type": "object"
+              }
+            },
+            "required": [
+              "itemVersion",
+              "referenceCount"
+            ],
+            "type": "object"
+          },
+          "documentId": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "formatId": {
+            "const": "nuedge.typhoon"
+          },
+          "imageId": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "locations": {
+            "items": {
+              "$ref": "#/components/schemas/NativeSourceLocation"
+            },
+            "type": "array"
+          },
+          "name": {
+            "type": "string"
+          },
+          "objectId": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "profile": {
+            "const": "typhoon-2000"
+          },
+          "revision": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "type": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "imageId",
+          "documentId",
+          "revision",
+          "formatId",
+          "profile",
+          "objectId",
+          "type",
+          "name",
+          "details",
+          "locations"
+        ],
+        "type": "object"
       },
       "Upload": {
         "additionalProperties": false,

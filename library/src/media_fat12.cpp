@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <deque>
 #include <format>
+#include <map>
 #include <ranges>
 #include <set>
 #include <unordered_map>
@@ -127,13 +128,58 @@ struct FatScanBudget {
     std::uint64_t path_bytes{};
 };
 
+// A Typhoon catalog can contain different item versions with identical DOS names.
+// Only grant occurrence paths after checking every colliding root file's native header.
+Result<std::set<std::string>> typhoon_occurrences(const RandomAccessReader &reader, const FatGeometry &geometry,
+                                                  std::span<const std::byte> root,
+                                                  const CancellationToken &cancellation) {
+    std::set<std::string> duplicates;
+    if (geometry.profile != FatProfile::a_series_floppy || reader.size() != 737280U || geometry.total_sectors != 1440 ||
+        geometry.bytes_per_sector != 512 || geometry.sectors_per_cluster != 2 || geometry.root_entry_count != 112 ||
+        geometry.fat_count != 2 || geometry.sectors_per_fat != 3 || geometry.reserved_sectors != 1 ||
+        geometry.media_descriptor != 0xf9)
+        return duplicates;
+    std::map<std::string, std::vector<std::size_t>> offsets;
+    for (std::size_t i = 0; i + 32 <= root.size() && root[i] != std::byte{}; i += 32) {
+        const auto entry = root.subspan(i, 32);
+        if (entry[0] != std::byte{0xe5} && (std::to_integer<unsigned>(entry[11]) & 8U) == 0)
+            offsets[detail::upper_ascii(decode_fat_name(entry))].push_back(i);
+    }
+    for (const auto &[name, entries] : offsets) {
+        if (entries.size() < 2)
+            continue;
+        for (const auto i : entries) {
+            const auto entry = root.subspan(i, 32);
+            const auto cluster = detail::le16(entry, 26);
+            const auto size = detail::le32(entry, 28);
+            if ((std::to_integer<unsigned>(entry[11]) & 0x10U) != 0 || cluster < 2 ||
+                cluster >= geometry.data_cluster_count + 2U || size < 36 || entry[9] < std::byte{'0'} ||
+                entry[9] > std::byte{'9'} || entry[10] < std::byte{'0'} || entry[10] > std::byte{'9'})
+                break;
+            const auto h = detail::read_bytes(reader, fat_cluster_offset(geometry, cluster), 36, cancellation);
+            if (!h)
+                return std::unexpected(h.error());
+            const std::string_view header{reinterpret_cast<const char *>(h->data()), h->size()};
+            const auto type = header.substr(8, 4);
+            const bool known =
+                (entry[8] == std::byte{'O'} && type == "TYPV") || (entry[8] == std::byte{'P'} && type == "TYPP");
+            if (!known || !header.starts_with("FORM") || detail::be32(*h, 4) != size - 8U ||
+                header.substr(12, 4) != "VInf" || detail::be32(*h, 16) != 16)
+                break;
+            if (i == entries.back())
+                duplicates.insert(name);
+        }
+    }
+    return duplicates;
+}
+
 Result<void> scan_fat_directory(std::vector<FatFile> &files, std::vector<FatDirectory> &directories,
                                 std::deque<PendingFatDirectory> &pending, std::span<const std::byte> bytes,
                                 std::string_view parent, std::uint64_t directory_offset,
                                 std::span<const std::uint16_t> directory_clusters, std::span<const std::byte> fat,
                                 const FatGeometry &geometry, std::string_view source,
                                 std::unordered_map<std::uint16_t, std::string> &claimed_clusters, FatScanBudget &budget,
-                                const CancellationToken &cancellation) {
+                                const CancellationToken &cancellation, const std::set<std::string> &occurrences = {}) {
     std::set<std::string> names;
     for (std::size_t offset = 0; offset + 32U <= bytes.size(); offset += 32U) {
         if (const auto check = cancellation.check(); !check)
@@ -160,7 +206,7 @@ Result<void> scan_fat_directory(std::vector<FatFile> &files, std::vector<FatDire
                                                        entry_offset)};
         }
         const auto folded = detail::upper_ascii(name);
-        if (!dot && !names.insert(folded).second) {
+        if (!dot && !names.insert(folded).second && !occurrences.contains(folded)) {
             return std::unexpected{detail::media_error(ErrorCode::container_invalid_geometry,
                                                        std::format("duplicate FAT directory name '{}'", name), source,
                                                        entry_offset)};
@@ -169,7 +215,9 @@ Result<void> scan_fat_directory(std::vector<FatFile> &files, std::vector<FatDire
             continue;
         const auto first_cluster = detail::le16(entry, 0x1a);
         const auto size = detail::le32(entry, 0x1c);
-        const auto path = parent.empty() ? name : std::format("{}/{}", parent, name);
+        auto path = parent.empty() ? name : std::format("{}/{}", parent, name);
+        if (occurrences.contains(folded))
+            path.insert(path.rfind('.'), std::format(" [entry {}]", entry_offset));
         budget.path_bytes += path.size();
         if (files.size() + directories.size() >= 100000U || budget.path_bytes > 64U * 1024U * 1024U) {
             return std::unexpected{detail::media_error(ErrorCode::unsupported_profile,
@@ -350,8 +398,12 @@ Result<FatImage> FatImage::open(std::shared_ptr<const RandomAccessReader> reader
     std::deque<PendingFatDirectory> pending;
     std::unordered_map<std::uint16_t, std::string> claimed_clusters;
     FatScanBudget budget{root_size, 0U};
-    if (const auto scan = scan_fat_directory(files, directories, pending, *root, {}, geometry.root_offset, {}, *fat,
-                                             geometry, source_name, claimed_clusters, budget, cancellation);
+    const auto occurrences = typhoon_occurrences(*reader, geometry, *root, cancellation);
+    if (!occurrences)
+        return std::unexpected(occurrences.error());
+    if (const auto scan =
+            scan_fat_directory(files, directories, pending, *root, {}, geometry.root_offset, {}, *fat, geometry,
+                               source_name, claimed_clusters, budget, cancellation, *occurrences);
         !scan) {
         return std::unexpected{scan.error()};
     }
@@ -391,6 +443,12 @@ Result<FatImage> FatImage::open(std::shared_ptr<const RandomAccessReader> reader
     result.reader_ = std::move(reader);
     result.source_name_ = std::move(source_name);
     result.geometry_ = geometry;
+    for (std::size_t i = 0; i + 32 <= root->size() && (*root)[i] != std::byte{}; i += 32) {
+        if ((*root)[i] != std::byte{0xe5} && (*root)[i + 11] == std::byte{8}) {
+            result.volume_label_ = detail::clean_ascii(std::span{*root}.subspan(i, 11));
+            break;
+        }
+    }
     result.files_ = std::move(files);
     result.directories_ = std::move(directories);
     const auto declared_bytes = static_cast<std::uint64_t>(geometry.total_sectors) * geometry.bytes_per_sector;

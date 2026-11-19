@@ -6,10 +6,12 @@ direction owns its mapping, fidelity policy and supported destination profile.
 | Profile | Select | Receive |
 | --- | --- | --- |
 | `yamaha.tx16w-to-a-series` | A TX16W source and an existing SFS volume | Reviewed Wave Data or supported hierarchy in the A-series destination |
+| `nuedge.typhoon-to-a-series` | A native Typhoon sound disk or explicit disk set | Wave Data, or Programs and Sample Banks built from selected Performances and Voices in an existing SFS image |
 | `yamaha.a-series-to-tx16w.wave-disk` | Ordered Wave Data occurrences in one native A-series document | A new 720 KiB FAT12 disk of mono TX16W Waves |
 
-The Wave disk contains no Setup, playable Voice or Performance. Neither
-direction edits an existing TX16W disk or writes to a physical floppy.
+The Wave disk contains no Setup, playable Voice or Performance. No
+profile edits an existing TX16W disk or writes to a physical floppy.
+The Yamaha Wave-disk exporter does not author Typhoon disks.
 
 The built-in profile list is the same for the file SDK and server. Each
 descriptor (including its options schema and `outputKind`) comes from the registration used
@@ -147,6 +149,35 @@ If the report contains explicit mapping decisions, append their IDs as shown
 in the prompt. Ordinary losses do not change the confirmation. Without `--output`, it
 only prepares and prints the report. `--strict` disallows loss and uncertainty.
 No serialized report can later be submitted as an executable plan.
+
+## Import a Typhoon sound disk
+
+You can inspect the disks without converting them. Pass the members together.
+On mixed disks, select the document with `formatId: "nuedge.typhoon"` for
+Typhoon data; the Yamaha document has its own object identities.
+
+```bash
+axklib info --source-set keys-a.img keys-b.img
+axklib convert --profile nuedge.typhoon-to-a-series \
+  --source keys-a.img keys-b.img --destination template.hds \
+  --selection '{"kind":"CREATE_VOLUME","partitionIndex":0,"volumeName":"Keys"}' \
+  --options '{"mode":"HIERARCHY"}'
+```
+
+The example is a dry run. Append `--output imported.hds` to publish a new
+copy after reviewing the plan. Use `EXISTING_VOLUME` to add to a named
+volume instead. `WAVE_DATA_ONLY` transfers audio independently of instrument
+dependencies. In `HIERARCHY`, a Performance becomes a Program, a Voice a
+Sample Bank, and each playable split a Sample pointing to Wave Data. A
+shared source Wave is stored once. A Voice selected on its own does not
+acquire a fabricated Performance.
+
+Review lists key and velocity ranges and the assigned Wave. Pitch offsets,
+envelopes, filters, modulation and Performance controls are not fully
+translated. Best reports omissions; Strict blocks them. A Voice with an
+explicitly empty Wave map is different from a missing Wave: Best can omit
+the former, never substitute for the latter. Select an unaffected instrument
+or supply the required disk and version before retrying.
 
 ## Create a TX16W Wave disk
 
