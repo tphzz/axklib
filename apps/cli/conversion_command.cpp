@@ -17,7 +17,7 @@ void register_conversion_command(CLI::App &app, ConversionCommand &state) {
     state.command->add_option("--selection", state.selection, "destination selection JSON for an existing image");
     state.command->add_option("--options", state.options, "profile options JSON")->required();
     state.command->add_flag("--strict", state.strict, "reject meaningful loss or uncertainty");
-    state.command->add_option("--output", state.output, "new output image; prompts for review in this process");
+    state.command->add_option("--output", state.output, "new image file or image-set directory; prompts for review");
 }
 
 int run_conversion(const ConversionCommand &state, const conversion::Registry &profiles) {

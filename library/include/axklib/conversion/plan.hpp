@@ -58,13 +58,23 @@ struct NewImageReview {
     std::uint64_t size_bytes{};
 };
 
+struct ImageMemberReview {
+    std::string filename;
+    std::uint64_t size_bytes{};
+    std::string sha256;
+};
+struct NewImageSetReview {
+    std::vector<ImageMemberReview> members;
+};
+void to_json(nlohmann::json &json, const NewImageSetReview &review);
+
 struct Report {
     std::string profile_id;
     Fidelity fidelity{Fidelity::best};
     bool executable{};
     std::vector<Action> actions;
     std::vector<Issue> issues;
-    std::variant<VolumeCapacityAdmission, NewImageReview> destination;
+    std::variant<VolumeCapacityAdmission, NewImageReview, NewImageSetReview> destination;
     std::vector<SourceObject> source_objects{};
 };
 
@@ -76,15 +86,26 @@ struct Patch {
     std::vector<std::byte> replacement;
 };
 
-enum class OutputKind : std::uint8_t { existing_image, new_image };
+enum class OutputKind : std::uint8_t { existing_image, new_image, new_image_set };
+[[nodiscard]] std::string_view output_kind_name(OutputKind kind) noexcept;
 struct ExistingImagePatches {
     std::vector<Patch> patches;
     std::uint64_t destination_size{};
 };
 struct NewImage {
     std::vector<std::byte> bytes;
+    std::string extension{"img"};
 };
-using PreparedOutput = std::variant<ExistingImagePatches, NewImage>;
+struct ImageMember {
+    std::string filename;
+    std::vector<std::byte> bytes;
+};
+struct NewImageSet {
+    static constexpr std::size_t maximum_members = 64;
+    std::vector<ImageMember> members;
+    [[nodiscard]] Result<void> validate(std::uint64_t byte_limit) const;
+};
+using PreparedOutput = std::variant<ExistingImagePatches, NewImage, NewImageSet>;
 
 struct Limits {
     std::uint64_t maximum_bytes{512ULL * 1024ULL * 1024ULL};
@@ -115,6 +136,7 @@ class PreparedPlan final {
     PreparedPlan(Report report, std::vector<Patch> patches, std::uint64_t destination_size,
                  std::uint64_t retained_bytes);
     PreparedPlan(Report report, NewImage image, std::uint64_t retained_bytes);
+    PreparedPlan(Report report, NewImageSet images);
     [[nodiscard]] const Report &report() const noexcept;
     [[nodiscard]] const PreparedOutput &output() const noexcept;
     [[nodiscard]] std::uint64_t retained_bytes() const noexcept;
@@ -124,6 +146,12 @@ class PreparedPlan final {
     Report report_;
     PreparedOutput output_;
     std::uint64_t retained_bytes_{};
+};
+
+struct RouteDescriptor {
+    std::string target_label, medium;
+    std::vector<std::string> intents, editor_capabilities;
+    int priority{};
 };
 
 struct Profile {
@@ -136,11 +164,58 @@ struct Profile {
         const Request &, const CancellationToken &, ProgressSink *)>;
     Prepare prepare;
     OutputKind output_kind{OutputKind::existing_image};
+    std::optional<RouteDescriptor> route{};
+};
+
+enum class WavePlayback {
+    unknown,
+    forward,
+    forward_loop,
+    forward_loop_release,
+    reverse,
+    forward_one_shot,
+    reverse_one_shot
+};
+
+// A mono playback window. Loop and first-frame positions use source frame coordinates;
+// reads are relative to the window and return signed 16-bit PCM without resampling.
+struct WaveTransfer {
+    std::string id, name;
+    std::uint32_t rate{}, first_frame{}, frame_count{};
+    WavePlayback loop_mode{WavePlayback::unknown};
+    std::uint32_t loop_start{}, loop_length{};
+    std::uint8_t root_key{};
+    std::int8_t fine_tune{};
+    using Read =
+        std::function<Result<std::vector<std::int16_t>>(std::uint64_t, std::size_t, const CancellationToken &)>;
+    Read read_pcm;
+    [[nodiscard]] Result<std::vector<std::int16_t>> read(std::uint64_t first, std::size_t count,
+                                                         const CancellationToken &cancel = {}) const;
+};
+
+// Wave adapters compose by their shared typed transfer contract. Source selection
+// belongs to the reader; destination placement, fidelity and limits remain in Request.
+struct WaveReaderAdapter {
+    std::string source_format, name;
+    nlohmann::json selection_schema;
+    std::vector<std::string> editor_capabilities;
+    std::function<Result<std::vector<WaveTransfer>>(const Request &, const CancellationToken &)> select;
+};
+
+struct WaveWriterAdapter {
+    std::string route_key, destination_format, name;
+    OutputKind output_kind;
+    std::optional<RouteDescriptor> route;
+    std::function<Result<std::shared_ptr<const PreparedPlan>>(
+        std::string_view, std::span<const WaveTransfer>, const Request &, const CancellationToken &, ProgressSink *)>
+        encode;
 };
 
 class Registry final {
   public:
     [[nodiscard]] Result<void> add(Profile profile);
+    [[nodiscard]] Result<void> add(WaveReaderAdapter reader);
+    [[nodiscard]] Result<void> add(WaveWriterAdapter writer);
     [[nodiscard]] std::span<const Profile> profiles() const noexcept;
     [[nodiscard]] Result<std::shared_ptr<const PreparedPlan>> prepare(std::string_view profile_id,
                                                                       const Request &request,
@@ -149,6 +224,8 @@ class Registry final {
 
   private:
     std::vector<Profile> profiles_;
+    std::vector<WaveReaderAdapter> wave_readers_;
+    std::vector<WaveWriterAdapter> wave_writers_;
 };
 
 [[nodiscard]] std::string_view impact_name(Impact impact) noexcept;

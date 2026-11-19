@@ -5,7 +5,7 @@
 #include "axklib/application/operation_registry.hpp"
 
 namespace axk::app {
-inline const std::array<OperationDescriptor, 3U> &conversion_descriptors() {
+inline const std::array<OperationDescriptor, 4U> &conversion_descriptors() {
     static const std::array descriptors{OperationDescriptor{"images.companionSources.resolve",
                                                             {},
                                                             HttpMethod::post,
@@ -14,6 +14,17 @@ inline const std::array<OperationDescriptor, 3U> &conversion_descriptors() {
                                                             {},
                                                             "CompanionSourceResolutionRequest",
                                                             "CompanionSourceResolution",
+                                                            OperationClass::read,
+                                                            false,
+                                                            false},
+                                        OperationDescriptor{"conversions.inspect",
+                                                            {},
+                                                            HttpMethod::post,
+                                                            "/api/v1/conversion-inspections",
+                                                            ExecutionMode::job,
+                                                            {},
+                                                            "ConversionInspectionRequest",
+                                                            "ConversionInspection",
                                                             OperationClass::read,
                                                             false,
                                                             false},

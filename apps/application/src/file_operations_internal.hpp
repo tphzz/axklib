@@ -15,6 +15,7 @@
 #include "axklib/application/file_operations.hpp"
 #include "axklib/media.hpp"
 #include "axklib/report.hpp"
+#include "directory_cleanup.hpp"
 
 namespace axk::app::file_operations_internal {
 
@@ -56,15 +57,6 @@ struct LoadedSource {
     axk::MediaInventory inventory;
     axk::RelationshipGraph graph;
     axk::ContentTree tree;
-};
-
-struct DirectoryCleanup {
-    std::filesystem::path path;
-
-    ~DirectoryCleanup() {
-        std::error_code error;
-        std::filesystem::remove_all(path, error);
-    }
 };
 
 Error operation_error(std::string code, std::string message, std::optional<std::string> relative_path = std::nullopt);

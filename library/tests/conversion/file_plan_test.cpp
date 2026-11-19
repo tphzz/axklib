@@ -11,6 +11,7 @@
 
 #include "axklib/audio.hpp"
 #include "axklib/conversion/file_plan.hpp"
+#include "axklib/conversion/image_set_publication.hpp"
 #include "axklib/conversion/tx16w_to_a_series/profile.hpp"
 #include "axklib/media.hpp"
 #include "axklib/relationship.hpp"
@@ -67,6 +68,68 @@ class ConversionFiles : public testing::Test {
     }
 };
 } // namespace
+
+TEST_F(ConversionFiles, ImageSetCancellationAndAnOccupiedDirectoryNeverPublishAPartialSet) {
+    using namespace axk::conversion;
+    NewImageSet set{{{"FIRST.IMG", {std::byte{1}}}, {"SECOND.IMG", {std::byte{2}}}}};
+    constexpr auto checkout = []() -> axk::Result<void> { return {}; };
+    const PreparedPlan plan{{"test.set", Fidelity::best, true, {}, {}, NewImageSetReview{}}, std::move(set)};
+    EXPECT_GT(plan.retained_bytes(), 2U);
+    struct Stop : axk::ProgressSink {
+        axk::CancellationSource source;
+        void report(const axk::Progress &p) noexcept override {
+            if (p.phase == axk::ProgressPhase::writing && p.completed == 1)
+                source.cancel();
+        }
+    } stop;
+    const auto dest = root / "published";
+    EXPECT_FALSE(publish_image_set(plan, dest, checkout, stop.source.token(), &stop));
+    EXPECT_FALSE(std::filesystem::exists(dest));
+    EXPECT_FALSE(publish_image_set(plan, dest, [&]() -> axk::Result<void> {
+        std::filesystem::create_directory(dest);
+        return {};
+    }));
+    EXPECT_TRUE(std::filesystem::is_empty(dest));
+    for (const auto &f : std::filesystem::directory_iterator(root))
+        EXPECT_FALSE(f.path().filename().string().starts_with(".axk-images-"));
+}
+
+TEST_F(ConversionFiles, ReplacedStagingDirectoryIsNeitherRemovedNorPublished) {
+    using namespace axk::conversion;
+    NewImageSet set{{{"DISK01.IMG", {std::byte{1}}}}};
+    const PreparedPlan plan{{"test.set", Fidelity::best, true, {}, {}, NewImageSetReview{}}, std::move(set)};
+    std::filesystem::path unrelated;
+    const auto result = publish_image_set(plan, root / "output", [&]() -> axk::Result<void> {
+        for (const auto &entry : std::filesystem::directory_iterator(root)) {
+            if (entry.path().filename().string().starts_with(".axk-images-")) {
+                unrelated = entry.path();
+                break;
+            }
+        }
+        if (unrelated.empty())
+            return std::unexpected(
+                axk::make_error(axk::ErrorCode::invalid_argument, axk::ErrorCategory::io, "Missing staging directory"));
+        std::filesystem::rename(unrelated, root / "relocated");
+        std::filesystem::create_directory(unrelated);
+        std::ofstream(unrelated / "DISK01.IMG") << "not ours";
+        return {};
+    });
+    EXPECT_FALSE(result);
+    EXPECT_FALSE(std::filesystem::exists(root / "output"));
+    EXPECT_TRUE(std::filesystem::exists(unrelated / "DISK01.IMG"));
+}
+
+TEST(ConversionImageSet, RejectsUnsafeMembersNameCollisionsAndRetentionOverflow) {
+    using namespace axk::conversion;
+    for (const auto *name : {"../disk.img", "dir/disk.img", "CON.img", "manifest.json", "DISK01.img", "bad."}) {
+        NewImageSet set{{{"disk01.IMG", {std::byte{1}}}, {name, {std::byte{2}}}}};
+        EXPECT_FALSE(set.validate(1000)) << name;
+    }
+    NewImageSet sized{{{"disk01.img", std::vector<std::byte>(17)}, {"disk02.img", std::vector<std::byte>(17)}}};
+    const auto actual = sized.members[0].bytes.capacity() + sized.members[1].bytes.capacity();
+    EXPECT_FALSE(sized.validate(actual - 1));
+    EXPECT_TRUE(sized.validate(actual));
+}
 
 TEST_F(ConversionFiles, CreatesVolumeInSecondPartitionOnlyWhenApplyingAndNeverMergesANameCollision) {
     const axk::HdsBuildManifest manifest{
@@ -125,6 +188,56 @@ TEST_F(ConversionFiles, OmittingReverseProfileLeavesNativeWaveReadingAndForwardC
     const auto rejected = axk::conversion::FilePlan::prepare(request, {}, nullptr, forward_only);
     ASSERT_FALSE(rejected);
     EXPECT_EQ(rejected.error().message, "Unknown conversion profile");
+}
+
+TEST_F(ConversionFiles, FreshASeriesTargetsReopenAsTheirOwnFormatWithTheSameConvertedPcm) {
+    request.destination.clear();
+    request.selection = nullptr;
+    std::vector<std::byte> expected_pcm;
+    for (auto [suffix, kind] : {std::pair{"floppy", axk::MediaKind::fat12_floppy},
+                                {"iso", axk::MediaKind::iso9660},
+                                {"sfs", axk::MediaKind::sfs}}) {
+        request.profile_id = std::string("yamaha.tx16w-to-a-series.") + suffix;
+        request.options = {{"mode", "WAVE_DATA_ONLY"}, {"volumeName", "Imported"}};
+        if (kind == axk::MediaKind::sfs) {
+            request.options.update({{"sizeBytes", 8388608}, {"partitionCount", 2}, {"partitionIndex", 1}});
+        }
+        auto plan = axk::conversion::FilePlan::prepare(request);
+        ASSERT_TRUE(plan) << suffix << ": " << plan.error().message;
+        ASSERT_TRUE(plan->report().executable) << suffix;
+        const auto path = root / (std::string("output.") + suffix);
+        ASSERT_FALSE(std::filesystem::exists(path));
+        const auto saved = plan->apply(path, {});
+        ASSERT_TRUE(saved) << saved.error().message;
+        auto media = axk::open_media(path);
+        ASSERT_TRUE(media) << media.error().message;
+        EXPECT_EQ(media->kind(), kind);
+        auto inventory = axk::build_media_inventory(*media);
+        ASSERT_TRUE(inventory) << inventory.error().message;
+        ASSERT_EQ(inventory->objects.size(), 1U);
+        auto object = axk::load_media_object(*media, inventory->objects.front());
+        ASSERT_TRUE(object) << object.error().message;
+        auto audio = axk::decode_waveform(*object);
+        ASSERT_TRUE(audio) << audio.error().message;
+        ASSERT_FALSE(audio->pcm.empty());
+        if (expected_pcm.empty())
+            expected_pcm = audio->pcm;
+        EXPECT_EQ(audio->pcm, expected_pcm) << suffix;
+        if (kind == axk::MediaKind::sfs) {
+            const auto &placement = inventory->catalog.objects.front().placement;
+            ASSERT_TRUE(placement);
+            EXPECT_EQ(placement->volume_name, "Imported");
+            EXPECT_EQ(inventory->catalog.objects.front().partition.value, 1U);
+        }
+    }
+    request.options["sizeBytes"] = 8ULL * 1024U * 1024U * 1024U;
+    auto oversized = axk::conversion::FilePlan::prepare(request);
+    ASSERT_TRUE(oversized) << oversized.error().message;
+    EXPECT_FALSE(oversized->report().executable);
+    EXPECT_FALSE(oversized->apply(root / "oversized.hds", {}));
+    EXPECT_FALSE(std::filesystem::exists(root / "oversized.hds"));
+    request.options["partitionIndex"] = 2;
+    EXPECT_FALSE(axk::conversion::FilePlan::prepare(request));
 }
 
 TEST_F(ConversionFiles, PublishesOnlyTheRetainedNewImageWithoutATemplate) {
@@ -255,6 +368,38 @@ TEST_F(ConversionFiles, ConvertsNativeHierarchyWithOccurrenceIdsAndReadableAudio
     EXPECT_EQ(audio->format.sample_rate, 48000U);
     EXPECT_GT(audio->frame_count, 0U);
     EXPECT_FALSE(audio->pcm.empty());
+
+    for (const auto suffix : {"floppy", "iso", "sfs"}) {
+        auto fresh = request;
+        fresh.profile_id += std::string(".") + suffix;
+        fresh.destination.clear();
+        fresh.selection = nullptr;
+        fresh.options["volumeName"] = "Stage";
+        if (std::string_view(suffix) == "sfs")
+            fresh.options.update({{"sizeBytes", 4194304}, {"partitionCount", 1}, {"partitionIndex", 0}});
+        auto hierarchy = axk::conversion::FilePlan::prepare(fresh);
+        ASSERT_TRUE(hierarchy) << suffix << ": " << hierarchy.error().message;
+        ASSERT_TRUE(hierarchy->report().executable) << hierarchy->report_json().dump();
+        const auto path = root / (std::string("playable.") + suffix);
+        ASSERT_TRUE(hierarchy->apply(path, acknowledgements(hierarchy->report())));
+        const auto media = axk::open_media(path);
+        ASSERT_TRUE(media) << media.error().message;
+        const auto inventory = axk::build_media_inventory(*media);
+        ASSERT_TRUE(inventory) << inventory.error().message;
+        ASSERT_EQ(inventory->objects.size(), 4U);
+        const auto graph = axk::build_relationship_graph(inventory->catalog);
+        for (const auto type : {"SBNK_LEFT_MEMBER_TO_SMPL", "SBAC_SLOT_TO_SBNK"}) {
+            EXPECT_TRUE(std::ranges::any_of(graph.relationships,
+                                            [type](const auto &edge) {
+                                                return edge.type == type && edge.target_key.has_value() &&
+                                                       edge.quality == axk::RelationshipQuality::known;
+                                            }))
+                << suffix << ": " << type;
+        }
+        EXPECT_TRUE(std::ranges::any_of(graph.relationships, [](const auto &edge) {
+            return axk::is_effective_program_assignment(edge) && edge.target_key.has_value();
+        })) << suffix;
+    }
 
     std::filesystem::remove(root / "source" / "SET.U01");
     auto voice_only = axk::conversion::FilePlan::prepare(request);

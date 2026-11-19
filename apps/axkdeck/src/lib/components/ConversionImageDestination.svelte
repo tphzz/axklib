@@ -1,11 +1,12 @@
 <script lang="ts">
     import DiskImportSettings from './DiskImportSettings.svelte';
     import SelectControl from './SelectControl.svelte';
-    import AttributeHelp from './AttributeHelp.svelte';
+    import ConversionRouteHeader from './ConversionRouteHeader.svelte';
     let {
         source,
         sourceLabel,
         profile,
+        targetLabel,
         destination,
         disabled,
         onbrowse,
@@ -13,28 +14,14 @@
         source?: string;
         sourceLabel: string;
         profile?: string;
+        targetLabel?: string;
         destination?: string;
         disabled: boolean;
         onbrowse?: () => void;
     } = $props();
 </script>
 
-<div class="route">
-    <span>Source</span><strong>{sourceLabel}</strong><span class="path"
-        >{#if source}<AttributeHelp label={source} description={source} />{/if}</span
-    >
-    <div class="target-format">
-        <strong>Target format</strong>
-        <SelectControl
-            label="Target format"
-            class="format-select"
-            value={profile}
-            options={profile ? [{ value: profile, label: 'A-series · Hard disk (SFS)' }] : []}
-            disabled={disabled || !profile}
-            onchange={() => undefined}
-        />
-    </div>
-</div>
+<ConversionRouteHeader {source} {sourceLabel} {profile} {targetLabel} {disabled} />
 <DiskImportSettings>
     <div class="destination-row">
         <strong>Destination</strong>
@@ -69,7 +56,6 @@
 </DiskImportSettings>
 
 <style>
-    .route,
     .destination-row {
         display: flex;
         flex-wrap: wrap;
@@ -77,24 +63,6 @@
         gap: 8px;
         min-width: 0;
         font-size: var(--dialog-body-font-size);
-    }
-    .route {
-        flex: none;
-        min-height: 32px;
-    }
-    .target-format {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        max-width: 100%;
-    }
-    .target-format strong {
-        white-space: nowrap;
-    }
-    .route :global(.format-select) {
-        flex: 0 1 230px;
-        width: 230px;
-        max-width: 100%;
     }
     .destination-row :global(.medium-select) {
         flex: 0 1 145px;
@@ -111,12 +79,6 @@
     label {
         color: var(--color-text-muted);
     }
-    .path {
-        flex: 1;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
     input {
         min-width: 100px;
         flex: 1;
@@ -129,9 +91,6 @@
         min-width: 0;
     }
     @container disk-import (max-width:680px) {
-        .path {
-            flex-basis: 45%;
-        }
         .destination-row strong {
             min-width: 0;
         }

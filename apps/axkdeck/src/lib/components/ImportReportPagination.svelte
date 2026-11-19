@@ -2,12 +2,14 @@
     import Icon from './Icon.svelte';
     let {
         label,
+        singular,
         count,
         page,
         pageSize = 100,
         onchange,
     }: {
         label: string;
+        singular?: string;
         count: number;
         page: number;
         pageSize?: number;
@@ -17,7 +19,10 @@
 </script>
 
 <nav aria-label={`${label} pages`}>
-    <span>{count ? page * pageSize + 1 : 0}-{Math.min(count, (page + 1) * pageSize)} of {count} {label}</span>
+    <span
+        >{count ? page * pageSize + 1 : 0}-{Math.min(count, (page + 1) * pageSize)} of {count}
+        {count === 1 ? (singular ?? label) : label}</span
+    >
     <button
         class="icon-button previous"
         aria-label={`Previous ${label} page`}

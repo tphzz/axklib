@@ -304,6 +304,13 @@ if(BUILD_TESTING)
            "${CMAKE_CURRENT_SOURCE_DIR}/tests/reverse_boundaries_test.py" "$<TARGET_FILE:axklib_cli>"
            "$<TARGET_FILE:axklib_cli>")
   set_tests_properties(FormatGeneralization.W3bBoundaries PROPERTIES TIMEOUT 90)
+  add_test(NAME FormatGeneralization.WaveDiskSetDelivery COMMAND "${Python3_EXECUTABLE}"
+           "${CMAKE_CURRENT_SOURCE_DIR}/tests/reverse_image_set_delivery_test.py" "$<TARGET_FILE:axklib_server>"
+           "$<TARGET_FILE:axklib_cli>")
+  axk_configure_server_process_test(FormatGeneralization.WaveDiskSetDelivery 90 server)
+  add_test(NAME FormatGeneralization.FreshASeriesDelivery COMMAND "${Python3_EXECUTABLE}"
+           "${CMAKE_CURRENT_SOURCE_DIR}/tests/fresh_a_series_delivery_test.py" "$<TARGET_FILE:axklib_server>")
+  axk_configure_server_process_test(FormatGeneralization.FreshASeriesDelivery 90 server)
   add_test(NAME FormatGeneralization.R1
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/server_format_reader_test.py"
             "$<TARGET_FILE:axk_server_fixture>")

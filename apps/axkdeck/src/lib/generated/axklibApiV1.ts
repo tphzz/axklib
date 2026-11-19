@@ -104,6 +104,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    '/conversion-inspections': {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations['conversions.inspect'];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     '/conversion-plans': {
         parameters: {
             query?: never;
@@ -2754,6 +2770,27 @@ export interface components {
         ConversionExecutionRequest: {
             acknowledgedIssueIds: string[];
         };
+        ConversionInspection: {
+            documentId: string;
+            items: {
+                id: string;
+                name: string;
+                type: string;
+                volumeName: string | null;
+            }[];
+            offset: number;
+            profileIds: string[];
+            sourceFormat: string;
+            total: number;
+        };
+        ConversionInspectionRequest: {
+            limit?: number;
+            objectType?: string;
+            offset?: number;
+            source: components['schemas']['ConversionSource'];
+            /** @description Required for an explicit disk set. For an open document, its detected format is authoritative. */
+            sourceFormat?: string;
+        };
         ConversionIssue: {
             code: string;
             /** @description An explicit mapping choice; only issues with a decision require acknowledgement. */
@@ -2777,6 +2814,7 @@ export interface components {
             warnings: string[];
         };
         ConversionNewImageDestination: {
+            file?: components['schemas']['FileRef'];
             /** @enum {unknown} */
             kind: 'NEW_IMAGE';
         };
@@ -2792,6 +2830,10 @@ export interface components {
             capacityPolicy?: components['schemas']['VolumeCapacityPolicy'];
             destination:
                 | components['schemas']['ConversionNewImageDestination']
+                | {
+                      /** @constant */
+                      kind: 'NEW_IMAGE_SET';
+                  }
                 | components['schemas']['ConversionSessionDestination'];
             /** @enum {string} */
             fidelity: 'BEST' | 'STRICT';
@@ -2809,7 +2851,9 @@ export interface components {
             name: string;
             optionsSchema: Record<string, never>;
             /** @enum {unknown} */
-            outputKind: 'EXISTING_IMAGE' | 'NEW_IMAGE';
+            outputKind: 'EXISTING_IMAGE' | 'NEW_IMAGE' | 'NEW_IMAGE_SET';
+            /** @description Interactive route, or null for a profile without an editor contract. Lower priority values sort first. */
+            route: components['schemas']['ConversionRouteDescriptor'] | null;
             sourceFormat: string;
         };
         ConversionProfiles: {
@@ -2826,10 +2870,20 @@ export interface components {
             destination:
                 | components['schemas']['ConversionDocumentRef']
                 | {
+                      file?: components['schemas']['FileRef'];
                       /** @enum {unknown} */
                       kind: 'NEW_IMAGE';
                       sha256: string | null;
                       sizeBytes: number;
+                  }
+                | {
+                      /** @constant */
+                      kind: 'NEW_IMAGE_SET';
+                      members: {
+                          filename: string;
+                          sha256: string;
+                          sizeBytes: number;
+                      }[];
                   };
             executable: boolean;
             /** @enum {string} */
@@ -2851,9 +2905,21 @@ export interface components {
         ConversionResult:
             | components['schemas']['ConversionMutationResult']
             | {
+                  file: components['schemas']['FileRef'];
+                  planId: string;
+                  warnings?: components['schemas']['Warning'][];
+              }
+            | {
                   download: components['schemas']['RetainedDownload'];
                   planId: string;
               };
+        ConversionRouteDescriptor: {
+            editorCapabilities: string[];
+            intents: string[];
+            medium: string;
+            priority: number;
+            targetLabel: string;
+        };
         ConversionSessionDestination: {
             documentId: string;
             expectedRevision: number;
@@ -6759,6 +6825,121 @@ export interface operations {
         requestBody: {
             content: {
                 'application/json': components['schemas']['CompanionSourceResolutionRequest'];
+            };
+        };
+        responses: {
+            /** @description Job accepted */
+            202: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['JobResponse'];
+                };
+            };
+            /** @description Malformed or schema-invalid request */
+            400: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Authentication is required */
+            401: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Authenticated caller is not authorized */
+            403: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Referenced resource does not exist */
+            404: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Request conflicts with current state */
+            409: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Configured request limit exceeded */
+            413: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Unsupported or invalid domain request */
+            422: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Transient server capacity exhausted */
+            429: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+            /** @description Contained internal failure */
+            500: {
+                headers: {
+                    'X-Request-Id': components['headers']['XRequestId'];
+                    [name: string]: unknown;
+                };
+                content: {
+                    'application/json': components['schemas']['ErrorResponse'];
+                };
+            };
+        };
+    };
+    'conversions.inspect': {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                'application/json': components['schemas']['ConversionInspectionRequest'];
             };
         };
         responses: {

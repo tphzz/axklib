@@ -6,12 +6,17 @@ import type {
     CompanionSourceInput,
     CompanionSourceResolution,
     ConversionInput,
+    ConversionInspectionInput,
+    ConversionInspection,
+    ConversionSource,
     ConversionPlan,
     ConversionProfile,
     ConversionTransport,
 } from './conversions';
 import type { InputFileLocation } from './storageLocations';
 import { documentTarget } from './httpNativeDocuments';
+import { readDirectoryArchive } from './httpDownloads';
+import type { RetainedDownload } from './transport';
 
 export class HttpConversions implements ConversionTransport {
     constructor(
@@ -51,6 +56,45 @@ export class HttpConversions implements ConversionTransport {
     async conversionProfiles(): Promise<ConversionProfile[]> {
         return (await this.client.request<{ profiles: ConversionProfile[] }>('GET', '/conversion-profiles')).profiles;
     }
+    async readConversionDownload(download: RetainedDownload): Promise<Blob> {
+        return (await readDirectoryArchive(this.client, download)).blob;
+    }
+    private wireSource(source: ConversionSource) {
+        if (source.kind === 'DOCUMENT')
+            return {
+                kind: source.kind,
+                imageId: this.sessions.get(source.sessionId).remoteId,
+                documentId: source.documentId,
+                expectedRevision: source.expectedRevision,
+            };
+        return {
+            kind: source.kind,
+            sources: source.sources.map((location) =>
+                location.kind === 'server-directory'
+                    ? { kind: 'DIRECTORY', directory: location.reference }
+                    : location.kind === 'client-upload'
+                      ? { kind: 'UPLOAD', upload: location.reference }
+                      : { kind: 'FILE', file: location.reference },
+            ),
+        };
+    }
+    async inspectConversion(input: ConversionInspectionInput, signal?: AbortSignal): Promise<ConversionInspection> {
+        signal?.throwIfAborted();
+        const submitted = await this.client.invoke<never>('conversions.inspect', {
+            ...input,
+            source: this.wireSource(input.source),
+        });
+        if (!this.jobs.isJob(submitted)) throw new Error('Conversion inspection did not return a job');
+        const completed = await this.jobs.wait(this.jobs.map(submitted).jobId, () => undefined, signal);
+        signal?.throwIfAborted();
+        if (completed.status !== 'completed' || !completed.result)
+            throw new AxklibApiError(
+                completed.errorCode ?? 'conversion_inspection_failed',
+                completed.error ?? 'Conversion inspection failed',
+                422,
+            );
+        return completed.result as ConversionInspection;
+    }
     async prepareConversion(input: ConversionInput, signal?: AbortSignal): Promise<ConversionPlan> {
         signal?.throwIfAborted();
         let destination;
@@ -64,30 +108,9 @@ export class HttpConversions implements ConversionTransport {
         } else {
             destination = input.destination;
         }
-        const source = input.source.kind === 'DOCUMENT' ? this.sessions.get(input.source.sessionId) : null;
         const request = {
             profileId: input.profileId,
-            source:
-                source && input.source.kind === 'DOCUMENT'
-                    ? {
-                          kind: 'DOCUMENT',
-                          imageId: source.remoteId,
-                          documentId: input.source.documentId,
-                          expectedRevision: input.source.expectedRevision,
-                      }
-                    : {
-                          kind: 'SOURCES',
-                          sources:
-                              input.source.kind === 'SOURCES'
-                                  ? input.source.sources.map((location) =>
-                                        location.kind === 'server-directory'
-                                            ? { kind: 'DIRECTORY', directory: location.reference }
-                                            : location.kind === 'client-upload'
-                                              ? { kind: 'UPLOAD', upload: location.reference }
-                                              : { kind: 'FILE', file: location.reference },
-                                    )
-                                  : [],
-                      },
+            source: this.wireSource(input.source),
             destination,
             options: input.options,
             fidelity: input.fidelity,

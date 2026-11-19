@@ -43,7 +43,7 @@ Result<ImportedAudio> materialize(const Wave &source, std::uint32_t rate) {
 }
 
 Result<std::shared_ptr<const PreparedPlan>> prepare(const Request &request, const CancellationToken &cancellation,
-                                                    ProgressSink *progress) {
+                                                    ProgressSink *progress, const FreshVolume *fresh) {
     const auto document = std::dynamic_pointer_cast<const Document>(request.source);
     if (!document)
         return std::unexpected(invalid("TX16W profile requires a native TX16W document"));
@@ -52,16 +52,20 @@ Result<std::shared_ptr<const PreparedPlan>> prepare(const Request &request, cons
     try {
         if (!request.options.is_object() ||
             request.options.size() != (request.options.contains("sourceObjectIds") ? 2U : 1U) ||
-            !request.destination.selection.is_object() || request.destination.selection.size() != 3U)
+            (!fresh && (!request.destination.selection.is_object() || request.destination.selection.size() != 3U)))
             return std::unexpected(invalid("Conversion options and destination contain unknown or missing fields"));
         const auto name = request.options.at("mode").get<std::string>();
         if (name != "HIERARCHY" && name != "WAVE_DATA_ONLY")
             return std::unexpected(invalid("Conversion mode must be HIERARCHY or WAVE_DATA_ONLY"));
         mode = name == "HIERARCHY" ? ImportMode::hierarchy : ImportMode::wave_data_only;
-        auto parsed = volume_destination(request.destination.selection);
-        if (!parsed)
-            return std::unexpected(parsed.error());
-        destination = std::move(*parsed);
+        if (fresh)
+            destination.volume_name = fresh->media.volume_name;
+        else {
+            auto parsed = volume_destination(request.destination.selection);
+            if (!parsed)
+                return std::unexpected(parsed.error());
+            destination = std::move(*parsed);
+        }
     } catch (const nlohmann::json::exception &) {
         return std::unexpected(invalid("Malformed conversion options or destination"));
     }
@@ -72,7 +76,8 @@ Result<std::shared_ptr<const PreparedPlan>> prepare(const Request &request, cons
         inspect_document(*document, mode, cancellation, selection->included ? &*selection->included : nullptr);
     if (!source)
         return std::unexpected(source.error());
-    const auto inventory = authoring::inventory(request.destination.reader, destination, cancellation);
+    const auto inventory = fresh ? Result<authoring::Inventory>{authoring::Inventory{}}
+                                 : authoring::inventory(request.destination.reader, destination, cancellation);
     if (!inventory)
         return std::unexpected(inventory.error());
     const TargetInventory target{inventory->occupied_program_slots, inventory->wave_data_names, inventory->sample_names,
@@ -82,7 +87,7 @@ Result<std::shared_ptr<const PreparedPlan>> prepare(const Request &request, cons
         return std::unexpected(mapped.error());
     Report report;
     report.source_objects = std::move(selection->catalog);
-    report.profile_id = profile_id;
+    report.profile_id = fresh ? std::string_view(fresh->profile_id) : profile_id;
     report.fidelity = request.fidelity;
     report.executable = true;
     auto issue = [&](Impact severity, std::string code, std::string source_id, std::string message,
@@ -146,8 +151,7 @@ Result<std::shared_ptr<const PreparedPlan>> prepare(const Request &request, cons
     if (retained_bytes > request.limits.maximum_bytes)
         return std::unexpected(invalid("Conversion report exceeds its memory limit"));
     if (!report.executable)
-        return std::make_shared<const PreparedPlan>(std::move(report), std::vector<Patch>{},
-                                                    request.destination.reader->size(), retained_bytes);
+        return blocked_volume_plan(request, std::move(report));
 
     authoring::Bundle bundle;
     bundle.samples = std::move(mapped->samples);
@@ -197,23 +201,28 @@ Result<std::shared_ptr<const PreparedPlan>> prepare(const Request &request, cons
         }
         bundle.wave_data.push_back({std::move(spec), std::move(*audio)});
     }
-    return finish_volume_plan(request, destination, bundle, std::move(report), cancellation, progress);
+    return finish_volume_plan(request, destination, std::move(bundle), std::move(report), cancellation, progress,
+                              fresh);
 }
 } // namespace
 
 conversion::Profile profile() {
-    return {std::string{profile_id},
-            "TX16W to A-series",
-            "yamaha.tx16w",
-            "yamaha.a-series",
-            {{"type", "object"},
-             {"additionalProperties", false},
-             {"required", {"mode"}},
-             {"properties",
-              {{"mode", {{"type", "string"}, {"enum", {"HIERARCHY", "WAVE_DATA_ONLY"}}}},
-               {"sourceObjectIds",
-                {{"type", "array"}, {"minItems", 1}, {"uniqueItems", true}, {"items", {{"type", "string"}}}}}}}},
-            prepare};
+    return {
+        std::string{profile_id},
+        "TX16W to A-series",
+        "yamaha.tx16w",
+        "yamaha.a-series",
+        {{"type", "object"},
+         {"additionalProperties", false},
+         {"required", {"mode"}},
+         {"properties",
+          {{"mode", {{"type", "string"}, {"enum", {"HIERARCHY", "WAVE_DATA_ONLY"}}}},
+           {"sourceObjectIds",
+            {{"type", "array"}, {"minItems", 1}, {"uniqueItems", true}, {"items", {{"type", "string"}}}}}}}},
+        [](const Request &r, const CancellationToken &token, ProgressSink *p) { return prepare(r, token, p, nullptr); },
+        OutputKind::existing_image,
+        existing_sfs_route()};
 }
 
+std::vector<conversion::Profile> fresh_profiles() { return conversion::fresh_volume_profiles(profile(), prepare); }
 } // namespace axk::tx16w::a_series

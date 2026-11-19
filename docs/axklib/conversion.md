@@ -3,27 +3,61 @@
 Conversion uses a common prepare, review and execute lifecycle. It does not
 translate every sampler through a universal intermediate model. Each registered
 direction owns its mapping, fidelity policy and supported destination profile.
+
 | Profile | Select | Receive |
 | --- | --- | --- |
 | `yamaha.tx16w-to-a-series` | A TX16W source and an existing SFS volume | Reviewed Wave Data or supported hierarchy in the A-series destination |
 | `nuedge.typhoon-to-a-series` | A native Typhoon sound disk or explicit disk set | Wave Data, or Programs and Sample Banks built from selected Performances and Voices in an existing SFS image |
+| `yamaha.tx16w-to-a-series.floppy`, `.iso`, `.sfs` | Yamaha disk set and volume name | A new A-series 1,440 KiB floppy, ISO CD-ROM or partitioned SFS image |
+| `nuedge.typhoon-to-a-series.floppy`, `.iso`, `.sfs` | Typhoon disk set and volume name | The corresponding new A-series image, using the Typhoon instrument mapper |
 | `yamaha.a-series-to-tx16w.wave-disk` | Ordered Wave Data occurrences in one native A-series document | A new 720 KiB FAT12 disk of mono TX16W Waves |
+| `yamaha.a-series-to-tx16w.wave-disk-set` | The same ordered Wave Data selection | One or more numbered 720 KiB FAT12 images, each containing whole Waves |
 
 The Wave disk contains no Setup, playable Voice or Performance. No
 profile edits an existing TX16W disk or writes to a physical floppy.
 The Yamaha Wave-disk exporter does not author Typhoon disks.
 
+In **axkdeck**, open an A-series image and choose **Image options (...) > Convert...**
+for the whole image, or **Convert...** from a volume's context menu for just that
+volume. Select the Waves to export, choose a new server file or a download, review
+the output, and choose **Create disk image**. This screen writes a single Yamaha
+Wave disk. Larger Wave disk sets and fresh A-series media are available through
+the converter API and file clients, not as additional destinations in this screen.
+
 The built-in profile list is the same for the file SDK and server. Each
 descriptor (including its options schema and `outputKind`) comes from the registration used
 to prepare that direction. Registering a native reader does not implicitly
-offer a conversion.
+offer a conversion. Direct converters can map native instruments without an
+intermediate format. For Wave Data, a registered `WaveReaderAdapter` and
+`WaveWriterAdapter` automatically contribute a direction: the reader resolves
+the source selection and supplies bounded mono PCM and playback metadata; the
+writer maps those Waves into its destination. Registering either adapter alone
+does not produce a route. Selection controls belong to the reader and media
+controls to the writer.
+
+A profile's `route` is either null (no interactive editor is offered) or
+describes its target label, medium, intents, required editor capabilities,
+and priority. Match the source, destination, output kind and intent before
+considering priority. An editor must support all required panels. Lower
+priority numbers are preferred; a dialog without a route chooser must not
+silently break a tie. Profile IDs identify registrations, not GUI components.
+
+For a fresh A-series destination, append the full suffix to the source's
+profile ID, for example `nuedge.typhoon-to-a-series.iso`. Supply `volumeName`
+alongside the usual `mode` and optional `sourceObjectIds`. The SFS route also
+requires a sector-aligned `sizeBytes`, `partitionCount` (1 to 8) and zero-based
+`partitionIndex`. For example, `8388608`, `2`, `1` places the volume in the
+second partition of a new 8 MiB disk. The requested image must fit the preparation
+memory limit; a valid SFS geometry is not a promise that an 8 GiB image can be
+materialized in the current process. No destination file is needed for preparation.
 
 ## Review And Execution
 
 Preparation is read-only. An `EXISTING_IMAGE` profile inventories the target
 and retains patches against its fingerprint. A `NEW_IMAGE` profile retains
-complete image bytes instead; review reports their size and SHA-256. Neither
-kind reruns mapping, resampling or encoding at execution.
+complete image bytes instead; review reports their size and SHA-256.
+`NEW_IMAGE_SET` retains a bounded, ordered collection of complete images.
+None reruns mapping, resampling or encoding at execution.
 
 The report identifies planned objects and native source occurrences, together
 with destination names, slots, relationships, key ranges and waveform settings.
@@ -45,8 +79,11 @@ TX16W option, not an automatic fallback for a broken hierarchy.
 
 Plans expire after 15 minutes and are not persisted across server restarts.
 The server admits at most 128 plans, 512 MiB per plan and 1 GiB across retained
-payloads and pending preparation reservations. Source metadata and leases are
-charged conservatively as well as the retained report and output. Idle expiry releases
+payloads and pending preparation reservations. Opening a private source set
+charges its decoded catalog during preparation. An already open document
+reuses the workspace catalog; preparing one Wave does not reserve another
+copy of the entire library. The plan retains its report, output, and source
+leases for identity and revision checks, not the decoded catalog. Idle expiry releases
 leases; no workspace access mutex remains locked while a user reviews a plan.
 
 An accepted plan has one execution job. Repeated execution requests return that
@@ -58,7 +95,9 @@ destination or workspace revision requires a new plan.
 For an existing destination, server execution uses the same guarded, journaled session commit as ordinary
 mutations, including rollback, interrupted-write recovery and revision
 publication. For a new image it publishes an owner-scoped download of the
-raw image; it does not mutate the source or increment its revision. Conversion
+raw image, or writes the exact reviewed bytes to the writable workspace
+`file` selected in the prepare request. Neither path replaces a file, mutates
+the source or increments its revision. Conversion
 itself never owns device authorization or recovery.
 
 ## Generic HTTP Resources
@@ -69,11 +108,19 @@ may be different documents in the same workspace.
 
 | Request | Purpose |
 | --- | --- |
-| `GET /api/v1/conversion-profiles` | Available directions and options schemas |
+| `GET /api/v1/conversion-profiles` | Available directions, options schemas and interactive route descriptors |
+| `POST /api/v1/conversion-inspections` | Read a native source catalog and applicable profile IDs without an output or retained plan |
 | `POST /api/v1/conversion-plans` | Submit a read-only preparation job |
 | `GET /api/v1/conversion-plans/{planId}?offset=0&limit=200` | Owner-scoped plan and report page |
 | `DELETE /api/v1/conversion-plans/{planId}` | Release an unsubmitted plan |
 | `POST /api/v1/conversion-plans/{planId}/executions` | Submit or retrieve its one execution job |
+
+Inspect with `source`, optional native `objectType`, zero-based `offset` and
+`limit` (1 to 200). An explicit source set also requires `sourceFormat`.
+The completed inspection job returns `documentId`, `sourceFormat`,
+`profileIds`, and a page of native occurrences in `items` with the filtered
+`total`. Keep the source and revision fixed while paging. This does not
+prepare a conversion or reserve a destination.
 
 Preparation uses `profileId`, `source`, `destination`, `options`, `fidelity` and
 optional `capacityPolicy`. `source` is a revision-bound `DOCUMENT`, or a `SOURCES`
@@ -92,10 +139,22 @@ that mode. The profile includes required dependencies automatically.
 For `NEW_IMAGE`, pass `"destination": {"kind": "NEW_IMAGE"}`, with no
 destination session, selection or capacity policy. The completed execution
 job contains `download.contentPath`; GET it as the same principal to receive
-the bytes, not an archive wrapper. For the TX16W Wave disk use the public
+the bytes, not an archive wrapper. To publish on the server instead, include
+the destination `file` (a writable-root FileRef) at preparation. An existing
+output is never replaced. A completed job with `file` and a
+`publication_durability_unconfirmed` warning means the file was published
+but the directory sync failed. Report the warning; do not retry the write.
+For the TX16W Wave disk use the public
 document ID and Wave IDs from the source session in `options.documentId`
 and `options.waveIds`. Use the same document and its current revision in
 `source`. File-client IDs are not substitutes for session IDs.
+
+For a `NEW_IMAGE_SET` route, pass `"destination": {"kind": "NEW_IMAGE_SET"}`.
+Review returns an ordered `destination.members` array: each entry has
+`filename`, `sizeBytes` and `sha256`. Execution publishes **one** owner-scoped
+TAR download, not independent downloads. Its root contains the reviewed
+images and `manifest.json` with the same ordered `members` and `profileId`.
+Read disk order from the manifest, not the archive entry or directory order.
 
 The preparation job result contains the plan ID and first report page. Fetch
 remaining pages using `actionCount`, `issueCount` and, when a selectable source
@@ -208,8 +267,24 @@ saturated at the endpoints. Review reports rate changes, loop rounding and
 precision loss. A STRICT plan with loss cannot execute.
 
 File sizes include 512-byte padding; allocation uses 1,024-byte clusters.
-All selected Waves must fit one disk. An unrepresentable Wave or exhausted
-capacity blocks the **entire** selection; there is no truncated output.
+For `wave-disk`, all selected Waves must fit one disk. For
+`wave-disk-set`, the writer starts the next disk when the next whole Wave will
+not fit. Selection order is preserved: for example, if the first two Waves
+fit on `DISK01.IMG`, the third retains its `.W03` slot on `DISK02.IMG`.
+Review identifies each Wave's disk. The 64-slot limit applies to the whole set,
+not per disk. Neither route splits a Wave, writes instrument assignments, or
+publishes a partial set when a Wave cannot be represented.
+
+For an ordered set, use the same selection with a **new directory** as
+the SDK or CLI output. Preparation alone creates nothing:
+
+```bash
+axklib convert --profile yamaha.a-series-to-tx16w.wave-disk-set --source source.hds --options "$options" --output disks
+```
+
+The file review lists the disk names, lengths and SHA-256 hashes in
+`newImageSet.members`. Publication creates the directory atomically after
+review, and refuses to replace even an empty directory.
 
 ## Axkdeck
 

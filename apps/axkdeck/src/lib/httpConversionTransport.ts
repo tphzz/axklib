@@ -15,6 +15,10 @@ export class HttpConversionTransport extends HttpPackageTransport implements Con
     resolveCompanionSources: ConversionTransport['resolveCompanionSources'] = (...args) =>
         this.conversions.resolveCompanionSources(...args);
     conversionProfiles: ConversionTransport['conversionProfiles'] = () => this.conversions.conversionProfiles();
+    inspectConversion: ConversionTransport['inspectConversion'] = (...args) =>
+        this.conversions.inspectConversion(...args);
+    readConversionDownload: ConversionTransport['readConversionDownload'] = (...args) =>
+        this.conversions.readConversionDownload(...args);
     prepareConversion: ConversionTransport['prepareConversion'] = (...args) =>
         this.conversions.prepareConversion(...args);
     conversionPlan: ConversionTransport['conversionPlan'] = (...args) => this.conversions.conversionPlan(...args);

@@ -87,7 +87,7 @@ target_sources(axk_application PRIVATE src/read_diagnostics.cpp src/image_auditi
 target_sources(axk_application PRIVATE src/operation_job_admission.cpp src/job_submission.cpp)
 target_sources(axk_application PRIVATE src/image_document_discovery.cpp src/image_document_browsing.cpp src/native_document_snapshot.cpp
   src/session_formats.cpp
-  src/conversion_plan_store.cpp src/conversion_operations.cpp src/conversion_sources.cpp src/companion_source_resolution.cpp src/prepared_session_commit.cpp
+  src/conversion_plan_store.cpp src/conversion_operations.cpp src/conversion_sources.cpp src/conversion_inspection.cpp src/companion_source_resolution.cpp src/prepared_session_commit.cpp
   src/image_source_read.cpp src/image_filesystem_workspace.cpp src/formats/a_series/admission.cpp
   src/native_document_state.cpp src/formats/typhoon/admission.cpp src/formats/typhoon/session_companions.cpp
   src/formats/tx16w/session_state.cpp src/formats/tx16w/audio.cpp src/formats/tx16w/admission.cpp)

@@ -125,6 +125,7 @@
             : undefined,
         sourceName: native ? 'Keys-01.img' : undefined,
         destinationProfile: native ? 'yamaha.tx16w-to-a-series' : undefined,
+        targetLabel: native ? 'A-series · Hard disk (SFS)' : undefined,
         destinationName: native
             ? query.get('scenario') === 'native-long'
                 ? `${'LongDestinationImageName'.repeat(9)}.hds`

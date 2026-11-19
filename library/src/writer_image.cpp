@@ -125,10 +125,16 @@ Result<std::vector<std::byte>> directory_payload(std::uint32_t id, std::uint32_t
 
 } // namespace
 
-Result<std::vector<PreparedRecord>> detail::prepare_partition_records(const PartitionSpec &partition,
-                                                                      const PartitionGeometry &geometry,
-                                                                      std::size_t partition_count,
-                                                                      const CancellationToken &cancellation) {
+Result<std::vector<PreparedRecord>>
+detail::prepare_partition_records(const PartitionSpec &partition, const PartitionGeometry &geometry,
+                                  std::size_t partition_count, const CancellationToken &cancellation,
+                                  std::optional<std::span<ImportedAudio>> prepared_audio) {
+    if (prepared_audio &&
+        (partition.volumes.size() != 1 || prepared_audio->size() != partition.volumes.front().waveforms.size() ||
+         std::ranges::any_of(partition.volumes.front().samples,
+                             [](const auto &s) { return s.interleaved_audio_path.has_value(); })))
+        return std::unexpected(make_error(ErrorCode::invalid_argument, ErrorCategory::audio,
+                                          "Prepared mono audio must match the Wave Data of a single volume"));
     std::vector<PreparedRecord> records{{0, std::vector<std::byte>(32U * cluster_size), RecordKind::hidden},
                                         {2, {}, RecordKind::system}};
     std::vector<Entry> root{{"sfserrlog", 2, {}}, {"sfserram", 0, {}}};
@@ -142,7 +148,9 @@ Result<std::vector<PreparedRecord>> detail::prepare_partition_records(const Part
             return std::unexpected{make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest,
                                               "PRF3 is reserved for partition support files")};
         }
-        if (auto valid = detail::validate_authored_volume(volume); !valid)
+        if (auto valid =
+                detail::validate_authored_volume(volume, prepared_audio ? WaveInput::prepared : WaveInput::file);
+            !valid)
             return std::unexpected{
                 make_error(ErrorCode::manifest_invalid, ErrorCategory::manifest, valid.error().message)};
         const auto volume_id = next++;
@@ -171,7 +179,8 @@ Result<std::vector<PreparedRecord>> detail::prepare_partition_records(const Part
             AudioImportOptions options;
             options.expected_channels = 1;
             options.target_sample_rate = spec.target_sample_rate;
-            auto imported = import_sampler_audio(spec.path, options);
+            auto imported = prepared_audio ? Result<ImportedAudio>{std::move((*prepared_audio)[waveform_index])}
+                                           : import_sampler_audio(spec.path, options);
             if (!imported)
                 return std::unexpected{imported.error()};
             const auto id = next++;

@@ -377,6 +377,7 @@ add_library(
   src/deletion_contract.cpp
   src/deletion_manifest.cpp
   src/media_build.cpp
+  src/media_bundle_hds.cpp
   src/media_conversion.cpp
   src/media_floppy_set.cpp
   src/media_floppy_archive.cpp
@@ -434,7 +435,10 @@ axk_set_project_warnings(axk_audio)
 axk_enable_sanitizers(axk_audio)
 axk_enable_coverage(axk_audio)
 
-add_library(axk_conversion STATIC src/conversion/plan.cpp)
+add_library(axk_conversion STATIC src/conversion/plan.cpp src/conversion/image_set.cpp src/conversion/image_set_publication.cpp)
+if(WIN32)
+  target_compile_definitions(axk_conversion PRIVATE NOMINMAX)
+endif()
 add_library(axklib::conversion ALIAS axk_conversion)
 target_compile_features(axk_conversion PUBLIC cxx_std_23)
 target_include_directories(axk_conversion PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/internal")
@@ -458,20 +462,25 @@ axk_set_project_warnings(axk_profile_tx16w_to_a_series)
 axk_enable_sanitizers(axk_profile_tx16w_to_a_series)
 axk_enable_coverage(axk_profile_tx16w_to_a_series)
 
-add_library(axk_profile_a_series_to_tx16w STATIC src/conversion/a_series_to_tx16w/source.cpp
-  src/conversion/a_series_to_tx16w/mapping.cpp src/conversion/a_series_to_tx16w/profile.cpp)
-add_library(axklib::profile_a_series_to_tx16w ALIAS axk_profile_a_series_to_tx16w)
-target_include_directories(axk_profile_a_series_to_tx16w PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/internal")
-target_link_libraries(axk_profile_a_series_to_tx16w PUBLIC axklib::conversion PRIVATE axklib::format_a_series axklib::format_tx16w axklib::audio)
-set_target_properties(axk_profile_a_series_to_tx16w PROPERTIES CXX_EXTENSIONS OFF POSITION_INDEPENDENT_CODE ON
-  CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
-axk_set_project_warnings(axk_profile_a_series_to_tx16w)
-axk_enable_sanitizers(axk_profile_a_series_to_tx16w)
-axk_enable_coverage(axk_profile_a_series_to_tx16w)
+add_library(axk_wave_reader_a_series STATIC src/conversion/a_series/wave_reader.cpp)
+add_library(axklib::wave_reader_a_series ALIAS axk_wave_reader_a_series)
+target_link_libraries(axk_wave_reader_a_series PUBLIC axklib::conversion PRIVATE axklib::format_a_series axklib::audio)
+add_library(axk_wave_writer_tx16w STATIC src/conversion/tx16w/wave_mapping.cpp src/conversion/tx16w/wave_disk_writer.cpp)
+add_library(axklib::wave_writer_tx16w ALIAS axk_wave_writer_tx16w)
+target_link_libraries(axk_wave_writer_tx16w PUBLIC axklib::conversion PRIVATE axklib::format_tx16w axklib::audio)
+foreach(target IN ITEMS axk_wave_reader_a_series axk_wave_writer_tx16w)
+  target_include_directories(${target} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/internal")
+  set_target_properties(${target} PROPERTIES CXX_EXTENSIONS OFF POSITION_INDEPENDENT_CODE ON
+    CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
+  axk_set_project_warnings(${target})
+  axk_enable_sanitizers(${target})
+  axk_enable_coverage(${target})
+endforeach()
 
 add_library(axk_conversion_profiles STATIC src/conversion/builtin_profiles.cpp)
 add_library(axklib::conversion_profiles ALIAS axk_conversion_profiles)
-target_link_libraries(axk_conversion_profiles PUBLIC axklib::conversion PRIVATE axklib::profile_tx16w_to_a_series axklib::profile_a_series_to_tx16w)
+target_link_libraries(axk_conversion_profiles PUBLIC axklib::conversion PRIVATE axklib::profile_tx16w_to_a_series
+  axklib::wave_reader_a_series axklib::wave_writer_tx16w)
 set_target_properties(axk_conversion_profiles PROPERTIES CXX_EXTENSIONS OFF POSITION_INDEPENDENT_CODE ON
   CXX_VISIBILITY_PRESET hidden VISIBILITY_INLINES_HIDDEN ON)
 axk_set_project_warnings(axk_conversion_profiles)

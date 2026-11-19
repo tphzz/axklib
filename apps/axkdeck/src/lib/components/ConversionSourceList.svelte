@@ -7,11 +7,15 @@
         selected,
         onchange,
         disabled = false,
+        bulkLabel = 'All sources in disk set',
+        locationLabel = 'Disk / occurrence',
     }: {
         objects: ConversionSourceObject[];
         selected: string[] | undefined;
         onchange: (ids: string[] | undefined) => void;
         disabled?: boolean;
+        bulkLabel?: string;
+        locationLabel?: string;
     } = $props();
     let page = $state(0);
     const size = 100;
@@ -52,9 +56,9 @@
         disabled={disabled || !roots.length}
         onchange={() => onchange(ids.size === roots.length ? [] : undefined)}
     />
-    All sources in disk set <small>{ids.size} of {roots.length} selected</small></label
+    {bulkLabel} <small>{ids.size} of {roots.length} selected</small></label
 >
-<div class="row headings"><span>Source object</span><span>Type</span><span>Disk / occurrence</span></div>
+<div class="row headings"><span>Source object</span><span>Type</span><span>{locationLabel}</span></div>
 {#each visible as object (object.id)}
     <div class="row">
         <label

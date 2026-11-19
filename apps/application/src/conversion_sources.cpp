@@ -12,6 +12,50 @@
 
 namespace axk::app::conversion_internal {
 
+Result<SourceBudget> source_budget(const NativeDocumentSnapshot &source, std::uint64_t limit) {
+    std::uint64_t bytes{};
+    const auto charge = [&](std::size_t count, std::uint64_t unit) {
+        if (count > (limit - bytes) / unit)
+            return false;
+        bytes += count * unit;
+        return true;
+    };
+    const auto exceeded = [] {
+        return std::unexpected(
+            Error{"conversion_limit_exceeded", "Conversion source metadata exceeds the memory limit"});
+    };
+    // Source membership, readers, identity checks and upload leases outlive preparation.
+    for (const auto &member : source.document->sources()->members()) {
+        if (!charge(1U, 65536U))
+            return exceeded();
+        for (const auto &root : member.roots)
+            if (!charge(root.entries.size(), 16384U))
+                return exceeded();
+    }
+    const auto retained = bytes;
+    if (source.reference.image_id.empty()) {
+        // Explicit files were decoded just for this request. The catalog is released
+        // once the immutable output has been prepared.
+        const auto &catalog = source.document->catalog();
+        if (!charge(catalog.objects.size(), 65536U) || !charge(catalog.relationships.size(), 8192U) ||
+            !charge(catalog.nodes.size(), 8192U) || !charge(catalog.diagnostics.size(), 8192U))
+            return exceeded();
+    } else if (source.native_keys_by_id) {
+        // The workspace already owns its decoded document. Only its transient
+        // public-ID translation table was allocated for this preparation.
+        const auto &keys = *source.native_keys_by_id;
+        if (!charge(keys.bucket_count(), sizeof(void *)) ||
+            !charge(keys.size(), sizeof(std::pair<const std::string, std::string>) + 4U * sizeof(void *)))
+            return exceeded();
+        for (const auto &[id, key] : keys)
+            if (!charge(id.capacity(), 1U) || !charge(key.capacity(), 1U))
+                return exceeded();
+    }
+    if (bytes >= limit)
+        return exceeded();
+    return SourceBudget{bytes, retained};
+}
+
 Result<NativeDocumentSnapshot> open_source(const nlohmann::json &input, const native::FormatRegistry &formats,
                                            std::string_view format_id, const Sandbox &sandbox, UploadStore &uploads,
                                            ImageSessionManager &images, const OperationContext &context,

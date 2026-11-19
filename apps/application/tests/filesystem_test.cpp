@@ -669,6 +669,70 @@ TEST_F(SandboxTest, RejectsUnsafeEntryMutationsAndPreservesExistingData) {
     EXPECT_EQ(read_only->delete_entry({"workspace", "images/alpha.hds"}).error().code, "read_only_root");
 }
 
+TEST_F(SandboxTest, ReviewedFileIsNotPublishedWhenSourceBecomesStaleOrCancellationWinsAtCommit) {
+    const auto value = sandbox();
+    const auto destination = value.bind_output_file({"workspace", "images/folder/sample.img"}, false);
+    ASSERT_TRUE(destination) << destination.error().message;
+    const axk::MemoryReader content{{std::byte{0x61}}};
+    const auto stale = value.publish_file(*destination, content, {}, []() -> axk::app::Result<void> {
+        return std::unexpected(axk::app::Error{"conversion_plan_stale", "Source revision changed"});
+    });
+    ASSERT_FALSE(stale);
+    EXPECT_EQ(stale.error().code, "conversion_plan_stale");
+    axk::CancellationSource stop;
+    const auto cancelled = value.publish_file(*destination, content, stop.token(), [&]() -> axk::app::Result<void> {
+        stop.cancel();
+        return {};
+    });
+    ASSERT_FALSE(cancelled);
+    EXPECT_EQ(cancelled.error().code, "operation_cancelled");
+    EXPECT_TRUE(std::filesystem::is_empty(root_ / "images" / "folder"));
+}
+
+TEST_F(SandboxTest, ReviewedFileCancellationStopsBetweenCopyChunks) {
+    struct CancellingReader final : axk::RandomAccessReader {
+        std::uint64_t size() const noexcept override { return 3U * 1024U * 1024U; }
+        axk::Result<void> read_exact_at(std::uint64_t, std::span<std::byte> out) const override {
+            std::ranges::fill(out, std::byte{});
+            ++calls;
+            stop.cancel();
+            return {};
+        }
+        mutable axk::CancellationSource stop;
+        mutable std::size_t calls{};
+    } source;
+    const auto value = sandbox();
+    const auto destination = value.bind_output_file({"workspace", "images/folder/sample.img"}, false);
+    ASSERT_TRUE(destination);
+    const auto cancelled = value.publish_file(*destination, source, source.stop.token(), {});
+    ASSERT_FALSE(cancelled);
+    EXPECT_EQ(cancelled.error().code, "operation_cancelled");
+    EXPECT_EQ(source.calls, 1U);
+    EXPECT_TRUE(std::filesystem::is_empty(root_ / "images" / "folder"));
+}
+
+TEST_F(SandboxTest, ReviewedFileRejectsRootRemapAndCompetingOutputAtCommit) {
+    auto value = sandbox();
+    const auto destination = value.bind_output_file({"workspace", "images/folder/sample.img"}, false);
+    ASSERT_TRUE(destination);
+    const axk::MemoryReader content{{std::byte{0x61}}};
+    std::filesystem::create_directories(outside_ / "images" / "folder");
+    const auto changed = value.publish_file(
+        *destination, content, {}, [&] { return value.replace_roots({{"workspace", "Workspace", outside_, true}}); });
+    ASSERT_FALSE(changed);
+    EXPECT_EQ(changed.error().code, "output_destination_changed");
+    EXPECT_TRUE(std::filesystem::is_empty(root_ / "images" / "folder"));
+    EXPECT_TRUE(std::filesystem::is_empty(outside_ / "images" / "folder"));
+    ASSERT_TRUE(value.replace_roots({{"workspace", "Workspace", root_, true}}));
+    const auto output = root_ / "images" / "folder" / "sample.img";
+    const auto occupied = value.publish_file(*destination, content, {}, [&]() -> axk::app::Result<void> {
+        std::ofstream(output) << "theirs";
+        return {};
+    });
+    ASSERT_FALSE(occupied);
+    EXPECT_EQ(read_text(output), "theirs");
+}
+
 #if !defined(_WIN32)
 TEST_F(SandboxTest, ParentSwapCannotRedirectFilePublicationOutsideTheRoot) {
     const auto value = sandbox();

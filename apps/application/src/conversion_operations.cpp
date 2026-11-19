@@ -17,12 +17,15 @@
 #include "axklib/application/download_archives.hpp"
 #include "axklib/application/image_session_contracts.hpp"
 #include "axklib/application/volume_capacity.hpp"
+#include "axklib/conversion/image_set_publication.hpp"
 #include "axklib/formats/tx16w/document.hpp"
 #include "axklib/formats/typhoon/document.hpp"
 #include "companion_source_resolution.hpp"
 #include "content_digest.hpp"
+#include "conversion_inspection.hpp"
 #include "conversion_plan_store.hpp"
 #include "conversion_sources.hpp"
+#include "directory_cleanup.hpp"
 #include "prepared_session_commit.hpp"
 
 namespace axk::app {
@@ -133,12 +136,19 @@ Json record_json(const Record &record, std::size_t offset, std::size_t limit) {
         out["destination"] = {{"imageId", edit->destination.image_id},
                               {"documentId", edit->destination.document_id},
                               {"expectedRevision", edit->revision}};
+    } else if (std::holds_alternative<ImageSetDelivery>(payload.target)) {
+        out["capacity"] = nullptr;
+        out["destination"] = std::get<conversion::NewImageSetReview>(report.destination);
+        out["destination"]["kind"] = "NEW_IMAGE_SET";
     } else {
         const auto &digest = std::get<ImageDelivery>(payload.target).digest;
         out["capacity"] = nullptr;
         out["destination"] = {{"kind", "NEW_IMAGE"},
                               {"sizeBytes", std::get<conversion::NewImageReview>(report.destination).size_bytes},
                               {"sha256", digest.empty() ? Json(nullptr) : Json(digest)}};
+        if (const auto &file = std::get<ImageDelivery>(payload.target).file)
+            out["destination"]["file"] = {{"rootId", file->reference().root_id},
+                                          {"relativePath", file->reference().relative_path}};
     }
     return result;
 }
@@ -176,33 +186,34 @@ struct ConversionService::Implementation {
             if (profile == profiles.profiles().end())
                 return std::unexpected(Error{"invalid_request", "Unknown conversion profile"});
             const auto &destination = input.at("destination");
-            const bool new_image = profile->output_kind == conversion::OutputKind::new_image;
-            if (new_image ? (destination != Json{{"kind", "NEW_IMAGE"}} || input.contains("capacityPolicy"))
-                          : destination.size() != 4U)
+            const bool new_image = profile->output_kind != conversion::OutputKind::existing_image;
+            std::optional<SandboxOutputFile> output_file;
+            if (profile->output_kind == conversion::OutputKind::new_image && destination.contains("file")) {
+                const auto &file = destination.at("file");
+                if (!file.is_object() || file.size() != 2U)
+                    return std::unexpected(Error{"invalid_request", "Expected an output file reference"});
+                auto bound = sandbox.bind_output_file(
+                    {file.at("rootId").get<std::string>(), file.at("relativePath").get<std::string>()}, false);
+                if (!bound)
+                    return std::unexpected(bound.error());
+                output_file = std::move(*bound);
+            }
+            if (new_image
+                    ? (destination.value("kind", std::string{}) != conversion::output_kind_name(profile->output_kind) ||
+                       destination.size() != (output_file ? 2U : 1U) || input.contains("capacityPolicy"))
+                    : destination.size() != 4U)
                 return std::unexpected(
                     Error{"invalid_request", "Destination or capacity policy does not match this conversion profile"});
             const auto fidelity = input.at("fidelity").get<std::string>();
             if (fidelity != "BEST" && fidelity != "STRICT")
                 return std::unexpected(Error{"invalid_request", "Fidelity must be BEST or STRICT"});
-            auto source =
-                open_source(input.at("source"), formats, profile->source_format, sandbox, uploads, images, context);
+            auto source = open_source(input.at("source"), formats, profile->source_format, sandbox, uploads, images,
+                                      context, conversion::Limits{}.maximum_bytes);
             if (!source)
                 return std::unexpected(source.error());
-            // Conservatively charge native metadata, entry readers and source leases as well as output patches.
-            // TX16W PCM is lazy; its decoded buffers are accounted for by the directional profile.
-            const auto &catalog = source->document->catalog();
-            std::uint64_t source_bytes = static_cast<std::uint64_t>(catalog.objects.size()) * 65536U +
-                                         static_cast<std::uint64_t>(catalog.relationships.size() +
-                                                                    catalog.nodes.size() + catalog.diagnostics.size()) *
-                                             8192U;
-            for (const auto &member : source->document->sources()->members()) {
-                source_bytes += 65536U;
-                for (const auto &root : member.roots)
-                    source_bytes += static_cast<std::uint64_t>(root.entries.size()) * 16384U;
-            }
-            if (source_bytes >= conversion::Limits{}.maximum_bytes)
-                return std::unexpected(
-                    Error{"conversion_limit_exceeded", "Native source metadata exceeds the plan retention limit"});
+            const auto budget = source_budget(*source, conversion::Limits{}.maximum_bytes);
+            if (!budget)
+                return std::unexpected(budget.error());
             conversion::Request request{source->document,
                                         {profile->destination_format, {}, {}, {}},
                                         input.at("options"),
@@ -244,15 +255,18 @@ struct ConversionService::Implementation {
                 payload->target = EditTarget{target, revision, std::move(*fingerprint), *policy};
                 held.emplace(std::move(*session));
             }
-            request.limits.maximum_bytes -= source_bytes;
+            request.limits.maximum_bytes -= budget->preparing;
             auto prepared = profiles.prepare(profile_id, request, context.cancellation, context.progress);
             if (!prepared)
                 return std::unexpected(failed(prepared.error()));
             if (held) {
                 if (auto verified = held->verify_source_unchanged(); !verified)
                     return std::unexpected(verified.error());
+            } else if (std::holds_alternative<conversion::NewImageSet>((*prepared)->output())) {
+                payload->target = ImageSetDelivery{};
             } else {
                 ImageDelivery delivery;
+                delivery.file = std::move(output_file);
                 const auto &image = std::get<conversion::NewImage>((*prepared)->output());
                 if (!image.bytes.empty()) {
                     auto hash = detail::reader_sha256(PlanBytes(*prepared, image.bytes), context.cancellation);
@@ -263,9 +277,9 @@ struct ConversionService::Implementation {
                 payload->target = std::move(delivery);
             }
             payload->prepared = std::move(*prepared);
-            payload->source = std::move(source->document);
+            payload->sources = source->document->sources();
             payload->verify_workspace = std::move(source->verify_current);
-            payload->source_retention_bytes = source_bytes;
+            payload->source_retention_bytes = budget->retained;
             auto published = store->publish(*token, context.owner_id, std::move(payload));
             if (!published)
                 return std::unexpected(published.error());
@@ -285,14 +299,54 @@ struct ConversionService::Implementation {
             if (auto current = payload.verify_workspace(context.cancellation); !current)
                 return std::unexpected(current.error());
         }
-        if (std::holds_alternative<ImageDelivery>(payload.target)) {
-            const auto &image = std::get<conversion::NewImage>(payload.prepared->output());
-            if (auto current = payload.source->sources()->verify(context.cancellation); !current)
+        if (!std::holds_alternative<EditTarget>(payload.target)) {
+            if (auto current = payload.sources->verify(context.cancellation); !current)
                 return std::unexpected(failed(current.error()));
             if (auto active = context.cancellation.check(); !active)
                 return std::unexpected(failed(active.error()));
-            auto file =
-                downloads.retain(context.owner_id, "conversion.img", "application/x-raw-disk-image", image.bytes);
+            const auto *delivery = std::get_if<ImageDelivery>(&payload.target);
+            if (delivery && delivery->file) {
+                const auto &target = delivery->file->reference();
+                const auto &image = std::get<conversion::NewImage>(payload.prepared->output());
+                const auto verify = [&]() -> Result<void> {
+                    if (auto current = payload.sources->verify(context.cancellation); !current)
+                        return std::unexpected(failed(current.error()));
+                    return payload.verify_workspace ? payload.verify_workspace(context.cancellation) : Result<void>{};
+                };
+                auto published = sandbox.publish_file(*delivery->file, PlanBytes{payload.prepared, image.bytes},
+                                                      context.cancellation, verify);
+                if (!published)
+                    return std::unexpected(published.error());
+                Json result{{"planId", id},
+                            {"file", {{"rootId", target.root_id}, {"relativePath", target.relative_path}}}};
+                for (const auto &warning : published->warnings)
+                    result["warnings"].push_back(
+                        {{"code", warning.code}, {"message", warning.message}, {"context", Json::object()}});
+                return result;
+            }
+            auto file = [&]() -> Result<DownloadArchiveSnapshot> {
+                if (delivery) {
+                    const auto &image = std::get<conversion::NewImage>(payload.prepared->output());
+                    return downloads.retain(context.owner_id, "conversion." + image.extension,
+                                            "application/x-raw-disk-image", image.bytes);
+                }
+                auto stage = sandbox.create_staging_directory("axklib-conversion-set");
+                if (!stage)
+                    return std::unexpected(stage.error());
+                file_operations_internal::DirectoryCleanup cleanup{*stage};
+                if (auto written =
+                        conversion::stage_image_set(*payload.prepared, *stage, context.cancellation, context.progress);
+                    !written)
+                    return std::unexpected(failed(written.error()));
+                if (auto current = payload.sources->verify(context.cancellation); !current)
+                    return std::unexpected(failed(current.error()));
+                if (payload.verify_workspace) {
+                    if (auto current = payload.verify_workspace(context.cancellation); !current)
+                        return std::unexpected(current.error());
+                }
+                return downloads.create_owned_directory(context.owner_id, *stage, "conversion.tar",
+                                                        context.cancellation, context.progress);
+            }();
             if (!file)
                 return std::unexpected(file.error());
             return Json{{"planId", id},
@@ -331,7 +385,7 @@ struct ConversionService::Implementation {
         if (!mutation)
             return std::unexpected(mutation.error());
         const auto verify = [&]() -> Result<void> {
-            auto current = payload.source->sources()->verify(context.cancellation);
+            auto current = payload.sources->verify(context.cancellation);
             return current ? Result<void>{} : std::unexpected(failed(current.error()));
         };
         auto committed =
@@ -372,6 +426,14 @@ ConversionService::~ConversionService() {
 }
 
 Result<void> ConversionService::bind(OperationRegistry &registry) {
+    if (auto bound = registry.bind("conversions.inspect",
+                                   [impl = implementation_](const Json &input, const OperationContext &context) {
+                                       return inspect_conversion_source(input, impl->profiles, impl->formats,
+                                                                        impl->sandbox, impl->uploads, impl->images,
+                                                                        context);
+                                   });
+        !bound)
+        return bound;
     if (auto bound = registry.bind("images.companionSources.resolve",
                                    [impl = implementation_](const Json &input, const OperationContext &context) {
                                        return resolve_companion_sources(input, impl->formats, impl->sandbox,

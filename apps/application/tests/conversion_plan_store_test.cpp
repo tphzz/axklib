@@ -1,11 +1,14 @@
 #include <chrono>
 #include <memory>
 #include <string>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
 
 #include "conversion_plan_store.hpp"
+#include "conversion_sources.hpp"
 
 namespace {
 using namespace axk::app::conversion_internal;
@@ -117,4 +120,39 @@ TEST(ConversionPlanStore, ChargesSourceLeasesAndCollectsWithoutAClientRequest) {
     now += std::chrono::seconds{2};
     store.collect_expired();
     EXPECT_TRUE(weak.expired());
+}
+
+TEST(ConversionPlanStore, LargeWorkspaceCatalogIsBorrowedButPrivateDecodeAndSourceLeasesRemainBounded) {
+    struct Document final : axk::native::Document {
+        const axk::native::DocumentSummary &summary() const noexcept override { return description; }
+        const axk::native::Catalog &catalog() const noexcept override { return data; }
+        const std::shared_ptr<const axk::native::SourceSet> &sources() const noexcept override { return members; }
+        axk::native::DocumentSummary description;
+        axk::native::Catalog data;
+        std::shared_ptr<const axk::native::SourceSet> members;
+    };
+    auto document = std::make_shared<Document>();
+    const auto sources = axk::native::SourceSet::create({{"disk", "Disk", {}, {{"root", "sfs", {}}}}});
+    ASSERT_TRUE(sources);
+    document->members = *sources;
+    document->data.objects.resize(8184U);
+    document->data.nodes.resize(8184U);
+    auto keys = std::make_shared<std::unordered_map<std::string, std::string>>();
+    for (std::size_t i = 0; i < document->data.objects.size(); ++i)
+        keys->emplace("public-" + std::to_string(i), "native-" + std::to_string(i));
+    axk::app::NativeDocumentSnapshot workspace{{"image", "document"}, 1U, document, {}, std::move(keys)};
+    const auto budget = source_budget(workspace, axk::conversion::Limits{}.maximum_bytes);
+    ASSERT_TRUE(budget);
+    EXPECT_GT(budget->preparing, budget->retained);
+    EXPECT_FALSE(source_budget(workspace, budget->retained));
+    const axk::app::NativeDocumentSnapshot standalone{{}, 0U, document, {}};
+    const auto refused = source_budget(standalone, axk::conversion::Limits{}.maximum_bytes);
+    ASSERT_FALSE(refused);
+    EXPECT_EQ(refused.error().code, "conversion_limit_exceeded");
+    document->data.objects.resize(32U);
+    document->data.nodes.resize(32U);
+    const auto small = source_budget(standalone, axk::conversion::Limits{}.maximum_bytes);
+    ASSERT_TRUE(small);
+    EXPECT_EQ(small->retained, budget->retained);
+    EXPECT_GT(small->preparing, small->retained);
 }

@@ -10,11 +10,13 @@
 #include <shared_mutex>
 #include <span>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "axklib/application/contracts.hpp"
 #include "axklib/application/mutation_target.hpp"
 #include "axklib/io.hpp"
+#include "axklib/publication.hpp"
 
 namespace axk::app {
 
@@ -69,6 +71,17 @@ struct SandboxFile {
     std::string revision;
     std::shared_ptr<const axk::RandomAccessReader> reader;
     std::function<Result<void>()> verify_unchanged;
+};
+
+class SandboxOutputFile {
+  public:
+    [[nodiscard]] const FileRef &reference() const noexcept;
+
+  private:
+    struct Binding;
+    std::shared_ptr<const Binding> binding_;
+    explicit SandboxOutputFile(std::shared_ptr<const Binding> binding) : binding_(std::move(binding)) {}
+    friend class Sandbox;
 };
 
 class SandboxMutation final : public MutationTarget {
@@ -153,8 +166,13 @@ class Sandbox {
     [[nodiscard]] Result<std::shared_ptr<SandboxMutation>> open_mutation(const FileRef &reference) const;
     [[nodiscard]] Result<SandboxTree> open_tree(const DirectoryRef &reference, const SandboxTreeLimits &limits,
                                                 const CancellationToken &cancellation = {}) const;
-    [[nodiscard]] Result<void> publish_file(const FileRef &destination, bool overwrite,
-                                            const axk::RandomAccessReader &source) const;
+    [[nodiscard]] Result<SandboxOutputFile> bind_output_file(const FileRef &destination, bool overwrite) const;
+    [[nodiscard]] Result<PublicationOutcome> publish_file(const FileRef &destination, bool overwrite,
+                                                          const axk::RandomAccessReader &source) const;
+    [[nodiscard]] Result<PublicationOutcome> publish_file(const SandboxOutputFile &destination,
+                                                          const axk::RandomAccessReader &source,
+                                                          const CancellationToken &cancellation,
+                                                          const std::function<Result<void>()> &before_commit) const;
     [[nodiscard]] Result<std::filesystem::path> create_staging_directory(std::string_view purpose) const;
     [[nodiscard]] Result<void> publish_directory(const DirectoryRef &destination, bool overwrite,
                                                  const std::filesystem::path &staging,

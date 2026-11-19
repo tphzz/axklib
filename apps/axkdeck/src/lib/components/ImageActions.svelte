@@ -11,6 +11,7 @@
         oncreate: () => void;
         onclose: () => void;
         onintegrity?: () => void;
+        onconvert?: () => void;
         onmanagelocations: () => void;
     }
     let {
@@ -22,6 +23,7 @@
         oncreate,
         onclose,
         onintegrity = () => undefined,
+        onconvert,
         onmanagelocations,
     }: Props = $props();
     let imageMenuOpen = $state(false);
@@ -127,6 +129,14 @@
                 >
             {/if}
             {#if image}
+                {#if onconvert}<button
+                        type="button"
+                        role="menuitem"
+                        onclick={() => {
+                            imageMenuOpen = false;
+                            onconvert?.();
+                        }}><Icon name="refresh" size={14} /> Convert...</button
+                    >{/if}
                 <button
                     type="button"
                     role="menuitem"

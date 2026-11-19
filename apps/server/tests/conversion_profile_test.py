@@ -166,6 +166,17 @@ def forward(server, cli, fixture, root, mode):
         descriptor = next(p for p in listing if p["id"] == FORWARD)
         # Compare the original descriptor independently from the later output and selection controls.
         assert descriptor.pop("outputKind") == "EXISTING_IMAGE"
+        assert descriptor.pop("route") == {
+            "targetLabel": "A-series · Hard disk (SFS)",
+            "medium": "sfs-hard-disk",
+            "intents": ["PLAYABLE_INSTRUMENTS", "WAVE_DATA"],
+            "editorCapabilities": [
+                "disk-set-selection",
+                "a-series-volume-placement",
+                "a-series-load-target",
+            ],
+            "priority": 0,
+        }
         selection = descriptor["optionsSchema"]["properties"].pop("sourceObjectIds")
         assert selection["type"] == "array" and selection["items"]["type"] == "string"
         assert "sourceObjectIds" not in descriptor["optionsSchema"]["required"]
@@ -228,7 +239,9 @@ def forward(server, cli, fixture, root, mode):
     assert "TONE" in tree
     if mode == "HIERARCHY":
         for binding in (report, full):
-            sample = next(a for a in binding["actions"] if a["kind"].lower() == "sample")
+            sample = next(
+                a for a in binding["actions"] if a["kind"].lower() == "sample"
+            )
             details = {d["label"]: d["value"] for d in sample["details"]}
             assert (details["Root key"], details["Key range"]) == ("58", "28..73")
         assert (

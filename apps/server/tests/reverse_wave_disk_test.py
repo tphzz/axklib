@@ -20,7 +20,7 @@ def catalog(cli, source):
     return doc["id"], rows["items"]
 
 
-def convert(client, source, doc, ids, *extra, ok=True, confirmation=""):
+def convert(client, source, doc, ids, *extra, ok=True, confirmation="", profile=PROFILE):
     result = subprocess.run(
         [
             client,
@@ -28,7 +28,7 @@ def convert(client, source, doc, ids, *extra, ok=True, confirmation=""):
             "--source",
             source,
             "--profile",
-            PROFILE,
+            profile,
             "--options",
             json.dumps({"documentId": doc, "waveIds": ids}),
             *extra,

@@ -11,6 +11,7 @@
 #include "axklib/catalog.hpp"
 #include "axklib/file_publication.hpp"
 #include "axklib/media.hpp"
+#include "axklib/native_bundle_media.hpp"
 #include "axklib/package_archive.hpp"
 #include "axklib/relationship.hpp"
 #include "axklib/utf8.hpp"
@@ -120,11 +121,13 @@ Result<std::vector<detail::PreparedMediaObject>> prepare_transfer(const SavedObj
     return result;
 }
 
-Result<std::vector<detail::PreparedMediaObject>>
-prepare_authored(const VolumeSpec &volume, const MediaBuildLimits &limits, const CancellationToken &cancellation) {
+Result<std::vector<detail::PreparedMediaObject>> prepare_authored(const VolumeSpec &volume,
+                                                                  const MediaBuildLimits &limits,
+                                                                  const CancellationToken &cancellation,
+                                                                  std::optional<std::span<ImportedAudio>> audio = {}) {
     PartitionSpec partition{"MEDIA", {volume}};
     constexpr PartitionGeometry staging_geometry{0, 3, 2'000'000, 1'999'999, 999'999, 2, 1, 3, 512};
-    auto records = detail::prepare_partition_records(partition, staging_geometry, 1, cancellation);
+    auto records = detail::prepare_partition_records(partition, staging_geometry, 1, cancellation, audio);
     if (!records)
         return std::unexpected{records.error()};
     std::vector<detail::PreparedMediaObject> result;
@@ -327,6 +330,55 @@ Result<void> validate_written_image(const detail::PreparedMediaImage &prepared, 
 }
 
 } // namespace
+
+Result<std::vector<std::byte>> a_series::authoring::build_media(Bundle bundle, const FreshMedia &target,
+                                                                std::uint64_t maximum_bytes,
+                                                                const CancellationToken &cancellation) {
+    if (auto active = cancellation.check(); !active)
+        return std::unexpected(active.error());
+    if (target.format != BuildManifestKind::fat12_floppy && target.format != BuildManifestKind::iso9660 &&
+        target.format != BuildManifestKind::hds)
+        return std::unexpected(
+            make_error(ErrorCode::unsupported_profile, ErrorCategory::unsupported, "Unknown A-series output medium"));
+    if ((maximum_bytes < formatted_floppy_size_bytes && target.format == BuildManifestKind::fat12_floppy) ||
+        (target.format == BuildManifestKind::hds && target.size_bytes > maximum_bytes))
+        return std::unexpected(make_error(ErrorCode::io_unsupported_size, ErrorCategory::io,
+                                          "Requested A-series image exceeds the conversion memory limit"));
+    VolumeSpec volume{
+        target.volume_name, {}, std::move(bundle.samples), std::move(bundle.sample_banks), std::move(bundle.programs)};
+    std::vector<ImportedAudio> audio;
+    for (auto &wave : bundle.wave_data) {
+        if (auto active = cancellation.check(); !active)
+            return std::unexpected(active.error());
+        if (!wave.spec.path.empty() || wave.audio.pcm_channels.size() != 1U ||
+            wave.audio.output_sample_width_bits != 16U ||
+            wave.audio.output_frames > maximum_wave_data_frames_per_channel ||
+            wave.audio.pcm_channels.front().size() != wave.audio.output_frames * sizeof(std::int16_t))
+            return std::unexpected(make_error(ErrorCode::invalid_argument, ErrorCategory::audio,
+                                              "Expected materialized mono PCM16 Wave Data"));
+        wave.spec.id = wave.spec.name;
+        volume.waveforms.push_back(std::move(wave.spec));
+        audio.push_back(std::move(wave.audio));
+    }
+    if (target.format == BuildManifestKind::hds)
+        return build_hds(std::move(volume), audio, target, cancellation);
+    const auto format =
+        target.format == BuildManifestKind::fat12_floppy ? MediaImageFormat::fat12_floppy : MediaImageFormat::iso9660;
+    MediaBuildLimits limits;
+    limits.maximum_aggregate_payload_bytes = maximum_bytes;
+    limits.maximum_object_bytes = std::min(limits.maximum_object_bytes, maximum_bytes);
+    limits.maximum_output_bytes = maximum_bytes;
+    auto objects = prepare_authored(volume, limits, cancellation, std::span{audio});
+    if (!objects)
+        return std::unexpected(objects.error());
+    detail::PreparedMediaImage image{};
+    image.manifest.format = format;
+    image.manifest.volume_name = target.volume_name;
+    image.limits = limits;
+    image.objects = std::move(*objects);
+    return format == MediaImageFormat::fat12_floppy ? detail::build_fat12_image(image, cancellation)
+                                                    : detail::build_iso9660_image(image, cancellation);
+}
 
 Result<detail::PreparedMediaImage> detail::prepare_media_image(const MediaBuildManifest &manifest,
                                                                const MediaBuildLimits &limits,

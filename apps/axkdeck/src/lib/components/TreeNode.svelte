@@ -33,6 +33,7 @@
         volumeFloppyExportEnabled?: boolean;
         audioExportEnabled?: boolean;
         mediaConversionEnabled?: boolean;
+        waveConversionEnabled?: boolean;
         allocationInspectionEnabled?: boolean;
         samplerOrderingEnabled?: boolean;
         onrequestmenu?: (item: DiskTreeItem, x: number, y: number) => void;
@@ -55,6 +56,7 @@
         volumeFloppyExportEnabled = false,
         audioExportEnabled = false,
         mediaConversionEnabled = false,
+        waveConversionEnabled = false,
         allocationInspectionEnabled = false,
         samplerOrderingEnabled = false,
         onrequestmenu = () => undefined,
@@ -161,6 +163,7 @@
     }
 
     function canOpenMenu(): boolean {
+        if (item.kind === 'volume' && waveConversionEnabled) return true;
         return (
             item.partitionIndex !== undefined &&
             ((item.kind === 'partition' &&
@@ -380,6 +383,7 @@
                     {volumeFloppyExportEnabled}
                     {audioExportEnabled}
                     {mediaConversionEnabled}
+                    {waveConversionEnabled}
                     {allocationInspectionEnabled}
                     {samplerOrderingEnabled}
                     {onrequestmenu}

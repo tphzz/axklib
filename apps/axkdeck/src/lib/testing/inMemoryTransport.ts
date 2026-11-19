@@ -563,6 +563,9 @@ export class InMemoryImageTransport implements ImageTransport {
     resolveCompanionSources: ImageTransport['resolveCompanionSources'] = (...args) =>
         this.invoke('resolveCompanionSources', args);
     conversionProfiles: ImageTransport['conversionProfiles'] = (...args) => this.invoke('conversionProfiles', args);
+    inspectConversion: ImageTransport['inspectConversion'] = (...args) => this.invoke('inspectConversion', args);
+    readConversionDownload: ImageTransport['readConversionDownload'] = (...args) =>
+        this.invoke('readConversionDownload', args);
     prepareConversion: ImageTransport['prepareConversion'] = (...args) => this.invoke('prepareConversion', args);
     conversionPlan: ImageTransport['conversionPlan'] = (...args) => this.invoke('conversionPlan', args);
     releaseConversion: ImageTransport['releaseConversion'] = (...args) => this.invoke('releaseConversion', args);

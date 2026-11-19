@@ -510,7 +510,7 @@ export class AxklibHttpApiClient {
         if (!response.ok) await this.throwResponseError(response);
     }
 
-    async openDirectoryArchive(snapshot: DownloadArchiveSnapshot): Promise<Response> {
+    async openDirectoryArchive(snapshot: Pick<DownloadArchiveSnapshot, 'contentPath'>): Promise<Response> {
         const response = await this.fetchResponse(
             'GET',
             this.operationPath(snapshot.contentPath),

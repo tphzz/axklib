@@ -11,7 +11,7 @@
 
 #include <nlohmann/json.hpp>
 
-#include "axklib/conversion/a_series_to_tx16w/source.hpp"
+#include "axklib/conversion/a_series/wave_reader.hpp"
 #include "axklib/sfs_disk_sources.hpp"
 
 namespace {
@@ -56,10 +56,10 @@ int measure_sfs_window(const std::filesystem::path &path) {
     meter->reads.clear();
     axk::conversion::Request request{doc, {}, {}, axk::conversion::Fidelity::best, {}, {}};
     const std::vector<std::string> invalid{wanted->id, "missing"};
-    if (axk::conversion::a_series_to_tx16w::select_waves(request, doc->summary().id, invalid))
+    if (axk::conversion::a_series_waves::select_waves(request, doc->summary().id, invalid))
         return 1;
     const auto waves =
-        axk::conversion::a_series_to_tx16w::select_waves(request, doc->summary().id, std::span{&wanted->id, 1U});
+        axk::conversion::a_series_waves::select_waves(request, doc->summary().id, std::span{&wanted->id, 1U});
     if (!waves || !meter->reads.empty())
         return 1;
     const auto pcm = waves->front().read(510U, 3U);

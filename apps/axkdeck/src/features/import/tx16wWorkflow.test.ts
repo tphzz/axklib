@@ -12,6 +12,13 @@ import { PickerController } from '../dialogs/picker';
 import { fitsCapacity, inspectFitsCapacity } from '../../test/samplerCapacityFixture';
 
 const target = { kind: 'EXISTING_VOLUME' as const, partitionIndex: 0, volumeName: 'Imported' };
+const existingSfsRoute = {
+    targetLabel: 'A-series · Hard disk (SFS)',
+    medium: 'sfs-hard-disk',
+    intents: ['PLAYABLE_INSTRUMENTS', 'WAVE_DATA'],
+    editorCapabilities: ['disk-set-selection', 'a-series-volume-placement', 'a-series-load-target'],
+    priority: 0,
+};
 const diskSource: ClientUploadSource = {
     name: 'library.ima',
     type: 'application/octet-stream',
@@ -324,6 +331,7 @@ describe('Tx16wImportWorkflow', () => {
             const seed = serverFileLocation({ rootId: 'remote', relativePath: 'DBS207A.img' });
             const profile = {
                 id: 'server-selected-profile',
+                route: existingSfsRoute,
                 sourceFormat: 'nuedge.typhoon',
                 destinationFormat: 'yamaha.a-series',
                 outputKind: 'EXISTING_IMAGE',
@@ -1061,6 +1069,7 @@ function createWorkflow(
         conversionProfiles: vi.fn().mockResolvedValue([
             {
                 id: 'yamaha.tx16w-to-a-series',
+                route: existingSfsRoute,
                 sourceFormat: 'yamaha.tx16w',
                 destinationFormat: 'yamaha.a-series',
                 outputKind: 'EXISTING_IMAGE',

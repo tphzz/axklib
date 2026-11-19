@@ -7,15 +7,14 @@
 #include <vector>
 
 #include "axklib/resample.hpp"
-#include "axklib/writer.hpp"
 
-namespace axk::conversion::a_series_to_tx16w {
-Result<tx16w::WaveEncoding> map_playback(const WaveSource &wave) {
+namespace axk::conversion::tx16w_wave_disk {
+Result<tx16w::WaveEncoding> map_playback(const WaveTransfer &wave) {
     const auto fail = [](const char *reason) -> Result<tx16w::WaveEncoding> {
         return std::unexpected(make_error(ErrorCode::unsupported_profile, ErrorCategory::audio, reason));
     };
-    const bool looped = wave.loop_mode == static_cast<unsigned>(AudioSamplerLoopMode::forward_loop);
-    if (!wave.rate || (!looped && wave.loop_mode != static_cast<unsigned>(AudioSamplerLoopMode::forward_one_shot)))
+    const bool looped = wave.loop_mode == WavePlayback::forward_loop;
+    if (!wave.rate || (!looped && wave.loop_mode != WavePlayback::forward_one_shot))
         return fail("Only forward one-shot and forward loop playback can be written");
     // Of the proven encodings, 50 kHz is available only for looped Waves.
     const std::uint32_t rate = looped && wave.rate >= 41667U ? 50000U : 33333U;
@@ -45,7 +44,7 @@ std::int16_t quantize_pcm12(double value) {
     return static_cast<std::int16_t>(std::clamp(std::round(value / 16.0), -2048.0, 2047.0) * 16.0);
 }
 
-Result<RenderedWave> render_wave(const WaveSource &wave, const tx16w::WaveEncoding &encoding,
+Result<RenderedWave> render_wave(const WaveTransfer &wave, const tx16w::WaveEncoding &encoding,
                                  const CancellationToken &cancel) {
     const auto frames = encoding.attack_frames + encoding.repeat_frames;
     auto samples = wave.read(0U, wave.frame_count, cancel);
@@ -94,4 +93,4 @@ std::string wave_filename(std::string_view source_name, std::size_t slot) {
         name = "WAVE";
     return name + (slot < 10U ? ".W0" : ".W") + std::to_string(slot);
 }
-} // namespace axk::conversion::a_series_to_tx16w
+} // namespace axk::conversion::tx16w_wave_disk

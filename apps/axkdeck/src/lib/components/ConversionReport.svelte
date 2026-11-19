@@ -8,7 +8,10 @@
         acknowledged = $bindable<string[]>([]),
         disabled = false,
         sourceSelection,
+        sourceFooter,
         sourceSummary = '',
+        plannedSummary,
+        sourceCatalog,
         capacity,
         feedback,
         feedbackNotice = '',
@@ -18,7 +21,10 @@
         acknowledged?: string[];
         disabled?: boolean;
         sourceSelection?: Snippet;
+        sourceFooter?: Snippet;
         sourceSummary?: string;
+        plannedSummary?: string;
+        sourceCatalog?: NonNullable<ConversionReport['sourceObjects']>;
         capacity?: Snippet;
         feedback?: Snippet;
         feedbackNotice?: string;
@@ -46,7 +52,9 @@
     const visibleIssues = $derived(orderedIssues.slice(currentIssuePage * pageSize, (currentIssuePage + 1) * pageSize));
     const remaining = $derived(required.filter((issue) => !acknowledged.includes(issue.id)).length);
     const strict = $derived(report.fidelity === 'STRICT');
-    const sources = $derived(new Map((prepared?.sourceObjects ?? []).map((object) => [object.id, object])));
+    const sources = $derived(
+        new Map((prepared?.sourceObjects ?? sourceCatalog ?? []).map((object) => [object.id, object])),
+    );
     function sourceLabel(id: string): string {
         const source = sources.get(id);
         if (source) return `${source.name} · ${source.location}`;
@@ -119,9 +127,12 @@
 <ImportReviewLayout
     bind:active
     {sourceSelection}
+    {sourceFooter}
     {sourceSummary}
     contentsSummary={`${report.actionCount} planned objects`}
-    reviewSummary={blockers.length ? reviewNotice : `${report.issueCount} mapping details`}
+    reviewSummary={blockers.length
+        ? reviewNotice
+        : `${report.issueCount} mapping ${report.issueCount === 1 ? 'detail' : 'details'}`}
     {reviewNotice}
 >
     {#snippet columns()}<div class="object-columns">
@@ -149,7 +160,7 @@
                     </div>
                     <div>
                         <dt>Planned output</dt>
-                        <dd>{prepared ? `${report.actionCount} objects` : 'No current plan'}</dd>
+                        <dd>{prepared ? (plannedSummary ?? `${report.actionCount} objects`) : 'No current plan'}</dd>
                     </div>
                 </dl>{/if}
             {#if blockers.length}<h4 class="blocker">
@@ -192,6 +203,7 @@
         />{/snippet}
     {#snippet reviewFooter()}<ImportReportPagination
             label="mapping details"
+            singular="mapping detail"
             count={report.issues.length}
             page={currentIssuePage}
             onchange={(page) => void changePage('review', page)}

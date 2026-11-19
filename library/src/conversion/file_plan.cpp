@@ -5,6 +5,7 @@
 #include <mutex>
 #include <utility>
 
+#include "axklib/conversion/image_set_publication.hpp"
 #include "axklib/file_publication.hpp"
 #include "axklib/formats/tx16w/document.hpp"
 #include "axklib/formats/typhoon/document.hpp"
@@ -41,7 +42,7 @@ Result<FilePlan> FilePlan::prepare(const FileRequest &request, const Cancellatio
     const auto profile = std::ranges::find(registry.profiles(), request.profile_id, &Profile::id);
     if (profile == registry.profiles().end())
         return std::unexpected(invalid("Unknown conversion profile"));
-    const bool new_image = profile->output_kind == OutputKind::new_image;
+    const bool new_image = profile->output_kind != OutputKind::existing_image;
     if (new_image && (!request.destination.empty() || !request.selection.is_null() || request.capacity_policy))
         return std::unexpected(
             invalid("New-image conversion accepts no destination template, selection or capacity policy"));
@@ -119,6 +120,10 @@ Result<PublicationOutcome> FilePlan::apply(const std::filesystem::path &output,
     }
     if (const auto checked = file_internal::verify(impl_->sources, cancellation); !checked)
         return std::unexpected(checked.error());
+    if (std::holds_alternative<NewImageSet>(prepared->output()))
+        return publish_image_set(
+            *prepared, output, [&] { return file_internal::verify(impl_->sources, cancellation); }, cancellation,
+            progress);
     auto temporary = detail::TemporaryPublication::create(output);
     if (!temporary)
         return std::unexpected(temporary.error());
@@ -206,6 +211,8 @@ nlohmann::json FilePlan::report_json() const {
     }
     if (const auto *capacity = std::get_if<VolumeCapacityAdmission>(&report.destination)) {
         result["capacity"] = {{"allowed", capacity->allowed}, {"target", a_series_load_target_name(capacity->target)}};
+    } else if (const auto *set = std::get_if<NewImageSetReview>(&report.destination)) {
+        result["newImageSet"] = *set;
     } else {
         const auto &image = std::get<NewImageReview>(report.destination);
         result["newImage"] = {

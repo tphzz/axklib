@@ -23,9 +23,9 @@ std::string folded(std::string name) {
     return name;
 }
 Result<std::shared_ptr<const PreparedPlan>> prepare(const Request &request, const CancellationToken &token,
-                                                    ProgressSink *progress) {
+                                                    ProgressSink *progress, const FreshVolume *fresh) {
     const auto doc = std::dynamic_pointer_cast<const typhoon::Document>(request.source);
-    if (!doc || !request.destination.reader)
+    if (!doc || (!fresh && !request.destination.reader))
         return std::unexpected(invalid("Select a native Typhoon document and an A-series image"));
     const auto &options = request.options;
     const bool subset = options.contains("sourceObjectIds");
@@ -33,7 +33,9 @@ Result<std::shared_ptr<const PreparedPlan>> prepare(const Request &request, cons
         (options["mode"] != "WAVE_DATA_ONLY" && options["mode"] != "HIERARCHY"))
         return std::unexpected(invalid("Select a Typhoon conversion mode"));
     const bool hierarchy = options["mode"] == "HIERARCHY";
-    auto destination = volume_destination(request.destination.selection);
+    auto destination = fresh ? Result<a_series::authoring::Destination>{a_series::authoring::Destination{
+                                   0, fresh->media.volume_name, false}}
+                             : volume_destination(request.destination.selection);
     if (!destination)
         return std::unexpected(destination.error());
     std::set<std::string, std::less<>> chosen, used;
@@ -50,13 +52,14 @@ Result<std::shared_ptr<const PreparedPlan>> prepare(const Request &request, cons
                 return std::unexpected(invalid("Selected Typhoon object is missing, invalid or duplicated"));
         }
     }
-    const auto inventory = a_series::authoring::inventory(request.destination.reader, *destination, token);
+    const auto inventory = fresh ? Result<a_series::authoring::Inventory>{a_series::authoring::Inventory{}}
+                                 : a_series::authoring::inventory(request.destination.reader, *destination, token);
     if (!inventory)
         return std::unexpected(inventory.error());
     for (const auto &name : inventory->wave_data_names)
         used.insert(folded(name));
     Report report;
-    report.profile_id = id;
+    report.profile_id = fresh ? fresh->profile_id : id;
     report.fidelity = request.fidelity;
     report.executable = true;
     auto issue = [&](Impact impact, std::string code, std::string object, std::string message) {
@@ -153,23 +156,26 @@ Result<std::shared_ptr<const PreparedPlan>> prepare(const Request &request, cons
         report.issues.size() > request.limits.maximum_issues || retained > request.limits.maximum_bytes)
         return std::unexpected(invalid("Typhoon conversion exceeds the review limit"));
     if (!report.executable)
-        return std::make_shared<const PreparedPlan>(std::move(report), std::vector<Patch>{},
-                                                    request.destination.reader->size(), retained);
-    return finish_volume_plan(request, *destination, bundle, std::move(report), token, progress);
+        return blocked_volume_plan(request, std::move(report));
+    return finish_volume_plan(request, *destination, std::move(bundle), std::move(report), token, progress, fresh);
 }
 } // namespace
 Profile profile() {
-    return {id,
-            "Typhoon to A-series",
-            "nuedge.typhoon",
-            "yamaha.a-series",
-            {{"type", "object"},
-             {"additionalProperties", false},
-             {"required", {"mode"}},
-             {"properties",
-              {{"mode", {{"type", "string"}, {"enum", {"WAVE_DATA_ONLY", "HIERARCHY"}}}},
-               {"sourceObjectIds",
-                {{"type", "array"}, {"minItems", 1}, {"uniqueItems", true}, {"items", {{"type", "string"}}}}}}}},
-            prepare};
+    return {
+        id,
+        "Typhoon to A-series",
+        "nuedge.typhoon",
+        "yamaha.a-series",
+        {{"type", "object"},
+         {"additionalProperties", false},
+         {"required", {"mode"}},
+         {"properties",
+          {{"mode", {{"type", "string"}, {"enum", {"WAVE_DATA_ONLY", "HIERARCHY"}}}},
+           {"sourceObjectIds",
+            {{"type", "array"}, {"minItems", 1}, {"uniqueItems", true}, {"items", {{"type", "string"}}}}}}}},
+        [](const Request &r, const CancellationToken &token, ProgressSink *p) { return prepare(r, token, p, nullptr); },
+        OutputKind::existing_image,
+        existing_sfs_route()};
 }
+std::vector<Profile> fresh_profiles() { return fresh_volume_profiles(profile(), prepare); }
 } // namespace axk::conversion::typhoon_to_a_series

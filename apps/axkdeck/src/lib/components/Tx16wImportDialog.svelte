@@ -159,6 +159,7 @@
                     {sourceLabel}
                     source={request.sourceName}
                     profile={request.destinationProfile ?? report?.profileId}
+                    targetLabel={request.targetLabel}
                     destination={request.destinationName}
                     disabled={busy}
                     {onbrowse}

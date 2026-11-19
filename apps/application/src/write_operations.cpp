@@ -339,7 +339,10 @@ axk::app::Result<void> axk::app::bind_write_operations(OperationRegistry &regist
                 auto reader = axk::FileReader::open(staged_output);
                 if (!reader)
                     return std::unexpected(core_error(reader.error(), record.output.relative_path));
-                return sandbox.publish_file(record.output, record.overwrite, **reader);
+                const auto publication = sandbox.publish_file(record.output, record.overwrite, **reader);
+                if (!publication)
+                    return std::unexpected(publication.error());
+                return {};
             };
             if (expected_kind == axk::BuildManifestKind::hds) {
                 const auto &manifest = std::get<axk::HdsBuildManifest>(record.manifest);

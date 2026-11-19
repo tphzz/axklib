@@ -14,10 +14,12 @@
     import FilesInspector from '../../files/FilesInspector.svelte';
     import FilesExportCoordinator from '../../files/FilesExportCoordinator.svelte';
     import ImageActions from '../../../lib/components/ImageActions.svelte';
+    import DocumentConverter from '../../conversion/DocumentConverter.svelte';
     import AboutDialog from '../../../lib/components/AboutDialog.svelte';
     import { desktopBuildInfo, type DesktopBuildInfoState } from '../../../lib/desktopBuildInfo';
     import type { FilesystemEntry, FilesystemBinding } from '../../../lib/filesystem';
     import { userFacingMessage } from '../../../lib/userFacingMessage';
+    import type { DiskTreeItem } from '../../../lib/types';
     import { ViewMemory, shellViewState } from '../../workspace/viewMemory';
 
     let { mode = $bindable('files'), inspectorOpen = $bindable(true), ...workspace }: WorkspaceProps = $props();
@@ -48,6 +50,7 @@
     const fileContexts = new Map<string, FilesContext>();
     let filesReady: Promise<void> = Promise.resolve();
     let fileExporter = $state<FilesExportCoordinator>();
+    let converter = $state<DocumentConverter>();
     let fileView = $state<{
         importRoot(root: FilesystemEntry): void;
         importCommands(root: FilesystemEntry): { label: string; action: () => void }[];
@@ -77,7 +80,8 @@
             workspace.switchingDocument ||
             workspace.imageOpening ||
             fileView?.isBusy() ||
-            fileExporter?.isOpen(),
+            fileExporter?.isOpen() ||
+            converter?.isOpen(),
         ),
     );
     const exportFiles = (entries: FilesystemEntry[]) => fileExporter?.open(files?.revision ?? 0, entries);
@@ -259,6 +263,12 @@
             if (about) about = { status: 'error' };
         }
     }
+    function convertWaves(item?: DiskTreeItem) {
+        const ids = workspace.packageSelection.items.filter((i) => i.kind === 'SMPL').map((i) => i.objectId);
+        if (!ids.length && workspace.inspectorSelection?.kind === 'wave-data')
+            ids.push(workspace.inspectorSelection.waveData.objectKey);
+        void converter?.open(ids, item);
+    }
 </script>
 
 {#snippet imageActions()}
@@ -271,6 +281,7 @@
         oncreate={workspace.createImage}
         onclose={workspace.closeImage}
         onintegrity={workspace.showImageIntegrity}
+        onconvert={converter?.available() ? () => convertWaves() : undefined}
         onmanagelocations={workspace.manageLocations}
     />
 {/snippet}
@@ -363,6 +374,7 @@
     {#if document?.formatId === 'yamaha.a-series'}
         <ASeriesPresentation
             bind:this={activePresentation}
+            onconvert={converter?.available() && !switchBlocked ? convertWaves : undefined}
             {workspace}
             {remember}
             canRevealFiles={Boolean(revealEntry)}
@@ -391,6 +403,22 @@
     {/if}
 {/key}
 {#if about}<AboutDialog state={about} onclose={() => (about = null)} />{/if}
+{#if document && workspace.sessionId !== null && workspace.revision !== undefined && document.formatId === 'yamaha.a-series'}
+    {#key `${workspace.sessionId}:${document.id}:${workspace.revision}`}
+        <DocumentConverter
+            bind:this={converter}
+            transport={workspace.transport}
+            sessionId={workspace.sessionId}
+            documentId={document.id}
+            revision={workspace.revision}
+            sourceFormat={document.formatId}
+            sourceName={workspace.imageLocation?.displayName ?? document.name}
+            isDesktop={workspace.isDesktop}
+            setStatus={workspace.setStatus}
+            manageLocations={workspace.manageLocations}
+        />
+    {/key}
+{/if}
 {#if exportDriver}{#key workspace.sessionId}<FilesExportCoordinator
             driver={exportDriver}
             setStatus={workspace.setStatus}

@@ -8,6 +8,7 @@
         review,
         columns,
         contentsFooter,
+        sourceFooter,
         reviewFooter,
         reviewToolbar,
         contentsSummary = '',
@@ -21,6 +22,7 @@
         review: Snippet;
         columns?: Snippet;
         contentsFooter?: Snippet;
+        sourceFooter?: Snippet;
         reviewFooter?: Snippet;
         reviewToolbar?: Snippet;
         contentsSummary?: string;
@@ -134,6 +136,9 @@
                 >
                     {#if pane === 'contents' && showingSource}{@render sourceSelection?.()}{:else if pane === 'contents'}{@render contents()}{:else}{@render review()}{/if}
                 </div>
+                {#if pane === 'contents' && sourceFooter && showingSource}<div class="pane-footer">
+                        {@render sourceFooter()}
+                    </div>{/if}
                 {#if pane === 'contents' && contentsFooter && !showingSource}<div class="pane-footer">
                         {@render contentsFooter()}
                     </div>{/if}
@@ -220,6 +225,7 @@
     /* Keep both scroll boxes laid out so switching views does not reset positions. */
     .inactive {
         visibility: hidden;
+        opacity: 0;
         pointer-events: none;
     }
 </style>

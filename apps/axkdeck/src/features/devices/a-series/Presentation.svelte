@@ -30,12 +30,14 @@
         workspace,
         children,
         canRevealFiles,
+        onconvert,
         onrevealFiles,
         remember,
     }: {
         workspace: WorkspaceProps;
         children: Snippet<[WorkspacePresentation, DevicePresentationState]>;
         canRevealFiles: boolean;
+        onconvert?: (item: DiskTreeItem) => void;
         onrevealFiles: () => void;
         remember: RememberView;
     } = $props();
@@ -260,6 +262,7 @@
         allocationInspectionEnabled={allocationInspectionAvailable}
         samplerOrderingEnabled={enabled}
         onimageaction={imageAction}
+        {onconvert}
         onloadchildren={(parentId, offset, limit) =>
             sessionId === null
                 ? Promise.resolve({ items: [], totalCount: 0 })

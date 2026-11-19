@@ -166,7 +166,7 @@ Result<void> validate_program_fields(const ProgramSpec &program) {
 
 Result<void> validate_inserted_program(const ProgramSpec &program) { return validate_program_fields(program); }
 
-Result<void> validate_volume(const VolumeSpec &volume) {
+Result<void> validate_volume(const VolumeSpec &volume, WaveInput input = WaveInput::file) {
     if (auto valid = require_object_name(volume.name, "volume.name"); !valid)
         return valid;
     if (is_partition_support_root_entry(volume.name))
@@ -183,7 +183,7 @@ Result<void> validate_volume(const VolumeSpec &volume) {
             return valid;
         if (!waveform_names.insert(waveform.name).second)
             return std::unexpected{manifest_error("volume has duplicate Wave Data names")};
-        if (waveform.path.empty())
+        if (input == WaveInput::file && waveform.path.empty())
             return std::unexpected{manifest_error("waveform.path must be a non-empty path")};
         if (waveform.root_key > 127U || waveform.fine_tune_cents < -63 || waveform.fine_tune_cents > 63 ||
             (waveform.target_sample_rate && *waveform.target_sample_rate == 0U) ||
@@ -547,7 +547,9 @@ Result<void> validate_placement_repair_transaction(const AlterationManifest &man
 
 } // namespace
 
-Result<void> validate_authored_volume(const VolumeSpec &volume) { return validate_volume(volume); }
+Result<void> validate_authored_volume(const VolumeSpec &volume, WaveInput input) {
+    return validate_volume(volume, input);
+}
 
 Result<void> validate_alteration_manifest(const AlterationManifest &manifest) {
     if (manifest.schema_version != alteration_manifest_schema_version)

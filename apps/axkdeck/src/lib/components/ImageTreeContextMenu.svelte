@@ -18,6 +18,7 @@
         mediaConversionEnabled: boolean;
         allocationInspectionEnabled: boolean;
         onaction: (action: ImageTreeAction) => void;
+        onconvert?: (item: DiskTreeItem) => void;
         onclose: () => void;
     }
 
@@ -38,6 +39,7 @@
         mediaConversionEnabled,
         allocationInspectionEnabled,
         onaction,
+        onconvert,
         onclose,
     }: Props = $props();
     let rootMenu = $state<HTMLDivElement>();
@@ -238,6 +240,15 @@
     onclick={(event) => event.stopPropagation()}
     onkeydown={handleRootKey}
 >
+    {#if item.kind === 'volume' && selectionCount === 1 && onconvert}<button
+            type="button"
+            role="menuitem"
+            onmouseenter={() => closeSubmenu(false)}
+            onclick={() => {
+                onclose();
+                onconvert?.(item);
+            }}>Convert...</button
+        >{/if}
     {#if multiVolumeSelection}
         <button class="danger-menu-item" type="button" role="menuitem" onclick={() => choose('delete-volume')}
             >Delete {selectionCount} volumes…</button

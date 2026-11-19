@@ -39,6 +39,7 @@
         allocationInspectionEnabled?: boolean;
         samplerOrderingEnabled?: boolean;
         onimageaction: (item: DiskTreeItem, action: ImageTreeAction) => void;
+        onconvert?: (item: DiskTreeItem) => void;
     }
 
     let {
@@ -68,6 +69,7 @@
         allocationInspectionEnabled = false,
         samplerOrderingEnabled = false,
         onimageaction,
+        onconvert,
     }: Props = $props();
     let filter = $state('');
     let treeMenu = $state<{
@@ -223,6 +225,7 @@
                         {volumeFloppyExportEnabled}
                         {audioExportEnabled}
                         {mediaConversionEnabled}
+                        waveConversionEnabled={!!onconvert}
                         {allocationInspectionEnabled}
                         {samplerOrderingEnabled}
                         onrequestmenu={requestTreeMenu}
@@ -273,6 +276,7 @@
             {mediaConversionEnabled}
             {allocationInspectionEnabled}
             onaction={chooseTreeAction}
+            {onconvert}
             onclose={() => (treeMenu = null)}
         />
     {/key}

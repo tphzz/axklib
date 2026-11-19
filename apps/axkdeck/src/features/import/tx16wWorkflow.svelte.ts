@@ -8,6 +8,7 @@ import type {
     VolumeImportDestination,
 } from '../../lib/transport';
 import { collectImportDestinations } from './packageDestinations';
+import { conversionRoutes, preferredConversionRoute } from '../../lib/conversionRoutes';
 import { droppedPlacement, placementError, type PlacementOptions } from './tx16wPlacement';
 import {
     requiredConversionIssues,
@@ -51,6 +52,7 @@ export interface Tx16wImportRequest {
     acknowledgedIssueIds: string[];
     documentSource?: Extract<ConversionSource, { kind: 'DOCUMENT' }>;
     destinationProfile?: string;
+    targetLabel?: string;
     destinationName?: string;
     sourceName?: string;
     sourceObjects?: ConversionSourceObject[];
@@ -121,14 +123,18 @@ export class Tx16wImportWorkflow {
     private async loadDestinationProfile(request: Tx16wImportRequest): Promise<void> {
         const profiles = await this.dependencies.transport.conversionProfiles();
         if (this.request !== request) return;
-        const profile = profiles.find(
-            (p) =>
-                p.sourceFormat === request.sourceFormat &&
-                p.destinationFormat === 'yamaha.a-series' &&
-                p.outputKind === 'EXISTING_IMAGE',
-        );
-        if (!profile) throw new Error('This server does not offer conversion to an existing A-series image');
-        request.destinationProfile = profile.id;
+        const choices = conversionRoutes(profiles, {
+            sourceFormat: request.sourceFormat ?? '',
+            destinationFormat: 'yamaha.a-series',
+            medium: 'sfs-hard-disk',
+            intent: request.importMode === 'WAVE_DATA_ONLY' ? 'WAVE_DATA' : 'PLAYABLE_INSTRUMENTS',
+            outputKind: 'EXISTING_IMAGE',
+            editorPanels: ['disk-set-selection', 'a-series-volume-placement', 'a-series-load-target'],
+        });
+        const choice = preferredConversionRoute(choices);
+        if (!choice) throw new Error('This server does not offer conversion to an existing A-series image');
+        request.destinationProfile = choice.profile.id;
+        request.targetLabel = choice.route.targetLabel;
     }
 
     async requestNativeDocument(
@@ -379,9 +385,18 @@ export class Tx16wImportWorkflow {
         const request = this.request;
         if (!request || this.completion.locked || request.importMode === importMode) return;
         request.importMode = importMode;
+        request.destinationProfile = undefined;
+        request.targetLabel = undefined;
         this.resetEligibility(request);
         request.error = '';
         if (request.target) await this.inspect();
+        else {
+            try {
+                await this.loadDestinationProfile(request);
+            } catch (error) {
+                if (this.request === request) request.error = userFacingMessage(error);
+            }
+        }
     }
 
     private resetEligibility(request: Tx16wImportRequest) {

@@ -2238,6 +2238,42 @@
           }
         }
       },
+      "ConversionInspectionRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source"],
+        "properties": {
+          "source": { "$ref": "#/components/schemas/ConversionSource" },
+          "sourceFormat": { "type": "string", "minLength": 1, "description": "Required for an explicit disk set. For an open document, its detected format is authoritative." },
+          "objectType": { "type": "string", "minLength": 1 },
+          "offset": { "type": "integer", "minimum": 0 },
+          "limit": { "type": "integer", "minimum": 1, "maximum": 200 }
+        }
+      },
+      "ConversionInspection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sourceFormat", "documentId", "profileIds", "items", "offset", "total"],
+        "properties": {
+          "sourceFormat": { "type": "string" },
+          "documentId": { "type": "string" },
+          "profileIds": { "type": "array", "items": { "type": "string" } },
+          "offset": { "type": "integer" },
+          "total": { "type": "integer", "minimum": 0 },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["id", "type", "name", "volumeName"],
+              "properties": {
+                "id": { "type": "string" }, "type": { "type": "string" },
+                "name": { "type": "string" }, "volumeName": { "type": ["string", "null"] }
+              }
+            }
+          }
+        }
+      },
       "ConversionPlanRequest": {
         "type": "object",
         "additionalProperties": false,
@@ -2259,6 +2295,7 @@
           "destination": {
             "oneOf": [
               { "$ref": "#/components/schemas/ConversionNewImageDestination" },
+              { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "const": "NEW_IMAGE_SET" } } },
               { "$ref": "#/components/schemas/ConversionSessionDestination" }
             ]
           },
@@ -2271,7 +2308,7 @@
         "type": "object",
         "additionalProperties": false,
         "required": ["kind"],
-        "properties": { "kind": { "enum": ["NEW_IMAGE"] } }
+        "properties": { "kind": { "enum": ["NEW_IMAGE"] }, "file": { "$ref": "#/components/schemas/FileRef" } }
       },
       "ConversionSessionDestination": {
         "type": "object",
@@ -2455,8 +2492,26 @@
                 "required": ["kind", "sizeBytes", "sha256"],
                 "properties": {
                   "kind": { "enum": ["NEW_IMAGE"] },
+                  "file": { "$ref": "#/components/schemas/FileRef" },
                   "sizeBytes": { "type": "integer", "minimum": 0 },
                   "sha256": { "oneOf": [{ "type": "string", "pattern": "^[0-9a-f]{64}$" }, { "type": "null" }] }
+                }
+              },
+              {
+                "type": "object", "additionalProperties": false, "required": ["kind", "members"],
+                "properties": {
+                  "kind": { "const": "NEW_IMAGE_SET" },
+                  "members": {
+                    "type": "array", "maxItems": 64,
+                    "items": {
+                      "type": "object", "additionalProperties": false, "required": ["filename", "sizeBytes", "sha256"],
+                      "properties": {
+                        "filename": { "type": "string", "minLength": 1, "maxLength": 64 },
+                        "sizeBytes": { "type": "integer", "minimum": 1 },
+                        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+                      }
+                    }
+                  }
                 }
               }
             ]
@@ -2532,6 +2587,15 @@
           { "$ref": "#/components/schemas/ConversionMutationResult" },
           {
             "type": "object", "additionalProperties": false,
+            "required": ["planId", "file"],
+            "properties": {
+              "planId": { "type": "string", "minLength": 1 },
+              "file": { "$ref": "#/components/schemas/FileRef" },
+              "warnings": { "type": "array", "items": { "$ref": "#/components/schemas/Warning" } }
+            }
+          },
+          {
+            "type": "object", "additionalProperties": false,
             "required": ["planId", "download"],
             "properties": {
               "planId": { "type": "string", "minLength": 1 },
@@ -2580,6 +2644,18 @@
           }
         }
       },
+      "ConversionRouteDescriptor": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["targetLabel", "medium", "intents", "editorCapabilities", "priority"],
+        "properties": {
+          "targetLabel": { "type": "string", "minLength": 1 },
+          "medium": { "type": "string", "minLength": 1 },
+          "intents": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string" } },
+          "editorCapabilities": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
+          "priority": { "type": "integer" }
+        }
+      },
       "ConversionProfile": {
         "type": "object",
         "additionalProperties": false,
@@ -2589,6 +2665,7 @@
           "sourceFormat",
           "destinationFormat",
           "outputKind",
+          "route",
           "optionsSchema"
         ],
         "properties": {
@@ -2604,7 +2681,11 @@
           "destinationFormat": {
             "type": "string"
           },
-          "outputKind": { "enum": ["EXISTING_IMAGE", "NEW_IMAGE"] },
+          "outputKind": { "enum": ["EXISTING_IMAGE", "NEW_IMAGE", "NEW_IMAGE_SET"] },
+          "route": {
+            "description": "Interactive route, or null for a profile without an editor contract. Lower priority values sort first.",
+            "oneOf": [{ "$ref": "#/components/schemas/ConversionRouteDescriptor" }, { "type": "null" }]
+          },
           "optionsSchema": {
             "type": "object"
           }

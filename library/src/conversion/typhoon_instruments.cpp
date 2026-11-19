@@ -108,7 +108,6 @@ void map_instruments(const typhoon::Document &doc, const Ids &chosen, const Wave
             SampleSpec sample;
             sample.name = unique(ref.name, 16, samples);
             sample.waveform_id = w.name;
-            sample.target_sample_rate = w.target_sample_rate;
             sample.parameters.root_key = w.root_key;
             sample.parameters.key_low = r.low;
             sample.parameters.key_high = r.high;

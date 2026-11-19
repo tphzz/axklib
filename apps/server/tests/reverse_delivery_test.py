@@ -101,6 +101,42 @@ def exercise(server, cli, installed, root):
         prefix = "/api/v1/images/" + opened["imageId"]
         remote = get(prefix + "/documents/" + http_doc["id"] + "/objects")["items"]
         http_ids = {o["volumeName"]: o["id"] for o in remote}
+        source_ref = {
+            "kind": "DOCUMENT",
+            "imageId": opened["imageId"],
+            "documentId": http_doc["id"],
+            "expectedRevision": opened["revision"],
+        }
+        inspected = []
+        for offset in range(4):
+            page = job(
+                "/api/v1/conversion-inspections",
+                {
+                    "source": source_ref,
+                    "objectType": "SMPL",
+                    "offset": offset,
+                    "limit": 1,
+                },
+                f"inspect{offset}",
+            )
+            assert page["sourceFormat"] == "yamaha.a-series"
+            assert (
+                page["documentId"] == http_doc["id"] and PROFILE in page["profileIds"]
+            )
+            assert (
+                page["total"] == 3 and page["offset"] == offset and "planId" not in page
+            )
+            inspected.extend(page["items"])
+        assert {row["volumeName"]: row["id"] for row in inspected} == http_ids
+        assert (
+            job(
+                "/api/v1/conversion-inspections",
+                {"source": {**source_ref, "expectedRevision": opened["revision"] + 1}},
+                "inspect-stale",
+                "FAILED",
+            )["code"]
+            == "image_revision_stale"
+        )
         for i, volumes in enumerate([["TWO"], ["TWO", "ONE"]]):
             ids = [file_ids[v] for v in volumes]
             review = convert(cli, source, doc["id"], ids)
@@ -147,12 +183,7 @@ def exercise(server, cli, installed, root):
                 plans,
                 {
                     "profileId": PROFILE,
-                    "source": {
-                        "kind": "DOCUMENT",
-                        "imageId": opened["imageId"],
-                        "documentId": http_doc["id"],
-                        "expectedRevision": opened["revision"],
-                    },
+                    "source": source_ref,
                     "destination": {"kind": "NEW_IMAGE"},
                     "fidelity": "BEST",
                     "options": {"documentId": http_doc["id"], "waveIds": remote_ids},
@@ -203,6 +234,53 @@ def exercise(server, cli, installed, root):
             )
         assert get(prefix)["revision"] == opened["revision"]
     assert list(workspace.iterdir()) == [source] and digest(source) == before
+    with service(server, root, workspace) as (get, job):
+        opened = job(
+            "/api/v1/images", {"sources": [file_ref(source.name)]}, "open-write-root"
+        )
+        (document,) = opened["documents"]
+        reference = {
+            "kind": "DOCUMENT",
+            "imageId": opened["imageId"],
+            "documentId": document["id"],
+            "expectedRevision": opened["revision"],
+        }
+        page = job(
+            "/api/v1/conversion-inspections",
+            {"source": reference, "objectType": "SMPL"},
+            "inventory",
+        )
+        wave_id = next(row["id"] for row in page["items"] if row["volumeName"] == "TWO")
+        for occupied in (False, True):
+            filename = "taken.img" if occupied else "converted.img"
+            file = file_ref(filename)["file"]
+            plan = job(
+                "/api/v1/conversion-plans",
+                {
+                    "source": reference,
+                    "profileId": PROFILE,
+                    "destination": {"kind": "NEW_IMAGE", "file": file},
+                    "options": {"documentId": document["id"], "waveIds": [wave_id]},
+                    "fidelity": "BEST",
+                },
+                "workspace-" + filename,
+            )
+            target = workspace / filename
+            assert not target.exists() and plan["report"]["destination"]["file"] == file
+            execution = "/api/v1/conversion-plans/" + plan["planId"] + "/executions"
+            if occupied:
+                target.write_bytes(b"keep")
+                job(execution, {"acknowledgedIssueIds": []}, "apply-occupied", "FAILED")
+                assert target.read_bytes() == b"keep"
+            else:
+                assert job(execution, {"acknowledgedIssueIds": []}, "apply-output") == {
+                    "planId": plan["planId"],
+                    "file": file,
+                }
+                assert (
+                    target.read_bytes() == (deliveries / "download0.img").read_bytes()
+                )
+        assert digest(source) == before
     reopen_alone(server, root / "fresh-server", deliveries)
     print("Unmodified A-series source SHA-256:", before)
 

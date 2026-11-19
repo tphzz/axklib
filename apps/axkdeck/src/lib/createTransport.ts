@@ -148,6 +148,8 @@ class UnavailableTransport implements ImageTransport {
     }
     resolveCompanionSources = (): Promise<never> => this.unavailable();
     conversionProfiles = (): Promise<never> => this.unavailable();
+    inspectConversion = (): Promise<never> => this.unavailable();
+    readConversionDownload = (): Promise<never> => this.unavailable();
     prepareConversion = (): Promise<never> => this.unavailable();
     conversionPlan = (): Promise<never> => this.unavailable();
     releaseConversion = (): Promise<never> => this.unavailable();

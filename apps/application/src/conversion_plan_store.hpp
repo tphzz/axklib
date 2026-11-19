@@ -4,6 +4,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -12,6 +13,7 @@
 #include <vector>
 
 #include "axklib/application/contracts.hpp"
+#include "axklib/application/filesystem.hpp"
 #include "axklib/application/image_documents.hpp"
 #include "axklib/conversion/plan.hpp"
 
@@ -25,11 +27,13 @@ struct EditTarget {
 };
 struct ImageDelivery {
     std::string digest;
+    std::optional<SandboxOutputFile> file{};
 };
+struct ImageSetDelivery {};
 struct Payload {
     std::shared_ptr<const conversion::PreparedPlan> prepared;
-    std::variant<EditTarget, ImageDelivery> target;
-    std::shared_ptr<const native::Document> source;
+    std::variant<EditTarget, ImageDelivery, ImageSetDelivery> target;
+    std::shared_ptr<const native::SourceSet> sources;
     std::function<Result<void>(const CancellationToken &)> verify_workspace;
     std::uint64_t source_retention_bytes{};
     [[nodiscard]] std::uint64_t retained_bytes() const noexcept {

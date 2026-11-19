@@ -7,7 +7,7 @@
 #include <utility>
 #include <vector>
 
-#include "axklib/conversion/a_series_to_tx16w/source.hpp"
+#include "axklib/conversion/a_series/wave_reader.hpp"
 #include "axklib/conversion/profiles.hpp"
 
 namespace fixture {
@@ -101,7 +101,7 @@ inline axk::conversion::Registry conversion_profiles(bool enabled) {
                    [](const Request &input, const axk::CancellationToken &token,
                       axk::ProgressSink *) -> axk::Result<std::shared_ptr<const PreparedPlan>> {
                        const auto ids = input.options.at("waveIds").get<std::vector<std::string>>();
-                       auto waves = a_series_to_tx16w::select_waves(
+                       auto waves = a_series_waves::select_waves(
                            input, input.options.at("documentId").get<std::string>(), ids, token);
                        if (!waves)
                            return std::unexpected(waves.error());

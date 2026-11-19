@@ -3,11 +3,12 @@
 
 #include <gtest/gtest.h>
 
-#include "axklib/sample_parameters.hpp"
+#include "axklib/conversion/plan.hpp"
 #include "axklib/tx16w_wave_mapping.hpp"
 
 namespace {
-using namespace axk::conversion::a_series_to_tx16w;
+using namespace axk::conversion;
+using namespace axk::conversion::tx16w_wave_disk;
 
 TEST(Tx16wWaveMapping, QuantizesSignedTiesAwayFromZeroAndSaturatesPeaks) {
     const std::array<double, 10> input{-32768, -9, -8, -7, 0, 7, 8, 9, 32767, 34000};
@@ -17,11 +18,11 @@ TEST(Tx16wWaveMapping, QuantizesSignedTiesAwayFromZeroAndSaturatesPeaks) {
 }
 
 TEST(Tx16wWaveMapping, LoopsAreRelativeToPlaybackNotTheRecordOrigin) {
-    WaveSource source{};
+    WaveTransfer source{};
     source.rate = 48000U;
     source.first_frame = 12000U;
     source.frame_count = 48000U;
-    source.loop_mode = static_cast<unsigned>(axk::AudioSamplerLoopMode::forward_loop);
+    source.loop_mode = WavePlayback::forward_loop;
     source.loop_start = 36000U;
     source.loop_length = 24000U;
     auto mapped = map_playback(source);
@@ -33,14 +34,14 @@ TEST(Tx16wWaveMapping, LoopsAreRelativeToPlaybackNotTheRecordOrigin) {
     --source.loop_length;
     EXPECT_FALSE(map_playback(source));
     ++source.loop_length;
-    source.loop_mode = static_cast<unsigned>(axk::AudioSamplerLoopMode::forward_loop_release);
+    source.loop_mode = WavePlayback::forward_loop_release;
     EXPECT_FALSE(map_playback(source));
 }
 
 TEST(Tx16wWaveMapping, OneShotNeverPadsTruncatesOrWrapsNativePartLengths) {
-    WaveSource source{};
+    WaveTransfer source{};
     source.rate = 33333U;
-    source.loop_mode = static_cast<unsigned>(axk::AudioSamplerLoopMode::forward_one_shot);
+    source.loop_mode = WavePlayback::forward_one_shot;
     source.frame_count = 127U;
     EXPECT_FALSE(map_playback(source));
     source.frame_count = 128U;

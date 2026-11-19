@@ -21,7 +21,8 @@
 
 namespace axk::detail {
 
-Result<void> validate_authored_volume(const VolumeSpec &volume);
+enum class WaveInput { file, prepared };
+Result<void> validate_authored_volume(const VolumeSpec &volume, WaveInput input = WaveInput::file);
 
 class TemporaryPublication;
 
@@ -190,10 +191,10 @@ Result<std::vector<std::byte>> encode_sfs_index_record(const PreparedRecord &rec
                                                        std::uint32_t size,
                                                        std::span<const std::uint32_t> continuation_clusters = {});
 
-Result<std::vector<PreparedRecord>> prepare_partition_records(const PartitionSpec &partition,
-                                                              const PartitionGeometry &geometry,
-                                                              std::size_t partition_count,
-                                                              const CancellationToken &cancellation);
+Result<std::vector<PreparedRecord>>
+prepare_partition_records(const PartitionSpec &partition, const PartitionGeometry &geometry,
+                          std::size_t partition_count, const CancellationToken &cancellation,
+                          std::optional<std::span<ImportedAudio>> prepared_audio = {});
 Result<std::size_t> checked_directory_index_size(std::span<const PreparedRecord> records);
 
 Result<PreparedMediaImage> prepare_media_image(const MediaBuildManifest &manifest, const MediaBuildLimits &limits,
@@ -232,6 +233,8 @@ Result<WrittenMediaImage> write_floppy_disk_set(const PreparedMediaImage &image,
                                                 const std::filesystem::path &output_path, bool overwrite,
                                                 const CancellationToken &cancellation);
 Result<Iso9660Layout> plan_iso9660_layout(const PreparedMediaImage &image);
+Result<std::vector<std::byte>> build_iso9660_image(const PreparedMediaImage &image,
+                                                   const CancellationToken &cancellation);
 Result<void> write_iso9660_image(const PreparedMediaImage &image, TemporaryPublication &publication,
                                  const CancellationToken &cancellation);
 

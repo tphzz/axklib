@@ -39,7 +39,7 @@ export async function downloadServerFile(
 
 export async function readDirectoryArchive(
     client: AxklibHttpApiClient,
-    archive: DownloadArchiveSnapshot,
+    archive: Pick<DownloadArchiveSnapshot, 'filename' | 'sizeBytes' | 'contentPath'>,
 ): Promise<ClientDownload> {
     requireRendererCapacity(archive.sizeBytes, 'archive');
     const response = await client.openDirectoryArchive(archive);

@@ -334,7 +334,6 @@ Result<ImportPlan> plan_import(const Inspection &inspection, const TargetInvento
                 plan.source_objects.emplace("sample:" + sample.name,
                                             identity(*timbre->second, &Inspection::SetupIdentities::timbres));
                 sample.waveform_id = wave_plan->name;
-                sample.target_sample_rate = wave_plan->target_sample_rate;
                 sample.parameters.root_key = *root;
                 sample.parameters.key_low = *low;
                 sample.parameters.key_high = *high;

@@ -17,7 +17,7 @@ const MAX_RETAINED_PACKAGE_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 const SUPPORTED_PACKAGE_EXTENSIONS: [&str; 8] = [
     "a3k", "axkvol", "axkprg", "axksbac", "axksbnk", "axksmpl", "axkseq", "axkpkg",
 ];
-const SUPPORTED_MEDIA_EXTENSIONS: [&str; 3] = ["iso", "ima", "zip"];
+const SUPPORTED_MEDIA_EXTENSIONS: [&str; 4] = ["iso", "ima", "img", "zip"];
 
 #[derive(Default)]
 pub(crate) struct PackageSaveCandidateStore {

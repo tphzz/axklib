@@ -1,11 +1,13 @@
 import type { components } from './generated/axklibApiV1';
-import type { DirectoryLocation, InputFileLocation } from './storageLocations';
+import type { DirectoryLocation, FileRef, InputFileLocation } from './storageLocations';
 import type { CapacityPolicy } from './importCapacity';
-import type { JobState } from './transport';
+import type { JobState, RetainedDownload } from './transport';
 
 export type ConversionPlan = components['schemas']['ConversionPlan'];
 export type ConversionProfile = components['schemas']['ConversionProfile'];
+export type ConversionInspection = components['schemas']['ConversionInspection'];
 export type ConversionReport = components['schemas']['ConversionReport'];
+export type ConversionResult = components['schemas']['ConversionResult'];
 export type ConversionSourceObject = NonNullable<ConversionReport['sourceObjects']>[number];
 export type ConversionFidelity = ConversionReport['fidelity'];
 export type CompanionSourceResolution = components['schemas']['CompanionSourceResolution'];
@@ -26,9 +28,18 @@ export type ConversionInput = {
     fidelity: ConversionFidelity;
 } & (
     | { destinationSessionId: number; selection: Record<string, unknown>; capacityPolicy: CapacityPolicy }
-    | { destination: { kind: 'NEW_IMAGE' } }
+    | { destination: { kind: 'NEW_IMAGE'; file?: FileRef } }
 );
+export interface ConversionInspectionInput {
+    source: ConversionSource;
+    sourceFormat?: string;
+    objectType?: string;
+    offset?: number;
+    limit?: number;
+}
 export interface ConversionTransport {
+    inspectConversion(input: ConversionInspectionInput, signal?: AbortSignal): Promise<ConversionInspection>;
+    readConversionDownload(download: RetainedDownload): Promise<Blob>;
     resolveCompanionSources(input: CompanionSourceInput, signal?: AbortSignal): Promise<CompanionSourceResolution>;
     conversionProfiles(): Promise<ConversionProfile[]>;
     prepareConversion(input: ConversionInput, signal?: AbortSignal): Promise<ConversionPlan>;

@@ -77,10 +77,9 @@ void append_directory_record(std::span<std::byte> directory, std::size_t &offset
     offset += record.size();
 }
 
-} // namespace
-
-Result<void> write_iso9660_image(const PreparedMediaImage &image, TemporaryPublication &publication,
-                                 const CancellationToken &cancellation) {
+template <class Sink>
+Result<void> emit_iso9660_image(const PreparedMediaImage &image, Sink &publication,
+                                const CancellationToken &cancellation) {
     auto planned = plan_iso9660_layout(image);
     if (!planned)
         return std::unexpected{planned.error()};
@@ -196,4 +195,35 @@ Result<void> write_iso9660_image(const PreparedMediaImage &image, TemporaryPubli
     return publication.write_at(17U * sector_size, terminator);
 }
 
+struct BufferSink {
+    std::vector<std::byte> bytes;
+    Result<void> resize(std::uint64_t size) {
+        if (size > bytes.max_size())
+            return std::unexpected(make_error(ErrorCode::io_unsupported_size, ErrorCategory::io,
+                                              "ISO9660 output exceeds addressable memory"));
+        bytes.resize(static_cast<std::size_t>(size));
+        return {};
+    }
+    Result<void> write_at(std::uint64_t offset, std::span<const std::byte> data) {
+        if (offset > bytes.size() || data.size() > bytes.size() - offset)
+            return std::unexpected(make_error(ErrorCode::internal_invariant, ErrorCategory::io,
+                                              "ISO9660 output exceeds its planned size"));
+        std::ranges::copy(data, std::span{bytes}.subspan(static_cast<std::size_t>(offset)).begin());
+        return {};
+    }
+};
+} // namespace
+
+Result<void> write_iso9660_image(const PreparedMediaImage &image, TemporaryPublication &publication,
+                                 const CancellationToken &cancellation) {
+    return emit_iso9660_image(image, publication, cancellation);
+}
+
+Result<std::vector<std::byte>> build_iso9660_image(const PreparedMediaImage &image,
+                                                   const CancellationToken &cancellation) {
+    BufferSink sink;
+    if (auto emitted = emit_iso9660_image(image, sink, cancellation); !emitted)
+        return std::unexpected(emitted.error());
+    return std::move(sink.bytes);
+}
 } // namespace axk::detail

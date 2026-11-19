@@ -35,6 +35,14 @@ const common = {
 };
 
 describe('ImageTreeContextMenu', () => {
+    it('offers the registered Convert action for a single volume and passes its exact scope', async () => {
+        const onconvert = vi.fn(),
+            onclose = vi.fn();
+        render(ImageTreeContextMenu, { props: { ...common, item: volume, onconvert, onclose } });
+        await fireEvent.click(screen.getByRole('menuitem', { name: 'Convert...' }));
+        expect(onconvert).toHaveBeenCalledWith(volume);
+        expect(onclose).toHaveBeenCalledOnce();
+    });
     it('renders the root menu only at its viewport-clamped position', () => {
         const { container } = render(ImageTreeContextMenu, { props: common });
 
@@ -67,7 +75,7 @@ describe('ImageTreeContextMenu', () => {
     it('offers only one plural delete command for a volume multi-selection', async () => {
         const onaction = vi.fn();
         render(ImageTreeContextMenu, {
-            props: { ...common, item: volume, selectionCount: 3, onaction },
+            props: { ...common, item: volume, selectionCount: 3, onaction, onconvert: vi.fn() },
         });
 
         const action = screen.getByRole('menuitem', { name: 'Delete 3 volumes…' });
