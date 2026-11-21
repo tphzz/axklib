@@ -13,7 +13,7 @@ def chunk(tag, data):
     return tag + struct.pack(">I", len(data)) + data + bytes(len(data) % 2)
 
 
-def source_disk(instrument, looped, tunings=(), detune=0):
+def wave_file(instrument, looped, detune=0):
     version = struct.pack(">I", 1)
     info = chunk(b"VInf", bytes(12) + version)
     common = struct.pack(">HIH", 1, 64, 16) + bytes.fromhex(
@@ -29,7 +29,7 @@ def source_disk(instrument, looped, tunings=(), detune=0):
         )
         if looped:
             inst += chunk(b"MARK", struct.pack(">HHI2xHI2x", 2, 1, 8, 2, 55))
-    wave = chunk(
+    return chunk(
         b"FORM",
         b"AIFF"
         + chunk(b"APPL", b"stoc\x07Typhoon" + info)
@@ -37,6 +37,12 @@ def source_disk(instrument, looped, tunings=(), detune=0):
         + inst
         + chunk(b"SSND", bytes(8 + 64 * 2)),
     )
+
+
+def source_disk(instrument, looped, tunings=(), detune=0):
+    wave = wave_file(instrument, looped, detune)
+    version = struct.pack(">I", 1)
+    info = chunk(b"VInf", bytes(12) + version)
     split = chunk(b"Splt", chunk(b"Wave", b"TONE".ljust(8, b"\0") + version + bytes(8)))
     voice = b"TYPV" + info
     groups = (

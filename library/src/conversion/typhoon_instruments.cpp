@@ -1,5 +1,6 @@
 #include "typhoon_instruments.hpp"
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <cstdint>
 #include <format>
@@ -9,6 +10,15 @@
 
 namespace axk::conversion::typhoon_to_a_series {
 namespace {
+// Closest A-series Sample Level for each Typhoon Group attenuation, from loudest to quietest.
+constexpr auto sample_levels = std::to_array<std::uint8_t>({
+    127, 122, 122, 117, 117, 112, 112, 105, 105, 100, 100, 96, 96, 92, 92, 90, 90, 86, 86, 83, 83, 79, 79, 74, 74, 71,
+    71,  68,  68,  65,  65,  64,  64,  61,  61,  58,  58,  56, 56, 52, 52, 50, 50, 48, 48, 46, 46, 45, 45, 43, 43, 41,
+    41,  39,  39,  37,  37,  36,  36,  34,  34,  33,  33,  32, 32, 30, 30, 29, 29, 28, 28, 26, 26, 25, 25, 24, 24, 23,
+    23,  22,  22,  21,  21,  20,  20,  20,  20,  19,  19,  18, 18, 17, 17, 16, 16, 16, 16, 15, 15, 15, 15, 14, 14, 13,
+    13,  13,  13,  12,  12,  11,  11,  11,  11,  11,  11,  10, 10, 10, 10, 9,  9,  9,  9,  9,  9,  8,  8,  2,
+});
+static_assert(sample_levels.size() == 128);
 struct SamplePitch {
     std::int8_t coarse, fine;
     bool clipped;
@@ -152,6 +162,7 @@ void map_instruments(const typhoon::Document &doc, const Ids &chosen, const Wave
         SampleBankSpec bank;
         bank.name = unique(item.name, 16, banks);
         std::set<std::uint8_t> reported_scalings;
+        std::set<std::uint8_t> reported_volumes;
         std::set<typhoon::TriggerMode> reported_triggers;
         for (const auto &r : item.regions) {
             const auto &ref = item.references.at(r.reference);
@@ -167,6 +178,13 @@ void map_instruments(const typhoon::Document &doc, const Ids &chosen, const Wave
             sample.parameters.key_high = r.midi_high;
             sample.parameters.velocity_low = r.velocity_low;
             sample.parameters.velocity_high = r.velocity_high;
+            const auto level = sample_levels[r.raw_group_volume];
+            sample.parameters.level = level;
+            if ((r.raw_group_volume == 123 || r.raw_group_volume == 124 || r.raw_group_volume == 127) &&
+                reported_volumes.insert(r.raw_group_volume).second)
+                issue(Impact::loss, "typhoon.group-volume-approximation", item.id,
+                      std::format("Group Volume (raw {}) maps to Sample Level {}, about {} dB louder than the source",
+                                  r.raw_group_volume, level, r.raw_group_volume == 127 ? "5.9" : "1.2"));
             const bool fixed = r.raw_key_scaling == 0;
             sample.parameters.fixed_pitch = fixed;
             const auto pitch = sample_pitch(r, source_wave);
@@ -194,6 +212,7 @@ void map_instruments(const typhoon::Document &doc, const Ids &chosen, const Wave
                 {"Key range", std::to_string(r.midi_low) + ".." + std::to_string(r.midi_high)},
                 {"Velocity range", std::to_string(r.velocity_low) + ".." + std::to_string(r.velocity_high)},
                 {"Root key", std::to_string(w.root_key)},
+                {"Sample Level", std::to_string(level)},
                 {"Fixed Pitch", fixed ? "On" : "Off"},
                 {"Coarse Tune", std::to_string(pitch.coarse)},
                 {"Fine Tune", std::to_string(pitch.fine)}};

@@ -231,7 +231,7 @@ Sample Bank, and each playable split a Sample pointing to Wave Data. A
 shared source Wave is stored once. A Voice selected on its own does not
 acquire a fabricated Performance.
 
-Review lists key and velocity ranges, Fixed Pitch, Sample Coarse and Fine Tune,
+Review lists key and velocity ranges, Sample Level, Fixed Pitch, Sample Coarse and Fine Tune,
 and the assigned Wave.
 Group and split ranges are reported in MIDI notes: native keys 0 through
 108 correspond to MIDI 12 through 120 before Performance transpose. Empty
@@ -241,6 +241,14 @@ honors note-off; a One-shot Group uses `One ->`, which plays to the end.
 A sustain loop is kept. A looped One-shot, Glide or Release trigger cannot
 be fully reproduced; Best reports the approximation and Strict blocks it.
 In particular, a Release Group is not triggered on key-up on the target.
+
+Group Volume sets the Level of every Sample in that Group. Groups sharing
+a Wave can therefore play it at different levels without altering its audio.
+Raw Group values 0, 32, 64 and 96 map to Sample Levels 127, 64, 32 and 16,
+respectively. The quietest setting (127) maps to Level 2, not mute. Review
+flags the three settings where the closest available level is more than 1 dB
+louder: raw 123 and 124 (Level 9) and raw 127 (Level 2). This mapping does
+not transfer Performance volume or the Group's velocity response.
 
 Group octave/semitone and fine settings tune each split's Sample, not the
 shared Wave. A Group coarse setting of +12 raises playback one octave.

@@ -48,6 +48,8 @@ Result<void> group(Item &item, Bytes body, std::size_t &index) {
     auto byte = [&](unsigned n) { return std::to_integer<std::uint8_t>(parm[n]); };
     if (byte(0) > byte(1) || byte(1) > 127 || byte(2) > byte(3) || byte(3) > 127)
         return std::unexpected(invalid("Unsupported group range"));
+    if (byte(7) > 127)
+        return std::unexpected(invalid("Group Volume is outside the supported range 0..127"));
     const auto trigger = static_cast<TriggerMode>(std::clamp<int>(std::bit_cast<std::int8_t>(byte(14)), -2, 1));
     constexpr unsigned voice_keys = 109, midi_origin = 12;
     item.has_split_table |= !splits.empty();
@@ -66,7 +68,7 @@ Result<void> group(Item &item, Bytes body, std::size_t &index) {
         if (low <= high)
             item.regions.push_back({*s.ref, static_cast<std::uint8_t>(low + midi_origin),
                                     static_cast<std::uint8_t>(high + midi_origin), byte(2), byte(3), byte(6), trigger,
-                                    std::bit_cast<std::int8_t>(byte(4)), std::bit_cast<std::int8_t>(byte(5))});
+                                    std::bit_cast<std::int8_t>(byte(4)), std::bit_cast<std::int8_t>(byte(5)), byte(7)});
     }
     return {};
 }

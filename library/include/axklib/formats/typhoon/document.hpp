@@ -25,6 +25,7 @@ struct Region {
     std::uint8_t midi_low{}, midi_high{}, velocity_low{}, velocity_high{}, raw_key_scaling{};
     TriggerMode trigger{TriggerMode::normal};
     std::int8_t coarse_semitones{}, fine_steps{}; // Group pitch; 1024 fine steps per octave.
+    std::uint8_t raw_group_volume{};              // 0 is loudest.
 };
 struct Part {
     std::size_t reference{};
