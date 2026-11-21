@@ -1,10 +1,61 @@
 #include "typhoon_instruments.hpp"
 #include <algorithm>
+#include <bit>
+#include <cstdint>
 #include <format>
+#include <set>
+#include <string_view>
 #include <utility>
 
 namespace axk::conversion::typhoon_to_a_series {
 namespace {
+struct SamplePitch {
+    std::int8_t coarse, fine;
+    bool clipped;
+};
+SamplePitch sample_pitch(const typhoon::Region &region, const typhoon::Wave &wave) {
+    const int pivot = 60 - wave.playback_origin.value_or(60);
+    // Typhoon adds Group coarse to its origin correction in a signed byte before applying key tracking.
+    const auto at_pivot = std::bit_cast<std::int8_t>(static_cast<std::uint8_t>(pivot + region.coarse_semitones));
+    const int coarse = at_pivot - (region.raw_key_scaling == 0 ? 0 : pivot);
+    const int fine = region.fine_steps - wave.playback_detune_steps();
+
+    // Keep the native dial values when possible. Otherwise trade a semitone for 1024/12 fine steps.
+    int target = std::clamp(coarse, -64, 63);
+    const auto remainder = [&](int semitones) {
+        const int thirds = (coarse - semitones) * 256;
+        return fine + (thirds + (thirds < 0 ? -1 : 1)) / 3;
+    };
+    while (remainder(target) > 63 && target < 63)
+        ++target;
+    while (remainder(target) < -63 && target > -64)
+        --target;
+    const int residual = remainder(target);
+    const int stored = std::clamp(residual, -63, 63);
+    return {static_cast<std::int8_t>(target), static_cast<std::int8_t>(stored), stored != residual};
+}
+struct Playback {
+    AudioSamplerLoopMode mode;
+    std::string_view loss{};
+};
+Playback group_playback(typhoon::TriggerMode trigger, bool looped) {
+    using enum typhoon::TriggerMode;
+    const auto gated = looped ? AudioSamplerLoopMode::forward_loop : AudioSamplerLoopMode::forward;
+    switch (trigger) {
+    case normal:
+        return {gated};
+    case one_shot:
+        if (looped)
+            return {gated, "Looped One-shot cannot be reproduced; keeping the loop with normal note-off"};
+        return {AudioSamplerLoopMode::forward_one_shot};
+    case glide:
+        return {gated, "Glide is not transferred; using normal note-on and note-off"};
+    case release:
+        return {looped ? gated : AudioSamplerLoopMode::forward_one_shot,
+                "Release trigger is not transferred; the Sample will start on note-on instead of note-off"};
+    }
+    std::unreachable();
+}
 std::string unique(std::string name, std::size_t length, Ids &used) {
     if (name.empty())
         name = "TYPHOON";
@@ -100,43 +151,66 @@ void map_instruments(const typhoon::Document &doc, const Ids &chosen, const Wave
             continue;
         SampleBankSpec bank;
         bank.name = unique(item.name, 16, banks);
+        std::set<std::uint8_t> reported_scalings;
+        std::set<typhoon::TriggerMode> reported_triggers;
         for (const auto &r : item.regions) {
             const auto &ref = item.references.at(r.reference);
             if (!ref.target || !waves.contains(*ref.target))
                 continue;
             const auto &w = waves.at(*ref.target);
+            const auto &source_wave = *doc.find(*ref.target)->wave;
             SampleSpec sample;
             sample.name = unique(ref.name, 16, samples);
             sample.waveform_id = w.name;
             sample.parameters.root_key = w.root_key;
-            sample.parameters.key_low = r.low;
-            sample.parameters.key_high = r.high;
+            sample.parameters.key_low = r.midi_low;
+            sample.parameters.key_high = r.midi_high;
             sample.parameters.velocity_low = r.velocity_low;
             sample.parameters.velocity_high = r.velocity_high;
-            sample.parameters.loop_mode = w.loop_mode;
+            const bool fixed = r.raw_key_scaling == 0;
+            sample.parameters.fixed_pitch = fixed;
+            const auto pitch = sample_pitch(r, source_wave);
+            sample.parameters.coarse_tune = pitch.coarse;
+            sample.parameters.fine_tune_cents = pitch.fine;
+            if (pitch.clipped)
+                issue(Impact::loss, "typhoon.pitch-range", item.id,
+                      std::format("Pitch for Sample {} exceeds the destination range; using Coarse Tune {} and Fine "
+                                  "Tune {}",
+                                  sample.name, pitch.coarse, pitch.fine));
+            if (!fixed && r.raw_key_scaling != 3 && reported_scalings.insert(r.raw_key_scaling).second)
+                issue(Impact::loss, "typhoon.key-scaling", item.id,
+                      std::format("Group key scaling 0x{:02X} is not supported; using normal tracking",
+                                  r.raw_key_scaling));
+            const auto playback = group_playback(r.trigger, source_wave.loop.has_value());
+            sample.parameters.loop_mode = playback.mode;
+            if (!playback.loss.empty() && reported_triggers.insert(r.trigger).second)
+                issue(Impact::loss, "typhoon.trigger-mode", item.id, std::string(playback.loss));
             sample.parameters.loop_start_frame = w.loop_start_frame;
             sample.parameters.loop_length_frames = w.loop_length_frames;
             bank.member_samples.push_back(sample.name);
             report.actions.push_back({"sample", sample.name, item.id});
             report.actions.back().details = {
                 {"Wave Data", w.name},
-                {"Key range", std::to_string(r.low) + ".." + std::to_string(r.high)},
+                {"Key range", std::to_string(r.midi_low) + ".." + std::to_string(r.midi_high)},
                 {"Velocity range", std::to_string(r.velocity_low) + ".." + std::to_string(r.velocity_high)},
-                {"Root key", std::to_string(w.root_key)}};
+                {"Root key", std::to_string(w.root_key)},
+                {"Fixed Pitch", fixed ? "On" : "Off"},
+                {"Coarse Tune", std::to_string(pitch.coarse)},
+                {"Fine Tune", std::to_string(pitch.fine)}};
             bundle.samples.push_back(std::move(sample));
         }
         if (bank.member_samples.empty()) {
-            if (item.mapping_error.empty() && item.has_split_table && item.references.empty()) {
+            if (item.mapping_error.empty() && item.has_split_table && item.regions.empty()) {
                 unmapped_silent_voices.insert(item.id);
                 issue(Impact::loss, "typhoon.silent-voice", item.id,
-                      "The Voice has no assigned Waves; its empty Sample Bank is omitted");
+                      "The Voice has no Wave assigned to playable keys; its empty Sample Bank is omitted");
             } else {
                 issue(Impact::blocker, "typhoon.empty-voice", item.id, "Voice has no playable Wave regions");
             }
             continue;
         }
         issue(Impact::loss, "typhoon.voice-controls", item.id,
-              "Group pitch offsets, envelopes, output, filter and modulation are not transferred");
+              "Group envelopes, output, filter and modulation are not transferred");
         bank_ids.emplace(item.id, bank.name);
         report.actions.push_back({"sample-bank", bank.name, item.id});
         bundle.sample_banks.push_back(std::move(bank));
@@ -187,7 +261,8 @@ void map_instruments(const typhoon::Document &doc, const Ids &chosen, const Wave
             continue;
         }
         issue(Impact::loss, "typhoon.performance-controls", item.id,
-              "Volume, transpose, priority, outputs, global settings and program-change mappings are not transferred");
+              "Volume, entry key limits, transpose, priority, outputs, global settings and program-change mappings "
+              "are not transferred");
         slots.insert(n);
         report.actions.push_back({"program", program.name, item.id});
         report.actions.back().details.push_back({"Program slot", std::to_string(n)});

@@ -1,5 +1,6 @@
 #include "axklib/formats/typhoon/wave.hpp"
 
+#include <algorithm>
 #include <bit>
 #include <cmath>
 #include <map>
@@ -74,6 +75,9 @@ Result<Sound> parse(Bytes bytes) {
         if (inst.size() != 20 || std::to_integer<unsigned>(inst[0]) > 127)
             return std::unexpected(invalid("Invalid Wave instrument chunk"));
         w.root_key = std::to_integer<std::uint8_t>(inst[0]);
+        // Equal INST note limits indicate no origin, even when a base note was stored.
+        if (inst[2] != inst[3])
+            w.playback_origin = std::clamp<std::uint8_t>(*w.root_key, 12, 120);
         w.detune_cents = std::bit_cast<std::int8_t>(inst[1]);
         if (u16(inst, 14) != 0 &&
             (u16(inst, 14) != u16(inst, 8) || u16(inst, 16) != u16(inst, 10) || u16(inst, 18) != u16(inst, 12)))

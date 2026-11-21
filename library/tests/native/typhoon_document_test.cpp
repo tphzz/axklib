@@ -86,18 +86,18 @@ TEST(TyphoonDocument, KeepsVelocityLayersAndClosesTheLastRegionAtAnEmptySplit) {
     parm[1] = 90;
     parm[2] = 20;
     parm[3] = 100;
-    auto split = [](char key) { return chunk("Parm", std::string{key, '\0'}); };
-    const auto group = chunk("Parm", parm) + chunk("Splt", reference("Wave", "FIRST", 1, "DISK")) +
+    auto split = [](char key) { return chunk("Parm", std::string{key, 'x'}); };
+    const auto group = chunk("Parm", parm) + chunk("Splt", split(88) + reference("Wave", "FIRST", 1, "DISK")) +
                        chunk("Splt", split(55) + reference("Wave", "NEXT", 2, "DISK")) + chunk("Splt", split(70));
     auto doc = open({member("DISK", "PIANO.O01", "TYPV", 7, chunk("Grop", group))});
     const auto *voice = doc->find(doc->catalog().objects.front().id);
     ASSERT_TRUE(voice);
     EXPECT_TRUE(voice->mapping_error.empty());
     ASSERT_EQ(voice->regions.size(), 2U);
-    EXPECT_EQ(voice->regions[0].low, 40U);
-    EXPECT_EQ(voice->regions[0].high, 54U);
-    EXPECT_EQ(voice->regions[1].low, 55U);
-    EXPECT_EQ(voice->regions[1].high, 69U);
+    EXPECT_EQ(voice->regions[0].midi_low, 52U);
+    EXPECT_EQ(voice->regions[0].midi_high, 66U);
+    EXPECT_EQ(voice->regions[1].midi_low, 67U);
+    EXPECT_EQ(voice->regions[1].midi_high, 81U);
     EXPECT_EQ(voice->regions[1].velocity_low, 20U);
     EXPECT_EQ(voice->regions[1].velocity_high, 100U);
     EXPECT_FALSE(voice->references[1].target);

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <optional>
@@ -18,9 +19,12 @@ struct Reference {
     std::optional<std::string> target{};
     bool ambiguous{};
 };
+enum class TriggerMode : std::int8_t { normal = -2, one_shot = -1, glide = 0, release = 1 };
 struct Region {
     std::size_t reference{};
-    std::uint8_t low{}, high{}, velocity_low{}, velocity_high{};
+    std::uint8_t midi_low{}, midi_high{}, velocity_low{}, velocity_high{}, raw_key_scaling{};
+    TriggerMode trigger{TriggerMode::normal};
+    std::int8_t coarse_semitones{}, fine_steps{}; // Group pitch; 1024 fine steps per octave.
 };
 struct Part {
     std::size_t reference{};

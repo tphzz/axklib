@@ -231,8 +231,34 @@ Sample Bank, and each playable split a Sample pointing to Wave Data. A
 shared source Wave is stored once. A Voice selected on its own does not
 acquire a fabricated Performance.
 
-Review lists key and velocity ranges and the assigned Wave. Pitch offsets,
-envelopes, filters, modulation and Performance controls are not fully
+Review lists key and velocity ranges, Fixed Pitch, Sample Coarse and Fine Tune,
+and the assigned Wave.
+Group and split ranges are reported in MIDI notes: native keys 0 through
+108 correspond to MIDI 12 through 120 before Performance transpose. Empty
+splits stay silent, and the projection does not shift the Wave root.
+For an unlooped Wave, a Normal Group uses forward playback (`-->`), which
+honors note-off; a One-shot Group uses `One ->`, which plays to the end.
+A sustain loop is kept. A looped One-shot, Glide or Release trigger cannot
+be fully reproduced; Best reports the approximation and Strict blocks it.
+In particular, a Release Group is not triggered on key-up on the target.
+
+Group octave/semitone and fine settings tune each split's Sample, not the
+shared Wave. A Group coarse setting of +12 raises playback one octave.
+Both fine controls use 1,024 steps per octave: with neutral Wave tuning,
+Group raw +32 becomes Sample Fine +32 (about +37.5 cents). When the Wave
+has a pitch origin, its detune is subtracted from the Group fine setting.
+The converter uses the available coarse and fine ranges together; a pitch
+outside their combined range is clipped in Best and reported as a loss.
+
+Fixed group scaling additionally turns on Fixed Pitch and adds the
+difference between MIDI 60 and the Wave's Typhoon pitch origin.
+For roots 48, 60 and 72 the correction is +12, 0 and -12 semitones.
+Typhoon limits valid origins to MIDI 12 through 120. An absent AIFF
+`INST` chunk or equal low/high notes means no origin and no correction.
+The stored Wave root and audio are unchanged. Normal scaling leaves Fixed
+Pitch off and adds no correction. Other scaling values fall back to normal
+tracking with a loss in Best and block Strict conversion. Envelopes,
+filters, modulation and Performance controls are not fully
 translated. Best reports omissions; Strict blocks them. A Voice with an
 explicitly empty Wave map is different from a missing Wave: Best can omit
 the former, never substitute for the latter. Select an unaffected instrument

@@ -50,8 +50,8 @@ class State final : public NativeDocumentState, public NativeAudioProvider {
         if (item->type == "voice") {
             auto &rows = details["regions"] = Json::array();
             for (const auto &r : item->regions)
-                rows.push_back({{"keyLow", r.low},
-                                {"keyHigh", r.high},
+                rows.push_back({{"keyLow", r.midi_low},
+                                {"keyHigh", r.midi_high},
                                 {"velocityLow", r.velocity_low},
                                 {"velocityHigh", r.velocity_high},
                                 {"wave", reference(r.reference)}});

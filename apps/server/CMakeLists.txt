@@ -311,6 +311,9 @@ if(BUILD_TESTING)
   add_test(NAME FormatGeneralization.FreshASeriesDelivery COMMAND "${Python3_EXECUTABLE}"
            "${CMAKE_CURRENT_SOURCE_DIR}/tests/fresh_a_series_delivery_test.py" "$<TARGET_FILE:axklib_server>")
   axk_configure_server_process_test(FormatGeneralization.FreshASeriesDelivery 90 server)
+  add_test(NAME FormatGeneralization.TyphoonKeyScaling COMMAND "${Python3_EXECUTABLE}"
+           "${CMAKE_CURRENT_SOURCE_DIR}/tests/typhoon_key_scaling_test.py" "$<TARGET_FILE:axklib_cli>")
+  axk_configure_server_process_test(FormatGeneralization.TyphoonKeyScaling 90 server)
   add_test(NAME FormatGeneralization.R1
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/server_format_reader_test.py"
             "$<TARGET_FILE:axk_server_fixture>")

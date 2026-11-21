@@ -125,3 +125,27 @@ fn rejects_symlinked_seed_or_parent() {
             .contains("links")
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn explicit_drop_pins_the_authorized_file_in_a_linked_directory() {
+    use std::os::unix::fs::symlink;
+    let first = Fixture::new();
+    let second = Fixture::new();
+    let picker = Fixture::new();
+    let seed = first.file("seed.img", 1);
+    second.file("seed.img", 2);
+    let alias = picker.0.join("alias");
+    symlink(&first.0, &alias).unwrap();
+    let dropped = alias.join("seed.img");
+    assert!(super::selected_disk_source(&dropped, |p| p == dropped).is_err());
+    let source = super::selected_disk_source(&dropped, |p| p == dropped || p == seed).unwrap();
+    assert_eq!(Path::new(&source.path), seed);
+    symlink(&seed, first.0.join("linked.img")).unwrap();
+    assert!(super::selected_disk_source(&alias.join("linked.img"), |_| true).is_err());
+    assert!(super::selected_disk_source(&alias.join("../alias/seed.img"), |_| true).is_err());
+    std::fs::remove_file(&alias).unwrap();
+    symlink(&second.0, &alias).unwrap();
+    assert_eq!(super::snapshot(&source).unwrap(), vec![0]);
+    assert!(super::selected_disk_source(&dropped, |p| p == dropped || p == seed).is_err());
+}

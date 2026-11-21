@@ -72,15 +72,23 @@ fn linked(metadata: &Metadata) -> bool {
     false
 }
 
-fn safe_path(path: &Path) -> Result<PathBuf, String> {
+fn validate_source_path(path: &Path) -> Result<(), String> {
     if !path.is_absolute() {
         return Err("Native disk source must be an absolute authorized path".to_owned());
     }
+    if path
+        .components()
+        .any(|part| matches!(part, Component::ParentDir | Component::CurDir))
+    {
+        return Err("Native disk source contains an invalid path component".to_owned());
+    }
+    Ok(())
+}
+
+fn safe_path(path: &Path) -> Result<PathBuf, String> {
+    validate_source_path(path)?;
     let mut checked = PathBuf::new();
     for part in path.components() {
-        if matches!(part, Component::ParentDir | Component::CurDir) {
-            return Err("Native disk source contains an invalid path component".to_owned());
-        }
         checked.push(part.as_os_str());
         if matches!(part, Component::Prefix(_)) {
             continue;
@@ -246,6 +254,34 @@ fn scoped_source(path: &Path, allowed: impl Fn() -> bool) -> Result<NativeDiskSo
     Ok(source)
 }
 
+fn selected_disk_source(
+    path: &Path,
+    allowed: impl Fn(&Path) -> bool,
+) -> Result<NativeDiskSource, String> {
+    if !allowed(path) {
+        return Err("Native disk source access is not allowed".into());
+    }
+    validate_source_path(path)?;
+    let name = path.file_name().ok_or("Select a disk file")?;
+    // Resolve directory aliases only at user selection. Keep the leaf and all later
+    // snapshots and companion scans subject to the usual no-link checks.
+    let resolved = path
+        .parent()
+        .ok_or("Select a disk file")?
+        .canonicalize()
+        .map_err(|e| e.to_string())?
+        .join(name);
+    let source = scoped_source(&resolved, || allowed(&resolved))?;
+    if !allowed(Path::new(&source.path)) {
+        return Err("Native disk source access changed".into());
+    }
+    let source = fingerprint(source)?;
+    if !allowed(Path::new(&source.path)) {
+        return Err("Native disk source access changed".into());
+    }
+    Ok(source)
+}
+
 fn siblings(
     path: &Path,
     limit: usize,
@@ -328,7 +364,7 @@ pub(crate) async fn inspect_native_disk_source(
     main_window(window.label())?;
     let scope = window.fs_scope();
     let source = tauri::async_runtime::spawn_blocking(move || {
-        fingerprint(scoped_source(&path, || scope.is_allowed(&path))?)
+        selected_disk_source(&path, |p| scope.is_allowed(p))
     })
     .await
     .map_err(|error| error.to_string())??;
@@ -407,9 +443,10 @@ pub(crate) async fn select_native_disk_sources(
         let path = selection
             .into_path()
             .map_err(|_| "Choose a local floppy image".to_owned())?;
-        let source = disk_source(&path)?;
+        // The native picker itself authorized this specific selection.
+        let source = selected_disk_source(&path, |_| true)?;
         if seen.insert(source.identity.clone()) {
-            sources.push(fingerprint(source)?);
+            sources.push(source);
         }
     }
     for source in &sources {
